@@ -4,8 +4,6 @@ Ports Get-KmlType / Set-KmlType (TrackTags ExtendedData) and Get-KmlContent
 (LineString coordinates + stitched description).
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 

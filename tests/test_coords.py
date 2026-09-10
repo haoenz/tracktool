@@ -1,7 +1,5 @@
 """Unit tests for pure logic: coordinates, mediatime parsing, batching."""
 
-from __future__ import annotations
-
 import pytest
 
 from tracktool import coords

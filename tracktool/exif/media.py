@@ -4,8 +4,6 @@ extension-based grouping.
 Ports Move-ExifTime / Move-Altitude / ConvertTo-Mp4 / Group-MediaFiles.
 """
 
-from __future__ import annotations
-
 import re
 import shutil
 import subprocess

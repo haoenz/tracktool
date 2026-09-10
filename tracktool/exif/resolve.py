@@ -5,8 +5,6 @@ altitude via Google, then position from KML) and Resolve-VIDExif (VID ->
 VID_original, ConvertTo-Mp4 into a fresh VID, then Resolve-MissingGPS).
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from .. import log

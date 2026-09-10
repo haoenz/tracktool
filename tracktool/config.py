@@ -6,8 +6,6 @@ verbatim. The Google Maps API key resolution order is: environment variable
 TRACKTOOL_GOOGLE_API_KEY > CLI parameter > config file.
 """
 
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path

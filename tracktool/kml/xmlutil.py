@@ -9,8 +9,6 @@ KML namespaces used by 2bulu exports:
 - gx: http://www.google.com/kml/ext/2.2 (Google extension: Track/coord/when)
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from lxml import etree

@@ -1,7 +1,5 @@
 """Tests for media time parsing and KML timestamp/point matching logic."""
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 
 import pytest

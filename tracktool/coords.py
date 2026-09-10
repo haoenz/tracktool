@@ -4,8 +4,6 @@ Ports ConvertTo-DecimalCoord (DMS -> decimal, 4 input styles including Chinese
 direction letters) and Get-GeoDistance (Haversine, R = 6371000 m).
 """
 
-from __future__ import annotations
-
 import math
 import re
 

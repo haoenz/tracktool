@@ -9,10 +9,8 @@ All returned datetimes are timezone-aware (their tzinfo is the *recorded*
 timezone, not necessarily local time).
 """
 
-from __future__ import annotations
-
 import re
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import exiftool, log

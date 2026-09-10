@@ -9,8 +9,6 @@ version. One process is not safe to share across threads, so get_media_tag
 etc. use a thread-local persistent process.
 """
 
-from __future__ import annotations
-
 import os
 import re
 import subprocess

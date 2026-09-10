@@ -6,8 +6,6 @@ fatal), Get-AltitudeFromGoogle (URL-length batching: max 512 locations and
 extraction with locality fallback chain).
 """
 
-from __future__ import annotations
-
 import time
 from dataclasses import dataclass
 

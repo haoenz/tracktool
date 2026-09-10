@@ -5,11 +5,8 @@ a ThreadPoolExecutor (I/O-bound workload) with a thread-safe progress counter.
 Single-item inputs skip the progress display entirely, like the original.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TypeVar
 
 from rich.progress import (
     BarColumn,
@@ -20,9 +17,6 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
-
-T = TypeVar("T")
-R = TypeVar("R")
 
 DEFAULT_WORKERS = 5  # mirrors the original ThrottleLimit
 

@@ -5,8 +5,6 @@ A message is shown when its level is >= the configured level. -v enables
 VERBOSE, -vv enables DEBUG.
 """
 
-from __future__ import annotations
-
 import sys
 
 from rich.console import Console

@@ -8,8 +8,6 @@ duration wins immediately, otherwise the smallest outside-diff is used when it
 is within MaxTimeDiffSeconds (default 60s).
 """
 
-from __future__ import annotations
-
 import shutil
 import zipfile
 from bisect import bisect_left

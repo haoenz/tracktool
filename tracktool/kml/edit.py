@@ -5,8 +5,6 @@ Ports Split-Kml / Remove-KmlBadPoints / Merge-Kml / Set-KmlAltitudeFromGoogle
 / Convert-KmlToMultiGeometry / Get-TrackLocationIndex.
 """
 
-from __future__ import annotations
-
 import re
 from datetime import UTC, datetime
 from pathlib import Path

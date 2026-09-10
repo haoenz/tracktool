@@ -1,12 +1,10 @@
 """End-to-end verification against real exiftool: stay_open process, tag
 write/read roundtrip, GPS position matching from a KML ZIP archive."""
 
-from __future__ import annotations
-
 import shutil
 import tempfile
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from tracktool import exiftool, mediatime
@@ -39,7 +37,7 @@ def main() -> None:
             photo = media_dir / f"photo{i}.jpg"
             make_test_jpeg(photo)
             # 拍摄时间：UTC 2024-05-01 00:0X:00（photo2 = 00:30 在轨迹[00:00-00:04]外）
-            t = datetime(2024, 5, 1, 0, minutes, 0, tzinfo=timezone.utc)
+            t = datetime(2024, 5, 1, 0, minutes, 0, tzinfo=UTC)
             # 写成本地时间(+08:00)再由 Get-MediaTime 解析回来；格式 yyyy:MM:dd HH:mm:ss
             local = t + timedelta(hours=8)
             exiftool.invoke_persistent(
@@ -97,7 +95,7 @@ def main() -> None:
         t = mediatime.get_media_time(photos[0])
         assert t is not None
         print(f"photo0 media time: {t.isoformat()}")
-        assert t.astimezone(timezone.utc) == datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc)
+        assert t.astimezone(UTC) == datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC)
 
         # ── 验证 5：Set-Exif 十进制写入 + DMS 读回转换 ──
         set_exif(photos[0], SetExifOptions(position="31.230416 121.473701", altitude=4.0, overwrite=True))

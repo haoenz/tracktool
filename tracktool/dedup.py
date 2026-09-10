@@ -6,8 +6,6 @@ Clear-HashLog. The hash log is a JSON file mapping absolute paths to
 LastWriteTime matches the file's mtime.
 """
 
-from __future__ import annotations
-
 import hashlib
 import json
 import re

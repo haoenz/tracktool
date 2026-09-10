@@ -4,8 +4,6 @@ Ports Set-Exif (four GPS position input formats), Find-MissingTag (zero
 altitude counts as missing), Write-MediaInfo.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field
 from pathlib import Path

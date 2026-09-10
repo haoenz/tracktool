@@ -3,7 +3,7 @@ name = "tracktool"
 version = "1.0.0"
 description = "Travel media geodata toolkit: KML track management and photo/video EXIF geotagging"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "typer>=0.12",
     "rich>=13.0",
@@ -29,7 +29,7 @@ packages = ["tracktool"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]

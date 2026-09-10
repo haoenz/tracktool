@@ -1,7 +1,5 @@
 """Tests for KML editing: split, bad-point removal, archive push/pop."""
 
-from __future__ import annotations
-
 import zipfile
 from pathlib import Path
 

@@ -6,8 +6,6 @@ Ports Push-KmlArchive / Pop-KmlArchive / Push-CompressedKml / Pop-CompressedKml
 / Add-*/Remove-KmlTrackTo*Collection and New-EmptyKml.
 """
 
-from __future__ import annotations
-
 import re
 import shutil
 import zipfile
