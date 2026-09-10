@@ -40,13 +40,19 @@ class TestGeoDistance:
         assert coords.geo_distance(39.9, 116.4, 39.9, 116.4) == 0
 
     def test_known_distance(self):
-        # 北京天安门到北京站约 1.3km
+        # 北京天安门到北京站约 2.7km
         distance = coords.geo_distance(39.9087, 116.3975, 39.9029, 116.4279)
         assert distance == pytest.approx(2700, abs=300)
 
     def test_one_degree_latitude(self):
+        # WGS84 椭球上赤道处 1° 纬度约 110,574 m（Haversine 球面近似为 111,195 m）
         distance = coords.geo_distance(0, 0, 1, 0)
-        assert distance == pytest.approx(111000, abs=1000)
+        assert distance == pytest.approx(110574, abs=10)
+
+    def test_geodesic_reference_value(self):
+        # geopy/geographiclib 的已知参考结果（Newport RI -> Cleveland OH）
+        distance = coords.geo_distance(41.49008, -71.312796, 41.499498, -81.695391)
+        assert distance == pytest.approx(866455.43, abs=1)
 
 
 class TestIsDecimalCoord:

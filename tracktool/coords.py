@@ -1,11 +1,14 @@
 """Coordinate conversion and geodesic distance.
 
 Ports ConvertTo-DecimalCoord (DMS -> decimal, 4 input styles including Chinese
-direction letters) and Get-GeoDistance (Haversine, R = 6371000 m).
+direction letters). Distance uses geopy's geodesic (Karney's algorithm on the
+WGS84 ellipsoid) — more accurate than the original PowerShell version's
+sphere-based Haversine (error drops from up to ~0.5% to ~0.5 mm).
 """
 
-import math
 import re
+
+from geopy.distance import geodesic
 
 from . import log
 
@@ -48,13 +51,5 @@ def is_decimal_coord(coordinate: str) -> bool:
 
 
 def geo_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Haversine distance between two points in meters."""
-    radius = 6371000.0
-    d_lat = math.radians(lat2 - lat1)
-    d_lon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(d_lat / 2) * math.sin(d_lat / 2)
-        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon / 2) * math.sin(d_lon / 2)
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return radius * c
+    """Geodesic distance between two points in meters (WGS84 ellipsoid)."""
+    return geodesic((lat1, lon1), (lat2, lon2)).meters

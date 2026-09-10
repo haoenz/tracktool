@@ -9,6 +9,7 @@ dependencies = [
     "rich>=13.0",
     "lxml>=5.0",
     "requests>=2.31",
+    "geopy>=2.5.0",
 ]
 
 [project.scripts]
