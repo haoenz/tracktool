@@ -52,11 +52,17 @@ def main(
     version: Annotated[bool | None, typer.Option("--version", callback=_version_callback,
                                                     is_eager=True, help="Show version and exit")] = None,
     verbose: Annotated[int, typer.Option("--verbose", "-v", count=True, help="-v VERBOSE, -vv DEBUG")] = 0,
+    quiet: QuietOpt = False,
 ) -> None:
+    config.load()
     if verbose == 1:
         log.set_level("VERBOSE")
     elif verbose >= 2:
         log.set_level("DEBUG")
+    elif quiet:
+        log.set_level("WARNING")
+    else:
+        log.set_level(config.log_level)
 
 
 def _resolve_path(path: Path, must_exist: bool = True) -> Path:
