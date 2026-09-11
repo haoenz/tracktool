@@ -5,8 +5,13 @@ from pathlib import Path
 
 import pytest
 from conftest import TRACK_KML
+from typer.testing import CliRunner
 
+from tracktool.cli import app
 from tracktool.kml import archive, edit, kmlfile, xmlutil
+from tracktool.kml.kmlfile import TrackType
+
+runner = CliRunner()
 
 
 @pytest.fixture
@@ -94,7 +99,7 @@ class TestArchive:
         zip_path = self._setup_archive(tmp_path, None)
 
         # push: 需要类型信息（源文件无 TrackTags）
-        archive.push_kml_archive(track_file, str(zip_path), type_="Default")
+        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT)
 
         # ZIP 中存在
         with zipfile.ZipFile(zip_path) as zf:
@@ -114,7 +119,7 @@ class TestArchive:
         assert len(xmlutil.findall(mobile_tree, "//kml:LineString")) == 1
 
         # pop: 取回并从汇总移除
-        archive.pop_kml_archive(track_file.stem, "Default", str(zip_path))
+        archive.pop_kml_archive(track_file.stem, TrackType.DEFAULT, str(zip_path))
         with zipfile.ZipFile(zip_path) as zf:
             assert track_file.name not in zf.namelist()
         # Pop extracts to the current working directory (原版默认输出到 '.')
@@ -125,3 +130,56 @@ class TestArchive:
             restored.unlink(missing_ok=True)
         desktop_tree = xmlutil.parse_file(desktop)
         assert len(xmlutil.findall(desktop_tree, "//kml:Placemark")) == 0
+
+
+class TestTrackType:
+    """Issue #7: TrackType StrEnum + set→get roundtrip."""
+
+    @staticmethod
+    def _kml_with_track_tags(tmp_path: Path, tag: str = "火车") -> Path:
+        # set_kml_type 只更新已存在的 TrackTags 节点（PowerShell 原样移植），
+        # 往返测试需要先注入一个（2bulu 导出的 KML 均带此节点）
+        kml_content = TRACK_KML.replace(
+            "<Document>",
+            "<Document>"
+            f"<ExtendedData><Data name='TrackTags'><value>{tag}</value></Data></ExtendedData>",
+        )
+        kml = tmp_path / "2024-05-01 test.kml"
+        kml.write_text(kml_content, encoding="utf-8")
+        return kml
+
+    def test_set_get_roundtrip(self, tmp_path: Path):
+        # --set 写入的是英文名（如 "Train"），get 必须能读回，不再落 Unknown
+        kml = self._kml_with_track_tags(tmp_path, "火车")
+        kmlfile.set_kml_type(kml, TrackType.TRAIN)
+        assert kmlfile.get_kml_type(kml) is TrackType.TRAIN
+
+    def test_written_value_is_plain_string(self, tmp_path: Path):
+        kml = self._kml_with_track_tags(tmp_path, "火车")
+        kmlfile.set_kml_type(kml, TrackType.FLIGHT)
+        tree = xmlutil.parse_file(kml)
+        node = xmlutil.find(tree, "/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='TrackTags']/kml:value")
+        assert (node.text or "") == "Flight"
+
+    def test_cli_set_then_get(self, tmp_path: Path):
+        kml = self._kml_with_track_tags(tmp_path, "火车")
+
+        result = runner.invoke(app, ["kml", "type", str(kml), "--set", "Train"])
+        assert result.exit_code == 0
+        result = runner.invoke(app, ["kml", "type", str(kml)])
+        assert result.exit_code == 0
+        assert result.output.strip() == "Train"
+
+    def test_cli_rejects_unknown_type(self, tmp_path: Path):
+        # 非法类型值在 CLI 入口被 typer 拒绝，不再流向下游
+        kml = tmp_path / "2024-05-01 test.kml"
+        kml.write_text(TRACK_KML, encoding="utf-8")
+        result = runner.invoke(app, ["kml", "type", str(kml), "--set", "Bogus"])
+        assert result.exit_code != 0
+
+    def test_cli_invalid_case_rejected(self, tmp_path: Path):
+        # 小写 "default" 曾会静默走向 Unknown / KeyError，现在入口即拒
+        kml = tmp_path / "2024-05-01 test.kml"
+        kml.write_text(TRACK_KML, encoding="utf-8")
+        result = runner.invoke(app, ["kml", "push", str(kml), "--type", "default"])
+        assert result.exit_code != 0

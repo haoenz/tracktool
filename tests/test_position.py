@@ -66,9 +66,9 @@ class TestKmlType:
         kml = tmp_path / "2024-05-01 test.kml"
         kml.write_text(TRACK_KML, encoding="utf-8")
         # 无 TrackTags ExtendedData -> Unknown
-        from tracktool.kml.kmlfile import get_kml_type
+        from tracktool.kml.kmlfile import TrackType, get_kml_type
 
-        assert get_kml_type(kml) == "Unknown"
+        assert get_kml_type(kml) is TrackType.UNKNOWN
 
     def test_get_kml_type_with_tags(self, tmp_path):
         # TrackTags 是 Document 级 ExtendedData，紧跟在 <Document> 之后
@@ -79,6 +79,6 @@ class TestKmlType:
         )
         kml = tmp_path / "2024-05-01 test.kml"
         kml.write_text(kml_content, encoding="utf-8")
-        from tracktool.kml.kmlfile import get_kml_type
+        from tracktool.kml.kmlfile import TrackType, get_kml_type
 
-        assert get_kml_type(kml) == "Default"
+        assert get_kml_type(kml) is TrackType.DEFAULT

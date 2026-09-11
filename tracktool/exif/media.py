@@ -14,6 +14,12 @@ from .. import exiftool, log, mediatime
 from ..fileutil import run_per_file
 from .write import SetExifOptions, list_files, set_exif
 
+# EXIF Make 字段注册值（exiftool 原样返回，精确匹配，不做大小写归一化）
+MAKE_SONY = "SONY"
+MAKE_FUJIFILM = "FUJIFILM"
+# Insta360 在 EXIF Make 字段的注册值
+MAKE_INSTA360 = "Arashi Vision"
+
 # 各厂商时间标签集合（Move-ExifTime 原样移植）
 _SONY_PHOTO_TAGS = ["ExifIFD:DateTimeOriginal", "Sony:SonyDateTime", "IFD0:ModifyDate", "ExifIFD:CreateDate"]
 _SONY_MP4_TAGS = [
@@ -75,7 +81,7 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
             total_seconds_offset += _parse_time_diff(time_diff)
 
         if offset_time.strip():
-            if make != "SONY":
+            if make != MAKE_SONY:
                 log.error(f"OffsetTime is currently only supported for SONY. Current make: {make}",
                           target=str(file))
                 return
@@ -123,7 +129,7 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
         offset = f"0:0:{days} {hours}:{minutes}:{seconds}"
         log.verbose(f"Shifting time by {sign}{offset}", target=str(file))
 
-        if make == "SONY":
+        if make == MAKE_SONY:
             if ext in (".arw", ".jpg", ".jpeg"):
                 tag_set = _SONY_PHOTO_TAGS
             elif ext == ".mp4":
@@ -131,13 +137,13 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
             else:
                 log.error(f"Unsupported file type '{ext}' for Sony camera; file skipped", target=str(file))
                 return
-        elif make == "FUJIFILM":
+        elif make == MAKE_FUJIFILM:
             if ext == ".mp4":
                 tag_set = _FUJIFILM_MP4_TAGS
             else:
                 log.error(f"Unsupported file type '{ext}' for Fujifilm camera; file skipped", target=str(file))
                 return
-        elif make == "Arashi Vision":
+        elif make == MAKE_INSTA360:
             if ext == ".mp4":
                 tag_set = _INSTA360_MP4_TAGS
             else:
@@ -156,7 +162,7 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
         exiftool.invoke(*params)
 
         # Insta360 文件名中的时间戳同步更新
-        if make == "Arashi Vision" and ext == ".mp4":
+        if make == MAKE_INSTA360 and ext == ".mp4":
             m = _INSTA360_FILENAME_PATTERN.search(file.stem)
             if m:
                 original_time = datetime.strptime(m[1], "%Y%m%d_%H%M%S")

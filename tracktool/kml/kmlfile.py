@@ -5,47 +5,64 @@ Ports Get-KmlType / Set-KmlType (TrackTags ExtendedData) and Get-KmlContent
 """
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from .. import log
 from . import xmlutil
 
+
+class TrackType(StrEnum):
+    """Track category shared by kmlfile/archive/cli; value doubles as collection filename."""
+
+    DEFAULT = "Default"
+    TRAIN = "Train"
+    FLIGHT = "Flight"
+    UNKNOWN = "Unknown"
+
+
 # 2bulu TrackTags (Chinese activity names) -> category
 TAG_TO_TYPE = {
-    "默认": "Default",
-    "徒步": "Default",
-    "爬山": "Default",
-    "骑行": "Default",
-    "驾车": "Default",
-    "摩托": "Default",
-    "轮船": "Default",
-    "散步": "Default",
-    "飞机": "Flight",
-    "滑翔": "Flight",
-    "轨交": "Train",
-    "缆车": "Train",
-    "地铁": "Train",
-    "火车": "Train",
+    "默认": TrackType.DEFAULT,
+    "徒步": TrackType.DEFAULT,
+    "爬山": TrackType.DEFAULT,
+    "骑行": TrackType.DEFAULT,
+    "驾车": TrackType.DEFAULT,
+    "摩托": TrackType.DEFAULT,
+    "轮船": TrackType.DEFAULT,
+    "散步": TrackType.DEFAULT,
+    "飞机": TrackType.FLIGHT,
+    "滑翔": TrackType.FLIGHT,
+    "轨交": TrackType.TRAIN,
+    "缆车": TrackType.TRAIN,
+    "地铁": TrackType.TRAIN,
+    "火车": TrackType.TRAIN,
 }
 
 
-def get_kml_type(path: Path) -> str:
-    """Map the TrackTags ExtendedData value to Default/Flight/Train/Unknown."""
+def get_kml_type(path: Path) -> TrackType:
+    """Map the TrackTags ExtendedData value to a TrackType."""
     tree = xmlutil.parse_file(path)
     track_tags = xmlutil.extended_data_value(tree, "TrackTags")
-    kml_type = TAG_TO_TYPE.get(track_tags, "Unknown")
+    kml_type = TAG_TO_TYPE.get(track_tags)
+    if kml_type is None:
+        # set_kml_type 写入的是英文名（如 "Train"），接受它使 set→get 往返成立
+        try:
+            kml_type = TrackType(track_tags)
+        except ValueError:
+            kml_type = TrackType.UNKNOWN
     log.debug(f"Detected track type: {kml_type} (tag: {track_tags})", target=str(path))
     return kml_type
 
 
-def set_kml_type(path: Path, type_: str) -> None:
+def set_kml_type(path: Path, type_: TrackType) -> None:
     """Overwrite the TrackTags ExtendedData value in place."""
     tree = xmlutil.parse_file(path)
     nodes = xmlutil.findall(tree, "/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='TrackTags']/kml:value")
     for node in nodes:
-        node.text = type_
+        node.text = type_.value
     xmlutil.save(tree, path)
-    log.info(f"Updated track tags to: {type_}", target=str(path))
+    log.info(f"Updated track tags to: {type_.value}", target=str(path))
 
 
 @dataclass

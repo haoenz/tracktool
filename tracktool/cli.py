@@ -21,6 +21,7 @@ from .googleapi import GoogleApiError
 from .kml import archive as kml_archive
 from .kml import edit as kml_edit
 from .kml import kmlfile
+from .kml.kmlfile import TrackType
 from .kml.xmlutil import etree
 from .progress import DEFAULT_WORKERS
 
@@ -88,7 +89,7 @@ def _resolve_path(path: Path, must_exist: bool = True) -> Path:
 @kml_app.command("type")
 def kml_type(
     path: Annotated[Path, typer.Argument(help="KML file")],
-    set: Annotated[str | None, typer.Option("--set", help="Set track type (Default/Train/Flight)")] = None,
+    set: Annotated[TrackType | None, typer.Option("--set", help="Set track type (Default/Train/Flight)")] = None,
 ) -> None:
     """Get or set the track type (TrackTags)."""
     path = _resolve_path(path)
@@ -101,7 +102,7 @@ def kml_type(
 @kml_app.command("push")
 def kml_push(
     path: Annotated[Path, typer.Argument(help="KML file to archive")],
-    type: Annotated[str | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
+    type: Annotated[TrackType | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     no_archive: Annotated[bool, typer.Option("--no-archive", help="Skip adding to ZIP")] = False,
 ) -> None:
@@ -113,7 +114,7 @@ def kml_push(
 @kml_app.command("pop")
 def kml_pop(
     kml_name: Annotated[str, typer.Argument(help="Track name to restore")],
-    type: Annotated[str, typer.Option("--type", help="Track type")] = "Default",
+    type: Annotated[TrackType, typer.Option("--type", help="Track type")] = TrackType.DEFAULT,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
 ) -> None:
     """Restore a KML from the archive: extract from ZIP, remove from collections."""

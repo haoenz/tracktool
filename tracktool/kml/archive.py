@@ -15,12 +15,13 @@ from .. import log
 from ..config import Config, config
 from ..fileutil import move_to_folder
 from . import kmlfile, xmlutil
+from .kmlfile import TrackType
 
 # Collection style per track type: (name, LineStyle color)
 COLLECTION_STYLES = {
-    "Default": ("普通行程", "ff2257ff"),
-    "Train": ("火车行程", "ff413830"),
-    "Flight": ("飞机行程", "1ab5ad00"),
+    TrackType.DEFAULT: ("普通行程", "ff2257ff"),
+    TrackType.TRAIN: ("火车行程", "ff413830"),
+    TrackType.FLIGHT: ("飞机行程", "1ab5ad00"),
 }
 
 _DATE_NAME_PATTERN = re.compile(r"(\d{4})-(\d{2})-\d{2}")
@@ -57,7 +58,7 @@ _EMPTY_MOBILE_TEMPLATE = """<?xml version='1.0' encoding='UTF-8'?>
 </kml>"""
 
 
-def new_empty_kml(type_: str | None = None) -> xmlutil.etree._ElementTree:
+def new_empty_kml(type_: TrackType | None = None) -> xmlutil.etree._ElementTree:
     if type_ is not None:
         name, color = COLLECTION_STYLES[type_]
         return xmlutil.parse_string(_EMPTY_STYLED_TEMPLATE.format(
@@ -212,7 +213,7 @@ def remove_track_from_mobile_collection(track_name: str, collection_path: Path) 
 # ── Top-level push/pop ──────────────────────────────────────────────────────
 
 
-def push_kml_archive(path: Path, zip_path: str | None = None, type_: str | None = None,
+def push_kml_archive(path: Path, zip_path: str | None = None, type_: TrackType | None = None,
                      no_archive: bool = False, cfg: Config = config) -> None:
     """Archive a KML track: both collections + ZIP + move to backup folder."""
     zip_file = resolve_zip_path(zip_path, cfg)
@@ -220,7 +221,7 @@ def push_kml_archive(path: Path, zip_path: str | None = None, type_: str | None 
 
     log.info("Archiving KML track", target=str(path))
     kml_type = type_ if type_ is not None else kmlfile.get_kml_type(path)
-    if kml_type == "Unknown":
+    if kml_type is TrackType.UNKNOWN:
         log.error("Cannot archive track with unknown type", target=str(path))
         return
 
@@ -242,7 +243,7 @@ def push_kml_archive(path: Path, zip_path: str | None = None, type_: str | None 
     move_to_folder(path, str(cfg["kmlBackupDirName"] or "Backup"), archive_dir)
 
 
-def pop_kml_archive(kml_name: str, type_: str = "Default", zip_path: str | None = None,
+def pop_kml_archive(kml_name: str, type_: TrackType = TrackType.DEFAULT, zip_path: str | None = None,
                     cfg: Config = config) -> None:
     """Restore a KML track: extract from ZIP and remove from both collections."""
     zip_file = resolve_zip_path(zip_path, cfg)
