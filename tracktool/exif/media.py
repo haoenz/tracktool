@@ -93,8 +93,8 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
 
             diff_sec = target_sec - current_sec
             total_seconds_offset += diff_sec
-            log.info(f"Setting timezone tags: ExifIFD:OffsetTime from {current_offset} to {offset_time} "
-                     f"(diff: {timedelta(seconds=diff_sec)})", target=str(file))
+            log.verbose(f"Setting timezone tags: ExifIFD:OffsetTime from {current_offset} to {offset_time} "
+                        f"(diff: {diff_sec:+d} seconds)", target=str(file))
             params += [
                 f"-ExifIFD:OffsetTime={offset_time}",
                 f"-ExifIFD:OffsetTimeOriginal={offset_time}",
@@ -108,9 +108,9 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
         if total_seconds_offset == 0:
             if len(params) > 1:
                 exiftool.invoke(*params)
-                log.info("Applied timezone offset tags but no time shift needed", target=str(file))
+                log.verbose("Applied timezone offset tags but no time-shift needed", target=str(file))
             else:
-                log.info("No timezone or time shift changes required", target=str(file))
+                log.verbose("No timezone or time-shift changes required", target=str(file))
             return
 
         is_negative = total_seconds_offset < 0
@@ -121,7 +121,7 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
 
         sign = "-=" if is_negative else "+="
         offset = f"0:0:{days} {hours}:{minutes}:{seconds}"
-        log.info(f"Shifting time by {sign}{offset}", target=str(file))
+        log.verbose(f"Shifting time by {sign}{offset}", target=str(file))
 
         if make == "SONY":
             if ext in (".arw", ".jpg", ".jpeg"):
@@ -129,22 +129,22 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
             elif ext == ".mp4":
                 tag_set = _SONY_MP4_TAGS
             else:
-                log.error(f"Unsupported file type '{ext}' for Sony camera", target=str(file))
+                log.error(f"Unsupported file type '{ext}' for Sony camera; file skipped", target=str(file))
                 return
         elif make == "FUJIFILM":
             if ext == ".mp4":
                 tag_set = _FUJIFILM_MP4_TAGS
             else:
-                log.error(f"Unsupported file type '{ext}' for Fujifilm camera", target=str(file))
+                log.error(f"Unsupported file type '{ext}' for Fujifilm camera; file skipped", target=str(file))
                 return
         elif make == "Arashi Vision":
             if ext == ".mp4":
                 tag_set = _INSTA360_MP4_TAGS
             else:
-                log.error(f"Unsupported file type '{ext}' for Insta360 camera", target=str(file))
+                log.error(f"Unsupported file type '{ext}' for Insta360 camera; file skipped", target=str(file))
                 return
         else:
-            log.error(f"Unknown camera make: {make}", target=str(file))
+            log.error(f"Unknown camera make: {make}; file skipped", target=str(file))
             return
 
         params += [f"-{tag}{sign}{offset}" for tag in tag_set]
@@ -165,7 +165,7 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
                 new_time_str = new_time.strftime("%Y%m%d_%H%M%S")
                 new_file_path = file.parent / _INSTA360_FILENAME_PATTERN.sub(f"_{new_time_str}_", file.name)
                 file.rename(new_file_path)
-                log.info("Renamed to match new timestamp", target=str(new_file_path))
+                log.verbose("Renamed to match new timestamp", target=str(new_file_path))
             else:
                 log.error("Filename does not match Insta360 naming pattern", target=str(file))
 
@@ -179,7 +179,7 @@ def move_altitude(path: Path, offset: float, overwrite: bool = False, parallel: 
     def process(file: Path) -> None:
         current = exiftool.get_media_tag(file, "GPSAltitude")
         if not current:
-            log.warning("No GPS altitude found, skipping", target=str(file))
+            log.warning("No GPSAltitude found, skipping", target=str(file))
             return
 
         m = _ALTITUDE_PATTERN.match(current)
@@ -191,7 +191,7 @@ def move_altitude(path: Path, offset: float, overwrite: bool = False, parallel: 
         if m[2] == "Below":
             current_alt = -current_alt
         new_alt = current_alt + offset
-        log.info(f"Shifting altitude: {current_alt} m -> {new_alt} m", target=str(file))
+        log.verbose(f"Shifting altitude: {current_alt} m -> {new_alt} m", target=str(file))
         set_exif(file, SetExifOptions(altitude=new_alt, overwrite=overwrite))
 
     run_per_file(files, process, activity=f"Shifting altitude by {offset} m", parallel=parallel)
@@ -211,7 +211,7 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
         mediatime.parse_offset(offset_time)
 
         if media_time is None:
-            log.warning("Failed to get MediaTime", target=str(file))
+            log.warning("No valid timestamp found; skipping", target=str(file))
             return
 
         create_time_utc = media_time.astimezone(UTC)
@@ -230,13 +230,13 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
             if ret.returncode != 0:
                 log.error("Failed to convert to MP4", target=str(file))
                 return
-            log.info("Converted to MP4", target=str(file))
+            log.verbose("Converted to MP4", target=str(file))
         else:
             log.debug("File is already MP4", target=str(file))
             original_path = file.with_name(file.name + "_original")
             shutil.move(str(file), str(original_path))
             if not quicktime_create_date:
-                log.debug("Setting QuickTime:CreateDate...", target=str(output_path))
+                log.debug("Setting QuickTime:CreateDate", target=str(output_path))
                 ret = subprocess.run(
                     ["ffmpeg", "-y", "-i", str(original_path),
                      "-metadata", f"creation_time={create_time_utc_str}",
@@ -254,7 +254,7 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
         if model:
             tags["Model"] = model
         set_exif(output_path, SetExifOptions(tags=tags, overwrite=True))
-        log.info(f"Set tags: {', '.join(tags)}", target=str(output_path))
+        log.verbose(f"Set tags: {', '.join(tags)}", target=str(output_path))
 
     run_per_file(files, process, activity="Converting to MP4", parallel=parallel)
 
@@ -280,4 +280,4 @@ def group_media_files(path: Path) -> None:
             log.warning("File already exists in target directory", target=str(target_path))
         else:
             shutil.move(str(file), str(target_path))
-            log.debug(f"Moved to {sub_dir}", target=str(target_path))
+            log.verbose(f"Moved to {sub_dir}", target=str(target_path))

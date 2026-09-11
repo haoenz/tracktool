@@ -4,6 +4,19 @@ Levels (decreasing verbosity): DEBUG, VERBOSE, INFO, WARNING, ERROR —
 VERBOSE is a custom level (15) between DEBUG and INFO. -v enables VERBOSE,
 -vv enables DEBUG. A message is shown when its level >= the configured level,
 which stdlib logging handles natively.
+
+Level policy:
+- INFO: command-level summaries and results (counts, one-shot state changes).
+- VERBOSE: per-file actions inside batch loops (moved, converted, tag writes).
+- DEBUG: parsing/protocol details (tag values, timestamps, API request params).
+
+Library helpers stay quiet about severity: a condition is logged at its
+decision point by the caller that acts on it (e.g. mediatime returns None and
+the caller decides whether that is a warning, an error, or ignorable).
+
+Wording: fact before consequence ("...; file skipped", "...; keeping existing
+hash"), no trailing punctuation; stored tags by EXIF tag name (GPSPosition),
+concepts in plain words (GPS data).
 """
 
 import logging

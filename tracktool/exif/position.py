@@ -71,9 +71,10 @@ def get_position_from_kml(tree: xmlutil.etree._ElementTree, time: datetime,
     # 如果在KML记录的持续时间内，时间差为正；如果在持续时间外（采用了最前/最后的点），时间差为负
     reported_time_diff = abs_time_diff if is_inside else -abs_time_diff
 
-    log.info(f"Found GPS coordinate: {(coord_nodes[index].text or '').strip()} in {kml_name}", target=target_file)
+    log.verbose(f"Found GPS coordinate in {kml_name} (lon/lat/alt): {(coord_nodes[index].text or '').strip()}",
+                target=target_file)
     log.debug(f"KML timestamp: {whens[index]}", target=target_file)
-    log.debug(f"Reported Time difference (Inside: {is_inside}): {abs_time_diff} seconds", target=target_file)
+    log.debug(f"Time difference (inside: {is_inside}): {abs_time_diff} seconds", target=target_file)
 
     lon, lat, alt = (coord_nodes[index].text or "").split(" ")[:3]
     return TrackPoint(latitude=lat, longitude=lon, altitude=alt, time_diff=reported_time_diff)
@@ -124,19 +125,19 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
     def process(file: Path) -> None:
         existing_position = exiftool.get_media_tag(file, "GPSPosition")
         if existing_position:
-            log.debug(f"GPS position already exists: {existing_position}", target=str(file))
+            log.debug(f"GPSPosition already exists: {existing_position}", target=str(file))
         existing_altitude = exiftool.get_media_tag(file, "GPSAltitude")
         if existing_altitude:
-            log.debug(f"GPS altitude already exists: {existing_altitude}", target=str(file))
+            log.debug(f"GPSAltitude already exists: {existing_altitude}", target=str(file))
 
         # 如果已有数据，并且用户没有开启 Force 也没开启 Verify，直接跳过当前文件
         if existing_position and existing_altitude and not options.force and not options.verify_existing_gps:
-            log.info("Skipping (GPS data already exists)", target=str(file))
+            log.verbose("Skipping (GPS data already exists)", target=str(file))
             return
 
         media_time = mediatime.get_media_time(file)
         if media_time is None:
-            log.error("Failed to get media timestamp", target=str(file))
+            log.error("No valid timestamp found; skipping", target=str(file))
             if options.failed_folder_name:
                 quarantine(file, options.failed_folder_name)
             return
@@ -181,7 +182,7 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
                     if distance > options.max_distance_meters:
                         log.warning(
                             f"Existing GPS and KML GPS differ by {round(distance, 2)} meters "
-                            f"(Threshold: {options.max_distance_meters}m).", target=str(file))
+                            f"(Threshold: {options.max_distance_meters}m)", target=str(file))
                         if not options.force:
                             return
                     else:
@@ -190,7 +191,7 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
                             target=str(file))
         elif best is not None:
             log.warning(
-                f"Best matched KML is outside duration by {best_abs_diff} seconds, "
+                f"Best matched KML is outside duration by {round(best_abs_diff, 2)} seconds, "
                 f"which exceeds the {options.max_time_diff_seconds}s limit", target=str(file))
             if options.failed_folder_name:
                 quarantine(file, options.failed_folder_name)
@@ -202,7 +203,7 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
                 new_position = f"{lat} {lon}"
                 new_altitude = alt if alt else existing_altitude
                 display_alt = f"{new_altitude} m" if new_altitude else "None"
-                log.info(f"Setting GPS position: {new_position}, altitude: {display_alt}", target=str(file))
+                log.verbose(f"Setting GPS position: {new_position}, altitude: {display_alt}", target=str(file))
                 set_exif(file, SetExifOptions(position=new_position, altitude=float(new_altitude)
                                               if new_altitude else None, overwrite=options.overwrite))
         else:

@@ -56,7 +56,7 @@ def _request_json(api_url: str, api_name: str, retry_count: int = 3, timeout: in
             if attempt < retry_count:
                 delay = 2 ** (attempt - 1)
                 log.warning(
-                    f"{api_name} transient error (attempt {attempt}/{retry_count}): {exc}. Retrying in {delay}s...")
+                    f"{api_name} transient error (attempt {attempt}/{retry_count}): {exc}; retrying in {delay}s")
                 time.sleep(delay)
                 continue
             raise GoogleApiError(f"{api_name} failed after {retry_count} attempt(s): {exc}") from exc
@@ -179,7 +179,7 @@ def get_location(
 
     response = _request_json(api_url, "Google Geocoding API", retry_count, timeout)
     if response.get("status") == "ZERO_RESULTS":
-        log.warning(f"No reverse geocoding result found for coordinate: {decimal}")
+        log.debug(f"No reverse geocoding result found for coordinate: {decimal}")
         return Location()
 
     results = response.get("results", [])

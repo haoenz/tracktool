@@ -31,7 +31,7 @@ def decimal_coord(coordinate: str) -> str | None:
         return None
     m = _DMS_PATTERN.match(coordinate)
     if not m:
-        log.error(f"Invalid coordinate format: {coordinate}")
+        log.warning(f"Invalid coordinate format: {coordinate}")
         return None
 
     lat_deg, lat_min, lat_sec, lat_ref = float(m[1]), float(m[2]), float(m[3]), m[4]

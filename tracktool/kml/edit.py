@@ -208,7 +208,7 @@ def set_kml_altitude_from_google(path: Path, api_key: str | None = None,
             all_lat_lon.append(f"{parts[1]},{parts[0]}")
             node_assignments.append((node, tuples, i))
 
-    log.info(f"Querying Google Elevation API for {len(all_lat_lon)} point(s)...", target=str(path))
+    log.info(f"Querying Google Elevation API for {len(all_lat_lon)} point(s)", target=str(path))
 
     elevations = googleapi.get_altitudes(all_lat_lon, api_key=api_key, cfg=cfg)
 

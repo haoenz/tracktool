@@ -95,7 +95,7 @@ def get_media_time(path: Path, default_offset: str = "+08:00") -> datetime | Non
         log.debug(f"Using {cfg['tag']}: {media_time}", target=str(path))
         return media_time
 
-    log.warning("No valid timestamp found", target=str(path))
+    log.debug("No valid timestamp found", target=str(path))
     return None
 
 

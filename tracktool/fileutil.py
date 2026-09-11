@@ -33,7 +33,7 @@ def move_to_folder(path: Path, folder_name: str, parent_directory: Path | None =
         log.warning(f"File already exists in {folder_name} folder", target=str(target_path))
         return
     shutil.move(str(path), str(target_path))
-    log.info(f"Moved to {folder_name} folder", target=str(target_path))
+    log.verbose(f"Moved to {folder_name} folder", target=str(target_path))
 
 
 def quarantine(path: Path, folder_name: str | None) -> None:

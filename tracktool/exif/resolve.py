@@ -21,11 +21,11 @@ def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | 
     missing = find_missing_tag(path, ["GPSPosition", "GPSAltitude"], parallel=parallel)
 
     if not missing:
-        log.info("No media files are missing GPS data.")
+        log.info("No files missing GPS data")
         return
 
     for result in missing:
-        log.debug(f"File: {result.file}, Missing: {', '.join(result.missing_tags)}")
+        log.verbose(f"File: {result.file}, Missing: {', '.join(result.missing_tags)}")
 
     # 仅缺失海拔的文件
     missing_alt_only = [r for r in missing
@@ -64,7 +64,7 @@ def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = No
 
     vid_original_path = path / "VID_original"
     if vid_original_path.exists():
-        log.error("VID_original already exists, please check")
+        log.error("VID_original already exists; remove or rename it before re-running")
         return
 
     vid_path.rename(vid_original_path)

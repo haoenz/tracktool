@@ -507,7 +507,7 @@ def cli_main() -> None:
     try:
         app()
     except DOMAIN_ERRORS as exc:
-        log.error(str(exc))
+        log.error(f"Command failed: {exc}")
         raise SystemExit(1) from exc
 
 

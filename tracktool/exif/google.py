@@ -20,17 +20,17 @@ def set_altitude_from_google(path: Path, overwrite: bool = False,
     def check(file: Path) -> tuple[Path, str] | None:
         altitude = exiftool.get_media_tag(file, "GPSAltitude")
         if not is_missing_altitude(altitude):
-            log.debug(f"Altitude already exists: {altitude}", target=str(file))
+            log.debug(f"GPSAltitude already exists: {altitude}", target=str(file))
             return None
         if altitude:
-            log.debug(f"Altitude is zero: {altitude}", target=str(file))
+            log.debug(f"GPSAltitude is zero: {altitude}", target=str(file))
         else:
-            log.debug("No altitude data found", target=str(file))
+            log.debug("No GPSAltitude found", target=str(file))
 
         position = exiftool.get_media_tag(file, "GPSPosition")
         if position:
             return (file, position)
-        log.warning("No GPS position found", target=str(file))
+        log.warning("No GPSPosition found", target=str(file))
         quarantine(file, failed_folder_name)
         return None
 
@@ -51,7 +51,7 @@ def set_altitude_from_google(path: Path, overwrite: bool = False,
     def update(item: tuple[tuple[Path, str], float | None]) -> None:
         (file, _), altitude = item
         if altitude is not None:
-            log.info(f"Setting altitude: {altitude} m", target=str(file))
+            log.verbose(f"Setting altitude: {altitude} m", target=str(file))
             set_exif(file, SetExifOptions(altitude=altitude, overwrite=overwrite))
         else:
             log.warning("No elevation data returned from API", target=str(file))
@@ -96,7 +96,7 @@ def set_location_from_google(path: Path, overwrite: bool = False,
 
         set_exif(file, SetExifOptions(tags=tags, overwrite=overwrite))
         location_str = " ".join(part for part in (location.country, location.state, location.city) if part)
-        log.info(f"IPTC location tags updated: {location_str}", target=str(file))
+        log.verbose(f"IPTC location tags updated: {location_str}", target=str(file))
 
     run_per_file(files, process, activity="Setting EXIF location from Google",
                  failed_folder_name=failed_folder_name, parallel=parallel)

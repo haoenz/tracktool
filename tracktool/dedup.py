@@ -20,7 +20,7 @@ def get_leaf_files(path: Path, include: str = ".*", exclude: str = "^$") -> list
     """Recursively scan a directory, filtering by regex on the full path."""
     include_re = re.compile(include, re.IGNORECASE)
     exclude_re = re.compile(exclude, re.IGNORECASE)
-    log.debug("Scanning directory for files...", target=str(path))
+    log.debug("Scanning directory for files", target=str(path))
     return [f for f in sorted(path.rglob("*"))
             if f.is_file() and include_re.search(str(f)) and not exclude_re.search(str(f))]
 
@@ -62,18 +62,18 @@ def _update_files_hash_log(files: list[Path], hash_log: dict) -> tuple[int, int]
         entry = hash_log.get(file_name)
 
         if entry is None:
-            log.debug("Adding file...", target=file_name)
+            log.debug("New file; hashing", target=file_name)
             counters["add"] += 1
         elif "MD5" not in entry:
-            log.debug("Creating hash...", target=file_name)
+            log.debug("Cached entry has no MD5; hashing", target=file_name)
             counters["add"] += 1
         elif entry.get("LastWriteTime", 0) < file_time:
-            log.debug("Updating hash...", target=file_name)
+            log.debug("File changed since last run; rehashing", target=file_name)
             counters["update"] += 1
         elif entry.get("LastWriteTime", 0) == file_time:
             return
         else:
-            log.warning("File LWT earlier than log", target=file_name)
+            log.warning("File last-write time is older than hash log entry; keeping existing hash", target=file_name)
             return
 
         hash_log[file_name] = {"MD5": _md5(file), "LastWriteTime": file_time}
