@@ -40,30 +40,30 @@ def set_level(level: str) -> None:
     _logger.setLevel(_LEVEL_NUMBERS[level])
 
 
-def log(message: str, level: str = "INFO", target: str | None = None) -> None:
+def _log(message: str, level: str = "INFO", target: str | None = None) -> None:
     """Log a message; `target` prefixes the message like the PowerShell -Target."""
     text = f"[{target}] {message}" if target else message
     _logger.log(_LEVEL_NUMBERS[level], text)
 
 
 def debug(message: str, target: str | None = None) -> None:
-    log(message, "DEBUG", target)
+    _log(message, "DEBUG", target)
 
 
 def verbose(message: str, target: str | None = None) -> None:
-    log(message, "VERBOSE", target)
+    _log(message, "VERBOSE", target)
 
 
 def info(message: str, target: str | None = None) -> None:
-    log(message, "INFO", target)
+    _log(message, "INFO", target)
 
 
 def warning(message: str, target: str | None = None) -> None:
-    log(message, "WARNING", target)
+    _log(message, "WARNING", target)
 
 
 def error(message: str, target: str | None = None) -> None:
-    log(message, "ERROR", target)
+    _log(message, "ERROR", target)
 
 
 def console() -> Console:
