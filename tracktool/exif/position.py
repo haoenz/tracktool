@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .. import coords, exiftool, log, mediatime
 from ..fileutil import quarantine, run_per_file
-from ..kml import xmlutil
+from ..kml import archive, xmlutil
 from .write import SetExifOptions, list_files, set_exif
 
 
@@ -109,10 +109,7 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
     cfg = cfg or config
     options = options or SetPositionOptions()
 
-    zip_path_str = kml_zip_path or str(cfg["kmlCompressedFilePath"] or "")
-    if not zip_path_str or not Path(zip_path_str).is_file():
-        raise FileNotFoundError(f"KML compressed file path does not exist: {zip_path_str}")
-    zip_path = Path(zip_path_str).resolve()
+    zip_path = archive.resolve_zip_path(kml_zip_path, cfg)
 
     try:
         kml_cache = _load_kml_cache(zip_path)

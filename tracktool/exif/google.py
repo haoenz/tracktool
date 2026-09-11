@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .. import exiftool, googleapi, log
 from ..fileutil import quarantine, run_per_file
-from .write import SetExifOptions, list_files, set_exif
+from .write import SetExifOptions, is_missing_altitude, list_files, set_exif
 
 
 def set_altitude_from_google(path: Path, overwrite: bool = False,
@@ -19,22 +19,19 @@ def set_altitude_from_google(path: Path, overwrite: bool = False,
     # Step 1: 找出需要补海拔的文件（读取阶段可并行）
     def check(file: Path) -> tuple[Path, str] | None:
         altitude = exiftool.get_media_tag(file, "GPSAltitude")
-        needs_update = False
-        if not altitude:
-            log.debug("No altitude data found", target=str(file))
-            needs_update = True
-        elif altitude in ("0 m Above Sea Level", "0 m Below Sea Level"):
-            log.debug(f"Altitude is zero: {altitude}", target=str(file))
-            needs_update = True
-        else:
+        if not is_missing_altitude(altitude):
             log.debug(f"Altitude already exists: {altitude}", target=str(file))
+            return None
+        if altitude:
+            log.debug(f"Altitude is zero: {altitude}", target=str(file))
+        else:
+            log.debug("No altitude data found", target=str(file))
 
-        if needs_update:
-            position = exiftool.get_media_tag(file, "GPSPosition")
-            if position:
-                return (file, position)
-            log.warning("No GPS position found", target=str(file))
-            quarantine(file, failed_folder_name)
+        position = exiftool.get_media_tag(file, "GPSPosition")
+        if position:
+            return (file, position)
+        log.warning("No GPS position found", target=str(file))
+        quarantine(file, failed_folder_name)
         return None
 
     checked = run_per_file(files, check, activity="Checking altitude data",

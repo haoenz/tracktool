@@ -26,6 +26,15 @@ class SetExifError(Exception):
     pass
 
 
+# exiftool 对海拔 0 的渲染：0 米既是“缺失”也是有效数据，两个字面量都视为缺失
+ZERO_ALTITUDE_VALUES = ("0 m Above Sea Level", "0 m Below Sea Level")
+
+
+def is_missing_altitude(value: str) -> bool:
+    """Zero altitude (either direction) counts as missing, like an empty value."""
+    return not value or value in ZERO_ALTITUDE_VALUES
+
+
 @dataclass
 class SetExifOptions:
     position: str | None = None
@@ -108,7 +117,7 @@ class MissingTagResult:
 
 
 def find_missing_tag(path: Path, tags: list[str], parallel: bool = False) -> list[MissingTagResult]:
-    """Files missing the given tags; '0 m Above Sea Level' counts as missing."""
+    """Files missing the given tags; zero altitude counts as missing."""
     files = list_files(path)
 
     def process(file: Path) -> MissingTagResult | None:
@@ -117,7 +126,7 @@ def find_missing_tag(path: Path, tags: list[str], parallel: bool = False) -> lis
             value = exiftool.get_media_tag(file, tag)
             if not value:
                 missing.append(tag)
-            elif tag == "GPSAltitude" and value == "0 m Above Sea Level":
+            elif tag == "GPSAltitude" and is_missing_altitude(value):
                 missing.append(tag)
             else:
                 log.debug(f"Found tag {tag}: [{value}]", target=str(file))

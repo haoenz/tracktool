@@ -179,10 +179,7 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
     log.info(f"Saved merged KML to: {output_path}")
 
     if not no_archive:
-        zip_path = str(cfg["kmlCompressedFilePath"] or "")
-        if not zip_path or not Path(zip_path).is_file():
-            raise FileNotFoundError(f"KML compressed file path does not exist: {zip_path}")
-        zip_file = Path(zip_path)
+        zip_file = archive.resolve_zip_path(None, cfg)
         archive_dir = zip_file.parent
         for path in paths:
             archive.push_compressed_kml(path, zip_file)
