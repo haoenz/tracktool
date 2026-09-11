@@ -3,25 +3,11 @@
 Ports Set-ExifAltitudeFromGoogle and Set-ExifLocationFromGoogle.
 """
 
-import shutil
 from pathlib import Path
 
 from .. import exiftool, googleapi, log
-from ..progress import DEFAULT_WORKERS, run_parallel
+from ..fileutil import quarantine, run_per_file
 from .write import SetExifOptions, list_files, set_exif
-
-
-def _move_to_folder(path: Path, folder_name: str) -> None:
-    target_dir = path.parent / folder_name
-    if not target_dir.is_dir():
-        target_dir.mkdir()
-        log.info(f"Created folder: {folder_name}", target=str(target_dir))
-    target_path = target_dir / path.name
-    if target_path.exists():
-        log.warning(f"File already exists in {folder_name} folder", target=str(target_path))
-        return
-    shutil.move(str(path), str(target_path))
-    log.info(f"Moved to {folder_name} folder", target=str(target_path))
 
 
 def set_altitude_from_google(path: Path, overwrite: bool = False,
@@ -48,12 +34,11 @@ def set_altitude_from_google(path: Path, overwrite: bool = False,
             if position:
                 return (file, position)
             log.warning("No GPS position found", target=str(file))
-            if failed_folder_name:
-                _move_to_folder(file, failed_folder_name)
+            quarantine(file, failed_folder_name)
         return None
 
-    checked = run_parallel(files, check, activity="Checking altitude data",
-                           workers=DEFAULT_WORKERS if parallel else 1)
+    checked = run_per_file(files, check, activity="Checking altitude data",
+                           failed_folder_name=failed_folder_name, parallel=parallel)
     need_altitude = [r for r in checked if r is not None]
     if not need_altitude:
         log.info("No files require altitude updates")
@@ -63,30 +48,21 @@ def set_altitude_from_google(path: Path, overwrite: bool = False,
 
     # Step 2: 查询 Google 高程 API（分批由 googleapi 内部处理）
     positions = [position for _, position in need_altitude]
-    try:
-        elevations = googleapi.get_altitudes(positions, api_key=api_key)
-    except googleapi.GoogleApiError as exc:
-        log.error(f"Failed to query Google Elevation API: {exc}")
-        raise
+    elevations = googleapi.get_altitudes(positions, api_key=api_key)
 
     # Step 3: 写回海拔
     def update(item: tuple[tuple[Path, str], float | None]) -> None:
         (file, _), altitude = item
         if altitude is not None:
             log.info(f"Setting altitude: {altitude} m", target=str(file))
-            try:
-                set_exif(file, SetExifOptions(altitude=altitude, overwrite=overwrite))
-            except Exception as exc:  # noqa: BLE001 - mirrors original per-file catch
-                log.error(f"Failed to set altitude: {exc}", target=str(file))
-                if failed_folder_name:
-                    _move_to_folder(file, failed_folder_name)
+            set_exif(file, SetExifOptions(altitude=altitude, overwrite=overwrite))
         else:
             log.warning("No elevation data returned from API", target=str(file))
-            if failed_folder_name:
-                _move_to_folder(file, failed_folder_name)
+            quarantine(file, failed_folder_name)
 
-    run_parallel(list(zip(need_altitude, elevations, strict=False)), update, activity="Updating altitude",
-                 workers=DEFAULT_WORKERS if parallel else 1)
+    run_per_file([item for item in zip(need_altitude, elevations, strict=False)],
+                 update, activity="Updating altitude",
+                 failed_folder_name=failed_folder_name, parallel=parallel)
     log.info(f"Altitude update completed for {len(need_altitude)} file(s)")
 
 
@@ -101,17 +77,10 @@ def set_location_from_google(path: Path, overwrite: bool = False,
         gps_position = exiftool.get_media_tag(file, "GPSPosition")
         if not gps_position:
             log.warning("No GPSPosition found", target=str(file))
-            if failed_folder_name:
-                _move_to_folder(file, failed_folder_name)
+            quarantine(file, failed_folder_name)
             return
 
-        try:
-            location = googleapi.get_location(gps_position, api_key=api_key, language=language)
-        except googleapi.GoogleApiError as exc:
-            log.error(f"Reverse geocoding failed: {exc}", target=str(file))
-            if failed_folder_name:
-                _move_to_folder(file, failed_folder_name)
-            return
+        location = googleapi.get_location(gps_position, api_key=api_key, language=language)
 
         tags: dict[str, str] = {}
         if location.city:
@@ -125,18 +94,12 @@ def set_location_from_google(path: Path, overwrite: bool = False,
 
         if not tags:
             log.warning("No location fields returned from reverse geocoding", target=str(file))
-            if failed_folder_name:
-                _move_to_folder(file, failed_folder_name)
+            quarantine(file, failed_folder_name)
             return
 
-        try:
-            set_exif(file, SetExifOptions(tags=tags, overwrite=overwrite))
-            location_str = " ".join(part for part in (location.country, location.state, location.city) if part)
-            log.info(f"IPTC location tags updated: {location_str}", target=str(file))
-        except Exception as exc:  # noqa: BLE001
-            log.error(f"Failed to write IPTC tags: {exc}", target=str(file))
-            if failed_folder_name:
-                _move_to_folder(file, failed_folder_name)
+        set_exif(file, SetExifOptions(tags=tags, overwrite=overwrite))
+        location_str = " ".join(part for part in (location.country, location.state, location.city) if part)
+        log.info(f"IPTC location tags updated: {location_str}", target=str(file))
 
-    run_parallel(files, process, activity="Setting EXIF location from Google",
-                 workers=DEFAULT_WORKERS if parallel else 1)
+    run_per_file(files, process, activity="Setting EXIF location from Google",
+                 failed_folder_name=failed_folder_name, parallel=parallel)

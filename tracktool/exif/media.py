@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .. import exiftool, log, mediatime
-from ..progress import DEFAULT_WORKERS, run_parallel
+from ..fileutil import run_per_file
 from .write import SetExifOptions, list_files, set_exif
 
 # 各厂商时间标签集合（Move-ExifTime 原样移植）
@@ -169,8 +169,7 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
             else:
                 log.error("Filename does not match Insta360 naming pattern", target=str(file))
 
-    run_parallel(files, process, activity="Shifting Exif time",
-                 workers=DEFAULT_WORKERS if parallel else 1)
+    run_per_file(files, process, activity="Shifting Exif time", parallel=parallel)
 
 
 def move_altitude(path: Path, offset: float, overwrite: bool = False, parallel: bool = False) -> None:
@@ -195,8 +194,7 @@ def move_altitude(path: Path, offset: float, overwrite: bool = False, parallel: 
         log.info(f"Shifting altitude: {current_alt} m -> {new_alt} m", target=str(file))
         set_exif(file, SetExifOptions(altitude=new_alt, overwrite=overwrite))
 
-    run_parallel(files, process, activity=f"Shifting altitude by {offset} m",
-                 workers=DEFAULT_WORKERS if parallel else 1)
+    run_per_file(files, process, activity=f"Shifting altitude by {offset} m", parallel=parallel)
 
 
 def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None,
@@ -258,8 +256,7 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
         set_exif(output_path, SetExifOptions(tags=tags, overwrite=True))
         log.info(f"Set tags: {', '.join(tags)}", target=str(output_path))
 
-    run_parallel(files, process, activity="Converting to MP4",
-                 workers=DEFAULT_WORKERS if parallel else 1)
+    run_per_file(files, process, activity="Converting to MP4", parallel=parallel)
 
 
 def group_media_files(path: Path) -> None:

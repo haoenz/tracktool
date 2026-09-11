@@ -29,7 +29,6 @@ class GoogleApiError(Exception):
 def _resolve_key(override: str | None, cfg: Config) -> str:
     key = cfg.google_api_key(override)
     if not key:
-        log.error("Google Maps API key not found in configuration")
         raise GoogleApiError("API key is required. Set TRACKTOOL_GOOGLE_API_KEY, pass --api-key, or set it in config")
     return key
 
@@ -40,7 +39,6 @@ def _resolve_decimal(coordinate: str) -> str:
         return coordinate
     decimal = coords_mod.decimal_coord(coordinate)
     if not decimal:
-        log.error(f"Failed to convert coordinate: {coordinate}")
         raise GoogleApiError(f"Invalid coordinate format: {coordinate}")
     return decimal
 
@@ -61,22 +59,19 @@ def _request_json(api_url: str, api_name: str, retry_count: int = 3, timeout: in
                     f"{api_name} transient error (attempt {attempt}/{retry_count}): {exc}. Retrying in {delay}s...")
                 time.sleep(delay)
                 continue
-            log.error(f"{api_name} failed after {retry_count} attempt(s): {exc}")
-            raise GoogleApiError(str(exc)) from exc
+            raise GoogleApiError(f"{api_name} failed after {retry_count} attempt(s): {exc}") from exc
 
         status = payload.get("status")
         if status in ("OK", "ZERO_RESULTS"):
             return payload
         if status == "OVER_QUERY_LIMIT":
-            log.error("Google API quota exceeded. Try again tomorrow.")
-            raise GoogleApiError("API quota exceeded")
+            raise GoogleApiError("API quota exceeded. Try again tomorrow.")
         if status == "REQUEST_DENIED":
-            log.error("API request denied. Check your API key.")
-            raise GoogleApiError("API key invalid or unauthorized")
-        log.error(f"{api_name} returned error status: {status}")
+            raise GoogleApiError("API request denied. Check your API key.")
+        error_message = f"{api_name} returned error status: {status}"
         if payload.get("error_message"):
-            log.error(f"Error message: {payload['error_message']}")
-        raise GoogleApiError(f"API request failed: {status}")
+            error_message += f" ({payload['error_message']})"
+        raise GoogleApiError(error_message)
 
     raise GoogleApiError(f"{api_name} exhausted retries")  # unreachable safeguard
 

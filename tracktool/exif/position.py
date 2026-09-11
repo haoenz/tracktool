@@ -8,7 +8,6 @@ duration wins immediately, otherwise the smallest outside-diff is used when it
 is within MaxTimeDiffSeconds (default 60s).
 """
 
-import shutil
 import zipfile
 from bisect import bisect_left
 from dataclasses import dataclass
@@ -16,8 +15,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .. import coords, exiftool, log, mediatime
+from ..fileutil import quarantine, run_per_file
 from ..kml import xmlutil
-from ..progress import DEFAULT_WORKERS, run_parallel
 from .write import SetExifOptions, list_files, set_exif
 
 
@@ -90,19 +89,6 @@ def _load_kml_cache(zip_path: Path) -> dict[str, str]:
     return cache
 
 
-def _move_to_folder(path: Path, folder_name: str) -> None:
-    target_dir = path.parent / folder_name
-    if not target_dir.is_dir():
-        target_dir.mkdir()
-        log.info(f"Created folder: {folder_name}", target=str(target_dir))
-    target_path = target_dir / path.name
-    if target_path.exists():
-        log.warning(f"File already exists in {folder_name} folder", target=str(target_path))
-        return
-    shutil.move(str(path), str(target_path))
-    log.info(f"Moved to {folder_name} folder", target=str(target_path))
-
-
 @dataclass
 class SetPositionOptions:
     max_time_diff_seconds: int = 60
@@ -125,15 +111,13 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
 
     zip_path_str = kml_zip_path or str(cfg["kmlCompressedFilePath"] or "")
     if not zip_path_str or not Path(zip_path_str).is_file():
-        log.error(f"KML compressed file path does not exist: {zip_path_str}")
         raise FileNotFoundError(f"KML compressed file path does not exist: {zip_path_str}")
     zip_path = Path(zip_path_str).resolve()
 
     try:
         kml_cache = _load_kml_cache(zip_path)
-    except (OSError, zipfile.BadZipFile):
-        log.error(f"Failed to read KML archive file: {zip_path}")
-        raise
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise OSError(f"Failed to read KML archive file: {zip_path}") from exc
 
     # 预解析 XML，避免在并行工作线程里重复解析
     parsed_cache = {name: xmlutil.parse_string(text) for name, text in kml_cache.items()}
@@ -157,7 +141,7 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
         if media_time is None:
             log.error("Failed to get media timestamp", target=str(file))
             if options.failed_folder_name:
-                _move_to_folder(file, options.failed_folder_name)
+                quarantine(file, options.failed_folder_name)
             return
 
         date_str = media_time.strftime("%Y-%m-%d")
@@ -212,7 +196,7 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
                 f"Best matched KML is outside duration by {best_abs_diff} seconds, "
                 f"which exceeds the {options.max_time_diff_seconds}s limit", target=str(file))
             if options.failed_folder_name:
-                _move_to_folder(file, options.failed_folder_name)
+                quarantine(file, options.failed_folder_name)
             return
 
         if lat and lon:
@@ -227,7 +211,7 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
         else:
             log.warning("No matching GPS data found in KML archive", target=str(file))
             if options.failed_folder_name:
-                _move_to_folder(file, options.failed_folder_name)
+                quarantine(file, options.failed_folder_name)
 
-    run_parallel(files, process, activity="Setting GPS info from KML",
-                 workers=DEFAULT_WORKERS if parallel else 1)
+    run_per_file(files, process, activity="Setting GPS info from KML",
+                 failed_folder_name=options.failed_folder_name, parallel=parallel)

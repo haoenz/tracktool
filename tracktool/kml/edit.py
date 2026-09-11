@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .. import googleapi, log
 from ..config import Config, config
+from ..fileutil import move_to_folder
 from . import archive, kmlfile, xmlutil
 
 _TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
@@ -96,7 +97,6 @@ def split_kml(path: Path, split_points: list[str]) -> None:
 def remove_bad_points(path: Path, bad_points: list[str]) -> None:
     """Remove one point, or the inclusive range between two, as <name>-Fixed.kml."""
     if len(bad_points) > 2:
-        log.error(f"Too many bad points specified (max 2): {len(bad_points)}", target=str(path))
         raise ValueError(f"Too many bad points specified (max 2): {len(bad_points)}")
 
     tree = xmlutil.parse_file(path)
@@ -181,13 +181,12 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
     if not no_archive:
         zip_path = str(cfg["kmlCompressedFilePath"] or "")
         if not zip_path or not Path(zip_path).is_file():
-            log.error(f"KML compressed file path does not exist: {zip_path}")
             raise FileNotFoundError(f"KML compressed file path does not exist: {zip_path}")
         zip_file = Path(zip_path)
         archive_dir = zip_file.parent
         for path in paths:
             archive.push_compressed_kml(path, zip_file)
-            archive._move_to_folder(path, str(cfg["kmlBackupDirName"] or "Backup"), archive_dir)
+            move_to_folder(path, str(cfg["kmlBackupDirName"] or "Backup"), archive_dir)
 
 
 def set_kml_altitude_from_google(path: Path, api_key: str | None = None,

@@ -9,16 +9,25 @@ from rich import box
 from rich.table import Table
 
 from . import __version__, dedup, log
-from .config import LEVELS, config
+from .config import LEVELS, ConfigError, config
 from .exif import google as exif_google
 from .exif import media as exif_media
 from .exif import position as exif_position
 from .exif import resolve as exif_resolve
 from .exif import write as exif_write
+from .exif.write import SetExifError
+from .exiftool import ExiftoolError
+from .googleapi import GoogleApiError
 from .kml import archive as kml_archive
 from .kml import edit as kml_edit
 from .kml import kmlfile
+from .kml.xmlutil import etree
 from .progress import DEFAULT_WORKERS
+
+# 用户输入触发的可预期错误：一行报错 + 退出码 1，不打印 traceback。
+# 之外的一切异常视为 bug，保留完整 traceback 供调试。
+DOMAIN_ERRORS = (ConfigError, GoogleApiError, SetExifError, ExiftoolError,
+                 FileNotFoundError, ValueError, etree.XMLSyntaxError, OSError)
 
 app = typer.Typer(
     name="tracktool",
@@ -179,7 +188,12 @@ def exif_set(
 ) -> None:
     """Write EXIF tags (GPS position/altitude, Make/Model, arbitrary tags)."""
     path = _resolve_path(path)
-    tag_dict = dict(tag.split("=", 1) for tag in (tags or []))
+    tag_dict: dict[str, str] = {}
+    for tag in (tags or []):
+        if "=" not in tag:
+            raise ValueError(f"Invalid tag format (expected NAME=VALUE): {tag}")
+        name, value = tag.split("=", 1)
+        tag_dict[name] = value
     options = exif_write.SetExifOptions(position=position, altitude=altitude, make=make,
                                         model=model, tags=tag_dict, overwrite=overwrite)
     exif_write.set_exif(path, options, parallel)
@@ -483,5 +497,19 @@ def config_import(
     log.info(f"Imported configuration from {legacy_path}", target=str(config.path))
 
 
+def cli_main() -> None:
+    """Console-script entry point: report expected domain errors cleanly.
+
+    Domain exceptions are the user's own doing (bad path, bad coordinates,
+    broken config, malformed KML) — one log line + exit code 1, no traceback.
+    Anything not in DOMAIN_ERRORS is a real bug and keeps its traceback.
+    """
+    try:
+        app()
+    except DOMAIN_ERRORS as exc:
+        log.error(str(exc))
+        raise SystemExit(1) from exc
+
+
 if __name__ == "__main__":
-    app()
+    cli_main()

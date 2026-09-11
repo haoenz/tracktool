@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-tracktool = "tracktool.cli:app"
+tracktool = "tracktool.cli:cli_main"
 
 [dependency-groups]
 dev = [

@@ -42,7 +42,6 @@ def build_position_params(position: str) -> list[str]:
     if m:
         latitude, longitude = float(m[1]), float(m[2])
         if abs(latitude) > 90 or abs(longitude) > 180:
-            log.error(f"Invalid GPS coordinates: {position}")
             raise SetExifError(f"Invalid GPS coordinates: {position}")
         lat_ref = "N" if latitude >= 0 else "S"
         lon_ref = "E" if longitude >= 0 else "W"
@@ -59,7 +58,6 @@ def build_position_params(position: str) -> list[str]:
         return [f"-GPSPosition={converted}"]
     if _EXIF_PATTERN.match(position) or _DEFAULT_PATTERN.match(position):
         return [f"-GPSPosition={position}"]
-    log.error(f"Invalid GPS pattern: {position}")
     raise SetExifError(f"Invalid GPS pattern: {position}")
 
 

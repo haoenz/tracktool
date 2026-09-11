@@ -8,7 +8,8 @@ VID_original, ConvertTo-Mp4 into a fresh VID, then Resolve-MissingGPS).
 from pathlib import Path
 
 from .. import log
-from .google import _move_to_folder, set_altitude_from_google
+from ..fileutil import move_to_folder
+from .google import set_altitude_from_google
 from .media import convert_to_mp4
 from .position import SetPositionOptions, set_position_from_kml
 from .write import find_missing_tag
@@ -38,7 +39,7 @@ def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | 
                                      parallel=parallel)
         for file in files:
             if file.exists():
-                _move_to_folder(file, "GoogleAltOK")
+                move_to_folder(file, "GoogleAltOK")
 
     # 缺失位置的文件
     missing_pos = [r for r in missing if "GPSPosition" in r.missing_tags]

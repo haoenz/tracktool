@@ -38,7 +38,6 @@ def _check_output(output: list[str], filters: list[re.Pattern[str]], cmd_desc: s
     errors = [line for line in lines if ERROR_PATTERN.search(line)]
     if errors:
         message = "Exiftool encountered error(s):\n" + "\n".join(errors)
-        log.error(message)
         raise ExiftoolError(message)
     return lines
 

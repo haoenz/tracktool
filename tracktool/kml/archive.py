@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .. import log
 from ..config import Config, config
+from ..fileutil import move_to_folder
 from . import kmlfile, xmlutil
 
 # Collection style per track type: (name, LineStyle color)
@@ -65,26 +66,11 @@ def new_empty_kml(type_: str | None = None) -> xmlutil.etree._ElementTree:
 
 
 def _resolve_zip_path(zip_path: str | None, cfg: Config) -> Path:
+    """CLI argument or config key -> resolved ZIP path; FileNotFoundError when absent."""
     path = zip_path or cfg["kmlCompressedFilePath"]
     if not path or not Path(path).is_file():
-        log.error(f"KML compressed file path does not exist: {path}")
         raise FileNotFoundError(f"KML compressed file path does not exist: {path}")
     return Path(path).resolve()
-
-
-def _move_to_folder(path: Path, folder_name: str, parent_directory: Path | None = None) -> None:
-    """Move file into folder_name, creating it if needed (ports Move-ToFolder)."""
-    target_parent = parent_directory if parent_directory is not None else path.parent
-    target_dir = target_parent / folder_name
-    if not target_dir.is_dir():
-        target_dir.mkdir()
-        log.info(f"Created folder: {folder_name}", target=str(target_dir))
-    target_path = target_dir / path.name
-    if target_path.exists():
-        log.warning(f"File already exists in {folder_name} folder", target=str(target_path))
-        return
-    shutil.move(str(path), str(target_path))
-    log.info(f"Moved to {folder_name} folder", target=str(target_path))
 
 
 # ── ZIP entry management ────────────────────────────────────────────────────
@@ -134,7 +120,6 @@ def add_track_to_desktop_collection(path: Path, collection_path: Path) -> None:
     """Append the track to Folder[year] > Document[yyyymm] > Placemark."""
     m = _DATE_NAME_PATTERN.search(path.stem)
     if not m:
-        log.error("Filename does not match expected date format (yyyy-MM-dd)", target=str(path))
         raise ValueError(f"Filename does not match expected date format (yyyy-MM-dd): {path.stem}")
     year, month = m[1], m[1] + m[2]
     log.debug(f"Parsed date from filename: {year}/{month}", target=str(path))
@@ -254,7 +239,7 @@ def push_kml_archive(path: Path, zip_path: str | None = None, type_: str | None 
             log.info("Created new ZIP archive", target=str(zip_file))
         push_compressed_kml(path, zip_file)
 
-    _move_to_folder(path, str(cfg["kmlBackupDirName"] or "Backup"), archive_dir)
+    move_to_folder(path, str(cfg["kmlBackupDirName"] or "Backup"), archive_dir)
 
 
 def pop_kml_archive(kml_name: str, type_: str = "Default", zip_path: str | None = None,
