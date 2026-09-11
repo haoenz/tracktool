@@ -42,6 +42,16 @@ _EXTENSION_MAP = {
     ".jpg": "IMG", ".jpeg": "IMG",
 }
 
+# (make, ext) -> 要平移的时间标签集合；组合缺失即报错跳过该文件
+_TAG_SETS: dict[tuple[str, str], list[str]] = {
+    (MAKE_SONY, ".arw"): _SONY_PHOTO_TAGS,
+    (MAKE_SONY, ".jpg"): _SONY_PHOTO_TAGS,
+    (MAKE_SONY, ".jpeg"): _SONY_PHOTO_TAGS,
+    (MAKE_SONY, ".mp4"): _SONY_MP4_TAGS,
+    (MAKE_FUJIFILM, ".mp4"): _FUJIFILM_MP4_TAGS,
+    (MAKE_INSTA360, ".mp4"): _INSTA360_MP4_TAGS,
+}
+
 
 def _parse_time_diff(time_diff: str) -> int:
     """'+1h30m' / '-2d' -> signed seconds."""
@@ -62,6 +72,75 @@ def _parse_tz_offset(offset: str) -> int | None:
         return None
 
 
+def _compute_time_shift(file: Path, time_diff: str, offset_time: str,
+                        make: str) -> tuple[int, list[str]] | None:
+    """Resolve the requested time_diff + timezone offset into a signed second
+    total plus the EXIF offset-time params to write.
+
+    Returns None after logging when the file cannot be processed (OffsetTime
+    is SONY-only, or a timezone value fails to parse).
+    """
+    total_seconds_offset = 0
+    tz_params: list[str] = []
+
+    if time_diff.strip():
+        total_seconds_offset += _parse_time_diff(time_diff)
+
+    if offset_time.strip():
+        if make != MAKE_SONY:
+            log.error(f"OffsetTime is currently only supported for SONY. Current make: {make}",
+                      target=str(file))
+            return None
+
+        current_offset = exiftool.get_media_tag(file, "ExifIFD:OffsetTime")
+        if not current_offset:
+            log.warning("Current ExifIFD:OffsetTime is missing, assuming +08:00", target=str(file))
+            current_offset = "+08:00"
+
+        target_sec = _parse_tz_offset(offset_time)
+        current_sec = _parse_tz_offset(current_offset)
+        if target_sec is None or current_sec is None:
+            log.error("Failed to parse timezones for OffsetTime difference calculation", target=str(file))
+            return None
+
+        diff_sec = target_sec - current_sec
+        total_seconds_offset += diff_sec
+        log.verbose(f"Setting timezone tags: ExifIFD:OffsetTime from {current_offset} to {offset_time} "
+                    f"(diff: {diff_sec:+d} seconds)", target=str(file))
+        tz_params = [
+            f"-ExifIFD:OffsetTime={offset_time}",
+            f"-ExifIFD:OffsetTimeOriginal={offset_time}",
+            f"-ExifIFD:OffsetTimeDigitized={offset_time}",
+        ]
+
+    return total_seconds_offset, tz_params
+
+
+def _format_shift(total_seconds_offset: int) -> tuple[str, str, timedelta]:
+    """Signed second total -> ('-='/'+=', 'D:0:0 HH:MM:SS' offset, timedelta)."""
+    is_negative = total_seconds_offset < 0
+    shift = timedelta(seconds=abs(total_seconds_offset))
+    days, remainder = divmod(int(shift.total_seconds()), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    sign = "-=" if is_negative else "+="
+    return sign, f"0:0:{days} {hours}:{minutes}:{seconds}", shift
+
+
+def _rename_insta360(file: Path, shift: timedelta, is_negative: bool) -> None:
+    """Sync the timestamp inside an Insta360 filename with the shifted EXIF time."""
+    m = _INSTA360_FILENAME_PATTERN.search(file.stem)
+    if not m:
+        log.error("Filename does not match Insta360 naming pattern", target=str(file))
+        return
+    original_time = datetime.strptime(m[1], "%Y%m%d_%H%M%S")
+    new_time = original_time - shift if is_negative else original_time + shift
+    new_time_str = new_time.strftime("%Y%m%d_%H%M%S")
+    new_file_path = file.parent / _INSTA360_FILENAME_PATTERN.sub(f"_{new_time_str}_", file.name)
+    file.rename(new_file_path)
+    log.verbose("Renamed to match new timestamp", target=str(new_file_path))
+
+
 def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
                    overwrite: bool = False, parallel: bool = False) -> None:
     """Shift EXIF timestamps; OffsetTime only supported for SONY. Insta360 files renamed."""
@@ -73,107 +152,41 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
     def process(file: Path) -> None:
         ext = file.suffix.lower()
         make = exiftool.get_media_tag(file, "Make")
-        params = [str(file)]
 
-        total_seconds_offset = 0
-
-        if time_diff.strip():
-            total_seconds_offset += _parse_time_diff(time_diff)
-
-        if offset_time.strip():
-            if make != MAKE_SONY:
-                log.error(f"OffsetTime is currently only supported for SONY. Current make: {make}",
-                          target=str(file))
-                return
-
-            current_offset = exiftool.get_media_tag(file, "ExifIFD:OffsetTime")
-            if not current_offset:
-                log.warning("Current ExifIFD:OffsetTime is missing, assuming +08:00", target=str(file))
-                current_offset = "+08:00"
-
-            target_sec = _parse_tz_offset(offset_time)
-            current_sec = _parse_tz_offset(current_offset)
-            if target_sec is None or current_sec is None:
-                log.error("Failed to parse timezones for OffsetTime difference calculation", target=str(file))
-                return
-
-            diff_sec = target_sec - current_sec
-            total_seconds_offset += diff_sec
-            log.verbose(f"Setting timezone tags: ExifIFD:OffsetTime from {current_offset} to {offset_time} "
-                        f"(diff: {diff_sec:+d} seconds)", target=str(file))
-            params += [
-                f"-ExifIFD:OffsetTime={offset_time}",
-                f"-ExifIFD:OffsetTimeOriginal={offset_time}",
-                f"-ExifIFD:OffsetTimeDigitized={offset_time}",
-            ]
-
-        if overwrite:
-            params.append("-overwrite_original")
-        params += exiftool.large_file_args(file)
+        resolved = _compute_time_shift(file, time_diff, offset_time, make)
+        if resolved is None:
+            return
+        total_seconds_offset, tz_params = resolved
 
         if total_seconds_offset == 0:
-            if len(params) > 1:
+            if tz_params:
+                params = [str(file), *tz_params]
+                if overwrite:
+                    params.append("-overwrite_original")
+                params += exiftool.large_file_args(file)
                 exiftool.invoke(*params)
                 log.verbose("Applied timezone offset tags but no time-shift needed", target=str(file))
             else:
                 log.verbose("No timezone or time-shift changes required", target=str(file))
             return
 
-        is_negative = total_seconds_offset < 0
-        shift = timedelta(seconds=abs(total_seconds_offset))
-        days, remainder = divmod(int(shift.total_seconds()), 86400)
-        hours, remainder = divmod(remainder, 3600)
-        minutes, seconds = divmod(remainder, 60)
-
-        sign = "-=" if is_negative else "+="
-        offset = f"0:0:{days} {hours}:{minutes}:{seconds}"
+        sign, offset, shift = _format_shift(total_seconds_offset)
         log.verbose(f"Shifting time by {sign}{offset}", target=str(file))
 
-        if make == MAKE_SONY:
-            if ext in (".arw", ".jpg", ".jpeg"):
-                tag_set = _SONY_PHOTO_TAGS
-            elif ext == ".mp4":
-                tag_set = _SONY_MP4_TAGS
-            else:
-                log.error(f"Unsupported file type '{ext}' for Sony camera; file skipped", target=str(file))
-                return
-        elif make == MAKE_FUJIFILM:
-            if ext == ".mp4":
-                tag_set = _FUJIFILM_MP4_TAGS
-            else:
-                log.error(f"Unsupported file type '{ext}' for Fujifilm camera; file skipped", target=str(file))
-                return
-        elif make == MAKE_INSTA360:
-            if ext == ".mp4":
-                tag_set = _INSTA360_MP4_TAGS
-            else:
-                log.error(f"Unsupported file type '{ext}' for Insta360 camera; file skipped", target=str(file))
-                return
-        else:
-            log.error(f"Unknown camera make: {make}; file skipped", target=str(file))
+        tag_set = _TAG_SETS.get((make, ext))
+        if tag_set is None:
+            log.error(f"Unsupported camera/extension: {make} {ext}; file skipped", target=str(file))
             return
 
-        params += [f"-{tag}{sign}{offset}" for tag in tag_set]
-
+        params = [str(file), *(f"-{tag}{sign}{offset}" for tag in tag_set), *tz_params]
         if overwrite:
             params.append("-overwrite_original")
         params += exiftool.large_file_args(file)
 
         exiftool.invoke(*params)
 
-        # Insta360 文件名中的时间戳同步更新
         if make == MAKE_INSTA360 and ext == ".mp4":
-            m = _INSTA360_FILENAME_PATTERN.search(file.stem)
-            if m:
-                original_time = datetime.strptime(m[1], "%Y%m%d_%H%M%S")
-                delta = timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
-                new_time = original_time - delta if is_negative else original_time + delta
-                new_time_str = new_time.strftime("%Y%m%d_%H%M%S")
-                new_file_path = file.parent / _INSTA360_FILENAME_PATTERN.sub(f"_{new_time_str}_", file.name)
-                file.rename(new_file_path)
-                log.verbose("Renamed to match new timestamp", target=str(new_file_path))
-            else:
-                log.error("Filename does not match Insta360 naming pattern", target=str(file))
+            _rename_insta360(file, shift, total_seconds_offset < 0)
 
     run_per_file(files, process, activity="Shifting Exif time", parallel=parallel)
 
