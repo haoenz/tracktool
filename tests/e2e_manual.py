@@ -11,10 +11,7 @@ from tracktool import exiftool, mediatime
 from tracktool.exif.position import MAX_TIME_DIFF_SECONDS, SetPositionOptions, set_position_from_kml
 from tracktool.exif.write import SetExifOptions, find_missing_tag, set_exif
 
-# 带完整 EXIF 的最小 JPEG（含 DateTimeOriginal），由 exiftool 生成更可靠：
-# 先用 PIL 不可用，改为用 exiftool 自身从一个已知小图创建。
-# 最稳妥的方式：用 exiftool 创建一个 "fake" EXIF-only JPEG 不现实，
-# 因此这里用 ffmpeg 生成 testsrc 一帧 JPEG。
+# 用 ffmpeg 生成一帧 JPEG，比手写 EXIF 字节流可靠。
 
 
 def make_test_jpeg(path: Path) -> None:

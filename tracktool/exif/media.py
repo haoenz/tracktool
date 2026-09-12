@@ -222,14 +222,14 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
                    offset_time: str = mediatime.DEFAULT_TZ_OFFSET,
                    parallel: bool = False) -> None:
     """Remux videos to MP4 with creation_time metadata + XMP tags (ffmpeg)."""
+    # 入口处一次性校验 offset_time 格式，坏参数直接报错，而不是逐文件失败
+    mediatime.parse_offset(offset_time)
     files = list_files(path)
     output_dir = output_directory if output_directory is not None else (files[0].parent if files else path)
 
     def process(file: Path) -> None:
         output_path = output_dir / f"{file.stem}.mp4"
-        quicktime_create_date = exiftool.get_media_tag(file, "QuickTime:CreateDate")
         media_time = mediatime.get_media_time(file, default_offset=offset_time)
-        mediatime.parse_offset(offset_time)
 
         if media_time is None:
             log.warning("No valid timestamp found; skipping", target=str(file))
@@ -254,6 +254,7 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
             log.verbose("Converted to MP4", target=str(file))
         else:
             log.debug("File is already MP4", target=str(file))
+            quicktime_create_date = exiftool.get_media_tag(file, "QuickTime:CreateDate")
             original_path = file.with_name(file.name + "_original")
             shutil.move(str(file), str(original_path))
             if not quicktime_create_date:

@@ -29,13 +29,11 @@ def _track_location_index(track: xmlutil.etree._Element, location: str) -> int:
     """Index of a timestamp or coordinate string in the track, -1 if absent."""
     index = -1
     if _TIMESTAMP_PATTERN.search(location):
-        # 2022-01-01T00:00:00Z
         whens = [w.text or "" for w in track.findall(f"{{{xmlutil.KML_NS}}}when")]
         if location in whens:
             index = whens.index(location)
             log.debug(f"Found timestamp in track at index {index}")
     elif _COORDINATE_PATTERN.search(location):
-        # 116.123456 39.123456 100.0
         coords = [c.text or "" for c in track.findall(f"{{{xmlutil.GX_NS}}}coord")]
         if location in coords:
             index = coords.index(location)
@@ -232,7 +230,7 @@ def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None
 def convert_kml_to_multigeometry(path: Path, output_path: Path | None = None) -> None:
     """Rewrap all LineStrings of a KML into a single MultiGeometry Placemark.
 
-    Preserves the source's name and styles; style copy is a known original TODO.
+    Preserves the source's name and styles.
     """
     tree = xmlutil.parse_file(path)
     coord_nodes = xmlutil.findall(tree, "//kml:LineString/kml:coordinates")
@@ -266,7 +264,7 @@ def convert_kml_to_multigeometry(path: Path, output_path: Path | None = None) ->
         if src_name is not None and (src_name.text or "").strip():
             xmlutil.sub(folder, "name", (src_name.text or "").strip())
         for style in list(src_container):
-            tag = etree_tag(style)
+            tag = xmlutil.etree.QName(style).localname
             if tag in ("Style", "StyleMap"):
                 folder.append(xmlutil.etree.fromstring(xmlutil.etree.tostring(style)))
 
@@ -282,8 +280,3 @@ def convert_kml_to_multigeometry(path: Path, output_path: Path | None = None) ->
         output_path = path.parent / f"{path.stem}-Merged.kml"
     xmlutil.save(output_tree, output_path.resolve())
     log.info(f"Saved merged KML to: {output_path}", target=str(path))
-
-
-def etree_tag(element: xmlutil.etree._Element) -> str:
-    qname = xmlutil.etree.QName(element)
-    return qname.localname

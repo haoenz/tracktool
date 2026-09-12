@@ -15,8 +15,16 @@ from .position import SetPositionOptions, set_position_from_kml
 from .write import find_missing_tag
 
 
+def _organize_repaired(files: list[Path]) -> None:
+    """Move successfully repaired files into the GoogleAltOK folder."""
+    for file in files:
+        if file.exists():
+            move_to_folder(file, "GoogleAltOK")
+
+
 def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | None = None) -> None:
-    """修复缺失 GPSPosition/GPSAltitude 的媒体文件：先补海拔，再补位置。"""
+    """修复缺失 GPSPosition/GPSAltitude 的媒体文件：先补海拔，再补位置；
+    补好海拔的文件移入 GoogleAltOK 目录。"""
     log.info("Finding media files missing GPSPosition and GPSAltitude")
     missing = find_missing_tag(path, ["GPSPosition", "GPSAltitude"], parallel=parallel)
 
@@ -37,9 +45,7 @@ def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | 
         for file in files:
             set_altitude_from_google(file, overwrite=True, failed_folder_name="GoogleAltFailed",
                                      parallel=parallel)
-        for file in files:
-            if file.exists():
-                move_to_folder(file, "GoogleAltOK")
+        _organize_repaired(files)
 
     # 缺失位置的文件
     missing_pos = [r for r in missing if "GPSPosition" in r.missing_tags]

@@ -150,8 +150,8 @@ def large_file_args(path: Path) -> list[str]:
     try:
         if path.stat().st_size >= LARGE_FILE_THRESHOLD:
             return ["-api", "largefilesupport=1"]
-    except OSError:
-        pass
+    except OSError as exc:
+        log.debug(f"Cannot stat file; skipping large-file check: {exc}", target=str(path))
     return []
 
 

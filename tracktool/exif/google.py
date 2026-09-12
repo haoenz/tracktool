@@ -17,7 +17,7 @@ def set_altitude_from_google(path: Path, overwrite: bool = False,
     files = list_files(path)
 
     # Step 1: 找出需要补海拔的文件（读取阶段可并行）
-    def check(file: Path) -> tuple[Path, str] | None:
+    def check_altitude(file: Path) -> tuple[Path, str] | None:
         altitude = exiftool.get_media_tag(file, "GPSAltitude")
         if not is_missing_altitude(altitude):
             log.debug(f"GPSAltitude already exists: {altitude}", target=str(file))
@@ -34,7 +34,7 @@ def set_altitude_from_google(path: Path, overwrite: bool = False,
         quarantine(file, failed_folder_name)
         return None
 
-    checked = run_per_file(files, check, activity="Checking altitude data",
+    checked = run_per_file(files, check_altitude, activity="Checking altitude data",
                            failed_folder_name=failed_folder_name, parallel=parallel)
     need_altitude = [r for r in checked if r is not None]
     if not need_altitude:
