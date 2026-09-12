@@ -8,6 +8,7 @@ import pytest
 from conftest import TRACK_KML
 
 from tracktool.config import Config
+from tracktool.context import ctx
 from tracktool.exif.write import is_missing_altitude
 from tracktool.kml.archive import resolve_zip_path
 
@@ -34,47 +35,54 @@ class TestIsMissingAltitude:
 
 
 class TestResolveZipPath:
-    def test_explicit_path_wins(self, tmp_path: Path):
+    """resolve_zip_path reads its config from the context, so each test installs
+    its own Config there rather than passing one in."""
+
+    @staticmethod
+    def _install(tmp_path: Path, monkeypatch, **values) -> Config:
+        cfg = Config(path=tmp_path / "config.json").load()
+        for key, value in values.items():
+            cfg[key] = value
+        monkeypatch.setattr(ctx, "config", cfg)
+        return cfg
+
+    def test_explicit_path_wins(self, tmp_path: Path, monkeypatch):
         zip_path = tmp_path / "Archive.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("placeholder.txt", "x")
-        cfg = Config(path=tmp_path / "config.json").load()
-        cfg["kml_zip_path"] = str(tmp_path / "other.zip")
+        self._install(tmp_path, monkeypatch, kml_zip_path=str(tmp_path / "other.zip"))
 
-        assert resolve_zip_path(str(zip_path), cfg) == zip_path.resolve()
+        assert resolve_zip_path(str(zip_path)) == zip_path.resolve()
 
-    def test_falls_back_to_config(self, tmp_path: Path):
+    def test_falls_back_to_config(self, tmp_path: Path, monkeypatch):
         zip_path = tmp_path / "FromConfig.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("2024-05-01 test.kml", TRACK_KML)
-        cfg = Config(path=tmp_path / "config.json").load()
-        cfg["kml_zip_path"] = str(zip_path)
+        self._install(tmp_path, monkeypatch, kml_zip_path=str(zip_path))
 
-        assert resolve_zip_path(None, cfg) == zip_path.resolve()
+        assert resolve_zip_path(None) == zip_path.resolve()
 
-    def test_missing_file_raises(self, tmp_path: Path):
-        cfg = Config(path=tmp_path / "config.json").load()
-        cfg["kml_zip_path"] = ""
+    def test_missing_file_raises(self, tmp_path: Path, monkeypatch):
+        self._install(tmp_path, monkeypatch, kml_zip_path="")
         with pytest.raises(FileNotFoundError, match="does not exist"):
-            resolve_zip_path(None, cfg)
+            resolve_zip_path(None)
         with pytest.raises(FileNotFoundError, match="does not exist"):
-            resolve_zip_path(str(tmp_path / "nope.zip"), cfg)
+            resolve_zip_path(str(tmp_path / "nope.zip"))
 
-    def test_merge_kml_archive_uses_shared_resolution(self, tmp_path: Path):
+    def test_merge_kml_archive_uses_shared_resolution(self, tmp_path: Path, monkeypatch):
         """merge_kml 的归档步骤走共享 resolve_zip_path（#5）并保持原有行为。"""
         from tracktool.kml.edit import merge_kml
 
         zip_path = tmp_path / "Archive.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("placeholder.txt", "x")
-        cfg = Config(path=tmp_path / "config.json").load()
-        cfg["kml_zip_path"] = str(zip_path)
-        cfg["kml_backup_dir_name"] = "Backup"
+        self._install(tmp_path, monkeypatch, kml_zip_path=str(zip_path),
+                      kml_backup_dir_name="Backup")
 
         src = tmp_path / "2024-05-01 test.kml"
         src.write_text(TRACK_KML, encoding="utf-8")
 
-        merge_kml([src], tmp_path / "merged.kml", no_archive=False, cfg=cfg)
+        merge_kml([src], tmp_path / "merged.kml", no_archive=False)
 
         assert "2024-05-01 test.kml" in zipfile.ZipFile(zip_path).namelist()
         assert (zip_path.parent / "Backup" / src.name).is_file()

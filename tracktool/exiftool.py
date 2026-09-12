@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from . import log
-from .config import Config, config
+from .context import ctx
 
 ERROR_PATTERN = re.compile(r"\bError\b")
 
@@ -48,8 +48,8 @@ class ExiftoolError(Exception):
     """Raised when exiftool output contains an error."""
 
 
-def _filters(cfg: Config) -> list[re.Pattern[str]]:
-    return [re.compile(f) for f in cfg.output_filters]
+def _filters() -> list[re.Pattern[str]]:
+    return [re.compile(f) for f in ctx.config.output_filters]
 
 
 def _check_output(output: list[str], filters: list[re.Pattern[str]], cmd_desc: str) -> list[str]:
@@ -67,7 +67,7 @@ def invoke(*params: str) -> list[str]:
     cmd = [_EXECUTABLE, *params]
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     output = (proc.stdout + proc.stderr).splitlines()
-    return _check_output(output, _filters(config), " ".join(cmd[:4]))
+    return _check_output(output, _filters(), " ".join(cmd[:4]))
 
 
 def _split_tag(tag: str) -> tuple[str, str]:
@@ -143,7 +143,7 @@ class _StayOpenProcess:
     def __init__(self) -> None:
         self._proc: subprocess.Popen[str] | None = None
         self._lock = threading.Lock()
-        self._filters = _filters(config)
+        self._filters = _filters()
         self._closed = False
         self._stderr = tempfile.TemporaryFile()
         self._stderr_offset = 0

@@ -84,7 +84,3 @@ class Config:
 
 class ConfigError(Exception):
     pass
-
-
-# Module-level singleton used across the app.
-config = Config()

@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 
 from tracktool import cli, exiftool
 from tracktool.config import Config
+from tracktool.context import ctx
 from tracktool.exif.position import SetPositionOptions, set_position_from_kml
 
 # 测试依赖真实 exiftool（读标签 / 写 GPS），以及 ffmpeg 生成样本 JPEG
@@ -51,16 +52,18 @@ def _write_kml_zip(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def media_dir(tmp_path: Path) -> tuple[Path, Config]:
-    """Media directory plus a test Config pointing at the test ZIP."""
+def media_dir(tmp_path: Path, monkeypatch) -> tuple[Path, Config]:
+    """Media directory plus a test Config installed as the context's config, so
+    the batch entry points resolve the test ZIP without being handed one."""
     cfg = Config(path=tmp_path / "config.json").load()
     cfg["kml_zip_path"] = str(_write_kml_zip(tmp_path))
+    monkeypatch.setattr(ctx, "config", cfg)
     directory = tmp_path / "media"
     directory.mkdir()
     return directory, cfg
 
 
-def _batch_with_bad_file(media_dir: Path, cfg: Config, parallel: bool = False) -> list[Path]:
+def _batch_with_bad_file(media_dir: Path, parallel: bool = False) -> list[Path]:
     """One unreadable file among two geotaggable ones; runs one batch."""
     good1, good2 = media_dir / "2024-05-01 a.jpg", media_dir / "2024-05-01 b.jpg"
     for file in (good1, good2):
@@ -70,14 +73,14 @@ def _batch_with_bad_file(media_dir: Path, cfg: Config, parallel: bool = False) -
     bad.write_bytes(b"\x00")
 
     set_position_from_kml(media_dir, options=SetPositionOptions(failed_folder_name="Failed"),
-                          parallel=parallel, cfg=cfg)
+                          parallel=parallel)
     return [good1, good2]
 
 
 class TestSetPositionBatchIsolation:
     def test_exception_in_one_file_does_not_abort_batch(self, media_dir):
         media_dir, cfg = media_dir
-        good1, good2 = _batch_with_bad_file(media_dir, cfg)
+        good1, good2 = _batch_with_bad_file(media_dir)
 
         # 批次完成：两个好文件都拿到了 KML 的 GPS 数据
         for file in (good1, good2):
@@ -88,7 +91,7 @@ class TestSetPositionBatchIsolation:
 
     def test_parallel_isolation_matches_sequential(self, media_dir):
         media_dir, cfg = media_dir
-        good1, good2 = _batch_with_bad_file(media_dir, cfg, parallel=True)
+        good1, good2 = _batch_with_bad_file(media_dir, parallel=True)
 
         for file in (good1, good2):
             assert exiftool.get_media_tag(file, "GPSPosition"), f"{file.name} not geotagged"
@@ -103,7 +106,7 @@ class TestSetPositionBatchIsolation:
         _make_jpeg(timeless)
 
         set_position_from_kml(media_dir, options=SetPositionOptions(
-            failed_folder_name="Failed"), cfg=cfg)
+            failed_folder_name="Failed"))
 
         assert exiftool.get_media_tag(good, "GPSPosition")
         assert (media_dir / "Failed" / "timeless.jpg").is_file()
@@ -116,7 +119,7 @@ class TestSetPositionBatchIsolation:
         bad.write_bytes(b"\x00")
 
         result = set_position_from_kml(media_dir, options=SetPositionOptions(
-            failed_folder_name="Failed"), cfg=cfg)
+            failed_folder_name="Failed"))
 
         assert result.succeeded == [None, None]  # 两个好文件都处理了
         assert [p.name for p in result.failed] == ["no-time.jpg"]
@@ -127,29 +130,28 @@ class TestCliExitCodeReflectsBatch:
     """The batch outcome has to reach the exit code: a run where nothing was
     processed used to be indistinguishable from a successful one."""
 
-    def _invoke(self, media_dir: Path, zip_path: str, tmp_path: Path, monkeypatch):
-        # CLI 走模块级 config 单例：指向临时路径，避免读用户真实配置
-        monkeypatch.setattr(cli.config, "path", tmp_path / "cli-config.json")
+    def _invoke(self, media_dir: Path, zip_path: str):
+        # media_dir fixture 已把 ctx.config 指向临时路径，CLI 不会读用户真实配置
         return runner.invoke(cli.app, ["exif", "set-position", str(media_dir),
                                        "--zip", zip_path, "--failed-folder", "Failed",
                                        "--overwrite"])
 
-    def test_partial_failure_exits_three(self, media_dir, tmp_path, monkeypatch):
+    def test_partial_failure_exits_three(self, media_dir):
         media_dir, cfg = media_dir
         good = media_dir / "2024-05-01 a.jpg"
         _make_geotaggable_jpeg(good)
         (media_dir / "no-time.jpg").write_bytes(b"\x00")
 
-        result = self._invoke(media_dir, cfg["kml_zip_path"], tmp_path, monkeypatch)
+        result = self._invoke(media_dir, cfg["kml_zip_path"])
 
         assert result.exit_code == cli.EXIT_PARTIAL
         assert (media_dir / "Failed" / "no-time.jpg").is_file()
         assert exiftool.get_media_tag(good, "GPSPosition")  # 好文件仍被处理
 
-    def test_every_file_failing_exits_three_too(self, media_dir, tmp_path, monkeypatch):
+    def test_every_file_failing_exits_three_too(self, media_dir):
         media_dir, cfg = media_dir
         (media_dir / "no-time.jpg").write_bytes(b"\x00")
 
-        result = self._invoke(media_dir, cfg["kml_zip_path"], tmp_path, monkeypatch)
+        result = self._invoke(media_dir, cfg["kml_zip_path"])
 
         assert result.exit_code == cli.EXIT_PARTIAL

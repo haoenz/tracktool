@@ -17,7 +17,7 @@ from dataclasses import dataclass
 import requests
 
 from . import log
-from .config import config
+from .context import ctx
 
 ELEVATION_URL_PREFIX = "https://maps.googleapis.com/maps/api/elevation/json?locations="
 MAX_URL_LENGTH = 8192
@@ -31,7 +31,7 @@ class GoogleApiError(Exception):
 
 
 def _resolve_key(override: str | None) -> str:
-    key = config.google_api_key(override)
+    key = ctx.config.google_api_key(override)
     if not key:
         raise GoogleApiError("API key is required. Set TRACKTOOL_GOOGLE_API_KEY, pass --api-key, or set it in config")
     return key

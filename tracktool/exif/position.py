@@ -15,7 +15,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .. import coords, exiftool, log, mediatime
-from ..config import Config, config
 from ..fileutil import BatchResult, FileFailure, run_per_file
 from ..kml import archive, xmlutil
 from .write import SetExifOptions, is_missing_altitude, list_files, write_exif_tags
@@ -136,11 +135,9 @@ def _verify_or_skip(latitude: float, longitude: float, best: TrackPoint,
     return True
 
 
-# cfg 为测试注入点：tests/test_batch_isolation.py 传入指向测试 ZIP 的临时 Config；若测试改用
-# 其他方式注入单例，可随测试一并移除。
 def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
                           options: SetPositionOptions | None = None,
-                          parallel: bool = False, cfg: Config = config) -> BatchResult[None]:
+                          parallel: bool = False) -> BatchResult[None]:
     """Set GPS position/altitude on media files from the KML ZIP archive.
 
     A file list is accepted so one call can cover a whole selection: the archive
@@ -148,7 +145,7 @@ def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = No
     """
     options = options or SetPositionOptions()
 
-    zip_path = archive.resolve_zip_path(kml_zip_path, cfg)
+    zip_path = archive.resolve_zip_path(kml_zip_path)
 
     try:
         kml_cache = _load_kml_cache(zip_path)

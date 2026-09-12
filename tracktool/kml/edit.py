@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from .. import googleapi, log
-from ..config import Config, config
+from ..context import ctx
 from ..fileutil import move_to_folder
 from . import archive, kmlfile, xmlutil
 
@@ -139,10 +139,8 @@ def remove_bad_points(path: Path, bad_points: list[str]) -> None:
     log.info("Created cleaned track file", target=str(new_kml_path))
 
 
-# cfg 为测试注入点：tests/test_shared_rules.py 传入指向临时 ZIP 的 Config；若测试改用
-# 其他方式注入单例，可随测试一并移除。
 def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
-              no_archive: bool = False, cfg: Config = config) -> None:
+              no_archive: bool = False) -> None:
     """Merge multiple KMLs into one LineString (-Connected) or MultiGeometry."""
     all_line_strings: list[str] = []
     first_description = ""
@@ -178,11 +176,11 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
     log.info(f"Saved merged KML to: {output_path}")
 
     if not no_archive:
-        zip_file = archive.resolve_zip_path(None, cfg)
+        zip_file = archive.resolve_zip_path(None)
         archive_dir = zip_file.parent
         for path in paths:
             archive.push_compressed_kml(path, zip_file)
-            move_to_folder(path, str(cfg["kml_backup_dir_name"] or "Backup"), archive_dir)
+            move_to_folder(path, str(ctx.config["kml_backup_dir_name"] or "Backup"), archive_dir)
 
 
 def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None:

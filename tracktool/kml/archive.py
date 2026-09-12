@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 
 from .. import log
-from ..config import Config, config
+from ..context import ctx
 from ..fileutil import move_to_folder
 from . import kmlfile, xmlutil
 from .kmlfile import TrackType
@@ -66,11 +66,9 @@ def new_empty_kml(type_: TrackType | None = None) -> xmlutil.etree._ElementTree:
     return xmlutil.parse_string(_EMPTY_PLAIN_TEMPLATE.format(kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS))
 
 
-# cfg 为测试注入点：tests/test_shared_rules.py 传入指向临时 ZIP 的 Config；若测试改用
-# 其他方式注入单例，可随测试一并移除。
-def resolve_zip_path(zip_path: str | None, cfg: Config) -> Path:
+def resolve_zip_path(zip_path: str | None) -> Path:
     """CLI argument or config key -> resolved ZIP path; FileNotFoundError when absent."""
-    path = zip_path or cfg["kml_zip_path"]
+    path = zip_path or ctx.config["kml_zip_path"]
     if not path or not Path(path).is_file():
         raise FileNotFoundError(f"KML compressed file path does not exist: {path}")
     return Path(path).resolve()
@@ -218,7 +216,7 @@ def remove_track_from_mobile_collection(track_name: str, collection_path: Path) 
 def push_kml_archive(path: Path, zip_path: str | None = None, type_: TrackType | None = None,
                      no_archive: bool = False) -> None:
     """Archive a KML track: both collections + ZIP + move to backup folder."""
-    zip_file = resolve_zip_path(zip_path, config)
+    zip_file = resolve_zip_path(zip_path)
     archive_dir = zip_file.parent
 
     log.info("Archiving KML track", target=str(path))
@@ -242,12 +240,12 @@ def push_kml_archive(path: Path, zip_path: str | None = None, type_: TrackType |
             log.info("Created new ZIP archive", target=str(zip_file))
         push_compressed_kml(path, zip_file)
 
-    move_to_folder(path, str(config["kml_backup_dir_name"] or "Backup"), archive_dir)
+    move_to_folder(path, str(ctx.config["kml_backup_dir_name"] or "Backup"), archive_dir)
 
 
 def pop_kml_archive(kml_name: str, type_: TrackType = TrackType.DEFAULT, zip_path: str | None = None) -> None:
     """Restore a KML track: extract from ZIP and remove from both collections."""
-    zip_file = resolve_zip_path(zip_path, config)
+    zip_file = resolve_zip_path(zip_path)
     archive_dir = zip_file.parent
 
     pop_compressed_kml(kml_name, zip_file)

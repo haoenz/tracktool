@@ -9,7 +9,8 @@ from rich import box
 from rich.table import Table
 
 from . import __version__, coords, dedup, googleapi, log, mediatime
-from .config import LEVELS, ConfigError, config
+from .config import LEVELS, ConfigError
+from .context import ctx
 from .exif import google as exif_google
 from .exif import media as exif_media
 from .exif import position as exif_position
@@ -84,7 +85,7 @@ def main(
     verbose: Annotated[int, typer.Option("--verbose", "-v", count=True, help="-v VERBOSE, -vv DEBUG")] = 0,
     quiet: QuietOpt = False,
 ) -> None:
-    config.load()
+    ctx.config.load()
     if verbose == 1:
         log.set_level("VERBOSE")
     elif verbose >= 2:
@@ -92,7 +93,7 @@ def main(
     elif quiet:
         log.set_level("WARNING")
     else:
-        log.set_level(config.log_level)
+        log.set_level(ctx.config.log_level)
 
 
 def _resolve_path(path: Path, must_exist: bool = True) -> Path:
@@ -490,7 +491,7 @@ def hash_clear_log(
 @config_app.command("show")
 def config_show() -> None:
     """Print the current configuration."""
-    print(json.dumps(config.as_dict(), ensure_ascii=False, indent=2))
+    print(json.dumps(ctx.config.as_dict(), ensure_ascii=False, indent=2))
 
 
 @config_app.command("set")
@@ -499,10 +500,10 @@ def config_set(
     value: Annotated[str, typer.Argument(help="Config value")],
 ) -> None:
     """Set a configuration value (e.g. google_api_key, kml_zip_path)."""
-    if key not in config:
+    if key not in ctx.config:
         log.warning(f"Unknown key '{key}' (adding anyway)")
-    config[key] = value
-    config.save()
+    ctx.config[key] = value
+    ctx.config.save()
     log.info(f"{key} = {value}")
 
 
@@ -512,8 +513,8 @@ def config_log_level(
 ) -> None:
     """Set the persisted log level."""
     log.set_level(level)
-    config["log_level"] = level.upper()
-    config.save()
+    ctx.config["log_level"] = level.upper()
+    ctx.config.save()
     log.info(f"Log level set to {level.upper()}")
 
 
@@ -523,8 +524,8 @@ def config_set_zip_path(
 ) -> None:
     """Set the KML compressed file path."""
     absolute = str(path.expanduser().resolve())
-    config["kml_zip_path"] = absolute
-    config.save()
+    ctx.config["kml_zip_path"] = absolute
+    ctx.config.save()
     log.info(f"KML compressed file path set to {absolute}")
 
 
