@@ -4,14 +4,18 @@ Ports Invoke-GoogleApiRequest (exponential-backoff retry, quota/auth errors are
 fatal), Get-AltitudeFromGoogle (URL-length batching: max 512 locations and
 8192-char URL per request) and Get-LocationFromGoogle (address component
 extraction with locality fallback chain).
+
+Coordinates are plain (lat, lon) degrees here: media metadata is read through
+exiftool's -n mode and command-line arguments are parsed by coords, so these
+clients never receive a display-format string.
 """
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import requests
 
-from . import coords as coords_mod
 from . import log
 from .config import config
 
@@ -31,16 +35,6 @@ def _resolve_key(override: str | None) -> str:
     if not key:
         raise GoogleApiError("API key is required. Set TRACKTOOL_GOOGLE_API_KEY, pass --api-key, or set it in config")
     return key
-
-
-def _resolve_decimal(coordinate: str) -> str:
-    """Any accepted coordinate form -> 'lat,lon' decimal."""
-    if coords_mod.is_decimal_coord(coordinate):
-        return coordinate
-    decimal = coords_mod.decimal_coord(coordinate)
-    if not decimal:
-        raise GoogleApiError(f"Invalid coordinate format: {coordinate}")
-    return decimal
 
 
 def _request_json(api_url: str, api_name: str, retry_count: int = 3, timeout: int = 30) -> dict:
@@ -76,15 +70,16 @@ def _request_json(api_url: str, api_name: str, retry_count: int = 3, timeout: in
     raise GoogleApiError(f"{api_name} exhausted retries")  # unreachable safeguard
 
 
-def _batch_coordinates(decimal_coords: list[str]) -> list[list[str]]:
-    """Split coordinates into batches honoring the 512-location and URL-length caps."""
+def _batch_coordinates(points: Sequence[tuple[float, float]]) -> list[list[str]]:
+    """Split "lat,lon" strings into batches honoring the 512-location and URL-length caps."""
     url_suffix_len = len("&key=") + 40  # key length varies; keep headroom like the original
     available = MAX_URL_LENGTH - len(ELEVATION_URL_PREFIX) - url_suffix_len
 
     batches: list[list[str]] = []
     current: list[str] = []
     current_length = 0
-    for coord in decimal_coords:
+    for latitude, longitude in points:
+        coord = f"{latitude},{longitude}"
         add_length = len(coord) + (1 if current else 0)  # '|' separator
         if current and (len(current) >= MAX_LOCATIONS_PER_REQUEST or current_length + add_length > available):
             batches.append(current)
@@ -99,19 +94,18 @@ def _batch_coordinates(decimal_coords: list[str]) -> list[list[str]]:
 
 
 def get_altitudes(
-    coordinates: list[str],
+    points: Sequence[tuple[float, float]],
     api_key: str | None = None,
     retry_count: int = 3,
     timeout: int = 30,
 ) -> list[float | None]:
-    """Query elevations for coordinates in any supported format, auto-batched."""
+    """Query elevations for (lat, lon) points, auto-batched."""
     key = _resolve_key(api_key)
-    if not coordinates:
+    if not points:
         return []
 
-    decimal_coords = [_resolve_decimal(c) for c in coordinates]
-    batches = _batch_coordinates(decimal_coords)
-    log.debug(f"Total coordinates: {len(decimal_coords)}, batches: {len(batches)}")
+    batches = _batch_coordinates(points)
+    log.debug(f"Total coordinates: {len(points)}, batches: {len(batches)}")
 
     elevations: list[float | None] = []
     for index, batch in enumerate(batches, 1):
@@ -162,15 +156,16 @@ def _parse_reverse_geocode(results: list[dict]) -> Location:
 
 
 def get_location(
-    coordinate: str,
+    latitude: float,
+    longitude: float,
     api_key: str | None = None,
     retry_count: int = 3,
     timeout: int = 30,
     language: str = "en",
 ) -> Location:
-    """Reverse geocode one coordinate."""
+    """Reverse geocode one (lat, lon) point."""
     key = _resolve_key(api_key)
-    decimal = _resolve_decimal(coordinate)
+    decimal = f"{latitude},{longitude}"
 
     api_url = f"{GEOCODE_URL}?latlng={decimal}&language={language}&key={key}"
     log.debug(f"Querying Google reverse geocoding API for coordinate: {decimal}")

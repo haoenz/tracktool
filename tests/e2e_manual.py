@@ -77,7 +77,7 @@ def main() -> None:
         # photo1: 00:01 UTC 精确匹配 -> (39.1, 116.1, 110)
         pos1 = exiftool.get_media_tag(photos[1], "GPSPosition")
         print(f"photo1 -> {pos1}")
-        assert "39 deg 6" in pos1 or "39°" in pos1, pos1  # 39.1 = 39° 6'
+        assert pos1 == "39.1 116.1", pos1
 
         # photo2: 00:30 UTC 在轨迹外 27 分钟 > 60s -> 移入 TrackPosFailed
         failed_dir = media_dir / "TrackPosFailed"
@@ -94,7 +94,7 @@ def main() -> None:
         print(f"photo0 media time: {t.isoformat()}")
         assert t.astimezone(UTC) == datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC)
 
-        # ── 验证 5：Set-Exif 十进制写入 + DMS 读回转换 ──
+        # ── 验证 5：Set-Exif 十进制写入 + 数值读回 ──
         set_exif(photos[0], SetExifOptions(position="31.230416 121.473701", altitude=4.0, overwrite=True))
         pos = exiftool.get_media_tag(photos[0], "GPSPosition")
         print(f"Shanghai position -> {pos}")

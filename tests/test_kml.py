@@ -106,14 +106,14 @@ class TestAltitudeFromGoogle:
     def test_fills_altitudes_per_point(self, linestring_file: Path, monkeypatch):
         queries: list[str] = []
 
-        def fake_get_altitudes(coordinates, api_key=None):
-            queries.extend(coordinates)
+        def fake_get_altitudes(points, api_key=None):
+            queries.extend(points)
             return [10.5, None, 12.5, 13.5]
 
         monkeypatch.setattr(edit.googleapi, "get_altitudes", fake_get_altitudes)
         edit.set_kml_altitude_from_google(linestring_file, "key")
 
-        assert queries == ["39.0,116.0", "39.1,116.1", "40.0,117.0", "40.1,117.1"]
+        assert queries == [(39.0, 116.0), (39.1, 116.1), (40.0, 117.0), (40.1, 117.1)]
         tree = xmlutil.parse_file(linestring_file)
         texts = [c.text or "" for c in xmlutil.findall(tree, "//kml:coordinates")]
         assert texts == [
@@ -174,7 +174,7 @@ class TestTrackType:
 
     @staticmethod
     def _kml_with_track_tags(tmp_path: Path, tag: str = "火车") -> Path:
-        # set_kml_type 只更新已存在的 TrackTags 节点（PowerShell 原样移植），
+        # set_kml_type 只更新已存在的 TrackTags 节点，
         # 往返测试需要先注入一个（2bulu 导出的 KML 均带此节点）
         kml_content = TRACK_KML.replace(
             "<Document>",

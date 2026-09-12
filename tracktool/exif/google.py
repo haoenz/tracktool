@@ -17,8 +17,9 @@ def set_altitude_from_google(path: Path, overwrite: bool = False,
     files = list_files(path)
 
     # Step 1: 找出需要补海拔的文件（读取阶段可并行）
-    def check_altitude(file: Path) -> tuple[Path, str] | None:
-        altitude = exiftool.get_media_tag(file, "GPSAltitude")
+    def check_altitude(file: Path) -> tuple[Path, tuple[float, float]] | None:
+        tags = exiftool.read_tags(file, ["GPSAltitude", "GPSLatitude", "GPSLongitude"])
+        altitude = tags.get("GPSAltitude", "")
         if not is_missing_altitude(altitude):
             log.debug(f"GPSAltitude already exists: {altitude}", target=str(file))
             return None
@@ -27,10 +28,10 @@ def set_altitude_from_google(path: Path, overwrite: bool = False,
         else:
             log.debug("No GPSAltitude found", target=str(file))
 
-        position = exiftool.get_media_tag(file, "GPSPosition")
-        if position:
-            return (file, position)
-        log.warning("No GPSPosition found", target=str(file))
+        latitude, longitude = tags.get("GPSLatitude"), tags.get("GPSLongitude")
+        if latitude is not None and longitude is not None:
+            return (file, (float(latitude), float(longitude)))
+        log.warning("No GPS position found", target=str(file))
         quarantine(file, failed_folder_name)
         return None
 
@@ -44,11 +45,11 @@ def set_altitude_from_google(path: Path, overwrite: bool = False,
     log.info(f"Found {len(need_altitude)} file(s) requiring altitude data")
 
     # Step 2: 查询 Google 高程 API（分批由 googleapi 内部处理）
-    positions = [position for _, position in need_altitude]
-    elevations = googleapi.get_altitudes(positions, api_key=api_key)
+    points = [point for _, point in need_altitude]
+    elevations = googleapi.get_altitudes(points, api_key=api_key)
 
     # Step 3: 写回海拔
-    def update(item: tuple[tuple[Path, str], float | None]) -> None:
+    def update(item: tuple[tuple[Path, tuple[float, float]], float | None]) -> None:
         (file, _), altitude = item
         if altitude is not None:
             log.verbose(f"Setting altitude: {altitude} m", target=str(file))
@@ -67,34 +68,36 @@ def set_location_from_google(path: Path, overwrite: bool = False,
                              failed_folder_name: str | None = None,
                              parallel: bool = False, api_key: str | None = None,
                              language: str = "en") -> None:
-    """Reverse geocode GPSPosition into IPTC City/State/Country tags."""
+    """Reverse geocode GPS position into IPTC City/State/Country tags."""
     files = list_files(path)
 
     def process(file: Path) -> None:
-        gps_position = exiftool.get_media_tag(file, "GPSPosition")
-        if not gps_position:
-            log.warning("No GPSPosition found", target=str(file))
+        tags = exiftool.read_tags(file, ["GPSLatitude", "GPSLongitude"])
+        latitude, longitude = tags.get("GPSLatitude"), tags.get("GPSLongitude")
+        if latitude is None or longitude is None:
+            log.warning("No GPS position found", target=str(file))
             quarantine(file, failed_folder_name)
             return
 
-        location = googleapi.get_location(gps_position, api_key=api_key, language=language)
+        location = googleapi.get_location(float(latitude), float(longitude),
+                                          api_key=api_key, language=language)
 
-        tags: dict[str, str] = {}
+        location_tags: dict[str, str] = {}
         if location.city:
-            tags["IPTC:City"] = location.city
+            location_tags["IPTC:City"] = location.city
         if location.state:
-            tags["IPTC:Province-State"] = location.state
+            location_tags["IPTC:Province-State"] = location.state
         if location.country_code_iso:
-            tags["IPTC:Country-PrimaryLocationCode"] = location.country_code_iso
+            location_tags["IPTC:Country-PrimaryLocationCode"] = location.country_code_iso
         if location.country:
-            tags["IPTC:Country-PrimaryLocationName"] = location.country
+            location_tags["IPTC:Country-PrimaryLocationName"] = location.country
 
-        if not tags:
+        if not location_tags:
             log.warning("No location fields returned from reverse geocoding", target=str(file))
             quarantine(file, failed_folder_name)
             return
 
-        set_exif(file, SetExifOptions(tags=tags, overwrite=overwrite))
+        set_exif(file, SetExifOptions(tags=location_tags, overwrite=overwrite))
         location_str = " ".join(part for part in (location.country, location.state, location.city) if part)
         log.verbose(f"IPTC location tags updated: {location_str}", target=str(file))
 

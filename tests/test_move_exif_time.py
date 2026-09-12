@@ -18,15 +18,17 @@ from tracktool.exif.media import (
 
 
 class TestComputeTimeShift:
+    """"make" and "current_offset" are handed in: the caller reads both tags in
+    one exiftool call, so this helper needs no tag access of its own."""
+
     def test_time_diff_only(self):
-        assert _compute_time_shift(Path("x.jpg"), "+1h30m", "", MAKE_SONY) == (5400, [])
+        assert _compute_time_shift(Path("x.jpg"), "+1h30m", "", MAKE_SONY, "") == (5400, [])
 
     def test_time_diff_negative(self):
-        assert _compute_time_shift(Path("x.jpg"), "-2d", "", MAKE_SONY) == (-172800, [])
+        assert _compute_time_shift(Path("x.jpg"), "-2d", "", MAKE_SONY, "") == (-172800, [])
 
-    def test_offset_only_builds_tz_params(self, monkeypatch):
-        monkeypatch.setattr(media.exiftool, "get_media_tag", lambda file, tag: "+09:00")
-        total, params = _compute_time_shift(Path("x.arw"), "", "+08:00", MAKE_SONY)
+    def test_offset_only_builds_tz_params(self):
+        total, params = _compute_time_shift(Path("x.arw"), "", "+08:00", MAKE_SONY, "+09:00")
         assert total == -3600
         assert params == [
             "-ExifIFD:OffsetTime=+08:00",
@@ -34,27 +36,25 @@ class TestComputeTimeShift:
             "-ExifIFD:OffsetTimeDigitized=+08:00",
         ]
 
-    def test_offset_missing_tag_defaults_to_plus_8(self, monkeypatch, caplog):
-        monkeypatch.setattr(media.exiftool, "get_media_tag", lambda file, tag: "")
-        total, params = _compute_time_shift(Path("x.arw"), "", "+09:00", MAKE_SONY)
+    def test_offset_missing_tag_defaults_to_plus_8(self, caplog):
+        total, params = _compute_time_shift(Path("x.arw"), "", "+09:00", MAKE_SONY, "")
         assert total == 3600
         assert params
         assert "assuming +08:00" in caplog.text
 
     def test_offset_rejected_for_non_sony(self, caplog):
         caplog.set_level(logging.ERROR)
-        assert _compute_time_shift(Path("x.mp4"), "", "+08:00", MAKE_INSTA360) is None
+        assert _compute_time_shift(Path("x.mp4"), "", "+08:00", MAKE_INSTA360, "+08:00") is None
         assert "only supported for SONY" in caplog.text
 
-    def test_unparseable_timezone_returns_none(self, monkeypatch, caplog):
+    def test_unparseable_timezone_returns_none(self, caplog):
         caplog.set_level(logging.ERROR)
-        monkeypatch.setattr(media.exiftool, "get_media_tag", lambda file, tag: "bogus")
-        assert _compute_time_shift(Path("x.arw"), "", "+08:00", MAKE_SONY) is None
+        assert _compute_time_shift(Path("x.arw"), "", "+08:00", MAKE_SONY, "bogus") is None
         assert "Failed to parse timezones" in caplog.text
 
     def test_offset_not_requested_for_non_sony_is_fine(self):
         # OffsetTime 跳过时非 SONY 不报错：只做 time_diff 平移
-        assert _compute_time_shift(Path("x.mp4"), "+10m", "", MAKE_INSTA360) == (600, [])
+        assert _compute_time_shift(Path("x.mp4"), "+10m", "", MAKE_INSTA360, "") == (600, [])
 
 
 class TestFormatShift:

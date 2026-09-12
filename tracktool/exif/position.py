@@ -18,14 +18,14 @@ from .. import coords, exiftool, log, mediatime
 from ..config import Config, config
 from ..fileutil import quarantine, run_per_file
 from ..kml import archive, xmlutil
-from .write import SetExifOptions, list_files, set_exif
+from .write import SetExifOptions, is_missing_altitude, list_files, set_exif
 
 
 @dataclass
 class TrackPoint:
-    latitude: str
-    longitude: str
-    altitude: str
+    latitude: float
+    longitude: float
+    altitude: float
     seconds_from_nearest: float
     inside_duration: bool
 
@@ -59,13 +59,16 @@ def get_position_from_kml(tree: xmlutil.etree._ElementTree, time: datetime,
 
     seconds_from_nearest = abs((time - whens[index]).total_seconds())
 
-    log.verbose(f"Found GPS coordinate in {kml_name} (lon/lat/alt): {(coord_nodes[index].text or '').strip()}",
-                target=target_file)
+    raw_coord = (coord_nodes[index].text or "").strip()
+    log.verbose(f"Found GPS coordinate in {kml_name} (lon/lat/alt): {raw_coord}", target=target_file)
     log.debug(f"KML timestamp: {whens[index]}", target=target_file)
     log.debug(f"Time difference (inside: {is_inside}): {seconds_from_nearest} seconds", target=target_file)
 
-    lon, lat, alt = (coord_nodes[index].text or "").split(" ")[:3]
-    return TrackPoint(latitude=lat, longitude=lon, altitude=alt,
+    # gx:coord 是 "lon lat alt"，第三段（海拔）可能缺省
+    parts = raw_coord.split()
+    longitude, latitude = float(parts[0]), float(parts[1])
+    altitude = float(parts[2]) if len(parts) > 2 else 0.0
+    return TrackPoint(latitude=latitude, longitude=longitude, altitude=altitude,
                       seconds_from_nearest=seconds_from_nearest, inside_duration=is_inside)
 
 
@@ -119,16 +122,11 @@ def _find_best_track(parsed_cache: dict[str, xmlutil.etree._ElementTree],
     return best
 
 
-def _verify_or_skip(existing_position: str, best: TrackPoint,
+def _verify_or_skip(latitude: float, longitude: float, best: TrackPoint,
                     options: SetPositionOptions, target_file: str | None = None) -> bool:
     """Distance check of existing GPS against the KML match; False = skip the
     file (mismatch beyond threshold and no force)."""
-    existing_dec = coords.decimal_coord(existing_position)
-    if not existing_dec:
-        return True
-    ex_lat, ex_lon = existing_dec.split(",")
-    distance = coords.geo_distance(float(ex_lat), float(ex_lon),
-                                   float(best.latitude), float(best.longitude))
+    distance = coords.geo_distance(latitude, longitude, best.latitude, best.longitude)
     if distance > options.max_distance_meters:
         log.warning(f"Existing GPS and KML GPS differ by {round(distance, 2)} meters "
                     f"(Threshold: {options.max_distance_meters}m)", target=target_file)
@@ -159,19 +157,29 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
     files = list_files(path)
 
     def process(file: Path) -> None:
-        existing_position = exiftool.get_media_tag(file, "GPSPosition")
-        if existing_position:
-            log.debug(f"GPSPosition already exists: {existing_position}", target=str(file))
-        existing_altitude = exiftool.get_media_tag(file, "GPSAltitude")
-        if existing_altitude:
-            log.debug(f"GPSAltitude already exists: {existing_altitude}", target=str(file))
+        # 时间标签与 GPS 标签一次读齐，每个文件只往返 exiftool 一次
+        tags = exiftool.read_tags(
+            file, [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"])
+
+        latitude_text, longitude_text = tags.get("GPSLatitude"), tags.get("GPSLongitude")
+        latitude = float(latitude_text) if latitude_text is not None else None
+        longitude = float(longitude_text) if longitude_text is not None else None
+        if latitude is not None and longitude is not None:
+            log.debug(f"GPSPosition already exists: {latitude} {longitude}", target=str(file))
+
+        altitude_text = tags.get("GPSAltitude", "")
+        # 零海拔同样算没有海拔，否则 0 会被当成可信高度而跳过补全
+        has_altitude = not is_missing_altitude(altitude_text)
+        if has_altitude:
+            log.debug(f"GPSAltitude already exists: {altitude_text}", target=str(file))
 
         # 如果已有数据，并且用户没有开启 Force 也没开启 Verify，直接跳过当前文件
-        if existing_position and existing_altitude and not options.force and not options.verify_existing_gps:
+        if (latitude is not None and longitude is not None and has_altitude
+                and not options.force and not options.verify_existing_gps):
             log.verbose("Skipping (GPS data already exists)", target=str(file))
             return
 
-        media_time = mediatime.get_media_time(file)
+        media_time = mediatime.parse_media_time(tags, target=str(file))
         if media_time is None:
             log.error("No valid timestamp found; skipping", target=str(file))
             if options.failed_folder_name:
@@ -192,19 +200,21 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
                 quarantine(file, options.failed_folder_name)
             return
 
-        if (options.verify_existing_gps and existing_position
-                and not _verify_or_skip(existing_position, best, options, str(file))):
-            return
+        if options.verify_existing_gps and latitude is not None and longitude is not None:
+            if not _verify_or_skip(latitude, longitude, best, options, str(file)):
+                return
 
-        if best.latitude and best.longitude:
+        if best.latitude is not None and best.longitude is not None:
             # 如果文件缺失位置或高度，或者用户开启了 Force，则同时打包更新
-            if not existing_position or not existing_altitude or options.force:
+            if latitude is None or longitude is None or not has_altitude or options.force:
                 new_position = f"{best.latitude} {best.longitude}"
-                new_altitude = best.altitude if best.altitude else existing_altitude
+                # KML 没带海拔时沿用文件里已有的值
+                file_altitude = float(altitude_text) if not is_missing_altitude(altitude_text) else None
+                new_altitude = best.altitude or file_altitude
                 display_alt = f"{new_altitude} m" if new_altitude else "None"
                 log.verbose(f"Setting GPS position: {new_position}, altitude: {display_alt}", target=str(file))
-                set_exif(file, SetExifOptions(position=new_position, altitude=float(new_altitude)
-                                              if new_altitude else None, overwrite=options.overwrite))
+                set_exif(file, SetExifOptions(position=new_position, altitude=new_altitude,
+                                              overwrite=options.overwrite))
         else:
             log.warning("No matching GPS data found in KML archive", target=str(file))
             if options.failed_folder_name:

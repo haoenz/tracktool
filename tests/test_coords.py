@@ -1,38 +1,36 @@
-"""Unit tests for pure logic: coordinates, mediatime parsing, batching."""
+"""Unit tests for pure logic: coordinate parsing, mediatime parsing, batching."""
 
 import pytest
 
 from tracktool import coords
 
 
-class TestDecimalCoord:
+class TestParseCoordinate:
     def test_english_dms(self):
-        result = coords.decimal_coord("39°54'30\"N, 116°23'29\"E")
-        lat, lon = result.split(",")
-        assert float(lat) == pytest.approx(39.908333, abs=1e-6)
-        assert float(lon) == pytest.approx(116.391389, abs=1e-6)
+        lat, lon = coords.parse_coordinate("39°54'30\"N, 116°23'29\"E")
+        assert lat == pytest.approx(39.908333, abs=1e-6)
+        assert lon == pytest.approx(116.391389, abs=1e-6)
 
     def test_deg_style(self):
-        result = coords.decimal_coord("39 deg 54'30\"N, 116 deg 23'29\"E")
-        assert result is not None
+        assert coords.parse_coordinate("39 deg 54'30\"N, 116 deg 23'29\"E") is not None
 
     def test_chinese_directions(self):
-        result = coords.decimal_coord("39°54'30\"北, 116°23'29\"东")
-        assert result is not None
-        lat, lon = result.split(",")
-        assert float(lat) > 0 and float(lon) > 0
+        lat, lon = coords.parse_coordinate("39°54'30\"北, 116°23'29\"东")
+        assert lat > 0 and lon > 0
 
     def test_south_west_negative(self):
-        result = coords.decimal_coord("33°54'30\"S, 118°23'29\"W")
-        lat, lon = result.split(",")
-        assert float(lat) < 0 and float(lon) < 0
+        lat, lon = coords.parse_coordinate("33°54'30\"S, 118°23'29\"W")
+        assert lat < 0 and lon < 0
 
-    def test_invalid_returns_none(self):
-        assert coords.decimal_coord("not a coord") is None
+    def test_decimal(self):
+        assert coords.parse_coordinate("39.908333,116.391389") == (39.908333, 116.391389)
 
     def test_fractional_seconds(self):
-        result = coords.decimal_coord("39°54'30.5\"N, 116°23'29.25\"E")
-        assert result is not None
+        assert coords.parse_coordinate("39°54'30.5\"N, 116°23'29.25\"E") is not None
+
+    def test_invalid_returns_none(self):
+        assert coords.parse_coordinate("not a coord") is None
+        assert coords.parse_coordinate("") is None
 
 
 class TestGeoDistance:
@@ -53,11 +51,3 @@ class TestGeoDistance:
         # geopy/geographiclib 的已知参考结果（Newport RI -> Cleveland OH）
         distance = coords.geo_distance(41.49008, -71.312796, 41.499498, -81.695391)
         assert distance == pytest.approx(866455.43, abs=1)
-
-
-class TestIsDecimalCoord:
-    def test_decimal(self):
-        assert coords.is_decimal_coord("39.908333,116.391389")
-
-    def test_dms_is_not_decimal(self):
-        assert not coords.is_decimal_coord("39°54'30\"N, 116°23'29\"E")

@@ -32,9 +32,9 @@ class TestGetPositionFromKml:
     def test_exact_match(self):
         pos = get_position_from_kml(self.tree, self.track_start)
         assert pos is not None
-        assert pos.latitude == "39.0"
-        assert pos.longitude == "116.0"
-        assert pos.altitude == "100"
+        assert pos.latitude == 39.0
+        assert pos.longitude == 116.0
+        assert pos.altitude == 100.0
         assert pos.seconds_from_nearest == 0
         assert pos.inside_duration is True
 
@@ -43,7 +43,7 @@ class TestGetPositionFromKml:
         t = self.track_start.timestamp() + 80
         pos = get_position_from_kml(self.tree, datetime.fromtimestamp(t, tz=UTC))
         assert pos is not None
-        assert pos.latitude == "39.1"
+        assert pos.latitude == 39.1
         assert pos.seconds_from_nearest == 20
         assert pos.inside_duration is True
 
@@ -58,7 +58,7 @@ class TestGetPositionFromKml:
         t = datetime(2024, 5, 1, 0, 3, 30, tzinfo=UTC)
         pos = get_position_from_kml(self.tree, t)
         assert pos is not None
-        assert pos.latitude == "39.3"
+        assert pos.latitude == 39.3
         assert pos.seconds_from_nearest == 30
         assert pos.inside_duration is False
 
@@ -67,7 +67,7 @@ class TestGetPositionFromKml:
         t = self.track_start.timestamp() + 100
         pos = get_position_from_kml(self.tree, datetime.fromtimestamp(t, tz=UTC))
         assert pos is not None
-        assert pos.latitude == "39.2"
+        assert pos.latitude == 39.2
         assert pos.seconds_from_nearest == 20
         assert pos.inside_duration is True
 
@@ -84,7 +84,7 @@ class TestFindBestTrack:
         best = _find_best_track(cache, media_time, multiday=False)
         assert best is not None
         assert best.inside_duration is True
-        assert best.latitude == "39.1"
+        assert best.latitude == 39.1
         assert best.seconds_from_nearest == 20
 
     def test_closest_out_of_duration_kept(self):
@@ -96,7 +96,7 @@ class TestFindBestTrack:
         assert best.inside_duration is False
         # far 轨迹最近点 00:03 差 19620s，near 轨迹 06:00 差 1800s
         assert best.seconds_from_nearest == 1800
-        assert best.latitude == "39.0"
+        assert best.latitude == 39.0
 
     def test_multiday_window(self):
         cache = {"2024-05-01 trip.kml": self.tree}
@@ -116,24 +116,23 @@ class TestFindBestTrack:
 
 
 class TestVerifyOrSkip:
-    EXISTING = "39 deg 0' 0\" N, 116 deg 0' 0\" E"
-
     @staticmethod
-    def _point(lat: str, lon: str) -> TrackPoint:
-        return TrackPoint(latitude=lat, longitude=lon, altitude="100",
+    def _point(latitude: float, longitude: float) -> TrackPoint:
+        return TrackPoint(latitude=latitude, longitude=longitude, altitude=100.0,
                           seconds_from_nearest=0, inside_duration=True)
 
     def test_matching_position_proceeds(self):
-        assert _verify_or_skip(self.EXISTING, self._point("39.0", "116.0"),
+        assert _verify_or_skip(39.0, 116.0, self._point(39.0, 116.0),
                                SetPositionOptions()) is True
 
     def test_mismatch_beyond_threshold_skips(self):
-        far = self._point("40.0", "117.0")
-        assert _verify_or_skip(self.EXISTING, far, SetPositionOptions()) is False
-        assert _verify_or_skip(self.EXISTING, far, SetPositionOptions(force=True)) is True
+        far = self._point(40.0, 117.0)
+        assert _verify_or_skip(39.0, 116.0, far, SetPositionOptions()) is False
+        assert _verify_or_skip(39.0, 116.0, far, SetPositionOptions(force=True)) is True
 
-    def test_unparseable_existing_proceeds(self):
-        assert _verify_or_skip("garbage", self._point("40.0", "117.0"),
+    def test_equator_position_is_a_real_coordinate(self):
+        # 纬度 0 是合法坐标，不能因为 falsy 被当成「没有位置」
+        assert _verify_or_skip(0.0, 116.0, self._point(0.0, 116.0),
                                SetPositionOptions()) is True
 
 

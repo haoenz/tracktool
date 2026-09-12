@@ -1,8 +1,8 @@
 """End-to-end regression for issue #4 with real exiftool: a file whose
-GPSAltitude is '0 m Below Sea Level' must be reported missing by
-find_missing_tag, matching what set_altitude_from_google repairs. Before the
-shared is_missing_altitude predicate the two rules diverged: find-missing only
-knew '0 m Above Sea Level', so Below Sea Level files looked healthy but were
+GPSAltitude is 0 below sea level must be reported missing by find_missing_tag,
+matching what set_altitude_from_google repairs. Before the shared
+is_missing_altitude predicate the two rules diverged: find-missing only knew
+the above-sea-level wording, so below-sea-level files looked healthy but were
 still "repaired" by set-altitude."""
 
 import shutil
@@ -31,7 +31,7 @@ class TestFindMissingAltitudeEndToEnd:
         exiftool.invoke(str(photo), "-GPSAltitude=0", "-GPSAltitudeRef=Below Sea Level",
                         "-overwrite_original")
 
-        assert exiftool.get_media_tag(photo, "GPSAltitude") == "0 m Below Sea Level"
+        assert exiftool.get_media_tag(photo, "GPSAltitude") == "0"
 
         results = find_missing_tag(photo, ["GPSAltitude"])
         assert [(r.file, r.missing_tags) for r in results] == [(photo, ["GPSAltitude"])]

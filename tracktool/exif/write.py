@@ -26,13 +26,19 @@ class SetExifError(Exception):
     pass
 
 
-# exiftool 对海拔 0 的渲染：0 米既是“缺失”也是有效数据，两个字面量都视为缺失
-ZERO_ALTITUDE_VALUES = ("0 m Above Sea Level", "0 m Below Sea Level")
+def is_missing_altitude(value: str | float | None) -> bool:
+    """Zero altitude (either direction) counts as missing, like an absent value.
 
-
-def is_missing_altitude(value: str) -> bool:
-    """Zero altitude (either direction) counts as missing, like an empty value."""
-    return not value or value in ZERO_ALTITUDE_VALUES
+    exiftool is read in -n mode, so the value is a signed decimal ("100",
+    "-50") and a zero altitude is a plain 0 whichever hemisphere it is in.
+    """
+    if value is None or value == "":
+        return True
+    try:
+        return float(value) == 0
+    except (TypeError, ValueError):
+        # 非数值形态无法判为零，按旧行为视为有值
+        return False
 
 
 @dataclass
@@ -120,9 +126,11 @@ def find_missing_tag(path: Path, tags: list[str], parallel: bool = False) -> lis
     files = list_files(path)
 
     def process(file: Path) -> MissingTagResult | None:
+        # 全部待查标签一次读齐，N 个标签仍是一次往返
+        values = exiftool.read_tags(file, tags)
         missing: list[str] = []
         for tag in tags:
-            value = exiftool.get_media_tag(file, tag)
+            value = values.get(tag, "")
             if not value:
                 missing.append(tag)
             elif tag == "GPSAltitude" and is_missing_altitude(value):
@@ -136,10 +144,9 @@ def find_missing_tag(path: Path, tags: list[str], parallel: bool = False) -> lis
 
 
 def print_media_info(path: Path) -> None:
-    """Print GPS position, altitude and timestamp of a file."""
-    gps_position = exiftool.get_media_tag(path, "GPSPosition").replace(" deg", "°")
-    gps_altitude = exiftool.get_media_tag(path, "GPSAltitude")
-    media_time = mediatime.get_media_time(path)
+    """Print timestamp, GPS position and altitude of a file."""
+    tags = exiftool.read_tags(path, [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"])
+    media_time = mediatime.parse_media_time(tags, target=str(path))
     print(media_time.isoformat() if media_time else "")
-    print(gps_position)
-    print(gps_altitude)
+    print(" ".join(v for v in (tags.get("GPSLatitude", ""), tags.get("GPSLongitude", "")) if v))
+    print(tags.get("GPSAltitude", ""))

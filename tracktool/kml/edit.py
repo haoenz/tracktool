@@ -195,8 +195,8 @@ def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None
 
     # KML 坐标格式: "lon,lat,alt lon,lat,alt ..."
     tuples_by_node: dict[xmlutil.etree._Element, list[str]] = {}
-    alt_targets: list[tuple[xmlutil.etree._Element, int]] = []  # 下标与 all_lat_lon 对齐
-    all_lat_lon: list[str] = []
+    alt_targets: list[tuple[xmlutil.etree._Element, int]] = []  # 下标与 points 对齐
+    points: list[tuple[float, float]] = []
     for node in coord_nodes:
         tuples = (node.text or "").strip().split()
         for i, tup in enumerate(tuples):
@@ -205,13 +205,13 @@ def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None
                 continue
             if node not in tuples_by_node:
                 tuples_by_node[node] = tuples
-            # Google API 接受 lat,lon
-            all_lat_lon.append(f"{parts[1]},{parts[0]}")
+            # KML 是 lon,lat，而 API 与领域模型都用 (lat, lon)
+            points.append((float(parts[1]), float(parts[0])))
             alt_targets.append((node, i))
 
-    log.info(f"Querying Google Elevation API for {len(all_lat_lon)} point(s)", target=str(path))
+    log.info(f"Querying Google Elevation API for {len(points)} point(s)", target=str(path))
 
-    elevations = googleapi.get_altitudes(all_lat_lon, api_key=api_key)
+    elevations = googleapi.get_altitudes(points, api_key=api_key)
 
     # 将高程写回，重建 coordinates 文本
     for i, (node, index) in enumerate(alt_targets):

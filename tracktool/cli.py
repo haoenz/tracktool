@@ -8,7 +8,7 @@ import typer
 from rich import box
 from rich.table import Table
 
-from . import __version__, dedup, googleapi, log, mediatime
+from . import __version__, coords, dedup, googleapi, log, mediatime
 from .config import LEVELS, ConfigError, config
 from .exif import google as exif_google
 from .exif import media as exif_media
@@ -367,7 +367,14 @@ def google_altitude(
     api_key: Annotated[str | None, typer.Option("--api-key", help="Google Maps API key")] = None,
 ) -> None:
     """Query elevations (auto-batched)."""
-    elevations = googleapi.get_altitudes(coordinates, api_key)
+    points: list[tuple[float, float]] = []
+    for coordinate in coordinates:
+        point = coords.parse_coordinate(coordinate)
+        if point is None:
+            raise ValueError(f"Unrecognized coordinate: {coordinate}")
+        points.append(point)
+
+    elevations = googleapi.get_altitudes(points, api_key)
     for coord, elevation in zip(coordinates, elevations, strict=False):
         print(f"{coord}\t{elevation}")
 
@@ -379,7 +386,11 @@ def google_location(
     language: Annotated[str, typer.Option("--language", help="Geocoding language")] = "en",
 ) -> None:
     """Reverse geocode a coordinate."""
-    location = googleapi.get_location(coordinate, api_key, language=language)
+    point = coords.parse_coordinate(coordinate)
+    if point is None:
+        raise ValueError(f"Unrecognized coordinate: {coordinate}")
+
+    location = googleapi.get_location(point[0], point[1], api_key, language=language)
     print(json.dumps(location.__dict__, ensure_ascii=False, indent=2))
 
 

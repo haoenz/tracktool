@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .. import exiftool, log, mediatime
 from ..fileutil import run_per_file
-from .write import SetExifOptions, list_files, set_exif
+from .write import SetExifOptions, is_missing_altitude, list_files, set_exif
 
 # EXIF Make 字段注册值（exiftool 原样返回，精确匹配，不做大小写归一化）
 MAKE_SONY = "SONY"
@@ -34,7 +34,6 @@ _INSTA360_MP4_TAGS = [
 
 _RELATIVE_TIME_PATTERN = re.compile(r"(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
 _INSTA360_FILENAME_PATTERN = re.compile(r"_(\d{8}_\d{6})_")
-_ALTITUDE_PATTERN = re.compile(r"^([\d.]+)\s*m\s+(Above|Below)\s+Sea\s+Level$")
 
 _EXTENSION_MAP = {
     ".mp4": "VID", ".mov": "VID", ".avi": "VID",
@@ -72,13 +71,15 @@ def _parse_tz_offset(offset: str) -> int | None:
         return None
 
 
-def _compute_time_shift(file: Path, time_diff: str, offset_time: str,
-                        make: str) -> tuple[int, list[str]] | None:
+def _compute_time_shift(file: Path, time_diff: str, offset_time: str, make: str,
+                        current_offset: str) -> tuple[int, list[str]] | None:
     """Resolve the requested time_diff + timezone offset into a signed second
     total plus the EXIF offset-time params to write.
 
-    Returns None after logging when the file cannot be processed (OffsetTime
-    is SONY-only, or a timezone value fails to parse).
+    `make` and `current_offset` come from the caller's single tag read, so this
+    stays a decision over metadata it is handed. Returns None after logging
+    when the file cannot be processed (OffsetTime is SONY-only, or a timezone
+    value fails to parse).
     """
     total_seconds_offset = 0
     tz_params: list[str] = []
@@ -92,7 +93,6 @@ def _compute_time_shift(file: Path, time_diff: str, offset_time: str,
                       target=str(file))
             return None
 
-        current_offset = exiftool.get_media_tag(file, "ExifIFD:OffsetTime")
         if not current_offset:
             log.warning(f"Current ExifIFD:OffsetTime is missing, assuming {mediatime.DEFAULT_TZ_OFFSET}",
                         target=str(file))
@@ -152,9 +152,12 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
 
     def process(file: Path) -> None:
         ext = file.suffix.lower()
-        make = exiftool.get_media_tag(file, "Make")
+        # Make 与 OffsetTime 一次读齐，每个文件只往返 exiftool 一次
+        tags = exiftool.read_tags(file, ["Make", "ExifIFD:OffsetTime"])
+        make = tags.get("Make", "")
 
-        resolved = _compute_time_shift(file, time_diff, offset_time, make)
+        resolved = _compute_time_shift(file, time_diff, offset_time, make,
+                                       tags.get("ExifIFD:OffsetTime", ""))
         if resolved is None:
             return
         total_seconds_offset, tz_params = resolved
@@ -197,21 +200,14 @@ def move_altitude(path: Path, offset: float, overwrite: bool = False, parallel: 
     files = list_files(path)
 
     def process(file: Path) -> None:
-        current = exiftool.get_media_tag(file, "GPSAltitude")
-        if not current:
+        # -n 模式读到的已是按 GPSAltitudeRef 定了符号的十进制（Below Sea Level 为负）
+        altitude = exiftool.get_media_tag(file, "GPSAltitude")
+        if is_missing_altitude(altitude):
             log.warning("No GPSAltitude found, skipping", target=str(file))
             return
 
-        m = _ALTITUDE_PATTERN.match(current)
-        if not m:
-            log.warning(f"Cannot parse altitude format: {current}", target=str(file))
-            return
-
-        current_alt = float(m[1])
-        if m[2] == "Below":
-            current_alt = -current_alt
-        new_alt = current_alt + offset
-        log.verbose(f"Shifting altitude: {current_alt} m -> {new_alt} m", target=str(file))
+        new_alt = float(altitude) + offset
+        log.verbose(f"Shifting altitude: {altitude} m -> {new_alt} m", target=str(file))
         set_exif(file, SetExifOptions(altitude=new_alt, overwrite=overwrite))
 
     run_per_file(files, process, activity=f"Shifting altitude by {offset} m", parallel=parallel)
@@ -229,7 +225,9 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
 
     def process(file: Path) -> None:
         output_path = output_dir / f"{file.stem}.mp4"
-        media_time = mediatime.get_media_time(file, default_offset=offset_time)
+        # 时间标签一次读齐；QuickTime:CreateDate 已在 TIME_TAGS 内，MP4 分支直接取用
+        tags = exiftool.read_tags(file, mediatime.TIME_TAGS)
+        media_time = mediatime.parse_media_time(tags, offset_time, target=str(file))
 
         if media_time is None:
             log.warning("No valid timestamp found; skipping", target=str(file))
@@ -254,7 +252,7 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
             log.verbose("Converted to MP4", target=str(file))
         else:
             log.debug("File is already MP4", target=str(file))
-            quicktime_create_date = exiftool.get_media_tag(file, "QuickTime:CreateDate")
+            quicktime_create_date = tags.get("QuickTime:CreateDate", "")
             original_path = file.with_name(file.name + "_original")
             shutil.move(str(file), str(original_path))
             if not quicktime_create_date:

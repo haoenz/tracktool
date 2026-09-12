@@ -1,7 +1,7 @@
 """Media timestamp extraction (Get-MediaTime).
 
 Tag priority with three timezone strategies:
-- Separate: offset lives in its own EXIF tags (Exif:OffsetTime*), defaults to +08:00
+- Separate: offset lives in its own EXIF tags (ExifIFD:OffsetTime*), defaults to +08:00
 - Include:  offset embedded in the datetime string, e.g. "2024:10:30 12:00:00+08:00"
 - UTC:      time is UTC; a Z is appended before parsing
 
@@ -10,6 +10,7 @@ timezone, not necessarily local time).
 """
 
 import re
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -30,15 +31,21 @@ class TZStrategy(StrEnum):
 
 _TAG_CONFIGS = [
     {
-        "tag": "Exif:DateTimeOriginal",
+        "tag": "ExifIFD:DateTimeOriginal",
         "tz": TZStrategy.SEPARATE,
-        "offset_tags": ["Exif:OffsetTimeOriginal", "Exif:OffsetTime", "Exif:OffsetTimeDigitized"],
+        "offset_tags": ["ExifIFD:OffsetTimeOriginal", "ExifIFD:OffsetTime", "ExifIFD:OffsetTimeDigitized"],
     },
     {"tag": "H264:DateTimeOriginal", "tz": TZStrategy.INCLUDE},
     {"tag": "XMP-exif:DateTimeOriginal", "tz": TZStrategy.INCLUDE},
     {"tag": "QuickTime:CreateDate", "tz": TZStrategy.UTC},
     {"tag": "Track1:TrackCreateDate", "tz": TZStrategy.UTC},
 ]
+
+# 全部候选时间标签，一次调用读齐；需要与其它标签合批时复用这份清单
+TIME_TAGS: tuple[str, ...] = tuple(dict.fromkeys(
+    [cfg["tag"] for cfg in _TAG_CONFIGS]
+    + [tag for cfg in _TAG_CONFIGS for tag in cfg.get("offset_tags", [])]
+))
 
 # "yyyy:MM:dd HH:mm:ss" with optional trailing "+HH:MM" or "Z"
 _TIME_PATTERN = re.compile(r"^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:([+-]\d{2}:\d{2})|(Z))?$")
@@ -64,18 +71,20 @@ def _naive(time_str: str) -> datetime:
 def _aware(naive: datetime, offset: str) -> datetime:
     seconds = 0 if offset in ("Z", "+00:00", "-00:00") else _offset_seconds(offset)
     # 时间戳本身记录在 offset 时区：绝对时刻 = naive - offset（UTC），
-    # 但保持 tzinfo 为该 offset（与 PowerShell ParseExact 的 K 行为一致）
+    # 但保持 tzinfo 为该 offset
     return naive.replace(tzinfo=timezone(timedelta(seconds=seconds)))
 
 
-def get_media_time(path: Path, default_offset: str = DEFAULT_TZ_OFFSET) -> datetime | None:
-    """Extract a timezone-aware creation timestamp, or None if no tag parses.
+def parse_media_time(tags: Mapping[str, str], default_offset: str = DEFAULT_TZ_OFFSET,
+                     target: str | None = None) -> datetime | None:
+    """Pick the highest-priority parseable timestamp out of already-read tags.
 
-    The returned datetime's tzinfo equals the recorded timezone offset; use
-    .astimezone(timezone.utc) to compare across sources.
+    `tags` is keyed by the TIME_TAGS names (exiftool.read_tags output), which
+    lets a caller that needs other tags from the same file read them all in one
+    call. Returns a timezone-aware datetime, or None if no candidate parses.
     """
     for cfg in _TAG_CONFIGS:
-        time_str = exiftool.get_media_tag(path, cfg["tag"])
+        time_str = tags.get(cfg["tag"], "")
         if not time_str:
             continue
 
@@ -91,11 +100,7 @@ def get_media_time(path: Path, default_offset: str = DEFAULT_TZ_OFFSET) -> datet
                     if m and m[7]:  # already carries an offset
                         media_time = _aware(_naive(time_str), m[7])
                     else:
-                        offset = ""
-                        for offset_tag in cfg["offset_tags"]:
-                            offset = exiftool.get_media_tag(path, offset_tag)
-                            if offset:
-                                break
+                        offset = next((tags.get(tag, "") for tag in cfg["offset_tags"] if tags.get(tag)), "")
                         media_time = _aware(_naive(time_str), offset or default_offset)
                 case TZStrategy.INCLUDE:
                     m = _TIME_PATTERN.match(time_str)
@@ -103,14 +108,23 @@ def get_media_time(path: Path, default_offset: str = DEFAULT_TZ_OFFSET) -> datet
                         raise ValueError(f"No embedded timezone: {time_str}")
                     media_time = _aware(_naive(time_str), m[7] or m[8])
         except ValueError:
-            log.debug(f"Failed to parse {cfg['tag']}: {time_str}", target=str(path))
+            log.debug(f"Failed to parse {cfg['tag']}: {time_str}", target=target)
             continue
 
-        log.debug(f"Using {cfg['tag']}: {media_time}", target=str(path))
+        log.debug(f"Using {cfg['tag']}: {media_time}", target=target)
         return media_time
 
-    log.debug("No valid timestamp found", target=str(path))
+    log.debug("No valid timestamp found", target=target)
     return None
+
+
+def get_media_time(path: Path, default_offset: str = DEFAULT_TZ_OFFSET) -> datetime | None:
+    """Extract a timezone-aware creation timestamp, or None if no tag parses.
+
+    The returned datetime's tzinfo equals the recorded timezone offset; use
+    .astimezone(timezone.utc) to compare across sources.
+    """
+    return parse_media_time(exiftool.read_tags(path, TIME_TAGS), default_offset, target=str(path))
 
 
 def parse_offset(offset: str) -> int:

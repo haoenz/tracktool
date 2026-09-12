@@ -14,16 +14,23 @@ from tracktool.kml.archive import resolve_zip_path
 
 class TestIsMissingAltitude:
     def test_zero_values_count_as_missing(self):
-        assert is_missing_altitude("0 m Above Sea Level")
-        assert is_missing_altitude("0 m Below Sea Level")
+        # 读数走 -n，海拔是带符号十进制；0 在半球的两个方向上都是 0
+        assert is_missing_altitude("0")
+        assert is_missing_altitude("0.0")
+        assert is_missing_altitude(0)
+        assert is_missing_altitude(-0.0)
 
     def test_empty_counts_as_missing(self):
         assert is_missing_altitude("")
-        assert not is_missing_altitude(" ")
+        assert is_missing_altitude(None)
 
     def test_real_altitude_is_present(self):
-        assert not is_missing_altitude("100 m Above Sea Level")
-        assert not is_missing_altitude("12.5 m Below Sea Level")
+        assert not is_missing_altitude("100")
+        assert not is_missing_altitude("-12.5")
+
+    def test_non_numeric_is_present(self):
+        # 非数值形态无法判为零，按旧行为视为有值
+        assert not is_missing_altitude(" ")
 
 
 class TestResolveZipPath:

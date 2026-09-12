@@ -1,19 +1,35 @@
 """Exiftool wrapper.
 
-Mirrors Invoke-Exiftool semantics: filter ignorable warnings (outputFilters
-from config, |-separated regexes), raise on any line matching \\bError\\b.
+Tag reads go through read_tags: one `-j -G1 -n` call per file returns every
+requested tag as a keyed JSON object, so a missing tag is an absent key and
+diagnostics on stderr (perl locale warnings, ...) can never be mistaken for a
+value.
+
+`-n` is what keeps callers in numbers rather than display text: derived GPS
+tags come back as signed decimals ("-50", "-12.3456789012222") instead of
+exiftool's rendering ("50 m Below Sea Level", "12 deg 20' 44.44\" S"), so no
+consumer has to parse display form back into numbers. Date/time and text tags
+are unaffected by `-n`, which is why a single numeric read can serve every
+consumer of one file.
+
+Write paths filter ignorable warnings (output_filters from config,
+|-separated regexes), then raise on any line matching \bError\b.
 
 Batch mode uses the -stay_open -@ argfile protocol for a persistent exiftool
-process, eliminating the per-file process startup cost of the PowerShell
-version. One process is not safe to share across threads, so get_media_tag
-etc. use a thread-local persistent process.
+process, eliminating the per-file process startup cost. One process is not
+safe to share across threads, so the read helpers use a thread-local
+persistent process.
 """
 
+import json
 import os
 import re
 import subprocess
+import tempfile
 import threading
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from . import log
 from .config import Config, config
@@ -22,6 +38,10 @@ ERROR_PATTERN = re.compile(r"\bError\b")
 
 _EXECUTABLE = os.environ.get("TRACKTOOL_EXIFTOOL", "exiftool")
 _local = threading.local()
+
+# 派生标签（GPSPosition / GPSLatitude / GPSAltitude）在 -G1 下渲染在 Composite 组，
+# 且 -n 下只有 Composite 那份是按 GPSAltitudeRef 定了符号的（GPS: 那份是无符号量值）
+_COMPOSITE_GROUP = "Composite"
 
 
 class ExiftoolError(Exception):
@@ -50,6 +70,60 @@ def invoke(*params: str) -> list[str]:
     return _check_output(output, _filters(config), " ".join(cmd[:4]))
 
 
+def _split_tag(tag: str) -> tuple[str, str]:
+    """'ExifIFD:DateTimeOriginal' -> ('ExifIFD', 'DateTimeOriginal'); no group -> ('', tag)."""
+    group, _, name = tag.rpartition(":")
+    return group, name
+
+
+def _resolve_key(payload: dict[str, Any], tag: str) -> str | None:
+    """Find the JSON key holding `tag` in a `-j -G1 -n` payload.
+
+    -G1 prints the family-1 group name, which normally equals the group the
+    caller wrote (ExifIFD:, XMP-exif:, QuickTime:, Track1:, ...). Two kinds of
+    name still need a fallback: derived tags, which exiftool renders under
+    Composite (GPSPosition, GPSLatitude, GPSAltitude), and ungrouped names
+    (Make). Preferring Composite doubles as preferring the signed value, since
+    -n leaves GPS:GPSAltitude an unsigned magnitude while
+    Composite:GPSAltitude carries the GPSAltitudeRef sign. A name matching
+    several groups is reported and left unresolved rather than guessed at, so
+    an ambiguous request reads as "absent" instead of as the wrong group's
+    value.
+    """
+    if tag in payload:
+        return tag
+
+    group, name = _split_tag(tag)
+    if not group:
+        composite = f"{_COMPOSITE_GROUP}:{name}"
+        if composite in payload:
+            return composite
+
+    candidates = [key for key in payload if _split_tag(key)[1] == name]
+    if group:
+        candidates = [key for key in candidates if _split_tag(key)[0].lower().startswith(group.lower())]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        log.warning(f"Ambiguous tag {tag!r}; exiftool reported: {', '.join(sorted(candidates))}")
+    return None
+
+
+def _parse_read_output(lines: list[str], path: Path) -> dict[str, Any]:
+    """First record of exiftool's -j array; an unreadable file is a tool
+    failure, not a file without tags."""
+    try:
+        payload = json.loads("\n".join(lines))
+        record = payload[0]
+    except (json.JSONDecodeError, IndexError, TypeError) as exc:
+        raise ExiftoolError(f"Unreadable exiftool JSON output for {path}: {exc}") from exc
+    if not isinstance(record, dict):
+        raise ExiftoolError(f"Unexpected exiftool JSON record for {path}: {record!r}")
+    if "Error" in record:
+        raise ExiftoolError(f"Exiftool failed to read {path}: {record['Error']}")
+    return {key: value for key, value in record.items() if key != "SourceFile"}
+
+
 class _StayOpenProcess:
     """A persistent exiftool process speaking the -stay_open argfile protocol.
 
@@ -57,6 +131,10 @@ class _StayOpenProcess:
     stdin, then a line "-executeNNN" (unique marker). exiftool processes the
     args and responds with "{readyNNN}" on stdout. Send "-stay_open\nFalse"
     to terminate.
+
+    stderr goes to a scratch file instead of being merged into stdout:
+    exiftool reports failures there and perl writes locale warnings there, and
+    a merged stream is what made a missing tag read back as a warning line.
     """
 
     _marker_counter = 0
@@ -67,6 +145,8 @@ class _StayOpenProcess:
         self._lock = threading.Lock()
         self._filters = _filters(config)
         self._closed = False
+        self._stderr = tempfile.TemporaryFile()
+        self._stderr_offset = 0
 
     def _ensure_started(self) -> None:
         if self._proc is None or self._proc.poll() is not None:
@@ -76,14 +156,27 @@ class _StayOpenProcess:
                 [_EXECUTABLE, "-stay_open", "True", "-@", "-", "-charset", "filename=UTF8"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=self._stderr,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
             )
 
+    def _read_new_diagnostics(self) -> list[str]:
+        """Diagnostics written since the previous command.
+
+        Only new lines are returned: the perl startup warning is written once
+        and must not be re-read (and re-reported) on every later call.
+        """
+        self._stderr.seek(self._stderr_offset)
+        chunk = self._stderr.read()
+        self._stderr_offset = self._stderr.tell()
+        if isinstance(chunk, bytes):
+            chunk = chunk.decode("utf-8", errors="replace")
+        return chunk.splitlines()
+
     def execute(self, args: list[str]) -> list[str]:
-        """Run one command through the persistent process, return output lines."""
+        """Run one command through the persistent process, return stdout lines."""
         with _StayOpenProcess._marker_lock:
             _StayOpenProcess._marker_counter += 1
             marker = str(_StayOpenProcess._marker_counter)
@@ -103,22 +196,26 @@ class _StayOpenProcess:
                     break
                 lines.append(stripped)
 
-        return _check_output(lines, self._filters, "stay_open execute")
+            diagnostics = self._read_new_diagnostics()
+
+        # 诊断里的 Error 才是失败信号，它不参与返回值
+        _check_output([*lines, *diagnostics], self._filters, "stay_open execute")
+        return lines
 
     def close(self) -> None:
         with self._lock:
-            if self._closed or self._proc is None:
+            if self._closed:
                 return
             self._closed = True
-            assert self._proc.stdin is not None
-            try:
-                self._proc.stdin.write("-stay_open\nFalse\n")
-                self._proc.stdin.flush()
-                self._proc.wait(timeout=10)
-            except (OSError, subprocess.TimeoutExpired):
-                self._proc.kill()
-            finally:
-                self._proc = None
+            proc, self._proc = self._proc, None
+            if proc is not None and proc.stdin is not None:
+                try:
+                    proc.stdin.write("-stay_open\nFalse\n")
+                    proc.stdin.flush()
+                    proc.wait(timeout=10)
+                except (OSError, subprocess.TimeoutExpired):
+                    proc.kill()
+            self._stderr.close()
 
 
 def _get_process() -> _StayOpenProcess:
@@ -155,7 +252,21 @@ def large_file_args(path: Path) -> list[str]:
     return []
 
 
+def read_tags(path: Path, tags: Sequence[str]) -> dict[str, str]:
+    """Read every requested tag in a single exiftool call.
+
+    Values come out in numeric mode (`-n`), so GPS tags arrive as signed
+    decimals ready to use. Returns a dict keyed by the requested names; a tag
+    the file does not carry is absent from the dict. Reading the whole set at
+    once is what keeps a file at one round-trip instead of one per tag.
+    """
+    requested = list(dict.fromkeys(tags))
+    lines = invoke_persistent("-j", "-G1", "-n", *[f"-{tag}" for tag in requested], str(path))
+    payload = _parse_read_output(lines, path)
+    return {tag: str(payload[key]).strip() for tag in requested
+            if (key := _resolve_key(payload, tag)) is not None}
+
+
 def get_media_tag(path: Path, tag: str) -> str:
-    """Read a single tag; empty string when absent (mirrors Get-MediaTag)."""
-    output = invoke_persistent("-s3", f"-{tag}", str(path))
-    return output[0].strip() if output else ""
+    """Read a single tag; empty string when absent."""
+    return read_tags(path, [tag]).get(tag, "")
