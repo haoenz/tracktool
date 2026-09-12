@@ -11,6 +11,7 @@ timezone, not necessarily local time).
 
 import re
 from datetime import datetime, timedelta, timezone
+from enum import StrEnum
 from pathlib import Path
 
 from . import exiftool, log
@@ -18,16 +19,25 @@ from . import exiftool, log
 # 假定的相机时区：EXIF 未记录 OffsetTime 时的回退值
 DEFAULT_TZ_OFFSET = "+08:00"
 
+
+class TZStrategy(StrEnum):
+    """How a tag's timestamp carries its timezone offset."""
+
+    SEPARATE = "separate"
+    INCLUDE = "include"
+    UTC = "utc"
+
+
 _TAG_CONFIGS = [
     {
         "tag": "Exif:DateTimeOriginal",
-        "tz": "separate",
+        "tz": TZStrategy.SEPARATE,
         "offset_tags": ["Exif:OffsetTimeOriginal", "Exif:OffsetTime", "Exif:OffsetTimeDigitized"],
     },
-    {"tag": "H264:DateTimeOriginal", "tz": "include"},
-    {"tag": "XMP-exif:DateTimeOriginal", "tz": "include"},
-    {"tag": "QuickTime:CreateDate", "tz": "utc"},
-    {"tag": "Track1:TrackCreateDate", "tz": "utc"},
+    {"tag": "H264:DateTimeOriginal", "tz": TZStrategy.INCLUDE},
+    {"tag": "XMP-exif:DateTimeOriginal", "tz": TZStrategy.INCLUDE},
+    {"tag": "QuickTime:CreateDate", "tz": TZStrategy.UTC},
+    {"tag": "Track1:TrackCreateDate", "tz": TZStrategy.UTC},
 ]
 
 # "yyyy:MM:dd HH:mm:ss" with optional trailing "+HH:MM" or "Z"
@@ -70,27 +80,28 @@ def get_media_time(path: Path, default_offset: str = DEFAULT_TZ_OFFSET) -> datet
             continue
 
         try:
-            if cfg["tz"] == "utc":
-                if time_str.endswith("Z"):
-                    media_time = _aware(_naive(time_str[:-1]), "Z")
-                else:
-                    media_time = _aware(_naive(time_str), "Z")
-            elif cfg["tz"] == "separate":
-                m = _TIME_PATTERN.match(time_str)
-                if m and m[7]:  # already carries an offset
-                    media_time = _aware(_naive(time_str), m[7])
-                else:
-                    offset = ""
-                    for offset_tag in cfg["offset_tags"]:
-                        offset = exiftool.get_media_tag(path, offset_tag)
-                        if offset:
-                            break
-                    media_time = _aware(_naive(time_str), offset or default_offset)
-            else:  # include
-                m = _TIME_PATTERN.match(time_str)
-                if not m or not (m[7] or m[8]):
-                    raise ValueError(f"No embedded timezone: {time_str}")
-                media_time = _aware(_naive(time_str), m[7] or m[8])
+            match cfg["tz"]:
+                case TZStrategy.UTC:
+                    if time_str.endswith("Z"):
+                        media_time = _aware(_naive(time_str[:-1]), "Z")
+                    else:
+                        media_time = _aware(_naive(time_str), "Z")
+                case TZStrategy.SEPARATE:
+                    m = _TIME_PATTERN.match(time_str)
+                    if m and m[7]:  # already carries an offset
+                        media_time = _aware(_naive(time_str), m[7])
+                    else:
+                        offset = ""
+                        for offset_tag in cfg["offset_tags"]:
+                            offset = exiftool.get_media_tag(path, offset_tag)
+                            if offset:
+                                break
+                        media_time = _aware(_naive(time_str), offset or default_offset)
+                case TZStrategy.INCLUDE:
+                    m = _TIME_PATTERN.match(time_str)
+                    if not m or not (m[7] or m[8]):
+                        raise ValueError(f"No embedded timezone: {time_str}")
+                    media_time = _aware(_naive(time_str), m[7] or m[8])
         except ValueError:
             log.debug(f"Failed to parse {cfg['tag']}: {time_str}", target=str(path))
             continue
