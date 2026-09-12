@@ -86,6 +86,43 @@ class TestKmlContent:
         assert tuples[0] == "116.0,39.0,100"
 
 
+LINESTRING_KML = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+<Placemark><LineString><coordinates>116.0,39.0 116.1,39.1</coordinates></LineString></Placemark>
+<Placemark><LineString><coordinates>117.0,40.0 bad 117.1,40.1</coordinates></LineString></Placemark>
+<Placemark><LineString><coordinates> </coordinates></LineString></Placemark>
+</Document>
+</kml>"""
+
+
+class TestAltitudeFromGoogle:
+    @pytest.fixture
+    def linestring_file(self, tmp_path: Path) -> Path:
+        path = tmp_path / "tracks.kml"
+        path.write_text(LINESTRING_KML, encoding="utf-8")
+        return path
+
+    def test_fills_altitudes_per_point(self, linestring_file: Path, monkeypatch):
+        queries: list[str] = []
+
+        def fake_get_altitudes(coordinates, api_key=None, cfg=None):
+            queries.extend(coordinates)
+            return [10.5, None, 12.5, 13.5]
+
+        monkeypatch.setattr(edit.googleapi, "get_altitudes", fake_get_altitudes)
+        edit.set_kml_altitude_from_google(linestring_file, "key")
+
+        assert queries == ["39.0,116.0", "39.1,116.1", "40.0,117.0", "40.1,117.1"]
+        tree = xmlutil.parse_file(linestring_file)
+        texts = [c.text or "" for c in xmlutil.findall(tree, "//kml:coordinates")]
+        assert texts == [
+            "116.0,39.0,10.5 116.1,39.1,0",  # None 高程写为 0
+            "117.0,40.0,12.5 bad 117.1,40.1,13.5",  # 无效元组跳过且原样保留
+            " ",  # 无有效坐标的节点不回写
+        ]
+
+
 class TestArchive:
     def _setup_archive(self, tmp_path: Path, monkeypatch) -> Path:
         archive_dir = tmp_path / "archive"

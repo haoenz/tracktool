@@ -196,7 +196,8 @@ def set_kml_altitude_from_google(path: Path, api_key: str | None = None,
         return
 
     # KML 坐标格式: "lon,lat,alt lon,lat,alt ..."
-    node_assignments: list[tuple[xmlutil.etree._Element, list[str], int]] = []
+    tuples_by_node: dict[xmlutil.etree._Element, list[str]] = {}
+    alt_targets: list[tuple[xmlutil.etree._Element, int]] = []  # 下标与 all_lat_lon 对齐
     all_lat_lon: list[str] = []
     for node in coord_nodes:
         tuples = (node.text or "").strip().split()
@@ -204,27 +205,25 @@ def set_kml_altitude_from_google(path: Path, api_key: str | None = None,
             parts = tup.split(",")
             if len(parts) < 2:
                 continue
+            if node not in tuples_by_node:
+                tuples_by_node[node] = tuples
             # Google API 接受 lat,lon
             all_lat_lon.append(f"{parts[1]},{parts[0]}")
-            node_assignments.append((node, tuples, i))
+            alt_targets.append((node, i))
 
     log.info(f"Querying Google Elevation API for {len(all_lat_lon)} point(s)", target=str(path))
 
     elevations = googleapi.get_altitudes(all_lat_lon, api_key=api_key, cfg=cfg)
 
-    # 将高程写回，按节点分组重建 coordinates 文本
-    node_tuples_map: dict[int, list[str]] = {}
-    node_list = {id(node): node for node in coord_nodes}
-    for i, (node, tuples, index) in enumerate(node_assignments):
-        key = id(node)
-        if key not in node_tuples_map:
-            node_tuples_map[key] = list(tuples)
-        parts = node_tuples_map[key][index].split(",")
+    # 将高程写回，重建 coordinates 文本
+    for i, (node, index) in enumerate(alt_targets):
+        tuples = tuples_by_node[node]
+        parts = tuples[index].split(",")
         alt = elevations[i] if i < len(elevations) and elevations[i] is not None else 0
-        node_tuples_map[key][index] = f"{parts[0]},{parts[1]},{alt}"
+        tuples[index] = f"{parts[0]},{parts[1]},{alt}"
 
-    for key, tuples in node_tuples_map.items():
-        node_list[key].text = " ".join(tuples)
+    for node, tuples in tuples_by_node.items():
+        node.text = " ".join(tuples)
 
     xmlutil.save(tree, path)
     log.info("Saved KML with updated altitudes", target=str(path))
