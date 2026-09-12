@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from . import log
-from .progress import DEFAULT_WORKERS, run_parallel
+from .progress import run_parallel
 
 # Sentinel marking a failed item inside run_per_file; unreachable by callers.
 _FAILED: Any = object()
@@ -70,8 +70,7 @@ def run_per_file[T, R](
             failed.append(file)
             return _FAILED
 
-    raw = run_parallel(files, guarded, activity=activity,
-                       workers=DEFAULT_WORKERS if parallel else 1)
+    raw = run_parallel(files, guarded, activity=activity, parallel=parallel)
     if failed:
         message = f"{activity}: {len(failed)} file(s) failed"
         if failed_folder_name:

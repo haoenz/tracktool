@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import exiftool, log
-from ..progress import DEFAULT_WORKERS, run_parallel
+from ..progress import run_parallel
 
 # Set-Exif 的四种 GPS 位置输入格式
 _DEFAULT_PATTERN = re.compile(
@@ -106,8 +106,7 @@ def set_exif(path: Path, options: SetExifOptions, parallel: bool = False) -> Non
         process_params = [str(file)] + params + exiftool.large_file_args(file)
         exiftool.invoke(*process_params)
 
-    run_parallel(files, process, activity="Setting Exif data",
-                 workers=DEFAULT_WORKERS if parallel else 1)
+    run_parallel(files, process, activity="Setting Exif data", parallel=parallel)
 
 
 @dataclass
@@ -132,8 +131,7 @@ def find_missing_tag(path: Path, tags: list[str], parallel: bool = False) -> lis
                 log.debug(f"Found tag {tag}: [{value}]", target=str(file))
         return MissingTagResult(file=file, missing_tags=missing) if missing else None
 
-    results = run_parallel(files, process, activity="Finding missing tags",
-                           workers=DEFAULT_WORKERS if parallel else 1)
+    results = run_parallel(files, process, activity="Finding missing tags", parallel=parallel)
     return [r for r in results if r is not None]
 
 

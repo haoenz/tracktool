@@ -24,14 +24,16 @@ DEFAULT_WORKERS = 5  # mirrors the original ThrottleLimit
 def run_parallel[T, R](
     items: list[T],
     fn: Callable[[T], R],
-    workers: int = DEFAULT_WORKERS,
     activity: str = "Processing",
+    parallel: bool = False,
 ) -> list[R]:
     """Apply fn to every item, in parallel when beneficial.
 
-    Returns results in input order. A single item is executed directly without
-    a progress bar, matching the original fast path.
+    Returns results in input order. `parallel` selects DEFAULT_WORKERS threads
+    over a single worker; a single item is executed directly without a
+    progress bar, matching the original fast path.
     """
+    workers = DEFAULT_WORKERS if parallel else 1
     if not items:
         return []
 

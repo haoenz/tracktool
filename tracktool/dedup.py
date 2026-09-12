@@ -78,7 +78,8 @@ def _update_files_hash_log(files: list[Path], hash_log: dict) -> tuple[int, int]
 
         hash_log[file_name] = {"MD5": _md5(file), "LastWriteTime": file_time}
 
-    run_parallel(files, process, activity="Hashing files")
+    # I/O 密集且无 --parallel 旗标：哈希始终走线程池，沿用原 ThrottleLimit 行为
+    run_parallel(files, process, activity="Hashing files", parallel=True)
     return counters["add"], counters["update"]
 
 
@@ -183,7 +184,7 @@ def clear_hash_log(hash_log_path: Path) -> None:
             return False
         return True
 
-    kept = run_parallel(list(hash_log.keys()), check, activity="Clearing hash log")
+    kept = run_parallel(list(hash_log.keys()), check, activity="Clearing hash log", parallel=True)
     removed_count = len(hash_log) - sum(1 for keep in kept if keep)
 
     if removed_count:
