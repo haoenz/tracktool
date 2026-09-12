@@ -29,12 +29,19 @@ from .progress import DEFAULT_WORKERS
 
 # 退出码表（cli_main 与各批次命令共同维护）：
 #   0  全部成功
-#   1  用户输入错误——路径、坐标、配置、KML 格式，见 USER_ERRORS
+#   1  用户输入错误——路径、坐标、配置、KML 格式（见 USER_ERRORS），
+#       以及命令/选项拼写错误（typer 的用法错误，见 USAGE_ERROR_CODE）
 #   2  外部工具或 API 失败——exiftool 不可用、Google 拒绝/超额，见 TOOL_ERROR_TYPES
 #   3  部分失败——逐文件隔离后仍有文件未处理完，见 BatchResult.failed
 EXIT_USER_ERROR = 1
 EXIT_TOOL_ERROR = 2
 EXIT_PARTIAL = 3
+
+# typer/_click 给用法错误（UsageError：命令名打错、选项不认识、缺必填参数）
+# 留的保留码。它和我们的表无关，但值恰好与 EXIT_TOOL_ERROR 相同，所以
+# cli_main 必须把这一来源归一成 EXIT_USER_ERROR——否则调用方分不清「参数
+# 拼错」和「exiftool 挂了」。
+USAGE_ERROR_CODE = 2
 
 # 用户输入触发的可预期错误：一行报错 + 退出码 1，不打印 traceback。
 USER_ERRORS = (ConfigError, SetExifError, FileNotFoundError, ValueError, etree.XMLSyntaxError, OSError)
@@ -532,6 +539,13 @@ def cli_main() -> None:
     """
     try:
         app()
+    except SystemExit as exc:
+        # typer 的用法错误与我们的表共用 2，这里归一成 1（详见
+        # USAGE_ERROR_CODE）；其余退出码（0 的 --help/--version、3 的部分
+        # 失败）原样透传。
+        if exc.code == USAGE_ERROR_CODE:
+            raise SystemExit(EXIT_USER_ERROR) from exc
+        raise
     except TOOL_ERROR_TYPES as exc:
         log.error(f"Command failed: {exc}")
         raise SystemExit(EXIT_TOOL_ERROR) from exc

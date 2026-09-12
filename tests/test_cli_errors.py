@@ -1,8 +1,9 @@
-"""Tests for the CLI top-level error handler (issue #2): expected user errors
-are reported as one clean log line + exit code 1, without a traceback;
-unexpected exceptions keep their traceback. External tool/API failures exit 2,
-a batch that left files unprocessed exits 3."""
+"""Tests for the CLI top-level error handler (issue #2): expected user errors —
+including typer's own usage errors — are reported as one clean log line + exit
+code 1, without a traceback; unexpected exceptions keep their traceback.
+External tool/API failures exit 2, a batch that left files unprocessed exits 3."""
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,19 @@ class TestExitCodeTable:
         with pytest.raises(SystemExit) as exc_info:
             cli_main()
         assert exc_info.value.code == cli.EXIT_TOOL_ERROR == 2
+
+    @pytest.mark.parametrize("argv", [
+        ["nosuchcommand"],                        # 命令名打错
+        ["exif", "set", "--nonexistent-option"],  # 选项不认识
+        ["exif", "set"],                          # 缺必填参数
+    ])
+    def test_usage_errors_fold_into_user_error(self, monkeypatch, argv):
+        # typer 给用法错误留的是 2，与 EXIT_TOOL_ERROR 同值；cli_main 必须把
+        # 这一来源归一成 1，否则调用方分不清「参数拼错」和「外部工具挂了」
+        monkeypatch.setattr(sys, "argv", ["tracktool", *argv])
+        with pytest.raises(SystemExit) as exc_info:
+            cli_main()
+        assert exc_info.value.code == cli.EXIT_USER_ERROR == 1
 
     def test_partial_batch_exits_three(self, tmp_path: Path):
         batch = BatchResult(succeeded=[None, None], failed=[tmp_path / "bad.jpg"])
