@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .. import log
 from ..context import ctx
+from ..errors import UserInputError
 from ..fileutil import move_to_folder
 from . import kmlfile, xmlutil
 from .kmlfile import TrackType
@@ -67,10 +68,10 @@ def new_empty_kml(type_: TrackType | None = None) -> xmlutil.etree._ElementTree:
 
 
 def resolve_zip_path(zip_path: str | None) -> Path:
-    """CLI argument or config key -> resolved ZIP path; FileNotFoundError when absent."""
+    """CLI argument or config key -> resolved ZIP path; UserInputError when absent."""
     path = zip_path or ctx.config["kml_zip_path"]
     if not path or not Path(path).is_file():
-        raise FileNotFoundError(f"KML compressed file path does not exist: {path}")
+        raise UserInputError(f"KML compressed file path does not exist: {path}")
     return Path(path).resolve()
 
 
@@ -121,7 +122,7 @@ def add_track_to_desktop_collection(path: Path, collection_path: Path) -> None:
     """Append the track to Folder[year] > Document[yyyymm] > Placemark."""
     m = _DATE_NAME_PATTERN.search(path.stem)
     if not m:
-        raise ValueError(f"Filename does not match expected date format (yyyy-MM-dd): {path.stem}")
+        raise UserInputError(f"Filename does not match expected date format (yyyy-MM-dd): {path.stem}")
     year, month = m[1], m[1] + m[2]
     log.debug(f"Parsed date from filename: {year}/{month}", target=str(path))
 
@@ -129,7 +130,7 @@ def add_track_to_desktop_collection(path: Path, collection_path: Path) -> None:
     ns = xmlutil.doc_ns(tree)
     top_folder = xmlutil.find(tree, "/kml:kml/kml:Folder")
     if top_folder is None:
-        raise ValueError(f"Collection KML has no top-level Folder: {collection_path}")
+        raise UserInputError(f"Collection KML has no top-level Folder: {collection_path}")
 
     year_folder = xmlutil.find(tree, f"/kml:kml/kml:Folder/kml:Folder[kml:name='{year}']")
     if year_folder is None:
@@ -183,7 +184,7 @@ def add_track_to_mobile_collection(path: Path, collection_path: Path) -> None:
     tree = xmlutil.parse_file(collection_path)
     multi_geom = xmlutil.find(tree, "//kml:MultiGeometry")
     if multi_geom is None:
-        raise ValueError(f"Mobile collection KML has no MultiGeometry: {collection_path}")
+        raise UserInputError(f"Mobile collection KML has no MultiGeometry: {collection_path}")
     track_id = path.stem
 
     existing = xmlutil.find(tree, f"//kml:LineString[@id='{track_id}']")

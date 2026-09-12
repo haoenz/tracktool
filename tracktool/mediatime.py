@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import log
 from .context import ctx
+from .errors import UserInputError
 
 # 假定的相机时区：EXIF 未记录 OffsetTime 时的回退值
 DEFAULT_TZ_OFFSET = "+08:00"
@@ -129,5 +130,13 @@ def get_media_time(path: Path, default_offset: str = DEFAULT_TZ_OFFSET) -> datet
 
 
 def parse_offset(offset: str) -> int:
-    """Public helper: '+08:00'-style offset -> seconds."""
-    return _offset_seconds(offset)
+    """Public helper: '+08:00'-style offset -> seconds.
+
+    The internal parsers signal a bad value with ValueError so a caller
+    can skip an unreadable tag; at this public boundary it becomes an
+    AppError the CLI reports without a traceback.
+    """
+    try:
+        return _offset_seconds(offset)
+    except ValueError as exc:
+        raise UserInputError(str(exc)) from exc

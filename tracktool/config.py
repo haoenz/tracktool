@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .errors import UserInputError
+
 CONFIG_DIR = Path.home() / ".tracktool"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
@@ -82,5 +84,5 @@ class Config:
         return key.strip()
 
 
-class ConfigError(Exception):
-    pass
+class ConfigError(UserInputError):
+    """The config file could not be read or is not a JSON object."""

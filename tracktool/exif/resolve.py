@@ -8,6 +8,7 @@ VID_original, ConvertTo-Mp4 into a fresh VID, then Resolve-MissingGPS).
 from pathlib import Path
 
 from .. import log, mediatime
+from ..errors import UserInputError
 from ..fileutil import BatchResult, move_to_folder
 from .google import set_altitude_from_google
 from .media import convert_to_mp4
@@ -77,7 +78,7 @@ def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = No
 
     vid_original_path = path / "VID_original"
     if vid_original_path.exists():
-        raise FileExistsError(f"{vid_original_path} already exists; remove or rename it before re-running")
+        raise UserInputError(f"{vid_original_path} already exists; remove or rename it before re-running")
 
     vid_path.rename(vid_original_path)
     log.info("Renamed VID to VID_original")

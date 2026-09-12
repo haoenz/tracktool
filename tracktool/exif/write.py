@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .. import log, mediatime
 from ..context import ctx
+from ..errors import UserInputError
 from ..fileutil import BatchResult, FileFailure, run_per_file
 
 # Set-Exif 的四种 GPS 位置输入格式
@@ -23,8 +24,8 @@ _EXIF_PATTERN = re.compile(
     r"\s*\d{1,3}\s*deg\s*\d{1,2}'\s*\d{1,2}(?:\.\d+)?\"\s*[EW]$")
 
 
-class SetExifError(Exception):
-    pass
+class SetExifError(UserInputError):
+    """The requested GPS position is not one of the accepted formats."""
 
 
 def is_missing_altitude(value: str | float | None) -> bool:
@@ -97,6 +98,8 @@ def list_files(path: Path | list[Path]) -> list[Path]:
         return list(path)
     if path.is_file():
         return [path]
+    if not path.is_dir():
+        raise UserInputError(f"Path does not exist: {path}")
     return sorted(p for p in path.iterdir() if p.is_file())
 
 

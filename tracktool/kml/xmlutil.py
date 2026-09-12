@@ -11,6 +11,8 @@ from pathlib import Path
 
 from lxml import etree
 
+from ..errors import UserInputError
+
 KML_NS = "http://www.opengis.net/kml/2.2"
 GX_NS = "http://www.google.com/kml/ext/2.2"
 
@@ -19,11 +21,17 @@ NSMAP = {"kml": KML_NS, "gx": GX_NS}
 
 def parse_file(path: Path) -> etree._ElementTree:
     parser = etree.XMLParser(remove_blank_text=False, strip_cdata=False, recover=False)
-    return etree.parse(str(path), parser)
+    try:
+        return etree.parse(str(path), parser)
+    except (etree.XMLSyntaxError, OSError) as exc:
+        raise UserInputError(f"Cannot read KML file {path}: {exc}") from exc
 
 
 def parse_string(text: str) -> etree._ElementTree:
-    return etree.fromstring(text.encode("utf-8")).getroottree()
+    try:
+        return etree.fromstring(text.encode("utf-8")).getroottree()
+    except etree.XMLSyntaxError as exc:
+        raise UserInputError(f"Cannot parse KML: {exc}") from exc
 
 
 def save(tree: etree._ElementTree, path: Path) -> None:

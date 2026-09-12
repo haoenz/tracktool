@@ -9,6 +9,7 @@ from conftest import TRACK_KML
 
 from tracktool.config import Config
 from tracktool.context import ctx
+from tracktool.errors import UserInputError
 from tracktool.exif.write import is_missing_altitude
 from tracktool.kml.archive import resolve_zip_path
 
@@ -64,9 +65,9 @@ class TestResolveZipPath:
 
     def test_missing_file_raises(self, tmp_path: Path, monkeypatch):
         self._install(tmp_path, monkeypatch, kml_zip_path="")
-        with pytest.raises(FileNotFoundError, match="does not exist"):
+        with pytest.raises(UserInputError, match="does not exist"):
             resolve_zip_path(None)
-        with pytest.raises(FileNotFoundError, match="does not exist"):
+        with pytest.raises(UserInputError, match="does not exist"):
             resolve_zip_path(str(tmp_path / "nope.zip"))
 
     def test_merge_kml_archive_uses_shared_resolution(self, tmp_path: Path, monkeypatch):

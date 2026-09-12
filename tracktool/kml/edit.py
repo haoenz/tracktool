@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .. import googleapi, log
 from ..context import ctx
+from ..errors import UserInputError
 from ..fileutil import move_to_folder
 from . import archive, kmlfile, xmlutil
 
@@ -21,7 +22,7 @@ def _get_track(tree: xmlutil.etree._ElementTree) -> xmlutil.etree._Element:
     """The single gx:Track under Document/Folder/Placemark (2bulu layout)."""
     track = xmlutil.find(tree, "/kml:kml/kml:Document/kml:Folder/kml:Placemark/gx:Track")
     if track is None:
-        raise ValueError("No gx:Track found under Document/Folder/Placemark")
+        raise UserInputError("No gx:Track found under Document/Folder/Placemark")
     return track
 
 
@@ -94,7 +95,7 @@ def split_kml(path: Path, split_points: list[str]) -> None:
 def remove_bad_points(path: Path, bad_points: list[str]) -> None:
     """Remove one point, or the inclusive range between two, as <name>-Fixed.kml."""
     if len(bad_points) > 2:
-        raise ValueError(f"Too many bad points specified (max 2): {len(bad_points)}")
+        raise UserInputError(f"Too many bad points specified (max 2): {len(bad_points)}")
 
     tree = xmlutil.parse_file(path)
     track = _get_track(tree)

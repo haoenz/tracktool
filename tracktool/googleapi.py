@@ -18,6 +18,7 @@ import requests
 
 from . import log
 from .context import ctx
+from .errors import ToolError
 
 ELEVATION_URL_PREFIX = "https://maps.googleapis.com/maps/api/elevation/json?locations="
 MAX_URL_LENGTH = 8192
@@ -26,8 +27,8 @@ MAX_LOCATIONS_PER_REQUEST = 512
 GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 
 
-class GoogleApiError(Exception):
-    pass
+class GoogleApiError(ToolError):
+    """The Google Maps API refused the request or could not be reached."""
 
 
 def _resolve_key(override: str | None) -> str:

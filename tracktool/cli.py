@@ -9,46 +9,27 @@ from rich import box
 from rich.table import Table
 
 from . import __version__, coords, dedup, googleapi, log, mediatime
-from .config import LEVELS, ConfigError
+from .config import LEVELS
 from .context import ctx
+from .errors import EXIT_PARTIAL, EXIT_USER_ERROR, AppError, UserInputError
 from .exif import google as exif_google
 from .exif import media as exif_media
 from .exif import position as exif_position
 from .exif import resolve as exif_resolve
 from .exif import write as exif_write
 from .exif.position import MAX_DISTANCE_METERS, MAX_TIME_DIFF_SECONDS
-from .exif.write import SetExifError
-from .exiftool import ExiftoolError
 from .fileutil import BatchResult
-from .googleapi import GoogleApiError
 from .kml import archive as kml_archive
 from .kml import edit as kml_edit
 from .kml import kmlfile
 from .kml.kmlfile import TrackType
-from .kml.xmlutil import etree
 from .progress import DEFAULT_WORKERS
 
-# 退出码表（cli_main 与各批次命令共同维护）：
-#   0  全部成功
-#   1  用户输入错误——路径、坐标、配置、KML 格式（见 USER_ERRORS），
-#       以及命令/选项拼写错误（typer 的用法错误，见 USAGE_ERROR_CODE）
-#   2  外部工具或 API 失败——exiftool 不可用、Google 拒绝/超额，见 TOOL_ERROR_TYPES
-#   3  部分失败——逐文件隔离后仍有文件未处理完，见 BatchResult.failed
-EXIT_USER_ERROR = 1
-EXIT_TOOL_ERROR = 2
-EXIT_PARTIAL = 3
-
 # typer/_click 给用法错误（UsageError：命令名打错、选项不认识、缺必填参数）
-# 留的保留码。它和我们的表无关，但值恰好与 EXIT_TOOL_ERROR 相同，所以
-# cli_main 必须把这一来源归一成 EXIT_USER_ERROR——否则调用方分不清「参数
+# 留的保留码。它和我们的表无关，但值恰好与 EXIT_TOOL_ERROR（见 errors.py）相同，
+# 所以 cli_main 必须把这一来源归一成 EXIT_USER_ERROR——否则调用方分不清「参数
 # 拼错」和「exiftool 挂了」。
 USAGE_ERROR_CODE = 2
-
-# 用户输入触发的可预期错误：一行报错 + 退出码 1，不打印 traceback。
-USER_ERRORS = (ConfigError, SetExifError, FileNotFoundError, ValueError, etree.XMLSyntaxError, OSError)
-# 依赖不可用：命令本身没写错，退出码 2。
-TOOL_ERROR_TYPES = (ExiftoolError, GoogleApiError)
-# 以上两组之外的一切异常视为 bug，保留完整 traceback 供调试。
 
 app = typer.Typer(
     name="tracktool",
@@ -223,7 +204,7 @@ def exif_set(
     tag_dict: dict[str, str] = {}
     for tag in (tags or []):
         if "=" not in tag:
-            raise ValueError(f"Invalid tag format (expected NAME=VALUE): {tag}")
+            raise UserInputError(f"Invalid tag format (expected NAME=VALUE): {tag}")
         name, value = tag.split("=", 1)
         tag_dict[name] = value
     options = exif_write.SetExifOptions(position=position, altitude=altitude, make=make,
@@ -401,7 +382,7 @@ def google_altitude(
     for coordinate in coordinates:
         point = coords.parse_coordinate(coordinate)
         if point is None:
-            raise ValueError(f"Unrecognized coordinate: {coordinate}")
+            raise UserInputError(f"Unrecognized coordinate: {coordinate}")
         points.append(point)
 
     elevations = googleapi.get_altitudes(points, api_key)
@@ -418,7 +399,7 @@ def google_location(
     """Reverse geocode a coordinate."""
     point = coords.parse_coordinate(coordinate)
     if point is None:
-        raise ValueError(f"Unrecognized coordinate: {coordinate}")
+        raise UserInputError(f"Unrecognized coordinate: {coordinate}")
 
     location = googleapi.get_location(point[0], point[1], api_key, language=language)
     print(json.dumps(location.__dict__, ensure_ascii=False, indent=2))
@@ -532,11 +513,12 @@ def config_set_zip_path(
 def cli_main() -> None:
     """Console-script entry point: expected failures become exit codes.
 
-    User-input exceptions are the user's own doing (bad path, bad coordinates,
-    broken config, malformed KML) — one log line + exit code 1, no traceback.
-    External tool/API failures exit 2. Anything not listed is a real bug and
-    keeps its traceback. A batch that left files unprocessed exits 3 through
-    _finish, which the command itself raises.
+    Anything deriving from AppError is expected — a bad path, bad
+    coordinates, broken config, malformed KML, a missing API key, exiftool
+    failing — and becomes one log line plus that error's own exit code (1
+    for user input, 2 for an external tool or API). Anything else is a bug
+    and keeps its traceback. A batch that left files unprocessed exits 3
+    through _finish, which the command itself raises.
     """
     try:
         app()
@@ -547,12 +529,9 @@ def cli_main() -> None:
         if exc.code == USAGE_ERROR_CODE:
             raise SystemExit(EXIT_USER_ERROR) from exc
         raise
-    except TOOL_ERROR_TYPES as exc:
+    except AppError as exc:
         log.error(f"Command failed: {exc}")
-        raise SystemExit(EXIT_TOOL_ERROR) from exc
-    except USER_ERRORS as exc:
-        log.error(f"Command failed: {exc}")
-        raise SystemExit(EXIT_USER_ERROR) from exc
+        raise SystemExit(exc.exit_code) from exc
 
 
 if __name__ == "__main__":

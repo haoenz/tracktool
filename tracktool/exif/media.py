@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .. import log, mediatime
 from ..context import ctx
+from ..errors import UserInputError
 from ..fileutil import BatchResult, FileFailure, run_per_file
 from .write import SetExifOptions, is_missing_altitude, list_files, write_exif_tags
 
@@ -59,7 +60,7 @@ def _parse_time_diff(time_diff: str) -> int:
     clean = time_diff.lstrip("+-")
     m = _RELATIVE_TIME_PATTERN.search(clean)
     if not m:
-        raise ValueError(f"Invalid TimeDiff: {time_diff}")
+        raise UserInputError(f"Invalid TimeDiff: {time_diff}")
     days, hours, minutes, seconds = (int(g) if g else 0 for g in m.groups())
     total = days * 86400 + hours * 3600 + minutes * 60 + seconds
     return -total if is_negative else total
@@ -136,7 +137,7 @@ def move_exif_time(path: Path | list[Path], time_diff: str = "", offset_time: st
                    overwrite: bool = False, parallel: bool = False) -> BatchResult[None]:
     """Shift EXIF timestamps; OffsetTime only supported for SONY. Insta360 files renamed."""
     if not time_diff and not offset_time:
-        raise ValueError("At least one of time_diff or offset_time must be provided.")
+        raise UserInputError("At least one of time_diff or offset_time must be provided.")
 
     files = list_files(path)
 

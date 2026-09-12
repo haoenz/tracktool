@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .. import coords, log, mediatime
 from ..context import ctx
+from ..errors import UserInputError
 from ..fileutil import BatchResult, FileFailure, run_per_file
 from ..kml import archive, xmlutil
 from .write import SetExifOptions, is_missing_altitude, list_files, write_exif_tags
@@ -151,7 +152,7 @@ def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = No
     try:
         kml_cache = _load_kml_cache(zip_path)
     except (OSError, zipfile.BadZipFile) as exc:
-        raise OSError(f"Failed to read KML archive file: {zip_path}") from exc
+        raise UserInputError(f"Failed to read KML archive file: {zip_path}") from exc
 
     # 预解析 XML，避免在并行工作线程里重复解析
     parsed_cache = {name: xmlutil.parse_string(text) for name, text in kml_cache.items()}

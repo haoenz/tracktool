@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from . import log
+from .errors import ToolError
 from .metadata import MetadataBackend
 
 ERROR_PATTERN = re.compile(r"\bError\b")
@@ -48,8 +49,8 @@ _local = threading.local()
 _COMPOSITE_GROUP = "Composite"
 
 
-class ExiftoolError(Exception):
-    """Raised when exiftool output contains an error."""
+class ExiftoolError(ToolError):
+    """Raised when exiftool is unavailable or its output contains an error."""
 
 
 def _filters() -> list[re.Pattern[str]]:
@@ -72,7 +73,12 @@ def _check_output(output: list[str], filters: list[re.Pattern[str]], cmd_desc: s
 def invoke(*params: str) -> list[str]:
     """Run exiftool once with the given arguments (one-shot subprocess)."""
     cmd = [_EXECUTABLE, *params]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+    except OSError as exc:
+        raise ExiftoolError(f"Could not run exiftool ({_EXECUTABLE}): {exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ExiftoolError(f"exiftool timed out: {' '.join(cmd[:4])}") from exc
     output = (proc.stdout + proc.stderr).splitlines()
     return _check_output(output, _filters(), " ".join(cmd[:4]))
 
@@ -159,15 +165,18 @@ class _StayOpenProcess:
         if self._proc is None or self._proc.poll() is not None:
             if self._proc is not None and self._proc.poll() is not None:
                 log.debug("Exiftool persistent process died, restarting")
-            self._proc = subprocess.Popen(
-                [_EXECUTABLE, "-stay_open", "True", "-@", "-", "-charset", "filename=UTF8"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=self._stderr,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
+            try:
+                self._proc = subprocess.Popen(
+                    [_EXECUTABLE, "-stay_open", "True", "-@", "-", "-charset", "filename=UTF8"],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=self._stderr,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+            except OSError as exc:
+                raise ExiftoolError(f"Could not start exiftool ({_EXECUTABLE}): {exc}") from exc
 
     def _read_new_diagnostics(self) -> list[str]:
         """Diagnostics written since the previous command.

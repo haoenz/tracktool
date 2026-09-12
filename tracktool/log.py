@@ -26,6 +26,7 @@ from rich.logging import RichHandler
 from rich.theme import Theme
 
 from .config import LEVELS
+from .errors import UserInputError
 
 VERBOSE = 15  # between DEBUG (10) and INFO (20)
 logging.addLevelName(VERBOSE, "VERBOSE")
@@ -49,7 +50,7 @@ _logger.setLevel(logging.INFO)
 def set_level(level: str) -> None:
     level = level.upper()
     if level not in LEVELS:
-        raise ValueError(f"Unknown log level: {level}")
+        raise UserInputError(f"Unknown log level: {level}")
     _logger.setLevel(_LEVEL_NUMBERS[level])
 
 
