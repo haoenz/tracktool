@@ -94,8 +94,9 @@ def _compute_time_shift(file: Path, time_diff: str, offset_time: str,
 
         current_offset = exiftool.get_media_tag(file, "ExifIFD:OffsetTime")
         if not current_offset:
-            log.warning("Current ExifIFD:OffsetTime is missing, assuming +08:00", target=str(file))
-            current_offset = "+08:00"
+            log.warning(f"Current ExifIFD:OffsetTime is missing, assuming {mediatime.DEFAULT_TZ_OFFSET}",
+                        target=str(file))
+            current_offset = mediatime.DEFAULT_TZ_OFFSET
 
         target_sec = _parse_tz_offset(offset_time)
         current_sec = _parse_tz_offset(current_offset)
@@ -217,7 +218,8 @@ def move_altitude(path: Path, offset: float, overwrite: bool = False, parallel: 
 
 
 def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None,
-                   output_directory: Path | None = None, offset_time: str = "+08:00",
+                   output_directory: Path | None = None,
+                   offset_time: str = mediatime.DEFAULT_TZ_OFFSET,
                    parallel: bool = False) -> None:
     """Remux videos to MP4 with creation_time metadata + XMP tags (ffmpeg)."""
     files = list_files(path)

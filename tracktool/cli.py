@@ -8,7 +8,7 @@ import typer
 from rich import box
 from rich.table import Table
 
-from . import __version__, dedup, log
+from . import __version__, dedup, log, mediatime
 from .config import LEVELS, ConfigError, config
 from .exif import google as exif_google
 from .exif import media as exif_media
@@ -49,6 +49,7 @@ app.add_typer(config_app, name="config")
 
 ParallelOpt = Annotated[bool, typer.Option("--parallel", help=f"Process in parallel ({DEFAULT_WORKERS} threads)")]
 QuietOpt = Annotated[bool, typer.Option("--quiet", "-q", help="Only warnings and errors")]
+OffsetTimeOpt = Annotated[str, typer.Option("--offset-time", help="Default timezone offset")]
 
 
 def _version_callback(value: bool) -> None:
@@ -311,7 +312,7 @@ def exif_to_mp4(
     output_directory: Annotated[Path | None, typer.Option("--output", "-o", help="Output directory")] = None,
     make: Annotated[str | None, typer.Option("--make", help="Camera make to write")] = None,
     model: Annotated[str | None, typer.Option("--model", help="Camera model to write")] = None,
-    offset_time: Annotated[str, typer.Option("--offset-time", help="Default timezone offset")] = "+08:00",
+    offset_time: OffsetTimeOpt = mediatime.DEFAULT_TZ_OFFSET,
     parallel: ParallelOpt = False,
 ) -> None:
     """Remux videos to MP4 with creation_time + XMP tags (ffmpeg)."""
@@ -345,7 +346,7 @@ def exif_resolve_vid(
     path: Annotated[Path, typer.Argument(help="Directory containing a VID subdirectory")],
     make: Annotated[str | None, typer.Option("--make", help="Camera make to write")] = None,
     model: Annotated[str | None, typer.Option("--model", help="Camera model to write")] = None,
-    offset_time: Annotated[str, typer.Option("--offset-time", help="Default timezone offset")] = "+08:00",
+    offset_time: OffsetTimeOpt = mediatime.DEFAULT_TZ_OFFSET,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     parallel: ParallelOpt = False,
 ) -> None:

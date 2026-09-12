@@ -7,7 +7,7 @@ VID_original, ConvertTo-Mp4 into a fresh VID, then Resolve-MissingGPS).
 
 from pathlib import Path
 
-from .. import log
+from .. import log, mediatime
 from ..fileutil import move_to_folder
 from .google import set_altitude_from_google
 from .media import convert_to_mp4
@@ -53,7 +53,7 @@ def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | 
 
 
 def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = None,
-                     offset_time: str = "+08:00", parallel: bool = False,
+                     offset_time: str = mediatime.DEFAULT_TZ_OFFSET, parallel: bool = False,
                      kml_zip_path: str | None = None) -> None:
     """VID → VID_original，转换 MP4 到新 VID，再补全 GPS。"""
     path = path.resolve()

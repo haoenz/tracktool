@@ -15,6 +15,9 @@ from pathlib import Path
 
 from . import exiftool, log
 
+# 假定的相机时区：EXIF 未记录 OffsetTime 时的回退值
+DEFAULT_TZ_OFFSET = "+08:00"
+
 _TAG_CONFIGS = [
     {
         "tag": "Exif:DateTimeOriginal",
@@ -55,7 +58,7 @@ def _aware(naive: datetime, offset: str) -> datetime:
     return naive.replace(tzinfo=timezone(timedelta(seconds=seconds)))
 
 
-def get_media_time(path: Path, default_offset: str = "+08:00") -> datetime | None:
+def get_media_time(path: Path, default_offset: str = DEFAULT_TZ_OFFSET) -> datetime | None:
     """Extract a timezone-aware creation timestamp, or None if no tag parses.
 
     The returned datetime's tzinfo equals the recorded timezone offset; use
