@@ -48,25 +48,13 @@ def get_position_from_kml(tree: xmlutil.etree._ElementTree, time: datetime,
 
     # 等价于 [Array]::BinarySearch：找到第一个 >= time 的位置
     insert_index = bisect_left(whens, time)
-    is_inside = True
-
-    if insert_index == 0:
-        if time < whens[0]:
-            is_inside = False
-            index = 0
-        else:
-            index = 0
-    elif insert_index == len(whens):
-        is_inside = False
+    is_inside = whens[0] <= time <= whens[-1]
+    if insert_index == len(whens):
         index = len(whens) - 1
+    elif insert_index > 0 and time - whens[insert_index - 1] < whens[insert_index] - time:
+        index = insert_index - 1
     else:
         index = insert_index
-        # 只有在不是起点的情况下才需要向前比较
-        if time - whens[index - 1] < whens[index] - time:
-            index -= 1
-
-    if whens[index] == time:
-        is_inside = True
 
     seconds_from_nearest = abs((time - whens[index]).total_seconds())
 
