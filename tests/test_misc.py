@@ -4,12 +4,17 @@ import json
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from tracktool import dedup
-from tracktool.config import Config
+from tracktool.cli import app
+from tracktool.config import Config, normalize
+from tracktool.context import ctx
 from tracktool.discover import list_files
 from tracktool.errors import UserInputError
 from tracktool.exif.write import SetExifError, SetExifOptions, build_position_params, build_tags
+
+runner = CliRunner()
 
 
 class TestListFiles:
@@ -111,6 +116,61 @@ class TestConfig:
         monkeypatch.delenv("TRACKTOOL_GOOGLE_API_KEY")
         assert cfg.google_api_key() == "file-key"
         assert cfg.google_api_key("param-key") == "param-key"
+
+
+class TestNormalize:
+    def test_log_level_is_uppercased_and_validated(self):
+        assert normalize("log_level", "debug") == "DEBUG"
+        with pytest.raises(UserInputError, match="Unknown log level"):
+            normalize("log_level", "LOUD")
+
+    def test_kml_zip_path_becomes_absolute(self, tmp_path: Path):
+        assert normalize("kml_zip_path", str(tmp_path / "x.zip")) == str(tmp_path / "x.zip")
+        assert Path(normalize("kml_zip_path", "~/x.zip")).is_absolute()
+
+    def test_other_keys_pass_through(self):
+        assert normalize("kml_backup_dir_name", "Old") == "Old"
+        assert normalize("output_filters", "ARW|JPG") == "ARW|JPG"
+
+
+class TestConfigSetCommand:
+    """`config set` 是唯一的写入入口：校验、归一化、拒绝未知键都在这一层。"""
+
+    def _install(self, tmp_path: Path, monkeypatch) -> Path:
+        path = tmp_path / "config.json"
+        cfg = Config(path=path).load()
+        cfg.save()  # 落一份默认配置：拒绝路径下文件应保持原样
+        monkeypatch.setattr(ctx, "config", cfg)
+        return path
+
+    def test_set_log_level(self, tmp_path: Path, monkeypatch):
+        path = self._install(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "set", "log_level", "debug"])
+        assert result.exit_code == 0
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        assert stored["log_level"] == "DEBUG"
+
+    def test_set_zip_path_stores_absolute(self, tmp_path: Path, monkeypatch):
+        path = self._install(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "set", "kml_zip_path", "~/tracks.zip"])
+        assert result.exit_code == 0
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        assert Path(stored["kml_zip_path"]).is_absolute()
+
+    def test_invalid_log_level_exits_one_without_writing(self, tmp_path: Path, monkeypatch):
+        path = self._install(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "set", "log_level", "LOUD"])
+        assert result.exit_code == 1
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        assert stored["log_level"] == "INFO"
+
+    def test_unknown_key_is_rejected(self, tmp_path: Path, monkeypatch):
+        # 连字符 typo（log-level）不能静默产生垃圾键
+        path = self._install(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "set", "log-level", "DEBUG"])
+        assert result.exit_code == 1
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        assert "log-level" not in stored
 
 
 class TestDedup:

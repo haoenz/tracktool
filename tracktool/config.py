@@ -29,6 +29,22 @@ DEFAULTS: dict[str, Any] = {
 LEVELS = ["DEBUG", "VERBOSE", "INFO", "WARNING", "ERROR"]
 
 
+def normalize(key: str, value: str) -> str:
+    """Validate and canonicalize a value for `config set <key> <value>`.
+
+    Per-key rules: log_level is uppercased and must be one of LEVELS;
+    kml_zip_path is expanded to an absolute path. Other keys pass through.
+    """
+    if key == "log_level":
+        level = value.upper()
+        if level not in LEVELS:
+            raise UserInputError(f"Unknown log level: {value} (one of {', '.join(LEVELS)})")
+        return level
+    if key == "kml_zip_path":
+        return str(Path(value).expanduser().resolve())
+    return value
+
+
 class Config:
     """Runtime configuration with lazy loading and persisted writes."""
 

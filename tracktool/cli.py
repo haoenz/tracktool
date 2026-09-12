@@ -10,7 +10,7 @@ from rich.table import Table
 
 from . import __version__, coords, dedup, googleapi, log, mediatime
 from .actions import Action, describe
-from .config import LEVELS
+from .config import normalize
 from .context import ctx
 from .errors import EXIT_PARTIAL, EXIT_USER_ERROR, AppError, UserInputError
 from .exif import google as exif_google
@@ -540,34 +540,15 @@ def config_set(
     key: Annotated[str, typer.Argument(help="Config key")],
     value: Annotated[str, typer.Argument(help="Config value")],
 ) -> None:
-    """Set a configuration value (e.g. google_api_key, kml_zip_path)."""
+    """Set a configuration value (e.g. google_api_key, kml_zip_path, log_level)."""
     if key not in ctx.config:
-        log.warning(f"Unknown key '{key}' (adding anyway)")
+        raise UserInputError(f"Unknown config key: {key}")
+    value = normalize(key, value)
     ctx.config[key] = value
     ctx.config.save()
+    if key == "log_level":
+        log.set_level(value)
     log.info(f"{key} = {value}")
-
-
-@config_app.command("log-level")
-def config_log_level(
-    level: Annotated[str, typer.Argument(help=f"One of {LEVELS}")],
-) -> None:
-    """Set the persisted log level."""
-    log.set_level(level)
-    ctx.config["log_level"] = level.upper()
-    ctx.config.save()
-    log.info(f"Log level set to {level.upper()}")
-
-
-@config_app.command("set-zip-path")
-def config_set_zip_path(
-    path: Annotated[Path, typer.Argument(help="KML ZIP archive path")],
-) -> None:
-    """Set the KML compressed file path."""
-    absolute = str(path.expanduser().resolve())
-    ctx.config["kml_zip_path"] = absolute
-    ctx.config.save()
-    log.info(f"KML compressed file path set to {absolute}")
 
 
 def cli_main() -> None:
