@@ -33,8 +33,9 @@ class TestFindMissingAltitudeEndToEnd:
 
         assert exiftool.get_media_tag(photo, "GPSAltitude") == "0"
 
-        results = find_missing_tag(photo, ["GPSAltitude"])
-        assert [(r.file, r.missing_tags) for r in results] == [(photo, ["GPSAltitude"])]
+        result = find_missing_tag(photo, ["GPSAltitude"])
+        assert [(r.file, r.missing_tags) for r in result.succeeded] == [(photo, ["GPSAltitude"])]
+        assert result.ok
 
     def test_real_altitude_not_reported(self, tmp_path: Path):
         photo = tmp_path / "photo.jpg"
@@ -42,4 +43,6 @@ class TestFindMissingAltitudeEndToEnd:
         exiftool.invoke(str(photo), "-GPSAltitude=12.5", "-GPSAltitudeRef=Below Sea Level",
                         "-overwrite_original")
 
-        assert find_missing_tag(photo, ["GPSAltitude"]) == []
+        result = find_missing_tag(photo, ["GPSAltitude"])
+        assert result.succeeded == []
+        assert result.ok

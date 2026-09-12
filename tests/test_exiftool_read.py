@@ -129,10 +129,11 @@ class TestBatchedCallers:
             "Composite:GPSPosition": "39.1 116.2",
         })
 
-        results = find_missing_tag(photo, ["GPSPosition", "GPSAltitude"])
+        batch = find_missing_tag(photo, ["GPSPosition", "GPSAltitude"])
 
         assert len(calls) == 1
-        assert [(r.file.name, r.missing_tags) for r in results] == [("p.jpg", ["GPSAltitude"])]
+        assert [(r.file.name, r.missing_tags) for r in batch.succeeded] == [("p.jpg", ["GPSAltitude"])]
+        assert batch.ok
 
 
 @requires_exiftool

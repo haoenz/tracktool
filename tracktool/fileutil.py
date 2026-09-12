@@ -1,15 +1,17 @@
-"""Shared file-moving helpers and the per-file batch failure policy.
+"""Shared file-moving helpers and the per-file batch failure contract.
 
-run_per_file layers the common error contract on top of run_parallel: a
-failure while processing one file is logged with that file as target and the
-file is quarantined into the caller's failed folder, while the batch always
-continues with the remaining files. Quarantining covers the whole per-file
-operation, not only the EXIF write — failures also arise from tag reads,
-media-time parsing, API calls and file renames.
+A batch owes its caller two answers: which files succeeded, and which did not.
+run_per_file layers that contract on top of run_parallel — one file's failure is
+logged with that file as target and never aborts the rest of the batch, and it
+is counted in the returned BatchResult so the CLI can turn it into an exit code.
+
+Quarantining covers the whole per-file operation, not only the EXIF write —
+failures also arise from tag reads, media-time parsing, API calls and renames.
 """
 
 import shutil
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,45 @@ from .progress import run_parallel
 
 # Sentinel marking a failed item inside run_per_file; unreachable by callers.
 _FAILED: Any = object()
+
+
+class FileFailure(Exception):
+    """One file the batch was asked to process and could not.
+
+    Raise it — after logging the reason with that file as target — instead of
+    returning early: an early return leaves nothing behind but a log line, and
+    the batch then reports success even when it processed nothing. The runner
+    counts the file in BatchResult.failed and moves it into the failed folder,
+    unless quarantine=False for a file that failed a check but should stay put.
+    """
+
+    def __init__(self, reason: str, *, quarantine: bool = True) -> None:
+        super().__init__(reason)
+        self.quarantine = quarantine
+
+
+@dataclass
+class BatchResult[R]:
+    """One batch's outcome: each processed file's result in input order, plus
+    the files that failed.
+
+    `succeeded` holds one entry per file that was processed without error,
+    `None` included — "processed and decided to skip" is still a success.
+    `failed` is what the CLI turns into an exit code, so any file the batch
+    could not process must land there.
+    """
+
+    succeeded: list[R] = field(default_factory=list)
+    failed: list[Path] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.failed
+
+    def merge(self, other: BatchResult[Any]) -> None:
+        """Absorb a nested batch's outcome (the stages of one command)."""
+        self.succeeded += other.succeeded
+        self.failed += other.failed
 
 
 def move_to_folder(path: Path, folder_name: str, parent_directory: Path | None = None) -> None:
@@ -48,31 +89,46 @@ def run_per_file[T, R](
     activity: str = "Processing",
     failed_folder_name: str | None = None,
     parallel: bool = False,
-) -> list[R]:
+) -> BatchResult[R]:
     """Apply process to every file; a per-file failure never aborts the batch.
 
-    Any exception from process() — tag reads, EXIF writes, API calls, renames —
-    is logged with the file as target and the file is moved into
-    failed_folder_name (when given); its result is omitted. Catching broadly is
-    the point: a systemic failure (missing exiftool, bad API key) repeats the
-    error per file instead of silently dropping the rest of the batch.
-    Returns the successful results in input order.
+    A FileFailure is the expected kind: the file was readable but could not be
+    processed, its reason is already logged at the raising site, and only the
+    counting happens here. Any other exception is unexpected and gets one
+    entry of its own in the log. Both kinds end up in BatchResult.failed (in
+    input order) and, unless there is no failed folder, are quarantined.
+
+    Catching broadly is the point: a systemic failure (missing exiftool, bad
+    API key) repeats the error per file instead of silently dropping the rest
+    of the batch, and the failure count is what tells the caller nothing worked.
     """
-    failed: list[Path] = []
 
     def guarded(file: Path) -> R:
         try:
             return process(file)
+        except FileFailure as exc:
+            log.debug(f"{activity} failed: {exc}", target=str(file))
+            if exc.quarantine:
+                quarantine(file, failed_folder_name)
+            return _FAILED
         except Exception as exc:  # per-file isolation is the whole contract
             log.error(f"{activity} failed: {exc}", target=str(file))
             quarantine(file, failed_folder_name)
-            failed.append(file)
             return _FAILED
 
     raw = run_parallel(files, guarded, activity=activity, parallel=parallel)
-    if failed:
-        message = f"{activity}: {len(failed)} file(s) failed"
+
+    # 并行执行的结果仍按输入顺序返回，失败清单也据此保持稳定
+    result: BatchResult[R] = BatchResult()
+    for file, outcome in zip(files, raw, strict=True):
+        if outcome is _FAILED:
+            result.failed.append(file)
+        else:
+            result.succeeded.append(outcome)
+
+    if result.failed:
+        message = f"{activity}: {len(result.failed)} file(s) failed"
         if failed_folder_name:
             message += f", moved to {failed_folder_name}"
         log.warning(message)
-    return [result for result in raw if result is not _FAILED]
+    return result

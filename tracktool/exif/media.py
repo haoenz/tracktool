@@ -11,8 +11,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .. import exiftool, log, mediatime
-from ..fileutil import run_per_file
-from .write import SetExifOptions, is_missing_altitude, list_files, set_exif
+from ..fileutil import BatchResult, FileFailure, run_per_file
+from .write import SetExifOptions, is_missing_altitude, list_files, write_exif_tags
 
 # EXIF Make 字段注册值（exiftool 原样返回，精确匹配，不做大小写归一化）
 MAKE_SONY = "SONY"
@@ -142,8 +142,8 @@ def _rename_insta360(file: Path, shift: timedelta, is_negative: bool) -> None:
     log.verbose("Renamed to match new timestamp", target=str(new_file_path))
 
 
-def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
-                   overwrite: bool = False, parallel: bool = False) -> None:
+def move_exif_time(path: Path | list[Path], time_diff: str = "", offset_time: str = "",
+                   overwrite: bool = False, parallel: bool = False) -> BatchResult[None]:
     """Shift EXIF timestamps; OffsetTime only supported for SONY. Insta360 files renamed."""
     if not time_diff and not offset_time:
         raise ValueError("At least one of time_diff or offset_time must be provided.")
@@ -159,7 +159,7 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
         resolved = _compute_time_shift(file, time_diff, offset_time, make,
                                        tags.get("ExifIFD:OffsetTime", ""))
         if resolved is None:
-            return
+            raise FileFailure("time shift not applicable to this file")
         total_seconds_offset, tz_params = resolved
 
         if total_seconds_offset == 0:
@@ -180,7 +180,7 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
         tag_set = _TAG_SETS.get((make, ext))
         if tag_set is None:
             log.error(f"Unsupported camera/extension: {make} {ext}; file skipped", target=str(file))
-            return
+            raise FileFailure(f"unsupported camera/extension: {make} {ext}")
 
         params = [str(file), *(f"-{tag}{sign}{offset}" for tag in tag_set), *tz_params]
         if overwrite:
@@ -192,10 +192,11 @@ def move_exif_time(path: Path, time_diff: str = "", offset_time: str = "",
         if make == MAKE_INSTA360 and ext == ".mp4":
             _rename_insta360(file, shift, total_seconds_offset < 0)
 
-    run_per_file(files, process, activity="Shifting Exif time", parallel=parallel)
+    return run_per_file(files, process, activity="Shifting Exif time", parallel=parallel)
 
 
-def move_altitude(path: Path, offset: float, overwrite: bool = False, parallel: bool = False) -> None:
+def move_altitude(path: Path | list[Path], offset: float, overwrite: bool = False,
+                  parallel: bool = False) -> BatchResult[None]:
     """Shift GPSAltitude by a fixed offset (drone/ground-level correction)."""
     files = list_files(path)
 
@@ -204,24 +205,24 @@ def move_altitude(path: Path, offset: float, overwrite: bool = False, parallel: 
         altitude = exiftool.get_media_tag(file, "GPSAltitude")
         if is_missing_altitude(altitude):
             log.warning("No GPSAltitude found, skipping", target=str(file))
-            return
+            raise FileFailure("no GPSAltitude to shift")
 
         new_alt = float(altitude) + offset
         log.verbose(f"Shifting altitude: {altitude} m -> {new_alt} m", target=str(file))
-        set_exif(file, SetExifOptions(altitude=new_alt, overwrite=overwrite))
+        write_exif_tags(file, SetExifOptions(altitude=new_alt, overwrite=overwrite))
 
-    run_per_file(files, process, activity=f"Shifting altitude by {offset} m", parallel=parallel)
+    return run_per_file(files, process, activity=f"Shifting altitude by {offset} m", parallel=parallel)
 
 
-def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None,
+def convert_to_mp4(path: Path | list[Path], make: str | None = None, model: str | None = None,
                    output_directory: Path | None = None,
                    offset_time: str = mediatime.DEFAULT_TZ_OFFSET,
-                   parallel: bool = False) -> None:
+                   parallel: bool = False) -> BatchResult[None]:
     """Remux videos to MP4 with creation_time metadata + XMP tags (ffmpeg)."""
     # 入口处一次性校验 offset_time 格式，坏参数直接报错，而不是逐文件失败
     mediatime.parse_offset(offset_time)
     files = list_files(path)
-    output_dir = output_directory if output_directory is not None else (files[0].parent if files else path)
+    output_dir = output_directory if output_directory is not None else (files[0].parent if files else Path())
 
     def process(file: Path) -> None:
         output_path = output_dir / f"{file.stem}.mp4"
@@ -231,7 +232,7 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
 
         if media_time is None:
             log.warning("No valid timestamp found; skipping", target=str(file))
-            return
+            raise FileFailure("no valid timestamp")
 
         create_time_utc = media_time.astimezone(UTC)
 
@@ -248,7 +249,7 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
                 capture_output=True)
             if ret.returncode != 0:
                 log.error("Failed to convert to MP4", target=str(file))
-                return
+                raise FileFailure("ffmpeg failed to convert to MP4")
             log.verbose("Converted to MP4", target=str(file))
         else:
             log.debug("File is already MP4", target=str(file))
@@ -264,7 +265,7 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
                     capture_output=True)
                 if ret.returncode != 0:
                     log.error("Failed to convert to MP4", target=str(file))
-                    return
+                    raise FileFailure("ffmpeg failed to convert to MP4")
             else:
                 shutil.copy2(original_path, output_path)
 
@@ -273,10 +274,10 @@ def convert_to_mp4(path: Path, make: str | None = None, model: str | None = None
             tags["Make"] = make
         if model:
             tags["Model"] = model
-        set_exif(output_path, SetExifOptions(tags=tags, overwrite=True))
+        write_exif_tags(output_path, SetExifOptions(tags=tags, overwrite=True))
         log.verbose(f"Set tags: {', '.join(tags)}", target=str(output_path))
 
-    run_per_file(files, process, activity="Converting to MP4", parallel=parallel)
+    return run_per_file(files, process, activity="Converting to MP4", parallel=parallel)
 
 
 def group_media_files(path: Path) -> None:

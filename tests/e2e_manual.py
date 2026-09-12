@@ -59,13 +59,16 @@ def main() -> None:
 
         # ── 验证 1：find-missing 找出全部缺失 GPS 的照片 ──
         missing = find_missing_tag(media_dir, ["GPSPosition", "GPSAltitude"])
-        assert len(missing) == 3, f"expected 3 missing, got {len(missing)}"
+        assert len(missing.succeeded) == 3, f"expected 3 missing, got {len(missing.succeeded)}"
+        assert missing.ok
 
         # ── 验证 2：set_position_from_kml 写入 GPS ──
-        set_position_from_kml(
+        batch = set_position_from_kml(
             media_dir, str(zip_path),
             options=SetPositionOptions(max_time_diff_seconds=MAX_TIME_DIFF_SECONDS, overwrite=True,
                                        failed_folder_name="TrackPosFailed"))
+        assert batch.succeeded == [None, None]  # photo0 / photo1 已写入
+        assert [p.name for p in batch.failed] == ["photo2.jpg"], batch.failed
 
         # photo0: 00:00 UTC 精确匹配 -> (39.0, 116.0, 100)
         pos0 = exiftool.get_media_tag(photos[0], "GPSPosition")
@@ -86,7 +89,7 @@ def main() -> None:
 
         # ── 验证 3：修复后 find-missing 只剩 0 个（photo2 已移走）──
         missing_after = find_missing_tag(media_dir, ["GPSPosition", "GPSAltitude"])
-        assert len(missing_after) == 0, [str(m.file) for m in missing_after]
+        assert missing_after.succeeded == [], [str(m.file) for m in missing_after.succeeded]
 
         # ── 验证 4：Get-MediaTime 时区解析（+08:00 默认偏移）──
         t = mediatime.get_media_time(photos[0])

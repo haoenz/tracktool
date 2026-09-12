@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich import box
@@ -18,6 +18,7 @@ from .exif import write as exif_write
 from .exif.position import MAX_DISTANCE_METERS, MAX_TIME_DIFF_SECONDS
 from .exif.write import SetExifError
 from .exiftool import ExiftoolError
+from .fileutil import BatchResult
 from .googleapi import GoogleApiError
 from .kml import archive as kml_archive
 from .kml import edit as kml_edit
@@ -26,10 +27,20 @@ from .kml.kmlfile import TrackType
 from .kml.xmlutil import etree
 from .progress import DEFAULT_WORKERS
 
+# 退出码表（cli_main 与各批次命令共同维护）：
+#   0  全部成功
+#   1  用户输入错误——路径、坐标、配置、KML 格式，见 USER_ERRORS
+#   2  外部工具或 API 失败——exiftool 不可用、Google 拒绝/超额，见 TOOL_ERROR_TYPES
+#   3  部分失败——逐文件隔离后仍有文件未处理完，见 BatchResult.failed
+EXIT_USER_ERROR = 1
+EXIT_TOOL_ERROR = 2
+EXIT_PARTIAL = 3
+
 # 用户输入触发的可预期错误：一行报错 + 退出码 1，不打印 traceback。
-# 之外的一切异常视为 bug，保留完整 traceback 供调试。
-DOMAIN_ERRORS = (ConfigError, GoogleApiError, SetExifError, ExiftoolError,
-                 FileNotFoundError, ValueError, etree.XMLSyntaxError, OSError)
+USER_ERRORS = (ConfigError, SetExifError, FileNotFoundError, ValueError, etree.XMLSyntaxError, OSError)
+# 依赖不可用：命令本身没写错，退出码 2。
+TOOL_ERROR_TYPES = (ExiftoolError, GoogleApiError)
+# 以上两组之外的一切异常视为 bug，保留完整 traceback 供调试。
 
 app = typer.Typer(
     name="tracktool",
@@ -81,8 +92,18 @@ def _resolve_path(path: Path, must_exist: bool = True) -> Path:
     path = path.expanduser().resolve()
     if must_exist and not path.exists():
         log.error(f"Path does not exist: {path}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=EXIT_USER_ERROR)
     return path
+
+
+def _finish(result: BatchResult[Any] | None) -> None:
+    """Turn a batch outcome into an exit code: files left unprocessed mean 3.
+
+    Every batch entry point returns what it could not process, so "all files
+    failed" can no longer look like success.
+    """
+    if result is not None and result.failed:
+        raise typer.Exit(code=EXIT_PARTIAL)
 
 
 # ── kml ─────────────────────────────────────────────────────────────────────
@@ -199,7 +220,7 @@ def exif_set(
         tag_dict[name] = value
     options = exif_write.SetExifOptions(position=position, altitude=altitude, make=make,
                                         model=model, tags=tag_dict, overwrite=overwrite)
-    exif_write.set_exif(path, options, parallel)
+    _finish(exif_write.set_exif(path, options, parallel))
 
 
 @exif_app.command("info")
@@ -219,15 +240,16 @@ def exif_find_missing(
 ) -> None:
     """List files missing the given tags (zero altitude counts as missing)."""
     path = _resolve_path(path)
-    results = exif_write.find_missing_tag(path, tags, parallel)
+    batch = exif_write.find_missing_tag(path, tags, parallel)
     table = Table(box=box.SIMPLE)
     table.add_column("File")
     table.add_column("Missing")
-    for result in results:
+    for result in batch.succeeded:
         table.add_row(str(result.file), ", ".join(result.missing_tags))
     log.console().print(table)
-    if not results:
+    if not batch.succeeded:
         log.info("No files missing the requested tags")
+    _finish(batch)
 
 
 @exif_app.command("set-position")
@@ -251,7 +273,7 @@ def exif_set_position(
         max_time_diff_seconds=max_time_diff, overwrite=overwrite, force=force,
         verify_existing_gps=verify, max_distance_meters=max_distance,
         multiday=multiday, failed_folder_name=failed_folder)
-    exif_position.set_position_from_kml(path, zip_path, options, parallel)
+    _finish(exif_position.set_position_from_kml(path, zip_path, options, parallel))
 
 
 @exif_app.command("set-altitude")
@@ -264,7 +286,7 @@ def exif_set_altitude(
 ) -> None:
     """Fill missing GPSAltitude from Google Elevation."""
     path = _resolve_path(path)
-    exif_google.set_altitude_from_google(path, overwrite, failed_folder, parallel, api_key)
+    _finish(exif_google.set_altitude_from_google(path, overwrite, failed_folder, parallel, api_key))
 
 
 @exif_app.command("set-location")
@@ -278,7 +300,7 @@ def exif_set_location(
 ) -> None:
     """Reverse geocode GPSPosition into IPTC City/State/Country tags."""
     path = _resolve_path(path)
-    exif_google.set_location_from_google(path, overwrite, failed_folder, parallel, api_key, language)
+    _finish(exif_google.set_location_from_google(path, overwrite, failed_folder, parallel, api_key, language))
 
 
 @exif_app.command("move-time")
@@ -293,8 +315,8 @@ def exif_move_time(
     path = _resolve_path(path)
     if not time_diff and not offset_time:
         log.error("At least one of --time-diff or --offset-time must be provided")
-        raise typer.Exit(code=1)
-    exif_media.move_exif_time(path, time_diff or "", offset_time or "", overwrite, parallel)
+        raise typer.Exit(code=EXIT_USER_ERROR)
+    _finish(exif_media.move_exif_time(path, time_diff or "", offset_time or "", overwrite, parallel))
 
 
 @exif_app.command("move-altitude")
@@ -306,7 +328,7 @@ def exif_move_altitude(
 ) -> None:
     """Shift GPSAltitude by a fixed offset."""
     path = _resolve_path(path)
-    exif_media.move_altitude(path, offset, overwrite, parallel)
+    _finish(exif_media.move_altitude(path, offset, overwrite, parallel))
 
 
 @exif_app.command("to-mp4")
@@ -321,7 +343,7 @@ def exif_to_mp4(
     """Remux videos to MP4 with creation_time + XMP tags (ffmpeg)."""
     path = _resolve_path(path)
     output_dir = _resolve_path(output_directory) if output_directory else None
-    exif_media.convert_to_mp4(path, make, model, output_dir, offset_time, parallel)
+    _finish(exif_media.convert_to_mp4(path, make, model, output_dir, offset_time, parallel))
 
 
 @exif_app.command("group")
@@ -341,7 +363,7 @@ def exif_resolve_missing(
 ) -> None:
     """Repair files missing GPSPosition/GPSAltitude (Google altitude, then KML position)."""
     path = _resolve_path(path)
-    exif_resolve.resolve_missing_gps(path, parallel, zip_path)
+    _finish(exif_resolve.resolve_missing_gps(path, parallel, zip_path))
 
 
 @exif_app.command("resolve-vid")
@@ -355,7 +377,7 @@ def exif_resolve_vid(
 ) -> None:
     """Video pipeline: VID -> VID_original, convert to MP4, then repair GPS."""
     path = _resolve_path(path)
-    exif_resolve.resolve_vid_exif(path, make, model, offset_time, parallel, zip_path)
+    _finish(exif_resolve.resolve_vid_exif(path, make, model, offset_time, parallel, zip_path))
 
 
 # ── google ──────────────────────────────────────────────────────────────────
@@ -500,17 +522,22 @@ def config_set_zip_path(
 
 
 def cli_main() -> None:
-    """Console-script entry point: report expected domain errors cleanly.
+    """Console-script entry point: expected failures become exit codes.
 
-    Domain exceptions are the user's own doing (bad path, bad coordinates,
+    User-input exceptions are the user's own doing (bad path, bad coordinates,
     broken config, malformed KML) — one log line + exit code 1, no traceback.
-    Anything not in DOMAIN_ERRORS is a real bug and keeps its traceback.
+    External tool/API failures exit 2. Anything not listed is a real bug and
+    keeps its traceback. A batch that left files unprocessed exits 3 through
+    _finish, which the command itself raises.
     """
     try:
         app()
-    except DOMAIN_ERRORS as exc:
+    except TOOL_ERROR_TYPES as exc:
         log.error(f"Command failed: {exc}")
-        raise SystemExit(1) from exc
+        raise SystemExit(EXIT_TOOL_ERROR) from exc
+    except USER_ERRORS as exc:
+        log.error(f"Command failed: {exc}")
+        raise SystemExit(EXIT_USER_ERROR) from exc
 
 
 if __name__ == "__main__":

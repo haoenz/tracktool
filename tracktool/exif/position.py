@@ -16,9 +16,9 @@ from pathlib import Path
 
 from .. import coords, exiftool, log, mediatime
 from ..config import Config, config
-from ..fileutil import quarantine, run_per_file
+from ..fileutil import BatchResult, FileFailure, run_per_file
 from ..kml import archive, xmlutil
-from .write import SetExifOptions, is_missing_altitude, list_files, set_exif
+from .write import SetExifOptions, is_missing_altitude, list_files, write_exif_tags
 
 
 @dataclass
@@ -138,10 +138,14 @@ def _verify_or_skip(latitude: float, longitude: float, best: TrackPoint,
 
 # cfg 为测试注入点：tests/test_batch_isolation.py 传入指向测试 ZIP 的临时 Config；若测试改用
 # 其他方式注入单例，可随测试一并移除。
-def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
+def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
                           options: SetPositionOptions | None = None,
-                          parallel: bool = False, cfg: Config = config) -> None:
-    """Set GPS position/altitude on media files from the KML ZIP archive."""
+                          parallel: bool = False, cfg: Config = config) -> BatchResult[None]:
+    """Set GPS position/altitude on media files from the KML ZIP archive.
+
+    A file list is accepted so one call can cover a whole selection: the archive
+    is read and parsed once for the batch, not once per file.
+    """
     options = options or SetPositionOptions()
 
     zip_path = archive.resolve_zip_path(kml_zip_path, cfg)
@@ -182,27 +186,22 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
         media_time = mediatime.parse_media_time(tags, target=str(file))
         if media_time is None:
             log.error("No valid timestamp found; skipping", target=str(file))
-            if options.failed_folder_name:
-                quarantine(file, options.failed_folder_name)
-            return
+            raise FileFailure("no valid timestamp")
 
         best = _find_best_track(parsed_cache, media_time, options.multiday, str(file))
         if best is None:
             log.warning("No matching GPS data found in KML archive", target=str(file))
-            if options.failed_folder_name:
-                quarantine(file, options.failed_folder_name)
-            return
+            raise FileFailure("no matching GPS data in the KML archive")
         if best.seconds_from_nearest > options.max_time_diff_seconds:
             log.warning(
                 f"Best matched KML is outside duration by {round(best.seconds_from_nearest, 2)} seconds, "
                 f"which exceeds the {options.max_time_diff_seconds}s limit", target=str(file))
-            if options.failed_folder_name:
-                quarantine(file, options.failed_folder_name)
-            return
+            raise FileFailure(f"best match {round(best.seconds_from_nearest, 2)}s outside the time limit")
 
         if options.verify_existing_gps and latitude is not None and longitude is not None:
             if not _verify_or_skip(latitude, longitude, best, options, str(file)):
-                return
+                # 校验不符：文件保持原位（用户要的是核对结果，不是搬运）
+                raise FileFailure("existing GPS disagrees with the KML", quarantine=False)
 
         if best.latitude is not None and best.longitude is not None:
             # 如果文件缺失位置或高度，或者用户开启了 Force，则同时打包更新
@@ -213,12 +212,11 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
                 new_altitude = best.altitude or file_altitude
                 display_alt = f"{new_altitude} m" if new_altitude else "None"
                 log.verbose(f"Setting GPS position: {new_position}, altitude: {display_alt}", target=str(file))
-                set_exif(file, SetExifOptions(position=new_position, altitude=new_altitude,
-                                              overwrite=options.overwrite))
+                write_exif_tags(file, SetExifOptions(position=new_position, altitude=new_altitude,
+                                                     overwrite=options.overwrite))
         else:
             log.warning("No matching GPS data found in KML archive", target=str(file))
-            if options.failed_folder_name:
-                quarantine(file, options.failed_folder_name)
+            raise FileFailure("matched KML point carries no coordinates")
 
-    run_per_file(files, process, activity="Setting GPS info from KML",
-                 failed_folder_name=options.failed_folder_name, parallel=parallel)
+    return run_per_file(files, process, activity="Setting GPS info from KML",
+                        failed_folder_name=options.failed_folder_name, parallel=parallel)

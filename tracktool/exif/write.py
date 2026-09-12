@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import exiftool, log, mediatime
-from ..progress import run_parallel
+from ..fileutil import BatchResult, FileFailure, run_per_file
 
 # Set-Exif 的四种 GPS 位置输入格式
 _DEFAULT_PATTERN = re.compile(
@@ -97,14 +97,19 @@ def build_params(options: SetExifOptions) -> list[str]:
     return params
 
 
-def list_files(path: Path) -> list[Path]:
+def list_files(path: Path | list[Path]) -> list[Path]:
+    """The files a target denotes: the file itself, a directory's immediate
+    contents, or an explicit list the orchestration layer already resolved."""
+    if isinstance(path, list):
+        return list(path)
     if path.is_file():
         return [path]
     return sorted(p for p in path.iterdir() if p.is_file())
 
 
-def set_exif(path: Path, options: SetExifOptions, parallel: bool = False) -> None:
-    """Apply EXIF tags to one file or every file in a directory."""
+def set_exif(path: Path | list[Path], options: SetExifOptions,
+             parallel: bool = False) -> BatchResult[None]:
+    """Apply EXIF tags to one file, every file in a directory, or a file list."""
     params = build_params(options)
     files = list_files(path)
 
@@ -112,7 +117,17 @@ def set_exif(path: Path, options: SetExifOptions, parallel: bool = False) -> Non
         process_params = [str(file)] + params + exiftool.large_file_args(file)
         exiftool.invoke(*process_params)
 
-    run_parallel(files, process, activity="Setting Exif data", parallel=parallel)
+    return run_per_file(files, process, activity="Setting Exif data", parallel=parallel)
+
+
+def write_exif_tags(file: Path, options: SetExifOptions) -> None:
+    """Write tags to one file, raising FileFailure when the write failed.
+
+    A per-file caller sits inside a batch of its own, so the inner failure has
+    to surface as its own: an inner BatchResult nobody reads would swallow it.
+    """
+    if not set_exif(file, options).ok:
+        raise FileFailure("failed to write EXIF tags")
 
 
 @dataclass
@@ -121,8 +136,13 @@ class MissingTagResult:
     missing_tags: list[str]
 
 
-def find_missing_tag(path: Path, tags: list[str], parallel: bool = False) -> list[MissingTagResult]:
-    """Files missing the given tags; zero altitude counts as missing."""
+def find_missing_tag(path: Path | list[Path], tags: list[str],
+                     parallel: bool = False) -> BatchResult[MissingTagResult]:
+    """Files missing the given tags; zero altitude counts as missing.
+
+    A file that cannot be read is counted as failed instead of aborting the
+    batch, so the repair orchestration keeps working on the readable files.
+    """
     files = list_files(path)
 
     def process(file: Path) -> MissingTagResult | None:
@@ -139,8 +159,8 @@ def find_missing_tag(path: Path, tags: list[str], parallel: bool = False) -> lis
                 log.debug(f"Found tag {tag}: [{value}]", target=str(file))
         return MissingTagResult(file=file, missing_tags=missing) if missing else None
 
-    results = run_parallel(files, process, activity="Finding missing tags", parallel=parallel)
-    return [r for r in results if r is not None]
+    batch = run_per_file(files, process, activity="Finding missing tags", parallel=parallel)
+    return BatchResult([r for r in batch.succeeded if r is not None], batch.failed)
 
 
 def print_media_info(path: Path) -> None:

@@ -99,7 +99,13 @@ def get_altitudes(
     retry_count: int = 3,
     timeout: int = 30,
 ) -> list[float | None]:
-    """Query elevations for (lat, lon) points, auto-batched."""
+    """Query elevations for (lat, lon) points, auto-batched.
+
+    Returns exactly one entry per input point, in input order, with None where
+    the API had no elevation for it. Callers pair the result with the points by
+    position, so a batch that comes back short pads with None instead of
+    shifting every later elevation onto the wrong file.
+    """
     key = _resolve_key(api_key)
     if not points:
         return []
@@ -114,11 +120,18 @@ def get_altitudes(
         log.debug(f"Batch {index}/{len(batches)}: {len(batch)} coords, URL length {len(api_url)}")
 
         response = _request_json(api_url, f"Google Elevation API (batch {index}/{len(batches)})", retry_count, timeout)
-        if response.get("status") == "OK":
-            log.debug(f"Batch {index} OK, received {len(response.get('results', []))} results")
-            for result in response.get("results", []):
-                elevation = result.get("elevation")
-                elevations.append(round(elevation, 2) if elevation is not None else None)
+        status = response.get("status")
+        results = response.get("results", [])[:len(batch)]
+        if status == "OK" and len(results) != len(batch):
+            log.debug(f"Batch {index} OK, received {len(results)} result(s) for {len(batch)} point(s)")
+        elif status != "OK":
+            # ZERO_RESULTS（如海面）也算没有高程，补 None 保持与 points 一一对应
+            log.warning(f"Batch {index}/{len(batches)} returned no elevation ({status}); "
+                        f"{len(batch)} point(s) count as missing")
+        for result in results:
+            elevation = result.get("elevation")
+            elevations.append(round(elevation, 2) if elevation is not None else None)
+        elevations.extend([None] * (len(batch) - len(results)))
     return elevations
 
 
