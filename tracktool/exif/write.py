@@ -1,29 +1,19 @@
 """EXIF tag reading and writing through the metadata backend.
 
-Set-Exif accepts four GPS position input formats; Find-MissingTag counts a zero
-altitude as missing; Write-MediaInfo prints what a file records.
+Set-Exif accepts any position spelling Coordinate.parse knows (decimal or DMS)
+and writes it as the four GPS tags a file actually stores; Find-MissingTag
+counts a zero altitude as missing; Write-MediaInfo prints what a file records.
 """
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import log, mediatime
+from .. import coords, log, mediatime
 from ..actions import Action, WriteTags, run
 from ..context import ctx
 from ..errors import UserInputError
 from ..fileutil import BatchResult, run_per_file
 from ..metadata import MediaMetadata, is_missing_altitude
-
-# Set-Exif 的四种 GPS 位置输入格式
-_DEFAULT_PATTERN = re.compile(
-    r"^\d{1,2}°\s*\d{1,2}'\s*\d{1,2}(?:\.\d+)?\"\s*[NS], \s*\d{1,3}°\s*\d{1,2}'\s*\d{1,2}(?:\.\d+)?\"\s*[EW]$")
-_2BULU_PATTERN = re.compile(r"^(-?\d+\.?\d*)\s+(-?\d+\.?\d*)$")
-_GE_PATTERN = re.compile(
-    r"^\d{1,2}°\d{1,2}'\d{1,2}(?:\.\d+)?\"\s+[北南]\s+\d{1,3}°\d{1,2}'\d{1,2}(?:\.\d+)?\"\s+[东西]$")
-_EXIF_PATTERN = re.compile(
-    r"^\d{1,2}\s*deg\s*\d{1,2}'\s*\d{1,2}(?:\.\d+)?\"\s*[NS], "
-    r"\s*\d{1,3}\s*deg\s*\d{1,2}'\s*\d{1,2}(?:\.\d+)?\"\s*[EW]$")
 
 
 class SetExifError(UserInputError):
@@ -41,25 +31,21 @@ class SetExifOptions:
 
 
 def build_position_params(position: str) -> dict[str, str]:
-    """Translate a -Position argument into tags (4 accepted formats)."""
-    m = _2BULU_PATTERN.match(position)
-    if m:
-        latitude, longitude = float(m[1]), float(m[2])
-        if abs(latitude) > 90 or abs(longitude) > 180:
-            raise SetExifError(f"Invalid GPS coordinates: {position}")
-        return {
-            "GPSLatitude": str(abs(latitude)),
-            "GPSLatitudeRef": "N" if latitude >= 0 else "S",
-            "GPSLongitude": str(abs(longitude)),
-            "GPSLongitudeRef": "E" if longitude >= 0 else "W",
-        }
-    if _GE_PATTERN.match(position):
-        converted = (position.replace("北", "N,").replace("南", "S,")
-                     .replace("东", "E").replace("西", "W"))
-        return {"GPSPosition": converted}
-    if _EXIF_PATTERN.match(position) or _DEFAULT_PATTERN.match(position):
-        return {"GPSPosition": position}
-    raise SetExifError(f"Invalid GPS pattern: {position}")
+    """Translate a -Position argument into the four GPS tags a file stores.
+
+    GPSLatitudeRef/GPSLongitudeRef carry the hemisphere, so the numeric tags
+    are stored unsigned; exiftool's composite GPSPosition is built from these
+    four on read, never written.
+    """
+    coordinate = coords.Coordinate.parse(position)
+    if coordinate is None:
+        raise SetExifError(f"Invalid GPS position: {position}")
+    return {
+        "GPSLatitude": str(abs(coordinate.latitude)),
+        "GPSLatitudeRef": "N" if coordinate.latitude >= 0 else "S",
+        "GPSLongitude": str(abs(coordinate.longitude)),
+        "GPSLongitudeRef": "E" if coordinate.longitude >= 0 else "W",
+    }
 
 
 def build_tags(options: SetExifOptions) -> dict[str, str]:

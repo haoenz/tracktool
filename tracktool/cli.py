@@ -218,7 +218,7 @@ def kml_set_altitude(
 @exif_app.command("set")
 def exif_set(
     path: Annotated[Path, typer.Argument(help="File or directory")],
-    position: Annotated[str | None, typer.Option("--position", "-p", help="GPS position (4 formats)")] = None,
+    position: Annotated[str | None, typer.Option("--position", "-p", help="GPS position (decimal or DMS)")] = None,
     altitude: Annotated[float | None, typer.Option("--altitude", "-a", help="GPS altitude")] = None,
     make: Annotated[str | None, typer.Option("--make", help="Camera make")] = None,
     model: Annotated[str | None, typer.Option("--model", help="Camera model")] = None,

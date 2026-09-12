@@ -26,13 +26,28 @@ class TestBuildPositionParams:
         with pytest.raises(SetExifError):
             build_position_params("999 999")
 
-    def test_dms_passthrough(self):
+    def test_dms_exif_style(self):
         tags = build_position_params("39°54'30\"N, 116°23'29\"E")
-        assert tags == {"GPSPosition": "39°54'30\"N, 116°23'29\"E"}
+        assert float(tags["GPSLatitude"]) == pytest.approx(39 + 54 / 60 + 30 / 3600)
+        assert tags["GPSLatitudeRef"] == "N"
+        assert float(tags["GPSLongitude"]) == pytest.approx(116 + 23 / 60 + 29 / 3600)
+        assert tags["GPSLongitudeRef"] == "E"
+
+    def test_dms_deg_style(self):
+        tags = build_position_params("39deg 54'30\"N, 116deg 23'29\"E")
+        assert float(tags["GPSLatitude"]) == pytest.approx(39 + 54 / 60 + 30 / 3600)
+        assert tags["GPSLatitudeRef"] == "N"
 
     def test_google_earth_chinese(self):
         tags = build_position_params("39°54'30\" 北 116°23'29\" 东")
-        assert tags["GPSPosition"].startswith("39°54'30\" N, 116°23'29\" E")
+        assert float(tags["GPSLatitude"]) == pytest.approx(39 + 54 / 60 + 30 / 3600)
+        assert tags["GPSLatitudeRef"] == "N"
+        assert tags["GPSLongitudeRef"] == "E"
+
+    def test_comma_decimal(self):
+        tags = build_position_params("39.908333, 116.391389")
+        assert tags["GPSLatitude"] == "39.908333"
+        assert tags["GPSLongitudeRef"] == "E"
 
 
 class TestBuildTags:

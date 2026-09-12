@@ -28,14 +28,14 @@ class TestCliMainHandler:
     def test_app_error_becomes_clean_exit(self, monkeypatch, capsys):
         # 命令体抛 AppError -> cli_main 记一行 error 并以该异常自带的退出码退出
         def failing_app() -> None:
-            raise SetExifError("Invalid GPS coordinates: 999 999")
+            raise SetExifError("Invalid GPS position: 999 999")
 
         monkeypatch.setattr("tracktool.cli.app", failing_app)
         with pytest.raises(SystemExit) as exc_info:
             cli_main()
         assert exc_info.value.code == cli.EXIT_USER_ERROR == 1
         captured = capsys.readouterr()
-        assert "Invalid GPS coordinates: 999 999" in captured.err
+        assert "Invalid GPS position: 999 999" in captured.err
 
     def test_unexpected_exception_keeps_traceback(self, monkeypatch):
         # AppError 之外的异常（真实 bug）必须原样传播，保留调试现场
