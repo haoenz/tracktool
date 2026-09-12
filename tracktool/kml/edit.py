@@ -6,7 +6,6 @@ Ports Split-Kml / Remove-KmlBadPoints / Merge-Kml / Set-KmlAltitudeFromGoogle
 """
 
 import re
-from datetime import UTC, datetime
 from pathlib import Path
 
 from .. import googleapi, log
@@ -288,8 +287,3 @@ def convert_kml_to_multigeometry(path: Path, output_path: Path | None = None) ->
 def etree_tag(element: xmlutil.etree._Element) -> str:
     qname = xmlutil.etree.QName(element)
     return qname.localname
-
-
-def parse_kml_timestamp(text: str) -> datetime:
-    """'2024-01-01T00:00:00Z' -> aware datetime (UTC)."""
-    return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)

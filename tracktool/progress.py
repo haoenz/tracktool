@@ -26,7 +26,6 @@ def run_parallel[T, R](
     fn: Callable[[T], R],
     workers: int = DEFAULT_WORKERS,
     activity: str = "Processing",
-    show_progress: bool = True,
 ) -> list[R]:
     """Apply fn to every item, in parallel when beneficial.
 
@@ -51,8 +50,6 @@ def run_parallel[T, R](
     def sequential() -> list[R]:
         if len(items) == 1:
             return [fn(items[0])]
-        if not show_progress:
-            return [fn(item) for item in items]
         with progress_factory() as progress:
             task = progress.add_task(activity, total=len(items))
             results = []

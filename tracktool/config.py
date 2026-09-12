@@ -58,9 +58,6 @@ class Config:
     def __setitem__(self, key: str, value: Any) -> None:
         self._data[key] = value
 
-    def get(self, key: str, default: Any = None) -> Any:
-        return self._data.get(key, default if default is not None else DEFAULTS.get(key))
-
     @property
     def log_level(self) -> str:
         level = str(self._data.get("trackToolLogLevel", "INFO")).upper()
