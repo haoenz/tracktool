@@ -9,7 +9,10 @@ the KML side, where a per-file loop re-read and re-parsed the whole archive.
 
 from pathlib import Path
 
+from conftest import InMemoryBackend
+
 from tracktool import googleapi
+from tracktool.context import ctx
 from tracktool.exif import google as exif_google
 from tracktool.exif import resolve as exif_resolve
 from tracktool.exif.write import MissingTagResult
@@ -20,11 +23,16 @@ def _paths(tmp_path: Path, prefix: str, count: int) -> list[Path]:
     return [tmp_path / f"{prefix}{i}.jpg" for i in range(count)]
 
 
+def _install_backend(monkeypatch, files: list[Path], tags: dict[str, str]) -> None:
+    """Every listed file reports the same tags, so what these tests measure is
+    the batch boundary rather than any per-file difference."""
+    monkeypatch.setattr(ctx, "backend", InMemoryBackend({path: dict(tags) for path in files}))
+
+
 class TestOneElevationCallPerSelection:
     def test_one_call_covers_every_file(self, tmp_path: Path, monkeypatch):
         files = _paths(tmp_path, "p", 3)
-        monkeypatch.setattr(exif_google.exiftool, "read_tags",
-                            lambda file, tags: {"GPSLatitude": "39.0", "GPSLongitude": "116.0"})
+        _install_backend(monkeypatch, files, {"GPSLatitude": "39.0", "GPSLongitude": "116.0"})
         queried: list[list[tuple[float, float]]] = []
         monkeypatch.setattr(
             exif_google.googleapi, "get_altitudes",
@@ -41,9 +49,8 @@ class TestOneElevationCallPerSelection:
 
     def test_no_call_when_nothing_needs_altitude(self, tmp_path: Path, monkeypatch):
         files = _paths(tmp_path, "p", 2)
-        monkeypatch.setattr(exif_google.exiftool, "read_tags",
-                            lambda file, tags: {"GPSAltitude": "100", "GPSLatitude": "39.0",
-                                                "GPSLongitude": "116.0"})
+        _install_backend(monkeypatch, files, {"GPSAltitude": "100", "GPSLatitude": "39.0",
+                                              "GPSLongitude": "116.0"})
         queried: list[object] = []
         monkeypatch.setattr(exif_google.googleapi, "get_altitudes",
                             lambda points, api_key=None: queried.append(points))
@@ -54,10 +61,10 @@ class TestOneElevationCallPerSelection:
         assert result.ok
 
     def test_a_directory_target_is_still_one_call(self, tmp_path: Path, monkeypatch):
-        for path in _paths(tmp_path, "p", 4):
+        files = _paths(tmp_path, "p", 4)
+        for path in files:
             path.touch()
-        monkeypatch.setattr(exif_google.exiftool, "read_tags",
-                            lambda file, tags: {"GPSLatitude": "39.0", "GPSLongitude": "116.0"})
+        _install_backend(monkeypatch, files, {"GPSLatitude": "39.0", "GPSLongitude": "116.0"})
         calls: list[int] = []
         monkeypatch.setattr(
             exif_google.googleapi, "get_altitudes",

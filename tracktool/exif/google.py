@@ -5,7 +5,8 @@ Ports Set-ExifAltitudeFromGoogle and Set-ExifLocationFromGoogle.
 
 from pathlib import Path
 
-from .. import exiftool, googleapi, log
+from .. import googleapi, log
+from ..context import ctx
 from ..fileutil import BatchResult, FileFailure, run_per_file
 from .write import SetExifOptions, is_missing_altitude, list_files, write_exif_tags
 
@@ -26,7 +27,7 @@ def set_altitude_from_google(path: Path | list[Path], overwrite: bool = False,
 
     # Step 1: 找出需要补海拔的文件（读取阶段可并行）
     def check_altitude(file: Path) -> tuple[Path, tuple[float, float]] | None:
-        tags = exiftool.read_tags(file, ["GPSAltitude", "GPSLatitude", "GPSLongitude"])
+        tags = ctx.backend.read_tags(file, ["GPSAltitude", "GPSLatitude", "GPSLongitude"])
         altitude = tags.get("GPSAltitude", "")
         if not is_missing_altitude(altitude):
             log.debug(f"GPSAltitude already exists: {altitude}", target=str(file))
@@ -80,7 +81,7 @@ def set_location_from_google(path: Path | list[Path], overwrite: bool = False,
     files = list_files(path)
 
     def process(file: Path) -> None:
-        tags = exiftool.read_tags(file, ["GPSLatitude", "GPSLongitude"])
+        tags = ctx.backend.read_tags(file, ["GPSLatitude", "GPSLongitude"])
         latitude, longitude = tags.get("GPSLatitude"), tags.get("GPSLongitude")
         if latitude is None or longitude is None:
             log.warning("No GPS position found", target=str(file))

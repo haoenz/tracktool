@@ -1,6 +1,6 @@
 """Unit tests for the move_exif_time helpers extracted in issue #9:
-offset/time-diff resolution, shift formatting, the (make, ext) tag-set table,
-and Insta360 filename renaming."""
+offset/time-diff resolution, the (make, ext) tag-set table, and Insta360
+filename renaming."""
 
 import logging
 from datetime import timedelta
@@ -12,7 +12,6 @@ from tracktool.exif.media import (
     MAKE_INSTA360,
     MAKE_SONY,
     _compute_time_shift,
-    _format_shift,
     _rename_insta360,
 )
 
@@ -22,24 +21,24 @@ class TestComputeTimeShift:
     one exiftool call, so this helper needs no tag access of its own."""
 
     def test_time_diff_only(self):
-        assert _compute_time_shift(Path("x.jpg"), "+1h30m", "", MAKE_SONY, "") == (5400, [])
+        assert _compute_time_shift(Path("x.jpg"), "+1h30m", "", MAKE_SONY, "") == (5400, {})
 
     def test_time_diff_negative(self):
-        assert _compute_time_shift(Path("x.jpg"), "-2d", "", MAKE_SONY, "") == (-172800, [])
+        assert _compute_time_shift(Path("x.jpg"), "-2d", "", MAKE_SONY, "") == (-172800, {})
 
-    def test_offset_only_builds_tz_params(self):
-        total, params = _compute_time_shift(Path("x.arw"), "", "+08:00", MAKE_SONY, "+09:00")
+    def test_offset_only_builds_tz_tags(self):
+        total, tz_tags = _compute_time_shift(Path("x.arw"), "", "+08:00", MAKE_SONY, "+09:00")
         assert total == -3600
-        assert params == [
-            "-ExifIFD:OffsetTime=+08:00",
-            "-ExifIFD:OffsetTimeOriginal=+08:00",
-            "-ExifIFD:OffsetTimeDigitized=+08:00",
-        ]
+        assert tz_tags == {
+            "ExifIFD:OffsetTime": "+08:00",
+            "ExifIFD:OffsetTimeOriginal": "+08:00",
+            "ExifIFD:OffsetTimeDigitized": "+08:00",
+        }
 
     def test_offset_missing_tag_defaults_to_plus_8(self, caplog):
-        total, params = _compute_time_shift(Path("x.arw"), "", "+09:00", MAKE_SONY, "")
+        total, tz_tags = _compute_time_shift(Path("x.arw"), "", "+09:00", MAKE_SONY, "")
         assert total == 3600
-        assert params
+        assert tz_tags
         assert "assuming +08:00" in caplog.text
 
     def test_offset_rejected_for_non_sony(self, caplog):
@@ -54,25 +53,7 @@ class TestComputeTimeShift:
 
     def test_offset_not_requested_for_non_sony_is_fine(self):
         # OffsetTime 跳过时非 SONY 不报错：只做 time_diff 平移
-        assert _compute_time_shift(Path("x.mp4"), "+10m", "", MAKE_INSTA360, "") == (600, [])
-
-
-class TestFormatShift:
-    def test_positive(self):
-        sign, offset, shift = _format_shift(5400)
-        assert (sign, offset, shift) == ("+=", "0:0:0 1:30:0", timedelta(hours=1, minutes=30))
-
-    def test_negative_multi_day(self):
-        sign, offset, shift = _format_shift(-3 * 86400 - 61)
-        assert sign == "-="
-        assert offset == "0:0:3 0:1:1"
-        assert shift == timedelta(days=3, minutes=1, seconds=1)
-
-    def test_zero(self):
-        sign, offset, shift = _format_shift(0)
-        assert sign == "+="
-        assert offset == "0:0:0 0:0:0"
-        assert shift == timedelta(0)
+        assert _compute_time_shift(Path("x.mp4"), "+10m", "", MAKE_INSTA360, "") == (600, {})
 
 
 class TestTagSetTable:

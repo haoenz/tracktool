@@ -15,7 +15,8 @@ from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
 
-from . import exiftool, log
+from . import log
+from .context import ctx
 
 # 假定的相机时区：EXIF 未记录 OffsetTime 时的回退值
 DEFAULT_TZ_OFFSET = "+08:00"
@@ -79,7 +80,7 @@ def parse_media_time(tags: Mapping[str, str], default_offset: str = DEFAULT_TZ_O
                      target: str | None = None) -> datetime | None:
     """Pick the highest-priority parseable timestamp out of already-read tags.
 
-    `tags` is keyed by the TIME_TAGS names (exiftool.read_tags output), which
+    `tags` is keyed by the TIME_TAGS names (read_tags output), which
     lets a caller that needs other tags from the same file read them all in one
     call. Returns a timezone-aware datetime, or None if no candidate parses.
     """
@@ -124,7 +125,7 @@ def get_media_time(path: Path, default_offset: str = DEFAULT_TZ_OFFSET) -> datet
     The returned datetime's tzinfo equals the recorded timezone offset; use
     .astimezone(timezone.utc) to compare across sources.
     """
-    return parse_media_time(exiftool.read_tags(path, TIME_TAGS), default_offset, target=str(path))
+    return parse_media_time(ctx.backend.read_tags(path, TIME_TAGS), default_offset, target=str(path))
 
 
 def parse_offset(offset: str) -> int:

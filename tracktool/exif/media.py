@@ -10,7 +10,8 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .. import exiftool, log, mediatime
+from .. import log, mediatime
+from ..context import ctx
 from ..fileutil import BatchResult, FileFailure, run_per_file
 from .write import SetExifOptions, is_missing_altitude, list_files, write_exif_tags
 
@@ -72,7 +73,7 @@ def _parse_tz_offset(offset: str) -> int | None:
 
 
 def _compute_time_shift(file: Path, time_diff: str, offset_time: str, make: str,
-                        current_offset: str) -> tuple[int, list[str]] | None:
+                        current_offset: str) -> tuple[int, dict[str, str]] | None:
     """Resolve the requested time_diff + timezone offset into a signed second
     total plus the EXIF offset-time params to write.
 
@@ -82,7 +83,7 @@ def _compute_time_shift(file: Path, time_diff: str, offset_time: str, make: str,
     value fails to parse).
     """
     total_seconds_offset = 0
-    tz_params: list[str] = []
+    tz_tags: dict[str, str] = {}
 
     if time_diff.strip():
         total_seconds_offset += _parse_time_diff(time_diff)
@@ -108,24 +109,13 @@ def _compute_time_shift(file: Path, time_diff: str, offset_time: str, make: str,
         total_seconds_offset += diff_sec
         log.verbose(f"Setting timezone tags: ExifIFD:OffsetTime from {current_offset} to {offset_time} "
                     f"(diff: {diff_sec:+d} seconds)", target=str(file))
-        tz_params = [
-            f"-ExifIFD:OffsetTime={offset_time}",
-            f"-ExifIFD:OffsetTimeOriginal={offset_time}",
-            f"-ExifIFD:OffsetTimeDigitized={offset_time}",
-        ]
+        tz_tags = {
+            "ExifIFD:OffsetTime": offset_time,
+            "ExifIFD:OffsetTimeOriginal": offset_time,
+            "ExifIFD:OffsetTimeDigitized": offset_time,
+        }
 
-    return total_seconds_offset, tz_params
-
-
-def _format_shift(total_seconds_offset: int) -> tuple[str, str, timedelta]:
-    """Signed second total -> ('-='/'+=', 'D:0:0 HH:MM:SS' offset, timedelta)."""
-    is_negative = total_seconds_offset < 0
-    shift = timedelta(seconds=abs(total_seconds_offset))
-    days, remainder = divmod(int(shift.total_seconds()), 86400)
-    hours, remainder = divmod(remainder, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    sign = "-=" if is_negative else "+="
-    return sign, f"0:0:{days} {hours}:{minutes}:{seconds}", shift
+    return total_seconds_offset, tz_tags
 
 
 def _rename_insta360(file: Path, shift: timedelta, is_negative: bool) -> None:
@@ -153,41 +143,34 @@ def move_exif_time(path: Path | list[Path], time_diff: str = "", offset_time: st
     def process(file: Path) -> None:
         ext = file.suffix.lower()
         # Make 与 OffsetTime 一次读齐，每个文件只往返 exiftool 一次
-        tags = exiftool.read_tags(file, ["Make", "ExifIFD:OffsetTime"])
+        tags = ctx.backend.read_tags(file, ["Make", "ExifIFD:OffsetTime"])
         make = tags.get("Make", "")
 
         resolved = _compute_time_shift(file, time_diff, offset_time, make,
                                        tags.get("ExifIFD:OffsetTime", ""))
         if resolved is None:
             raise FileFailure("time shift not applicable to this file")
-        total_seconds_offset, tz_params = resolved
+        total_seconds_offset, tz_tags = resolved
 
         if total_seconds_offset == 0:
-            if tz_params:
-                params = [str(file), *tz_params]
-                if overwrite:
-                    params.append("-overwrite_original")
-                params += exiftool.large_file_args(file)
-                exiftool.invoke(*params)
+            if tz_tags:
+                ctx.backend.write_tags(file, tz_tags, overwrite=overwrite)
                 log.verbose("Applied timezone offset tags but no time-shift needed", target=str(file))
             else:
                 log.verbose("No timezone or time-shift changes required", target=str(file))
             return
 
-        sign, offset, shift = _format_shift(total_seconds_offset)
-        log.verbose(f"Shifting time by {sign}{offset}", target=str(file))
+        shift = timedelta(seconds=total_seconds_offset)
+        log.verbose(f"Shifting time by {shift}", target=str(file))
 
         tag_set = _TAG_SETS.get((make, ext))
         if tag_set is None:
             log.error(f"Unsupported camera/extension: {make} {ext}; file skipped", target=str(file))
             raise FileFailure(f"unsupported camera/extension: {make} {ext}")
 
-        params = [str(file), *(f"-{tag}{sign}{offset}" for tag in tag_set), *tz_params]
-        if overwrite:
-            params.append("-overwrite_original")
-        params += exiftool.large_file_args(file)
-
-        exiftool.invoke(*params)
+        ctx.backend.shift_tags(file, tag_set, shift, overwrite=overwrite)
+        if tz_tags:
+            ctx.backend.write_tags(file, tz_tags, overwrite=overwrite)
 
         if make == MAKE_INSTA360 and ext == ".mp4":
             _rename_insta360(file, shift, total_seconds_offset < 0)
@@ -202,7 +185,7 @@ def move_altitude(path: Path | list[Path], offset: float, overwrite: bool = Fals
 
     def process(file: Path) -> None:
         # -n 模式读到的已是按 GPSAltitudeRef 定了符号的十进制（Below Sea Level 为负）
-        altitude = exiftool.get_media_tag(file, "GPSAltitude")
+        altitude = ctx.backend.read_tags(file, ["GPSAltitude"]).get("GPSAltitude", "")
         if is_missing_altitude(altitude):
             log.warning("No GPSAltitude found, skipping", target=str(file))
             raise FileFailure("no GPSAltitude to shift")
@@ -227,7 +210,7 @@ def convert_to_mp4(path: Path | list[Path], make: str | None = None, model: str 
     def process(file: Path) -> None:
         output_path = output_dir / f"{file.stem}.mp4"
         # 时间标签一次读齐；QuickTime:CreateDate 已在 TIME_TAGS 内，MP4 分支直接取用
-        tags = exiftool.read_tags(file, mediatime.TIME_TAGS)
+        tags = ctx.backend.read_tags(file, mediatime.TIME_TAGS)
         media_time = mediatime.parse_media_time(tags, offset_time, target=str(file))
 
         if media_time is None:

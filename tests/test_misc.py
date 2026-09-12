@@ -1,4 +1,4 @@
-"""Tests for dedup, config, and Set-Exif position param building."""
+"""Tests for dedup, config, and Set-Exif tag building."""
 
 import json
 from pathlib import Path
@@ -7,46 +7,46 @@ import pytest
 
 from tracktool import dedup
 from tracktool.config import Config
-from tracktool.exif.write import SetExifError, SetExifOptions, build_params, build_position_params
+from tracktool.exif.write import SetExifError, SetExifOptions, build_position_params, build_tags
 
 
 class TestBuildPositionParams:
     def test_decimal_2bulu_style(self):
-        params = build_position_params("39.908333 116.391389")
-        assert "-GPSLatitude=39.908333" in params
-        assert "-GPSLatitudeRef=N" in params
-        assert "-GPSLongitudeRef=E" in params
+        tags = build_position_params("39.908333 116.391389")
+        assert tags["GPSLatitude"] == "39.908333"
+        assert tags["GPSLatitudeRef"] == "N"
+        assert tags["GPSLongitudeRef"] == "E"
 
     def test_negative_decimal(self):
-        params = build_position_params("-33.865 151.209")
-        assert "-GPSLatitude=33.865" in params
-        assert "-GPSLatitudeRef=S" in params
+        tags = build_position_params("-33.865 151.209")
+        assert tags["GPSLatitude"] == "33.865"
+        assert tags["GPSLatitudeRef"] == "S"
 
     def test_invalid_raises(self):
         with pytest.raises(SetExifError):
             build_position_params("999 999")
 
     def test_dms_passthrough(self):
-        params = build_position_params("39°54'30\"N, 116°23'29\"E")
-        assert params == ["-GPSPosition=39°54'30\"N, 116°23'29\"E"]
+        tags = build_position_params("39°54'30\"N, 116°23'29\"E")
+        assert tags == {"GPSPosition": "39°54'30\"N, 116°23'29\"E"}
 
     def test_google_earth_chinese(self):
-        params = build_position_params("39°54'30\" 北 116°23'29\" 东")
-        assert params[0].startswith("-GPSPosition=39°54'30\" N, 116°23'29\" E")
+        tags = build_position_params("39°54'30\" 北 116°23'29\" 东")
+        assert tags["GPSPosition"].startswith("39°54'30\" N, 116°23'29\" E")
 
 
-class TestBuildParams:
+class TestBuildTags:
     def test_altitude_sign(self):
-        positive = build_params(SetExifOptions(altitude=100))
-        negative = build_params(SetExifOptions(altitude=-50))
-        assert "-GPSAltitudeRef=Above Sea Level" in positive
-        assert "-GPSAltitudeRef=Below Sea Level" in negative
-        assert "-GPSAltitude=50" in negative
+        positive = build_tags(SetExifOptions(altitude=100))
+        negative = build_tags(SetExifOptions(altitude=-50))
+        assert positive["GPSAltitudeRef"] == "Above Sea Level"
+        assert negative["GPSAltitudeRef"] == "Below Sea Level"
+        assert negative["GPSAltitude"] == "50"
 
-    def test_overwrite_and_tags(self):
-        params = build_params(SetExifOptions(tags={"IPTC:City": "Beijing"}, overwrite=True))
-        assert "-IPTC:City=Beijing" in params
-        assert "-overwrite_original" in params
+    def test_tags_are_handed_over_verbatim(self):
+        # overwrite 不在标签里：它是 write_tags 的开关，由后端负责参数化
+        tags = build_tags(SetExifOptions(tags={"IPTC:City": "Beijing"}))
+        assert tags["IPTC:City"] == "Beijing"
 
 
 class TestConfig:

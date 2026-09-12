@@ -19,6 +19,9 @@ Batch mode uses the -stay_open -@ argfile protocol for a persistent exiftool
 process, eliminating the per-file process startup cost. One process is not
 safe to share across threads, so the read helpers use a thread-local
 persistent process.
+
+ExiftoolBackend is what the rest of the package talks to: it implements the
+MetadataBackend protocol, so exiftool's argument syntax never leaves this file.
 """
 
 import json
@@ -27,12 +30,13 @@ import re
 import subprocess
 import tempfile
 import threading
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 from . import log
-from .context import ctx
+from .metadata import MetadataBackend
 
 ERROR_PATTERN = re.compile(r"\bError\b")
 
@@ -49,6 +53,9 @@ class ExiftoolError(Exception):
 
 
 def _filters() -> list[re.Pattern[str]]:
+    # 延迟导入：context 在导入期就要构造默认后端，而默认后端就是本模块
+    from .context import ctx
+
     return [re.compile(f) for f in ctx.config.output_filters]
 
 
@@ -242,7 +249,7 @@ def close_thread_process() -> None:
 LARGE_FILE_THRESHOLD = 4 * 1024**3  # 4 GiB, mirrors $_.Length -ge 4GB
 
 
-def large_file_args(path: Path) -> list[str]:
+def _large_file_args(path: Path) -> list[str]:
     """-api largefilesupport=1 for files >= 4 GiB."""
     try:
         if path.stat().st_size >= LARGE_FILE_THRESHOLD:
@@ -270,3 +277,38 @@ def read_tags(path: Path, tags: Sequence[str]) -> dict[str, str]:
 def get_media_tag(path: Path, tag: str) -> str:
     """Read a single tag; empty string when absent."""
     return read_tags(path, [tag]).get(tag, "")
+
+
+def _shift_amount(delta: timedelta) -> str:
+    """A timedelta as the operand of exiftool's date shift ('0:0:1 2:30:00').
+
+    exiftool shifts a date tag with `-Tag+=operand` / `-Tag-=operand`, where the
+    operand counts from a zero date as `D:0:0 HH:MM:SS`. The sign lives in the
+    operator, so only the magnitude is rendered here.
+    """
+    days, remainder = divmod(abs(int(delta.total_seconds())), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"0:0:{days} {hours}:{minutes}:{seconds}"
+
+
+class ExiftoolBackend(MetadataBackend):
+    """The MetadataBackend over a persistent exiftool process."""
+
+    def read_tags(self, path: Path, tags: Sequence[str]) -> dict[str, str]:
+        return read_tags(path, tags)
+
+    def write_tags(self, path: Path, tags: Mapping[str, str], *, overwrite: bool = False) -> None:
+        params = [str(path), *(f"-{tag}={value}" for tag, value in tags.items())]
+        if overwrite:
+            params.append("-overwrite_original")
+        invoke(*params, *_large_file_args(path))
+
+    def shift_tags(self, path: Path, tags: Sequence[str], delta: timedelta,
+                   *, overwrite: bool = False) -> None:
+        sign = "-=" if delta < timedelta(0) else "+="
+        operand = _shift_amount(delta)
+        params = [str(path), *(f"-{tag}{sign}{operand}" for tag in tags)]
+        if overwrite:
+            params.append("-overwrite_original")
+        invoke(*params, *_large_file_args(path))

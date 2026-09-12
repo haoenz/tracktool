@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .. import coords, exiftool, log, mediatime
+from .. import coords, log, mediatime
+from ..context import ctx
 from ..fileutil import BatchResult, FileFailure, run_per_file
 from ..kml import archive, xmlutil
 from .write import SetExifOptions, is_missing_altitude, list_files, write_exif_tags
@@ -159,7 +160,7 @@ def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = No
 
     def process(file: Path) -> None:
         # 时间标签与 GPS 标签一次读齐，每个文件只往返 exiftool 一次
-        tags = exiftool.read_tags(
+        tags = ctx.backend.read_tags(
             file, [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"])
 
         latitude_text, longitude_text = tags.get("GPSLatitude"), tags.get("GPSLongitude")

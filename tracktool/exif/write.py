@@ -1,4 +1,4 @@
-"""EXIF tag reading and writing via exiftool.
+"""EXIF tag reading and writing through the metadata backend.
 
 Ports Set-Exif (four GPS position input formats), Find-MissingTag (zero
 altitude counts as missing), Write-MediaInfo.
@@ -8,7 +8,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import exiftool, log, mediatime
+from .. import log, mediatime
+from ..context import ctx
 from ..fileutil import BatchResult, FileFailure, run_per_file
 
 # Set-Exif 的四种 GPS 位置输入格式
@@ -51,50 +52,42 @@ class SetExifOptions:
     overwrite: bool = False
 
 
-def build_position_params(position: str) -> list[str]:
-    """Translate a -Position argument into exiftool params (4 accepted formats)."""
+def build_position_params(position: str) -> dict[str, str]:
+    """Translate a -Position argument into tags (4 accepted formats)."""
     m = _2BULU_PATTERN.match(position)
     if m:
         latitude, longitude = float(m[1]), float(m[2])
         if abs(latitude) > 90 or abs(longitude) > 180:
             raise SetExifError(f"Invalid GPS coordinates: {position}")
-        lat_ref = "N" if latitude >= 0 else "S"
-        lon_ref = "E" if longitude >= 0 else "W"
-        params = [
-            f"-GPSLatitude={abs(latitude)}",
-            f"-GPSLatitudeRef={lat_ref}",
-            f"-GPSLongitude={abs(longitude)}",
-            f"-GPSLongitudeRef={lon_ref}",
-        ]
-        return params
+        return {
+            "GPSLatitude": str(abs(latitude)),
+            "GPSLatitudeRef": "N" if latitude >= 0 else "S",
+            "GPSLongitude": str(abs(longitude)),
+            "GPSLongitudeRef": "E" if longitude >= 0 else "W",
+        }
     if _GE_PATTERN.match(position):
         converted = (position.replace("北", "N,").replace("南", "S,")
                      .replace("东", "E").replace("西", "W"))
-        return [f"-GPSPosition={converted}"]
+        return {"GPSPosition": converted}
     if _EXIF_PATTERN.match(position) or _DEFAULT_PATTERN.match(position):
-        return [f"-GPSPosition={position}"]
+        return {"GPSPosition": position}
     raise SetExifError(f"Invalid GPS pattern: {position}")
 
 
-def build_params(options: SetExifOptions) -> list[str]:
-    params: list[str] = []
+def build_tags(options: SetExifOptions) -> dict[str, str]:
+    """The tags one Set-Exif call assigns; overwrite is a write flag, not a tag."""
+    tags: dict[str, str] = {}
     if options.position:
-        params += build_position_params(options.position)
+        tags.update(build_position_params(options.position))
     if options.altitude is not None:
-        if options.altitude < 0:
-            params.append("-GPSAltitudeRef=Below Sea Level")
-        else:
-            params.append("-GPSAltitudeRef=Above Sea Level")
-        params.append(f"-GPSAltitude={abs(options.altitude)}")
+        tags["GPSAltitudeRef"] = "Below Sea Level" if options.altitude < 0 else "Above Sea Level"
+        tags["GPSAltitude"] = str(abs(options.altitude))
     if options.make:
-        params.append(f"-Make={options.make}")
+        tags["Make"] = options.make
     if options.model:
-        params.append(f"-Model={options.model}")
-    if options.overwrite:
-        params.append("-overwrite_original")
-    for tag, value in options.tags.items():
-        params.append(f"-{tag}={value}")
-    return params
+        tags["Model"] = options.model
+    tags.update(options.tags)
+    return tags
 
 
 def list_files(path: Path | list[Path]) -> list[Path]:
@@ -110,12 +103,11 @@ def list_files(path: Path | list[Path]) -> list[Path]:
 def set_exif(path: Path | list[Path], options: SetExifOptions,
              parallel: bool = False) -> BatchResult[None]:
     """Apply EXIF tags to one file, every file in a directory, or a file list."""
-    params = build_params(options)
+    tags = build_tags(options)
     files = list_files(path)
 
     def process(file: Path) -> None:
-        process_params = [str(file)] + params + exiftool.large_file_args(file)
-        exiftool.invoke(*process_params)
+        ctx.backend.write_tags(file, tags, overwrite=options.overwrite)
 
     return run_per_file(files, process, activity="Setting Exif data", parallel=parallel)
 
@@ -147,7 +139,7 @@ def find_missing_tag(path: Path | list[Path], tags: list[str],
 
     def process(file: Path) -> MissingTagResult | None:
         # 全部待查标签一次读齐，N 个标签仍是一次往返
-        values = exiftool.read_tags(file, tags)
+        values = ctx.backend.read_tags(file, tags)
         missing: list[str] = []
         for tag in tags:
             value = values.get(tag, "")
@@ -165,7 +157,7 @@ def find_missing_tag(path: Path | list[Path], tags: list[str],
 
 def print_media_info(path: Path) -> None:
     """Print timestamp, GPS position and altitude of a file."""
-    tags = exiftool.read_tags(path, [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"])
+    tags = ctx.backend.read_tags(path, [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"])
     media_time = mediatime.parse_media_time(tags, target=str(path))
     print(media_time.isoformat() if media_time else "")
     print(" ".join(v for v in (tags.get("GPSLatitude", ""), tags.get("GPSLongitude", "")) if v))
