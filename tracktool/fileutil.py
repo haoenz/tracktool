@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import log
+from .context import ctx
 from .progress import run_parallel
 
 # Sentinel marking a failed item inside run_per_file; unreachable by callers.
@@ -134,7 +135,8 @@ def run_per_file[T, R](
             _quarantine(file, failed_folder_name, dry_run)
             return _FAILED
 
-    raw = run_parallel(files, guarded, activity=activity, parallel=parallel)
+    raw = run_parallel(files, guarded, parallel=parallel,
+                       on_progress=ctx.reporter(activity))
 
     # 并行执行的结果仍按输入顺序返回，失败清单也据此保持稳定
     result: BatchResult[R] = BatchResult()

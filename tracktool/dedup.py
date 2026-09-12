@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import log
+from .context import ctx
 from .discover import leaf_files
 from .progress import run_parallel
 
@@ -68,8 +69,8 @@ def _update_files_hash_log(files: list[Path], hash_log: dict) -> tuple[int, int]
 
         hash_log[file_name] = {"MD5": _md5(file), "LastWriteTime": file_time}
 
-    # I/O 密集且无 --parallel 旗标：哈希始终走线程池，沿用原 ThrottleLimit 行为
-    run_parallel(files, process, activity="Hashing files", parallel=True)
+    # I/O 密集且无 --parallel 旗标：哈希始终走线程池
+    run_parallel(files, process, parallel=True, on_progress=ctx.reporter("Hashing files"))
     return counters["add"], counters["update"]
 
 
@@ -172,8 +173,8 @@ def clear_hash_log(hash_log_path: Path) -> None:
             return False
         return True
 
-    kept = run_parallel(list(hash_log.keys()), file_still_exists,
-                        activity="Clearing hash log", parallel=True)
+    kept = run_parallel(list(hash_log.keys()), file_still_exists, parallel=True,
+                        on_progress=ctx.reporter("Clearing hash log"))
     removed_count = len(hash_log) - sum(1 for keep in kept if keep)
 
     if removed_count:

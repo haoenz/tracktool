@@ -2,10 +2,11 @@
 
 The CLI entry point builds a single AppContext and the rest of the package
 reads it here: one way to reach the config, one way to reach the metadata
-backend. Before this there were two ways to reach the config — a module
-singleton, plus three functions carrying an extra `cfg` argument whose only
-purpose was to let a test inject one; which of the two a given function used
-was historical accident rather than design.
+backend, one way to reach a progress reporter. Before this there were two
+ways to reach the config — a module singleton, plus three functions carrying
+an extra `cfg` argument whose only purpose was to let a test inject one;
+which of the two a given function used was historical accident rather than
+design.
 
 Tests replace a whole field instead of mutating a shared object:
 
@@ -17,6 +18,7 @@ restores the attribute it patched, but would not undo writes made into the
 object behind it.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .config import Config
@@ -31,12 +33,25 @@ def _exiftool_backend() -> MetadataBackend:
     return ExiftoolBackend()
 
 
+def _default_reporter() -> Callable[[str], Callable[[int, int], None]]:
+    """Built on first use for the same cycle reason; the rich import itself
+    also stays inside the function, so the execution layer never needs it."""
+    from .progress import rich_reporter
+
+    return rich_reporter
+
+
 @dataclass
 class AppContext:
-    """The dependencies one command run needs, built once at the entry point."""
+    """The dependencies one command run needs, built once at the entry point.
+
+    `reporter` turns an activity name into a progress callback `(done, total)`;
+    the execution layers call it, the entry point decides what it draws.
+    """
 
     config: Config = field(default_factory=Config)
     backend: MetadataBackend = field(default_factory=_exiftool_backend)
+    reporter: Callable[[str], Callable[[int, int], None]] = field(default_factory=_default_reporter)
 
 
 ctx = AppContext()
