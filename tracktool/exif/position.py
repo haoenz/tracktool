@@ -79,13 +79,17 @@ def _load_kml_cache(zip_path: Path) -> dict[str, str]:
     return cache
 
 
+MAX_TIME_DIFF_SECONDS = 60
+MAX_DISTANCE_METERS = 100
+
+
 @dataclass
 class SetPositionOptions:
-    max_time_diff_seconds: int = 60
+    max_time_diff_seconds: int = MAX_TIME_DIFF_SECONDS
     overwrite: bool = False
     force: bool = False
     verify_existing_gps: bool = False
-    max_distance_meters: int = 100
+    max_distance_meters: int = MAX_DISTANCE_METERS
     multiday: bool = False
     failed_folder_name: str | None = None
 

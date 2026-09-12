@@ -15,6 +15,7 @@ from .exif import media as exif_media
 from .exif import position as exif_position
 from .exif import resolve as exif_resolve
 from .exif import write as exif_write
+from .exif.position import MAX_DISTANCE_METERS, MAX_TIME_DIFF_SECONDS
 from .exif.write import SetExifError
 from .exiftool import ExiftoolError
 from .googleapi import GoogleApiError
@@ -233,11 +234,13 @@ def exif_find_missing(
 def exif_set_position(
     path: Annotated[Path, typer.Argument(help="File or directory")],
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
-    max_time_diff: Annotated[int, typer.Option("--max-time-diff", help="Max seconds outside track duration")] = 60,
+    max_time_diff: Annotated[int, typer.Option(
+        "--max-time-diff", help="Max seconds outside track duration")] = MAX_TIME_DIFF_SECONDS,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     force: Annotated[bool, typer.Option("--force", help="Update even when GPS exists")] = False,
     verify: Annotated[bool, typer.Option("--verify", help="Verify existing GPS against KML")] = False,
-    max_distance: Annotated[int, typer.Option("--max-distance", help="Verification threshold in meters")] = 100,
+    max_distance: Annotated[int, typer.Option(
+        "--max-distance", help="Verification threshold in meters")] = MAX_DISTANCE_METERS,
     multiday: Annotated[bool, typer.Option("--multiday", help="Also check ±1 day tracks")] = False,
     failed_folder: Annotated[str | None, typer.Option("--failed-folder", help="Move failures here")] = None,
     parallel: ParallelOpt = False,

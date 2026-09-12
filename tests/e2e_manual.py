@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from tracktool import exiftool, mediatime
-from tracktool.exif.position import SetPositionOptions, set_position_from_kml
+from tracktool.exif.position import MAX_TIME_DIFF_SECONDS, SetPositionOptions, set_position_from_kml
 from tracktool.exif.write import SetExifOptions, find_missing_tag, set_exif
 
 # 带完整 EXIF 的最小 JPEG（含 DateTimeOriginal），由 exiftool 生成更可靠：
@@ -67,7 +67,7 @@ def main() -> None:
         # ── 验证 2：set_position_from_kml 写入 GPS ──
         set_position_from_kml(
             media_dir, str(zip_path),
-            options=SetPositionOptions(max_time_diff_seconds=60, overwrite=True,
+            options=SetPositionOptions(max_time_diff_seconds=MAX_TIME_DIFF_SECONDS, overwrite=True,
                                        failed_folder_name="TrackPosFailed"))
 
         # photo0: 00:00 UTC 精确匹配 -> (39.0, 116.0, 100)
