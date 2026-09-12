@@ -16,7 +16,7 @@ from . import log
 from .progress import run_parallel
 
 
-def get_leaf_files(path: Path, include: str = ".*", exclude: str = "^$") -> list[Path]:
+def _get_leaf_files(path: Path, include: str = ".*", exclude: str = "^$") -> list[Path]:
     """Recursively scan a directory, filtering by regex on the full path."""
     include_re = re.compile(include, re.IGNORECASE)
     exclude_re = re.compile(exclude, re.IGNORECASE)
@@ -96,7 +96,7 @@ def get_directories_hash(directories: list[Path], include: str = ".*", exclude: 
 
     target_files: dict[Path, list[Path]] = {}
     for directory in directories:
-        target_files[directory] = get_leaf_files(directory, include, exclude)
+        target_files[directory] = _get_leaf_files(directory, include, exclude)
 
     add_count = update_count = 0
     for directory, files in target_files.items():
@@ -138,19 +138,17 @@ def compare_directories(directories: list[Path], include: str = ".*", exclude: s
     dir_hashes = get_directories_hash(directories, include, exclude, hash_log_path)
     log.info(f"Comparing {len(directories)} directories")
 
+    md5_sets = [{h.md5 for h in d.hashes} for d in dir_hashes]
+
     result: dict[Path, list[Path]] = {}
-    if unique:
-        for current in dir_hashes:
-            other_md5s = {h.md5 for other in dir_hashes if other is not current for h in other.hashes}
-            result[current.directory] = [h.path for h in current.hashes if h.md5 not in other_md5s]
-    else:
-        for current in dir_hashes:
-            others = [other for other in dir_hashes if other is not current]
-            files = []
-            for h in current.hashes:
-                if any(h.md5 not in {o.md5 for o in other.hashes} for other in others):
-                    files.append(h.path)
-            result[current.directory] = files
+    for current in dir_hashes:
+        others = [s for d, s in zip(dir_hashes, md5_sets, strict=True) if d is not current]
+        if unique:
+            result[current.directory] = [h.path for h in current.hashes
+                                         if not any(h.md5 in s for s in others)]
+        else:
+            result[current.directory] = [h.path for h in current.hashes
+                                         if any(h.md5 not in s for s in others)]
     return result
 
 
@@ -178,13 +176,14 @@ def clear_hash_log(hash_log_path: Path) -> None:
     """Drop entries whose files no longer exist."""
     hash_log = _load_hash_log(hash_log_path)
 
-    def check(path_str: str) -> bool:
+    def file_still_exists(path_str: str) -> bool:
         if not Path(path_str).is_file():
             log.debug("File no longer exists", target=path_str)
             return False
         return True
 
-    kept = run_parallel(list(hash_log.keys()), check, activity="Clearing hash log", parallel=True)
+    kept = run_parallel(list(hash_log.keys()), file_still_exists,
+                        activity="Clearing hash log", parallel=True)
     removed_count = len(hash_log) - sum(1 for keep in kept if keep)
 
     if removed_count:
