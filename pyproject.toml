@@ -19,6 +19,8 @@ tracktool = "tracktool.cli:cli_main"
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    "mypy>=1.13",
+    "import-linter>=2.0",
 ]
 
 [build-system]
@@ -34,3 +36,53 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: tests that need a real external tool (exiftool, ffmpeg) instead of doubles",
+]
+
+[tool.mypy]
+python_version = "3.14"
+files = ["tracktool"]
+# typer 的装饰器与 rich 的动态形态产生噪声；先兜住领域代码的类型错误
+disable_error_code = ["misc", "func-returns-value", "abstract"]
+warn_unused_ignores = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["geopy.*", "lxml.*"]
+ignore_missing_imports = true
+
+[tool.importlinter]
+root_packages = ["tracktool"]
+
+# 分层：cli 只在顶上；功能包在中间；编排在功能包之下；底层按实际依赖边排。
+[[tool.importlinter.contracts]]
+name = "cli on top, features in the middle, plumbing below"
+type = "layers"
+layers = [
+    "tracktool.cli",
+    "tracktool.exif | tracktool.dedup",
+    "tracktool.kml",
+    "tracktool.actions | tracktool.workspace | tracktool.discover | tracktool.googleapi | tracktool.mediatime",
+    "tracktool.exiftool | tracktool.fileutil",
+    "tracktool.context",
+    "tracktool.log",
+    "tracktool.config",
+    "tracktool.errors | tracktool.metadata | tracktool.coords | tracktool.progress",
+]
+ignore_imports = [
+    # AppContext 的后端工厂按导入期环规避约定懒加载 exiftool
+    "tracktool.context -> tracktool.exiftool",
+    # 进度回调的默认实现同样懒加载，执行层不依赖 rich
+    "tracktool.context -> tracktool.progress",
+]
+
+# exif 只读 kml 的轨迹模型与 XML 工具；归档编排（进 collection、搬备份）不归它管
+[[tool.importlinter.contracts]]
+name = "exif geotags against the track model, not the archive orchestration"
+type = "forbidden"
+source_modules = ["tracktool.exif"]
+forbidden_modules = ["tracktool.kml.archive", "tracktool.kml.collections", "tracktool.kml.kmlfile"]

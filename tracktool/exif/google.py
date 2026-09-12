@@ -106,15 +106,17 @@ def set_altitude_from_google(path: Path | list[Path], overwrite: bool = False,
     # Step 2: 查询 Google 高程 API（客户端按 512 点 / URL 长度分批，一次调用覆盖全部文件）
     elevations = googleapi.get_altitudes([query.point for query in queries], api_key=api_key)
 
-    # Step 3: 写回海拔
-    def update(item: tuple[Lookup, float | None]) -> list[Action]:
-        query, altitude = item
+    # Step 3: 写回海拔（按文件路径对齐：一个文件的判定至多产出一次查询）
+    elevation_by_file = dict(zip((query.file for query in queries), elevations, strict=True))
+
+    def update(file: Path) -> list[Action]:
+        altitude = elevation_by_file[file]
         if altitude is None:
-            return run([Failed(query.file, "no elevation data returned by the API")])
-        return run([WriteTags(query.file, build_tags(SetExifOptions(altitude=altitude)),
+            return run([Failed(file, "no elevation data returned by the API")])
+        return run([WriteTags(file, build_tags(SetExifOptions(altitude=altitude)),
                               overwrite=overwrite)])
 
-    result.merge(run_per_file(list(zip(queries, elevations, strict=True)), update,
+    result.merge(run_per_file(list(elevation_by_file), update,
                               activity="Updating altitude",
                               failed_folder_name=failed_folder_name, parallel=parallel))
     log.info(f"Altitude update completed for {len(queries)} file(s)")

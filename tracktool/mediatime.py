@@ -1,4 +1,4 @@
-"""Media timestamp extraction (Get-MediaTime).
+"""Media timestamp extraction.
 
 Tag priority with three timezone strategies:
 - Separate: offset lives in its own EXIF tags (ExifIFD:OffsetTime*), defaults to +08:00
@@ -11,6 +11,7 @@ timezone, not necessarily local time).
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -31,22 +32,28 @@ class TZStrategy(StrEnum):
     UTC = "utc"
 
 
+@dataclass(frozen=True)
+class TagConfig:
+    """One candidate timestamp tag: where its time lives, where its offset does."""
+
+    tag: str
+    tz: TZStrategy
+    offset_tags: list[str] = field(default_factory=list)
+
+
 _TAG_CONFIGS = [
-    {
-        "tag": "ExifIFD:DateTimeOriginal",
-        "tz": TZStrategy.SEPARATE,
-        "offset_tags": ["ExifIFD:OffsetTimeOriginal", "ExifIFD:OffsetTime", "ExifIFD:OffsetTimeDigitized"],
-    },
-    {"tag": "H264:DateTimeOriginal", "tz": TZStrategy.INCLUDE},
-    {"tag": "XMP-exif:DateTimeOriginal", "tz": TZStrategy.INCLUDE},
-    {"tag": "QuickTime:CreateDate", "tz": TZStrategy.UTC},
-    {"tag": "Track1:TrackCreateDate", "tz": TZStrategy.UTC},
+    TagConfig("ExifIFD:DateTimeOriginal", TZStrategy.SEPARATE,
+              ["ExifIFD:OffsetTimeOriginal", "ExifIFD:OffsetTime", "ExifIFD:OffsetTimeDigitized"]),
+    TagConfig("H264:DateTimeOriginal", TZStrategy.INCLUDE),
+    TagConfig("XMP-exif:DateTimeOriginal", TZStrategy.INCLUDE),
+    TagConfig("QuickTime:CreateDate", TZStrategy.UTC),
+    TagConfig("Track1:TrackCreateDate", TZStrategy.UTC),
 ]
 
 # 全部候选时间标签，一次调用读齐；需要与其它标签合批时复用这份清单
 TIME_TAGS: tuple[str, ...] = tuple(dict.fromkeys(
-    [cfg["tag"] for cfg in _TAG_CONFIGS]
-    + [tag for cfg in _TAG_CONFIGS for tag in cfg.get("offset_tags", [])]
+    [cfg.tag for cfg in _TAG_CONFIGS]
+    + [tag for cfg in _TAG_CONFIGS for tag in cfg.offset_tags]
 ))
 
 # "yyyy:MM:dd HH:mm:ss" with optional trailing "+HH:MM" or "Z"
@@ -86,12 +93,12 @@ def parse_media_time(tags: Mapping[str, str], default_offset: str = DEFAULT_TZ_O
     call. Returns a timezone-aware datetime, or None if no candidate parses.
     """
     for cfg in _TAG_CONFIGS:
-        time_str = tags.get(cfg["tag"], "")
+        time_str = tags.get(cfg.tag, "")
         if not time_str:
             continue
 
         try:
-            match cfg["tz"]:
+            match cfg.tz:
                 case TZStrategy.UTC:
                     if time_str.endswith("Z"):
                         media_time = _aware(_naive(time_str[:-1]), "Z")
@@ -102,7 +109,7 @@ def parse_media_time(tags: Mapping[str, str], default_offset: str = DEFAULT_TZ_O
                     if m and m[7]:  # already carries an offset
                         media_time = _aware(_naive(time_str), m[7])
                     else:
-                        offset = next((tags.get(tag, "") for tag in cfg["offset_tags"] if tags.get(tag)), "")
+                        offset = next((tags.get(tag, "") for tag in cfg.offset_tags if tags.get(tag)), "")
                         media_time = _aware(_naive(time_str), offset or default_offset)
                 case TZStrategy.INCLUDE:
                     m = _TIME_PATTERN.match(time_str)
@@ -110,10 +117,10 @@ def parse_media_time(tags: Mapping[str, str], default_offset: str = DEFAULT_TZ_O
                         raise ValueError(f"No embedded timezone: {time_str}")
                     media_time = _aware(_naive(time_str), m[7] or m[8])
         except ValueError:
-            log.debug(f"Failed to parse {cfg['tag']}: {time_str}", target=target)
+            log.debug(f"Failed to parse {cfg.tag}: {time_str}", target=target)
             continue
 
-        log.debug(f"Using {cfg['tag']}: {media_time}", target=target)
+        log.debug(f"Using {cfg.tag}: {media_time}", target=target)
         return media_time
 
     log.debug("No valid timestamp found", target=target)

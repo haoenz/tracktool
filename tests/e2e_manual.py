@@ -2,25 +2,22 @@
 write/read roundtrip, GPS position matching from a KML ZIP archive."""
 
 import shutil
+import sys
 import tempfile
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from tracktool import exiftool, mediatime
-from tracktool.exif.position import MAX_TIME_DIFF_SECONDS, SetPositionOptions, set_position_from_kml
-from tracktool.exif.write import SetExifOptions, find_missing_tag, set_exif
+sys.path.insert(0, str(Path(__file__).parent))  # manual script: put tests/ on the path
+from fixtures.media import make_test_jpeg  # noqa: E402
 
-# 用 ffmpeg 生成一帧 JPEG，比手写 EXIF 字节流可靠。
-
-
-def make_test_jpeg(path: Path) -> None:
-    import subprocess
-
-    ret = subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x64", "-frames:v", "1", str(path)],
-        capture_output=True)
-    assert ret.returncode == 0, ret.stderr.decode(errors="replace")
+from tracktool import exiftool, mediatime  # noqa: E402
+from tracktool.exif.position import (  # noqa: E402
+    MAX_TIME_DIFF_SECONDS,
+    SetPositionOptions,
+    set_position_from_kml,
+)
+from tracktool.exif.write import SetExifOptions, find_missing_tag, set_exif  # noqa: E402
 
 
 def main() -> None:

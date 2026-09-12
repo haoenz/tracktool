@@ -185,11 +185,11 @@ class _StayOpenProcess:
         and must not be re-read (and re-reported) on every later call.
         """
         self._stderr.seek(self._stderr_offset)
-        chunk = self._stderr.read()
+        raw = self._stderr.read()
         self._stderr_offset = self._stderr.tell()
-        if isinstance(chunk, bytes):
-            chunk = chunk.decode("utf-8", errors="replace")
-        return chunk.splitlines()
+        # 句柄是二进制临时文件，而 Popen(text=True) 可能往里写 str——两者都兼容
+        text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+        return text.splitlines()
 
     def execute(self, args: list[str]) -> list[str]:
         """Run one command through the persistent process, return stdout lines."""

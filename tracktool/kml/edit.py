@@ -71,6 +71,7 @@ def split_kml(path: Path, split_points: list[str]) -> None:
         new_tree = xmlutil.parse_string(xmlutil.etree.tostring(tree, encoding="unicode"))
         placemark = xmlutil.find(new_tree, "/kml:kml/kml:Document/kml:Folder/kml:Placemark")
         old_track = _get_track(new_tree)
+        assert placemark is not None  # gx:Track 存在，其 Placemark 必在
         placemark.remove(old_track)
 
         new_track = xmlutil.etree.SubElement(placemark, f"{{{xmlutil.GX_NS}}}Track")

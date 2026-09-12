@@ -79,6 +79,23 @@ class TestOneElevationCallPerSelection:
         assert len(backend.writes) == 4
         assert result.ok
 
+    def test_a_file_the_api_has_no_elevation_for_fails_without_crashing_the_batch(
+            self, tmp_path: Path, monkeypatch):
+        # 回归：写回阶段按 Path 隔离失败文件——曾经把 (查询, 海拔) 元组当文件
+        # 喂给批量入口，API 返回 None 时隔离逻辑当场崩溃、整个批次跟着炸
+        files = _paths(tmp_path, "p", 2)
+        for path in files:
+            path.touch()
+        _install_backend(monkeypatch, files,
+                         {"GPSLatitude": "39.0", "GPSLongitude": "116.0"})
+        monkeypatch.setattr(exif_google.googleapi, "get_altitudes",
+                            lambda points, api_key=None: [None, 10.0])
+
+        result = exif_google.set_altitude_from_google(files, failed_folder_name="NoElev")
+
+        assert [p.name for p in result.failed] == ["p0.jpg"]
+        assert result.succeeded and (tmp_path / "NoElev" / "p0.jpg").is_file()
+
 
 class TestRepairPassesTheWholeSelectionToEachStage:
     def test_each_stage_is_called_once_with_its_file_list(self, tmp_path: Path, monkeypatch):
