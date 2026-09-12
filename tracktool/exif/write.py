@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import exiftool, log
+from .. import exiftool, log, mediatime
 from ..progress import run_parallel
 
 # Set-Exif 的四种 GPS 位置输入格式
@@ -135,18 +135,11 @@ def find_missing_tag(path: Path, tags: list[str], parallel: bool = False) -> lis
     return [r for r in results if r is not None]
 
 
-def write_media_info(path: Path) -> dict[str, str]:
-    """Print/read GPS position, altitude and timestamp of a file."""
-    from .. import mediatime
-
+def print_media_info(path: Path) -> None:
+    """Print GPS position, altitude and timestamp of a file."""
     gps_position = exiftool.get_media_tag(path, "GPSPosition").replace(" deg", "°")
     gps_altitude = exiftool.get_media_tag(path, "GPSAltitude")
     media_time = mediatime.get_media_time(path)
-    info = {
-        "time": media_time.isoformat() if media_time else "",
-        "position": gps_position,
-        "altitude": gps_altitude,
-    }
-    for _key, value in info.items():
-        print(value)
-    return info
+    print(media_time.isoformat() if media_time else "")
+    print(gps_position)
+    print(gps_altitude)

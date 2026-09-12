@@ -91,12 +91,12 @@ def _resolve_path(path: Path, must_exist: bool = True) -> Path:
 @kml_app.command("type")
 def kml_type(
     path: Annotated[Path, typer.Argument(help="KML file")],
-    set: Annotated[TrackType | None, typer.Option("--set", help="Set track type (Default/Train/Flight)")] = None,
+    set_type: Annotated[TrackType | None, typer.Option("--set", help="Set track type (Default/Train/Flight)")] = None,
 ) -> None:
     """Get or set the track type (TrackTags)."""
     path = _resolve_path(path)
-    if set:
-        kmlfile.set_kml_type(path, set)
+    if set_type:
+        kmlfile.set_kml_type(path, set_type)
     else:
         print(kmlfile.get_kml_type(path))
 
@@ -104,23 +104,23 @@ def kml_type(
 @kml_app.command("push")
 def kml_push(
     path: Annotated[Path, typer.Argument(help="KML file to archive")],
-    type: Annotated[TrackType | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
+    track_type: Annotated[TrackType | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     no_archive: Annotated[bool, typer.Option("--no-archive", help="Skip adding to ZIP")] = False,
 ) -> None:
     """Archive a KML: add to both collections, compress into ZIP, move to backup."""
     path = _resolve_path(path)
-    kml_archive.push_kml_archive(path, zip_path, type, no_archive)
+    kml_archive.push_kml_archive(path, zip_path, track_type, no_archive)
 
 
 @kml_app.command("pop")
 def kml_pop(
     kml_name: Annotated[str, typer.Argument(help="Track name to restore")],
-    type: Annotated[TrackType, typer.Option("--type", help="Track type")] = TrackType.DEFAULT,
+    track_type: Annotated[TrackType, typer.Option("--type", help="Track type")] = TrackType.DEFAULT,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
 ) -> None:
     """Restore a KML from the archive: extract from ZIP, remove from collections."""
-    kml_archive.pop_kml_archive(kml_name, type, zip_path)
+    kml_archive.pop_kml_archive(kml_name, track_type, zip_path)
 
 
 @kml_app.command("split")
@@ -208,7 +208,7 @@ def exif_info(
 ) -> None:
     """Print GPS position, altitude, and timestamp."""
     path = _resolve_path(path)
-    exif_write.write_media_info(path)
+    exif_write.print_media_info(path)
 
 
 @exif_app.command("find-missing")
@@ -450,7 +450,7 @@ def hash_clear_log(
 @config_app.command("show")
 def config_show() -> None:
     """Print the current configuration."""
-    print(json.dumps({k: v for k, v in config._data.items()}, ensure_ascii=False, indent=2))
+    print(json.dumps(config.as_dict(), ensure_ascii=False, indent=2))
 
 
 @config_app.command("set")
@@ -459,7 +459,7 @@ def config_set(
     value: Annotated[str, typer.Argument(help="Config value")],
 ) -> None:
     """Set a configuration value (e.g. googleMapApiKey, kmlCompressedFilePath)."""
-    if key not in config._data:
+    if key not in config:
         log.warning(f"Unknown key '{key}' (adding anyway)")
     config[key] = value
     config.save()

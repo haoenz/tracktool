@@ -58,6 +58,13 @@ class Config:
     def __setitem__(self, key: str, value: Any) -> None:
         self._data[key] = value
 
+    def __contains__(self, key: str) -> bool:
+        return key in self._data
+
+    def as_dict(self) -> dict[str, Any]:
+        """A copy of the stored config values (defaults included)."""
+        return dict(self._data)
+
     @property
     def log_level(self) -> str:
         level = str(self._data.get("trackToolLogLevel", "INFO")).upper()
