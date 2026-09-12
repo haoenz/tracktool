@@ -1,8 +1,9 @@
 """One-click media repair orchestration.
 
-Ports Resolve-MissingGPS (find files missing GPSPosition/GPSAltitude, fill
-altitude via Google, then position from KML) and Resolve-VIDExif (VID ->
-VID_original, ConvertTo-Mp4 into a fresh VID, then Resolve-MissingGPS).
+Resolve-missing repairs files lacking GPSPosition/GPSAltitude — altitude via
+Google first, position from the KML archive second — and files that got their
+altitude land in a GoogleAltOK folder. Resolve-vid turns a VID directory into
+VID_original, converts its videos into a fresh VID, then repairs those.
 
 A dry run goes through the same stages and stops at the same places, so the
 steps it cannot preview are the ones whose inputs the earlier steps produce —

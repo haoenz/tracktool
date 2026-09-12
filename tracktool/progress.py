@@ -17,7 +17,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-DEFAULT_WORKERS = 5  # mirrors the original ThrottleLimit
+DEFAULT_WORKERS = 5
 
 
 def run_parallel[T, R](
@@ -30,7 +30,7 @@ def run_parallel[T, R](
 
     Returns results in input order. `parallel` selects DEFAULT_WORKERS threads
     over a single worker; a single item is executed directly without a
-    progress bar, matching the original fast path.
+    progress bar.
     """
     workers = DEFAULT_WORKERS if parallel else 1
     if not items:

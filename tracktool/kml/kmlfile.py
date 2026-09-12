@@ -1,7 +1,8 @@
 """KML file inspection and content extraction.
 
-Ports Get-KmlType / Set-KmlType (TrackTags ExtendedData) and Get-KmlContent
-(LineString coordinates + stitched description).
+A KML's type comes from its TrackTags ExtendedData value (a 2bulu export
+records the activity in Chinese); its content is the LineString coordinates —
+gx:Track coords converted to LineString tuples — plus a stitched description.
 """
 
 from dataclasses import dataclass
@@ -77,8 +78,7 @@ def get_kml_content(path: Path) -> KmlContent:
     gx:Track coordinates are converted to LineString tuples ("lon lat alt"
     joined by commas). The description combines the source Placemark's
     description (as plain text), TrackTags/PosStartName/PosEndName, and the
-    Placemark description again — mirroring the original stitching, which
-    relies on Out-String line breaks.
+    Placemark description again, separated by line breaks.
     """
     tree = xmlutil.parse_file(path)
 

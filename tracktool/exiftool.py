@@ -255,7 +255,7 @@ def close_thread_process() -> None:
         _local.exiftool_proc = None
 
 
-LARGE_FILE_THRESHOLD = 4 * 1024**3  # 4 GiB, mirrors $_.Length -ge 4GB
+LARGE_FILE_THRESHOLD = 4 * 1024**3  # beyond this exiftool needs the large-file API flag
 
 
 def _large_file_args(path: Path) -> list[str]:

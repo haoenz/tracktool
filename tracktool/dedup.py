@@ -1,9 +1,8 @@
 """File deduplication: MD5 hash log, duplicate detection, directory comparison.
 
-Ports Get-DirectoriesHash / Compare-Directories / Find-DuplicateFiles /
-Clear-HashLog. The hash log is a JSON file mapping absolute paths to
+The hash log is a JSON file mapping absolute paths to
 {"MD5": ..., "LastWriteTime": ...}; hashing is skipped when the stored
-LastWriteTime matches the file's mtime.
+LastWriteTime matches the file's mtime, so unchanged trees re-hash nothing.
 """
 
 import hashlib

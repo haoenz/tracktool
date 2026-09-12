@@ -1,7 +1,5 @@
 """Google-powered EXIF completion: altitude fill and reverse-geocoded IPTC tags.
 
-Ports Set-ExifAltitudeFromGoogle and Set-ExifLocationFromGoogle.
-
 Both commands are a billable query wrapped in file work, so both plan the query
 as a `Lookup`: a dry run then names the points that would be queried instead of
 spending quota to find out, and the stage that owns the call reads the query

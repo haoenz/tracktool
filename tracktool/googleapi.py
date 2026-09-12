@@ -1,9 +1,10 @@
 """Google Maps API clients: Elevation (batched) and reverse Geocoding.
 
-Ports Invoke-GoogleApiRequest (exponential-backoff retry, quota/auth errors are
-fatal), Get-AltitudeFromGoogle (URL-length batching: max 512 locations and
-8192-char URL per request) and Get-LocationFromGoogle (address component
-extraction with locality fallback chain).
+Both clients share one request helper: exponential-backoff retry on transport
+errors, fatal on quota/denied statuses. The Elevation client batches its
+locations to honor the API's 512-location and 8192-char URL caps; the
+Geocoding client extracts the address components a photo caption needs, with
+a locality fallback chain.
 
 Coordinates are plain (lat, lon) degrees here: media metadata is read through
 exiftool's -n mode and command-line arguments are parsed by coords, so these
@@ -73,7 +74,7 @@ def _request_json(api_url: str, api_name: str, retry_count: int = 3, timeout: in
 
 def _batch_coordinates(points: Sequence[tuple[float, float]]) -> list[list[str]]:
     """Split "lat,lon" strings into batches honoring the 512-location and URL-length caps."""
-    url_suffix_len = len("&key=") + 40  # key length varies; keep headroom like the original
+    url_suffix_len = len("&key=") + 40  # key length varies; keep headroom
     available = MAX_URL_LENGTH - len(ELEVATION_URL_PREFIX) - url_suffix_len
 
     batches: list[list[str]] = []

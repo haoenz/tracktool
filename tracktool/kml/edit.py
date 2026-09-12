@@ -1,8 +1,9 @@
 """KML track editing: split, bad-point removal, merge, altitude fill,
 MultiGeometry conversion.
 
-Ports Split-Kml / Remove-KmlBadPoints / Merge-Kml / Set-KmlAltitudeFromGoogle
-/ Convert-KmlToMultiGeometry / Get-TrackLocationIndex.
+These commands rewrite a KML's gx:Track in place (or into sibling files named
+after the edit); merging fills altitude through Google and can file the
+sources into the archive afterwards.
 """
 
 import re
@@ -12,7 +13,9 @@ from .. import googleapi, log
 from ..context import ctx
 from ..errors import UserInputError
 from ..fileutil import move_to_folder
+from ..workspace import resolve_zip_path
 from . import archive, kmlfile, xmlutil
+from .collections import new_empty_kml
 
 _TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _COORDINATE_PATTERN = re.compile(r"-?\d{1,3}(\.\d+)?\s-?\d{1,2}(\.\d+)?\s\d+(\.\d+)?")
@@ -151,7 +154,7 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
         if i == 0:
             first_description = content.description
 
-    output_tree = archive.new_empty_kml()
+    output_tree = new_empty_kml()
     xmlutil.doc_ns(output_tree)
     folder = xmlutil.find(output_tree, "//kml:Folder")
 
@@ -177,7 +180,7 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
     log.info(f"Saved merged KML to: {output_path}")
 
     if not no_archive:
-        zip_file = archive.resolve_zip_path(None)
+        zip_file = resolve_zip_path(None)
         archive_dir = zip_file.parent
         for path in paths:
             archive.push_compressed_kml(path, zip_file)

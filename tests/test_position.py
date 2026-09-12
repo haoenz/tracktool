@@ -10,14 +10,17 @@ from tracktool import mediatime
 from tracktool.actions import Failed, Skip, WriteTags
 from tracktool.exif.position import (
     SetPositionOptions,
-    TrackPoint,
     _find_best_track,
     _verify_or_skip,
     decide_position,
-    get_position_from_kml,
 )
 from tracktool.kml import xmlutil
+from tracktool.kml.track import Track, TrackMatch, TrackPoint
 from tracktool.metadata import MediaMetadata
+
+
+def make_track(kml_text: str = TRACK_KML, name: str = "2024-05-01 test.kml") -> Track:
+    return Track.from_kml(xmlutil.parse_string(kml_text), name)
 
 
 class TestMediatimeParsing:
@@ -28,115 +31,134 @@ class TestMediatimeParsing:
             mediatime.parse_offset("bad")
 
 
-class TestGetPositionFromKml:
+class TestTrackLoading:
+    def test_points_carry_time_and_place(self):
+        track = make_track()
+
+        assert track.name == "2024-05-01 test.kml"
+        assert track.points[0] == TrackPoint(39.0, 116.0, 100.0,
+                                             datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC))
+        assert len(track.points) == 4
+
+    def test_mismatched_lists_are_rejected_at_load(self):
+        # whens 与 coords 数量不一致的 KML 是坏文件，加载时就报，而不是错位取点
+        broken = TRACK_KML.replace("<when>2024-05-01T00:02:00Z</when>", "")
+        with pytest.raises(Exception, match="coordinate|timestamp"):
+            make_track(broken)
+
+
+class TestTrackNearest:
     def setup_method(self):
-        self.tree = xmlutil.parse_string(TRACK_KML)
+        self.track = make_track()
         self.track_start = datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC)
 
     def test_exact_match(self):
-        pos = get_position_from_kml(self.tree, self.track_start)
-        assert pos is not None
-        assert pos.latitude == 39.0
-        assert pos.longitude == 116.0
-        assert pos.altitude == 100.0
-        assert pos.seconds_from_nearest == 0
-        assert pos.inside_duration is True
+        match = self.track.nearest(self.track_start)
+        assert match is not None
+        assert match.point.latitude == 39.0
+        assert match.point.longitude == 116.0
+        assert match.point.altitude == 100.0
+        assert match.seconds_from_nearest == 0
+        assert match.inside_duration is True
 
     def test_inside_nearest_neighbor(self):
         # 00:01:20 在 [00:01, 00:02] 之间，离 00:01 更近
         t = self.track_start.timestamp() + 80
-        pos = get_position_from_kml(self.tree, datetime.fromtimestamp(t, tz=UTC))
-        assert pos is not None
-        assert pos.latitude == 39.1
-        assert pos.seconds_from_nearest == 20
-        assert pos.inside_duration is True
+        match = self.track.nearest(datetime.fromtimestamp(t, tz=UTC))
+        assert match is not None
+        assert match.point.latitude == 39.1
+        assert match.seconds_from_nearest == 20
+        assert match.inside_duration is True
 
     def test_before_track_outside_duration(self):
         before = datetime(2024, 4, 30, 23, 59, 30, tzinfo=UTC)
-        pos = get_position_from_kml(self.tree, before)
-        assert pos is not None
-        assert pos.seconds_from_nearest == 30
-        assert pos.inside_duration is False
+        match = self.track.nearest(before)
+        assert match is not None
+        assert match.seconds_from_nearest == 30
+        assert match.inside_duration is False
 
     def test_after_track_outside_duration(self):
         t = datetime(2024, 5, 1, 0, 3, 30, tzinfo=UTC)
-        pos = get_position_from_kml(self.tree, t)
-        assert pos is not None
-        assert pos.latitude == 39.3
-        assert pos.seconds_from_nearest == 30
-        assert pos.inside_duration is False
+        match = self.track.nearest(t)
+        assert match is not None
+        assert match.point.latitude == 39.3
+        assert match.seconds_from_nearest == 30
+        assert match.inside_duration is False
 
     def test_rounding_to_nearest(self):
         # 00:01:40 离 00:02 更近
         t = self.track_start.timestamp() + 100
-        pos = get_position_from_kml(self.tree, datetime.fromtimestamp(t, tz=UTC))
-        assert pos is not None
-        assert pos.latitude == 39.2
-        assert pos.seconds_from_nearest == 20
-        assert pos.inside_duration is True
+        match = self.track.nearest(datetime.fromtimestamp(t, tz=UTC))
+        assert match is not None
+        assert match.point.latitude == 39.2
+        assert match.seconds_from_nearest == 20
+        assert match.inside_duration is True
+
+    def test_an_empty_track_matches_nothing(self):
+        empty = make_track('<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>')
+        assert empty.nearest(datetime(2024, 5, 1, tzinfo=UTC)) is None
 
 
 class TestFindBestTrack:
     def setup_method(self):
-        self.tree = xmlutil.parse_string(TRACK_KML)
+        self.track = make_track()
 
     def test_inside_match_wins(self):
         # 第一个候选（06:00 轨迹）在持续时间外，第二个（00:00 轨迹）命中持续时间
-        shifted = xmlutil.parse_string(TRACK_KML.replace("T00:0", "T06:0"))
-        cache = {"2024-05-01 far.kml": shifted, "2024-05-01 near.kml": self.tree}
+        far = make_track(TRACK_KML.replace("T00:0", "T06:0"), "2024-05-01 far.kml")
+        near = make_track(TRACK_KML, "2024-05-01 near.kml")
         media_time = datetime(2024, 5, 1, 0, 1, 20, tzinfo=UTC)
-        best = _find_best_track(cache, media_time, multiday=False)
+        best = _find_best_track([far, near], media_time, multiday=False)
         assert best is not None
         assert best.inside_duration is True
-        assert best.latitude == 39.1
+        assert best.point.latitude == 39.1
         assert best.seconds_from_nearest == 20
 
     def test_closest_out_of_duration_kept(self):
-        shifted = xmlutil.parse_string(TRACK_KML.replace("T00:0", "T06:0"))
-        cache = {"2024-05-01 far.kml": self.tree, "2024-05-01 near.kml": shifted}
+        far = make_track(TRACK_KML, "2024-05-01 far.kml")
+        near = make_track(TRACK_KML.replace("T00:0", "T06:0"), "2024-05-01 near.kml")
         media_time = datetime(2024, 5, 1, 5, 30, 0, tzinfo=UTC)
-        best = _find_best_track(cache, media_time, multiday=False)
+        best = _find_best_track([far, near], media_time, multiday=False)
         assert best is not None
         assert best.inside_duration is False
         # far 轨迹最近点 00:03 差 19620s，near 轨迹 06:00 差 1800s
         assert best.seconds_from_nearest == 1800
-        assert best.latitude == 39.0
+        assert best.point.latitude == 39.0
 
     def test_multiday_window(self):
-        cache = {"2024-05-01 trip.kml": self.tree}
+        tracks = [make_track(name="2024-05-01 trip.kml")]
         media_time = datetime(2024, 4, 30, 23, 59, 30, tzinfo=UTC)
-        assert _find_best_track(cache, media_time, multiday=False) is None
-        best = _find_best_track(cache, media_time, multiday=True)
+        assert _find_best_track(tracks, media_time, multiday=False) is None
+        best = _find_best_track(tracks, media_time, multiday=True)
         assert best is not None
         assert best.inside_duration is False
         assert best.seconds_from_nearest == 30
 
     def test_kml_without_gps_skipped(self):
-        empty = xmlutil.parse_string(
-            '<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>')
-        cache = {"2024-05-01 empty.kml": empty}
-        assert _find_best_track(cache, datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC),
+        tracks = [make_track('<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>',
+                             "2024-05-01 empty.kml")]
+        assert _find_best_track(tracks, datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC),
                                 multiday=False) is None
 
 
 class TestVerifyOrSkip:
     @staticmethod
-    def _point(latitude: float, longitude: float) -> TrackPoint:
-        return TrackPoint(latitude=latitude, longitude=longitude, altitude=100.0,
-                          seconds_from_nearest=0, inside_duration=True)
+    def _match(latitude: float, longitude: float) -> TrackMatch:
+        point = TrackPoint(latitude, longitude, 100.0, datetime(2024, 5, 1, tzinfo=UTC))
+        return TrackMatch(point, 0, True)
 
     def test_matching_position_proceeds(self):
-        assert _verify_or_skip(39.0, 116.0, self._point(39.0, 116.0),
+        assert _verify_or_skip(39.0, 116.0, self._match(39.0, 116.0),
                                SetPositionOptions()) is True
 
     def test_mismatch_beyond_threshold_skips(self):
-        far = self._point(40.0, 117.0)
+        far = self._match(40.0, 117.0)
         assert _verify_or_skip(39.0, 116.0, far, SetPositionOptions()) is False
         assert _verify_or_skip(39.0, 116.0, far, SetPositionOptions(force=True)) is True
 
     def test_equator_position_is_a_real_coordinate(self):
         # 纬度 0 是合法坐标，不能因为 falsy 被当成「没有位置」
-        assert _verify_or_skip(0.0, 116.0, self._point(0.0, 116.0),
+        assert _verify_or_skip(0.0, 116.0, self._match(0.0, 116.0),
                                SetPositionOptions()) is True
 
 
@@ -175,20 +197,20 @@ class TestDecidePosition:
         return MediaMetadata.of(Path("2024-05-01 a.jpg"), tags)
 
     @staticmethod
-    def _finder(point: TrackPoint | None):
-        def find(media_time: datetime) -> TrackPoint | None:
-            return point
+    def _finder(match: TrackMatch | None):
+        def find(media_time: datetime) -> TrackMatch | None:
+            return match
 
         return find
 
     @staticmethod
-    def _point(latitude: float = 39.1, longitude: float = 116.1, altitude: float = 110.0,
-               seconds: float = 0.0, inside: bool = True) -> TrackPoint:
-        return TrackPoint(latitude=latitude, longitude=longitude, altitude=altitude,
-                          seconds_from_nearest=seconds, inside_duration=inside)
+    def _match(latitude: float = 39.1, longitude: float = 116.1, altitude: float = 110.0,
+               seconds: float = 0.0, inside: bool = True) -> TrackMatch:
+        point = TrackPoint(latitude, longitude, altitude, datetime(2024, 5, 1, tzinfo=UTC))
+        return TrackMatch(point, seconds, inside)
 
     def test_a_fully_tagged_file_never_searches_the_archive(self):
-        def unexpected(media_time: datetime) -> TrackPoint | None:
+        def unexpected(media_time: datetime) -> TrackMatch | None:
             raise AssertionError("the archive was searched for a file that needs nothing")
 
         result = decide_position(self._meta(**self.FULL_GPS), unexpected, SetPositionOptions())
@@ -196,7 +218,7 @@ class TestDecidePosition:
         assert result == [Skip(Path("2024-05-01 a.jpg"), "GPS data already exists")]
 
     def test_a_track_match_plans_the_write(self):
-        result = decide_position(self._meta(**self.TIME), self._finder(self._point()),
+        result = decide_position(self._meta(**self.TIME), self._finder(self._match()),
                                  SetPositionOptions(overwrite=True))
 
         assert result == [WriteTags(Path("2024-05-01 a.jpg"), {
@@ -207,18 +229,18 @@ class TestDecidePosition:
 
     def test_the_decision_against_a_real_archive(self):
         # 00:01:30 UTC 落在 [00:01, 00:02] 正中间，取到 00:02 那个点
-        cache = {"2024-05-01 test.kml": xmlutil.parse_string(TRACK_KML)}
+        tracks = [make_track()]
 
         result = decide_position(
             self._meta(**self.TIME),
-            lambda media_time: _find_best_track(cache, media_time, multiday=False),
+            lambda media_time: _find_best_track(tracks, media_time, multiday=False),
             SetPositionOptions())
 
         assert result[0].tags["GPSLatitude"] == "39.2"
         assert result[0].tags["GPSAltitude"] == "120.0"
 
     def test_no_timestamp_is_a_failure(self):
-        result = decide_position(self._meta(), self._finder(self._point()), SetPositionOptions())
+        result = decide_position(self._meta(), self._finder(self._match()), SetPositionOptions())
 
         assert result == [Failed(Path("2024-05-01 a.jpg"), "no valid timestamp")]
 
@@ -229,7 +251,7 @@ class TestDecidePosition:
 
     def test_a_match_beyond_the_time_limit_is_a_failure(self):
         result = decide_position(self._meta(**self.TIME),
-                                 self._finder(self._point(seconds=90.0, inside=False)),
+                                 self._finder(self._match(seconds=90.0, inside=False)),
                                  SetPositionOptions(max_time_diff_seconds=60))
 
         assert result == [Failed(Path("2024-05-01 a.jpg"), "best match 90.0s outside the 60s limit")]
@@ -237,20 +259,20 @@ class TestDecidePosition:
     def test_the_existing_altitude_is_kept_when_the_track_has_none(self):
         # KML 点的海拔是 0（未记录），沿用文件里已有的值
         result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
-                                 self._finder(self._point(altitude=0.0)),
+                                 self._finder(self._match(altitude=0.0)),
                                  SetPositionOptions(force=True))
 
         assert result[0].tags["GPSAltitude"] == "110.0"
 
     def test_force_rewrites_even_a_fully_tagged_file(self):
         result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
-                                 self._finder(self._point()), SetPositionOptions(force=True))
+                                 self._finder(self._match()), SetPositionOptions(force=True))
 
         assert [type(action) for action in result] == [WriteTags]
 
     def test_a_verification_mismatch_fails_without_quarantine(self):
         result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
-                                 self._finder(self._point(latitude=40.0, longitude=117.0)),
+                                 self._finder(self._match(latitude=40.0, longitude=117.0)),
                                  SetPositionOptions(verify_existing_gps=True))
 
         assert result == [Failed(Path("2024-05-01 a.jpg"), "existing GPS disagrees with the KML",
@@ -258,7 +280,7 @@ class TestDecidePosition:
 
     def test_a_passing_verification_has_nothing_to_write(self):
         result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
-                                 self._finder(self._point()),
+                                 self._finder(self._match()),
                                  SetPositionOptions(verify_existing_gps=True))
 
         assert result == [Skip(Path("2024-05-01 a.jpg"), "existing GPS agrees with the KML match")]

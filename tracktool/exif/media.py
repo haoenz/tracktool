@@ -1,11 +1,12 @@
 """Media file operations: time shifting, altitude shifting, MP4 conversion,
 extension-based grouping.
 
-Ports Move-ExifTime / Move-Altitude / ConvertTo-Mp4 / Group-MediaFiles.
-
-Each per-file rule lives in a `decide_*` function that takes one file's
-metadata and returns the steps to take, so the rules can be read (and tested)
-without an exiftool process or an ffmpeg run in the way.
+Timestamp sets are per camera maker (a SONY photo and a SONY clip carry the
+same moment in different tags); an Insta360 clip's filename encodes the same
+time its tags do, so a shifted clip is renamed to match. Each per-file rule
+lives in a `decide_*` function that takes one file's metadata and returns the
+steps to take, so the rules can be read (and tested) without an exiftool
+process or an ffmpeg run in the way.
 """
 
 import re
