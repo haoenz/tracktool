@@ -11,6 +11,7 @@ from pathlib import Path
 from .. import coords, log, mediatime
 from ..actions import Action, WriteTags, run
 from ..context import ctx
+from ..discover import list_files
 from ..errors import UserInputError
 from ..fileutil import BatchResult, run_per_file
 from ..metadata import MediaMetadata, is_missing_altitude
@@ -62,18 +63,6 @@ def build_tags(options: SetExifOptions) -> dict[str, str]:
         tags["Model"] = options.model
     tags.update(options.tags)
     return tags
-
-
-def list_files(path: Path | list[Path]) -> list[Path]:
-    """The files a target denotes: the file itself, a directory's immediate
-    contents, or an explicit list the orchestration layer already resolved."""
-    if isinstance(path, list):
-        return list(path)
-    if path.is_file():
-        return [path]
-    if not path.is_dir():
-        raise UserInputError(f"Path does not exist: {path}")
-    return sorted(p for p in path.iterdir() if p.is_file())
 
 
 def set_exif(path: Path | list[Path], options: SetExifOptions,

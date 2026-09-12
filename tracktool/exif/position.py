@@ -21,11 +21,12 @@ from pathlib import Path
 from .. import coords, log, mediatime
 from ..actions import Action, Failed, Skip, WriteTags, run
 from ..context import ctx
+from ..discover import list_files
 from ..errors import UserInputError
 from ..fileutil import BatchResult, run_per_file
 from ..kml import archive, xmlutil
 from ..metadata import MediaMetadata
-from .write import SetExifOptions, build_tags, list_files
+from .write import SetExifOptions, build_tags
 
 POSITION_TAGS = [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"]
 

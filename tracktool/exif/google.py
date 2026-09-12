@@ -13,9 +13,10 @@ from pathlib import Path
 from .. import googleapi, log
 from ..actions import Action, Failed, Lookup, Skip, WriteTags, run
 from ..context import ctx
+from ..discover import list_files
 from ..fileutil import BatchResult, run_per_file
 from ..metadata import MediaMetadata
-from .write import SetExifOptions, build_tags, list_files
+from .write import SetExifOptions, build_tags
 
 ALTITUDE_TAGS = ["GPSAltitude", "GPSLatitude", "GPSLongitude"]
 LOCATION_TAGS = ["GPSLatitude", "GPSLongitude"]

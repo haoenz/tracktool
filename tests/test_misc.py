@@ -7,7 +7,35 @@ import pytest
 
 from tracktool import dedup
 from tracktool.config import Config
+from tracktool.discover import list_files
+from tracktool.errors import UserInputError
 from tracktool.exif.write import SetExifError, SetExifOptions, build_position_params, build_tags
+
+
+class TestListFiles:
+    def test_a_directory_yields_only_media(self, tmp_path: Path):
+        # 真实照片目录混入 .txt / .DS_Store 是常态，目录目标只收已知媒体扩展名
+        (tmp_path / "a.jpg").touch()
+        (tmp_path / "notes.txt").touch()
+        (tmp_path / ".DS_Store").touch()
+        (tmp_path / "b.arw").touch()
+
+        assert list_files(tmp_path) == [tmp_path / "a.jpg", tmp_path / "b.arw"]
+
+    def test_a_named_file_is_kept_whatever_it_is(self, tmp_path: Path):
+        # 用户点名什么就处理什么，扩展名拦不住显式路径
+        txt = tmp_path / "notes.txt"
+        txt.touch()
+
+        assert list_files(txt) == [txt]
+
+    def test_an_explicit_list_is_handed_back_verbatim(self, tmp_path: Path):
+        chosen = [tmp_path / "x.jpg", tmp_path / "y.txt"]
+        assert list_files(chosen) == chosen
+
+    def test_a_missing_path_raises(self, tmp_path: Path):
+        with pytest.raises(UserInputError, match="does not exist"):
+            list_files(tmp_path / "nope")
 
 
 class TestBuildPositionParams:

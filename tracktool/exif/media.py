@@ -16,10 +16,11 @@ from pathlib import Path
 from .. import log, mediatime
 from ..actions import Action, Failed, RemuxVideo, Rename, ShiftTags, Skip, WriteTags, run
 from ..context import ctx
+from ..discover import MEDIA_EXTENSIONS, list_files
 from ..errors import UserInputError
 from ..fileutil import BatchResult, run_per_file
 from ..metadata import MediaMetadata
-from .write import SetExifOptions, build_tags, list_files
+from .write import SetExifOptions, build_tags
 
 # EXIF Make 字段注册值（exiftool 原样返回，精确匹配，不做大小写归一化）
 MAKE_SONY = "SONY"
@@ -41,12 +42,6 @@ _INSTA360_MP4_TAGS = [
 
 _RELATIVE_TIME_PATTERN = re.compile(r"(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
 _INSTA360_FILENAME_PATTERN = re.compile(r"_(\d{8}_\d{6})_")
-
-_EXTENSION_MAP = {
-    ".mp4": "VID", ".mov": "VID", ".avi": "VID",
-    ".arw": "RAW", ".raf": "RAW", ".dng": "RAW",
-    ".jpg": "IMG", ".jpeg": "IMG",
-}
 
 # (make, ext) -> 要平移的时间标签集合；组合缺失即报错跳过该文件
 _TAG_SETS: dict[tuple[str, str], list[str]] = {
@@ -267,7 +262,7 @@ def group_media_files(path: Path) -> None:
         return
 
     for file in files:
-        sub_dir = _EXTENSION_MAP.get(file.suffix.lower())
+        sub_dir = MEDIA_EXTENSIONS.get(file.suffix.lower())
         if sub_dir is None:
             continue
         target_dir = path / sub_dir

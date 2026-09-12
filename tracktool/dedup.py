@@ -8,21 +8,12 @@ LastWriteTime matches the file's mtime.
 
 import hashlib
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import log
+from .discover import leaf_files
 from .progress import run_parallel
-
-
-def _get_leaf_files(path: Path, include: str = ".*", exclude: str = "^$") -> list[Path]:
-    """Recursively scan a directory, filtering by regex on the full path."""
-    include_re = re.compile(include, re.IGNORECASE)
-    exclude_re = re.compile(exclude, re.IGNORECASE)
-    log.debug("Scanning directory for files", target=str(path))
-    return [f for f in sorted(path.rglob("*"))
-            if f.is_file() and include_re.search(str(f)) and not exclude_re.search(str(f))]
 
 
 def _load_hash_log(hash_log_path: Path) -> dict:
@@ -96,7 +87,7 @@ def get_directories_hash(directories: list[Path], include: str = ".*", exclude: 
 
     target_files: dict[Path, list[Path]] = {}
     for directory in directories:
-        target_files[directory] = _get_leaf_files(directory, include, exclude)
+        target_files[directory] = leaf_files(directory, include, exclude)
 
     add_count = update_count = 0
     for directory, files in target_files.items():
