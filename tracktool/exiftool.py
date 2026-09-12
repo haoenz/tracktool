@@ -33,7 +33,7 @@ def _filters(cfg: Config) -> list[re.Pattern[str]]:
 
 
 def _check_output(output: list[str], filters: list[re.Pattern[str]], cmd_desc: str) -> list[str]:
-    """Apply outputFilters, then raise on any remaining line containing Error."""
+    """Apply the config's output filters, then raise on any remaining line containing Error."""
     lines = [line for line in output if line and not any(f.search(line) for f in filters)]
     errors = [line for line in lines if ERROR_PATTERN.search(line)]
     if errors:

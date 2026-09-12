@@ -1,12 +1,11 @@
 """Shared file-moving helpers and the per-file batch failure policy.
 
-move_to_folder ports the PowerShell Move-ToFolder. run_per_file layers the
-common error contract on top of run_parallel: a failure while processing one
-file is logged with that file as target and the file is quarantined into the
-caller's failed folder, while the batch always continues with the remaining
-files. Quarantining covers the whole per-file operation, not only the EXIF
-write — failures also arise from tag reads, media-time parsing, API calls and
-file renames.
+run_per_file layers the common error contract on top of run_parallel: a
+failure while processing one file is logged with that file as target and the
+file is quarantined into the caller's failed folder, while the batch always
+continues with the remaining files. Quarantining covers the whole per-file
+operation, not only the EXIF write — failures also arise from tag reads,
+media-time parsing, API calls and file renames.
 """
 
 import shutil
@@ -22,7 +21,7 @@ _FAILED: Any = object()
 
 
 def move_to_folder(path: Path, folder_name: str, parent_directory: Path | None = None) -> None:
-    """Move file into folder_name, creating it if needed (ports Move-ToFolder)."""
+    """Move file into folder_name, creating it if needed."""
     target_parent = parent_directory if parent_directory is not None else path.parent
     target_dir = target_parent / folder_name
     if not target_dir.is_dir():

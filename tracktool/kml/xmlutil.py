@@ -1,8 +1,6 @@
 """KML/XML helpers shared across the kml package.
 
-The PowerShell module leans on .NET XmlDocument + XmlNamespaceManager with
-XPath. lxml.etree is the closest Python equivalent (namespace-aware in-place
-DOM editing with XPath).
+lxml.etree provides namespace-aware in-place DOM editing with XPath.
 
 KML namespaces used by 2bulu exports:
 - kml: http://www.opengis.net/kml/2.2 (the document element's own namespace)

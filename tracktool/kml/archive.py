@@ -70,7 +70,7 @@ def new_empty_kml(type_: TrackType | None = None) -> xmlutil.etree._ElementTree:
 # 其他方式注入单例，可随测试一并移除。
 def resolve_zip_path(zip_path: str | None, cfg: Config) -> Path:
     """CLI argument or config key -> resolved ZIP path; FileNotFoundError when absent."""
-    path = zip_path or cfg["kmlCompressedFilePath"]
+    path = zip_path or cfg["kml_zip_path"]
     if not path or not Path(path).is_file():
         raise FileNotFoundError(f"KML compressed file path does not exist: {path}")
     return Path(path).resolve()
@@ -242,7 +242,7 @@ def push_kml_archive(path: Path, zip_path: str | None = None, type_: TrackType |
             log.info("Created new ZIP archive", target=str(zip_file))
         push_compressed_kml(path, zip_file)
 
-    move_to_folder(path, str(config["kmlBackupDirName"] or "Backup"), archive_dir)
+    move_to_folder(path, str(config["kml_backup_dir_name"] or "Backup"), archive_dir)
 
 
 def pop_kml_archive(kml_name: str, type_: TrackType = TrackType.DEFAULT, zip_path: str | None = None) -> None:

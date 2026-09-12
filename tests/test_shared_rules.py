@@ -32,7 +32,7 @@ class TestResolveZipPath:
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("placeholder.txt", "x")
         cfg = Config(path=tmp_path / "config.json").load()
-        cfg["kmlCompressedFilePath"] = str(tmp_path / "other.zip")
+        cfg["kml_zip_path"] = str(tmp_path / "other.zip")
 
         assert resolve_zip_path(str(zip_path), cfg) == zip_path.resolve()
 
@@ -41,13 +41,13 @@ class TestResolveZipPath:
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("2024-05-01 test.kml", TRACK_KML)
         cfg = Config(path=tmp_path / "config.json").load()
-        cfg["kmlCompressedFilePath"] = str(zip_path)
+        cfg["kml_zip_path"] = str(zip_path)
 
         assert resolve_zip_path(None, cfg) == zip_path.resolve()
 
     def test_missing_file_raises(self, tmp_path: Path):
         cfg = Config(path=tmp_path / "config.json").load()
-        cfg["kmlCompressedFilePath"] = ""
+        cfg["kml_zip_path"] = ""
         with pytest.raises(FileNotFoundError, match="does not exist"):
             resolve_zip_path(None, cfg)
         with pytest.raises(FileNotFoundError, match="does not exist"):
@@ -61,8 +61,8 @@ class TestResolveZipPath:
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("placeholder.txt", "x")
         cfg = Config(path=tmp_path / "config.json").load()
-        cfg["kmlCompressedFilePath"] = str(zip_path)
-        cfg["kmlBackupDirName"] = "Backup"
+        cfg["kml_zip_path"] = str(zip_path)
+        cfg["kml_backup_dir_name"] = "Backup"
 
         src = tmp_path / "2024-05-01 test.kml"
         src.write_text(TRACK_KML, encoding="utf-8")

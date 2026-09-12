@@ -1,9 +1,8 @@
 """Configuration management.
 
-Config lives at ~/.tracktool/config.json and keeps the same field names as the
-original PowerShell module's config.json so an old config can be imported
-verbatim. The Google Maps API key resolution order is: environment variable
-TRACKTOOL_GOOGLE_API_KEY > CLI parameter > config file.
+Config lives at ~/.tracktool/config.json. The Google Maps API key resolution
+order is: environment variable TRACKTOOL_GOOGLE_API_KEY > CLI parameter >
+config file.
 """
 
 import json
@@ -17,14 +16,14 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 ENV_API_KEY = "TRACKTOOL_GOOGLE_API_KEY"
 
 DEFAULTS: dict[str, Any] = {
-    "trackToolLogLevel": "INFO",
-    "kmlCompressedFilePath": "",
-    "kmlBackupDirName": "Backup",
-    "outputFilters": "",
-    "googleMapApiKey": "",
+    "log_level": "INFO",
+    "kml_zip_path": "",
+    "kml_backup_dir_name": "Backup",
+    "output_filters": "",
+    "google_api_key": "",
 }
 
-# Valid levels in decreasing verbosity (mirrors the PowerShell module).
+# Valid levels in decreasing verbosity.
 LEVELS = ["DEBUG", "VERBOSE", "INFO", "WARNING", "ERROR"]
 
 
@@ -67,35 +66,20 @@ class Config:
 
     @property
     def log_level(self) -> str:
-        level = str(self._data.get("trackToolLogLevel", "INFO")).upper()
+        level = str(self._data.get("log_level", "INFO")).upper()
         return level if level in LEVELS else "INFO"
 
     @property
     def output_filters(self) -> list[str]:
-        raw = str(self._data.get("outputFilters", "") or "")
+        raw = str(self._data.get("output_filters", "") or "")
         return [f for f in (part.strip() for part in raw.split("|")) if f]
 
     # -- Google API key ------------------------------------------------------
 
     def google_api_key(self, override: str | None = None) -> str:
         """Resolve the Google Maps API key: env var > parameter > config."""
-        key = os.environ.get(ENV_API_KEY) or override or str(self._data.get("googleMapApiKey", "") or "")
+        key = os.environ.get(ENV_API_KEY) or override or str(self._data.get("google_api_key", "") or "")
         return key.strip()
-
-    # -- migration -----------------------------------------------------------
-
-    def import_legacy(self, legacy_path: Path) -> None:
-        """Import an original PowerShell module config.json."""
-        try:
-            legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ConfigError(f"Failed to read legacy config {legacy_path}: {exc}") from exc
-        if not isinstance(legacy, dict):
-            raise ConfigError(f"Legacy config {legacy_path} is not a JSON object")
-        for key in DEFAULTS:
-            if key in legacy:
-                self._data[key] = legacy[key]
-        self.save()
 
 
 class ConfigError(Exception):

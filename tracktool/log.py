@@ -54,7 +54,7 @@ def set_level(level: str) -> None:
 
 
 def _log(message: str, level: str = "INFO", target: str | None = None) -> None:
-    """Log a message; `target` prefixes the message like the PowerShell -Target."""
+    """Log a message; `target` is prefixed to the message as "[target] message"."""
     text = f"[{target}] {message}" if target else message
     _logger.log(_LEVEL_NUMBERS[level], text)
 

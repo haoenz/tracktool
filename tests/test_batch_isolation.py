@@ -51,7 +51,7 @@ def _write_kml_zip(tmp_path: Path) -> Path:
 def media_dir(tmp_path: Path) -> tuple[Path, Config]:
     """Media directory plus a test Config pointing at the test ZIP."""
     cfg = Config(path=tmp_path / "config.json").load()
-    cfg["kmlCompressedFilePath"] = str(_write_kml_zip(tmp_path))
+    cfg["kml_zip_path"] = str(_write_kml_zip(tmp_path))
     directory = tmp_path / "media"
     directory.mkdir()
     return directory, cfg

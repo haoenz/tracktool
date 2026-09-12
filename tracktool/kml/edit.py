@@ -182,7 +182,7 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
         archive_dir = zip_file.parent
         for path in paths:
             archive.push_compressed_kml(path, zip_file)
-            move_to_folder(path, str(cfg["kmlBackupDirName"] or "Backup"), archive_dir)
+            move_to_folder(path, str(cfg["kml_backup_dir_name"] or "Backup"), archive_dir)
 
 
 def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None:

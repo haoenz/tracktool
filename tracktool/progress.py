@@ -1,8 +1,7 @@
 """Parallel batch processing with a rich progress bar.
 
-Replaces the PowerShell ForEach-ObjectWithProgress runspace-injection machinery:
-a ThreadPoolExecutor (I/O-bound workload) with a thread-safe progress counter.
-Single-item inputs skip the progress display entirely, like the original.
+A ThreadPoolExecutor (I/O-bound workload) with a thread-safe progress counter.
+Single-item inputs skip the progress display entirely.
 """
 
 from collections.abc import Callable

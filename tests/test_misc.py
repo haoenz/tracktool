@@ -53,30 +53,16 @@ class TestConfig:
     def test_defaults_and_roundtrip(self, tmp_path: Path):
         cfg = Config(path=tmp_path / "config.json")
         cfg.load()
-        assert cfg["trackToolLogLevel"] == "INFO"
-        cfg["kmlBackupDirName"] = "Old"
+        assert cfg["log_level"] == "INFO"
+        cfg["kml_backup_dir_name"] = "Old"
         cfg.save()
         reloaded = Config(path=tmp_path / "config.json").load()
-        assert reloaded["kmlBackupDirName"] == "Old"
-
-    def test_import_legacy(self, tmp_path: Path):
-        legacy = tmp_path / "legacy.json"
-        legacy.write_text(json.dumps({
-            "trackToolLogLevel": "DEBUG",
-            "kmlCompressedFilePath": "C:\\some\\path.zip",
-            "googleMapApiKey": "test-key",
-            "unknownField": "ignored",
-        }), encoding="utf-8")
-        cfg = Config(path=tmp_path / "config.json").load()
-        cfg.import_legacy(legacy)
-        assert cfg["trackToolLogLevel"] == "DEBUG"
-        assert cfg["kmlCompressedFilePath"] == "C:\\some\\path.zip"
-        assert "unknownField" not in cfg._data
+        assert reloaded["kml_backup_dir_name"] == "Old"
 
     def test_api_key_env_priority(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("TRACKTOOL_GOOGLE_API_KEY", "env-key")
         cfg = Config(path=tmp_path / "config.json").load()
-        cfg["googleMapApiKey"] = "file-key"
+        cfg["google_api_key"] = "file-key"
         assert cfg.google_api_key() == "env-key"
         assert cfg.google_api_key("param-key") == "env-key"
         monkeypatch.delenv("TRACKTOOL_GOOGLE_API_KEY")

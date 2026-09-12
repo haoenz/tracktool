@@ -458,7 +458,7 @@ def config_set(
     key: Annotated[str, typer.Argument(help="Config key")],
     value: Annotated[str, typer.Argument(help="Config value")],
 ) -> None:
-    """Set a configuration value (e.g. googleMapApiKey, kmlCompressedFilePath)."""
+    """Set a configuration value (e.g. google_api_key, kml_zip_path)."""
     if key not in config:
         log.warning(f"Unknown key '{key}' (adding anyway)")
     config[key] = value
@@ -472,7 +472,7 @@ def config_log_level(
 ) -> None:
     """Set the persisted log level."""
     log.set_level(level)
-    config["trackToolLogLevel"] = level.upper()
+    config["log_level"] = level.upper()
     config.save()
     log.info(f"Log level set to {level.upper()}")
 
@@ -483,19 +483,9 @@ def config_set_zip_path(
 ) -> None:
     """Set the KML compressed file path."""
     absolute = str(path.expanduser().resolve())
-    config["kmlCompressedFilePath"] = absolute
+    config["kml_zip_path"] = absolute
     config.save()
     log.info(f"KML compressed file path set to {absolute}")
-
-
-@config_app.command("import")
-def config_import(
-    legacy_path: Annotated[Path, typer.Argument(help="Original PowerShell config.json path")],
-) -> None:
-    """Import the original PowerShell module's config.json."""
-    legacy_path = _resolve_path(legacy_path)
-    config.import_legacy(legacy_path)
-    log.info(f"Imported configuration from {legacy_path}", target=str(config.path))
 
 
 def cli_main() -> None:
