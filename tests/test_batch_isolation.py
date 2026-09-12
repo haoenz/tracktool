@@ -121,7 +121,7 @@ class TestSetPositionBatchIsolation:
         result = set_position_from_kml(media_dir, options=SetPositionOptions(
             failed_folder_name="Failed"))
 
-        assert result.succeeded == [None, None]  # 两个好文件都处理了
+        assert [len(plan) for plan in result.succeeded] == [1, 1]  # 两个好文件各一条写入计划
         assert [p.name for p in result.failed] == ["no-time.jpg"]
         assert not result.ok
 

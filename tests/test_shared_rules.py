@@ -10,8 +10,8 @@ from conftest import TRACK_KML
 from tracktool.config import Config
 from tracktool.context import ctx
 from tracktool.errors import UserInputError
-from tracktool.exif.write import is_missing_altitude
 from tracktool.kml.archive import resolve_zip_path
+from tracktool.metadata import is_missing_altitude
 
 
 class TestIsMissingAltitude:

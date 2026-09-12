@@ -2,19 +2,24 @@
 extension-based grouping.
 
 Ports Move-ExifTime / Move-Altitude / ConvertTo-Mp4 / Group-MediaFiles.
+
+Each per-file rule lives in a `decide_*` function that takes one file's
+metadata and returns the steps to take, so the rules can be read (and tested)
+without an exiftool process or an ffmpeg run in the way.
 """
 
 import re
 import shutil
-import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .. import log, mediatime
+from ..actions import Action, Failed, RemuxVideo, Rename, ShiftTags, Skip, WriteTags, run
 from ..context import ctx
 from ..errors import UserInputError
-from ..fileutil import BatchResult, FileFailure, run_per_file
-from .write import SetExifOptions, is_missing_altitude, list_files, write_exif_tags
+from ..fileutil import BatchResult, run_per_file
+from ..metadata import MediaMetadata
+from .write import SetExifOptions, build_tags, list_files
 
 # EXIF Make 字段注册值（exiftool 原样返回，精确匹配，不做大小写归一化）
 MAKE_SONY = "SONY"
@@ -52,6 +57,8 @@ _TAG_SETS: dict[tuple[str, str], list[str]] = {
     (MAKE_FUJIFILM, ".mp4"): _FUJIFILM_MP4_TAGS,
     (MAKE_INSTA360, ".mp4"): _INSTA360_MP4_TAGS,
 }
+
+SHIFT_TAGS = ["Make", "ExifIFD:OffsetTime"]
 
 
 def _parse_time_diff(time_diff: str) -> int:
@@ -119,149 +126,136 @@ def _compute_time_shift(file: Path, time_diff: str, offset_time: str, make: str,
     return total_seconds_offset, tz_tags
 
 
-def _rename_insta360(file: Path, shift: timedelta, is_negative: bool) -> None:
-    """Sync the timestamp inside an Insta360 filename with the shifted EXIF time."""
+def _insta360_new_name(file: Path, shift: timedelta, is_negative: bool) -> str | None:
+    """The name an Insta360 clip should carry after the shift, or None when the
+    name does not encode a timestamp (an Insta360 build's does)."""
     m = _INSTA360_FILENAME_PATTERN.search(file.stem)
     if not m:
-        log.error("Filename does not match Insta360 naming pattern", target=str(file))
-        return
+        return None
     original_time = datetime.strptime(m[1], "%Y%m%d_%H%M%S")
     new_time = original_time - shift if is_negative else original_time + shift
-    new_time_str = new_time.strftime("%Y%m%d_%H%M%S")
-    new_file_path = file.parent / _INSTA360_FILENAME_PATTERN.sub(f"_{new_time_str}_", file.name)
-    file.rename(new_file_path)
-    log.verbose("Renamed to match new timestamp", target=str(new_file_path))
+    return _INSTA360_FILENAME_PATTERN.sub(f"_{new_time.strftime('%Y%m%d_%H%M%S')}_", file.name)
+
+
+def decide_time_shift(meta: MediaMetadata, time_diff: str, offset_time: str,
+                      overwrite: bool) -> list[Action]:
+    """The steps that shift one file's timestamps, plus the name sync that
+    follows for an Insta360 clip whose name carries the same time."""
+    resolved = _compute_time_shift(meta.path, time_diff, offset_time, meta.get("Make"),
+                                   meta.get("ExifIFD:OffsetTime"))
+    if resolved is None:
+        return [Failed(meta.path, "time shift not applicable to this file")]
+    total_seconds_offset, tz_tags = resolved
+
+    if total_seconds_offset == 0:
+        if not tz_tags:
+            return [Skip(meta.path, "no timezone or time-shift changes required")]
+        return [WriteTags(meta.path, tz_tags, overwrite)]
+
+    make, ext = meta.get("Make"), meta.path.suffix.lower()
+    tag_set = _TAG_SETS.get((make, ext))
+    if tag_set is None:
+        return [Failed(meta.path, f"unsupported camera/extension: {make} {ext}")]
+
+    shift = timedelta(seconds=total_seconds_offset)
+    actions: list[Action] = [ShiftTags(meta.path, tag_set, shift, overwrite)]
+    if tz_tags:
+        actions.append(WriteTags(meta.path, tz_tags, overwrite))
+    if make == MAKE_INSTA360 and ext == ".mp4":
+        new_name = _insta360_new_name(meta.path, shift, total_seconds_offset < 0)
+        if new_name is None:
+            log.error("Filename does not match Insta360 naming pattern", target=str(meta.path))
+        else:
+            actions.append(Rename(meta.path, new_name))
+    return actions
 
 
 def move_exif_time(path: Path | list[Path], time_diff: str = "", offset_time: str = "",
-                   overwrite: bool = False, parallel: bool = False) -> BatchResult[None]:
+                   overwrite: bool = False, parallel: bool = False,
+                   dry_run: bool = False) -> BatchResult[list[Action]]:
     """Shift EXIF timestamps; OffsetTime only supported for SONY. Insta360 files renamed."""
     if not time_diff and not offset_time:
         raise UserInputError("At least one of time_diff or offset_time must be provided.")
 
     files = list_files(path)
 
-    def process(file: Path) -> None:
-        ext = file.suffix.lower()
+    def process(file: Path) -> list[Action]:
         # Make 与 OffsetTime 一次读齐，每个文件只往返 exiftool 一次
-        tags = ctx.backend.read_tags(file, ["Make", "ExifIFD:OffsetTime"])
-        make = tags.get("Make", "")
+        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, SHIFT_TAGS))
+        return run(decide_time_shift(meta, time_diff, offset_time, overwrite), dry_run=dry_run)
 
-        resolved = _compute_time_shift(file, time_diff, offset_time, make,
-                                       tags.get("ExifIFD:OffsetTime", ""))
-        if resolved is None:
-            raise FileFailure("time shift not applicable to this file")
-        total_seconds_offset, tz_tags = resolved
+    return run_per_file(files, process, activity="Shifting Exif time", parallel=parallel,
+                        dry_run=dry_run)
 
-        if total_seconds_offset == 0:
-            if tz_tags:
-                ctx.backend.write_tags(file, tz_tags, overwrite=overwrite)
-                log.verbose("Applied timezone offset tags but no time-shift needed", target=str(file))
-            else:
-                log.verbose("No timezone or time-shift changes required", target=str(file))
-            return
 
-        shift = timedelta(seconds=total_seconds_offset)
-        log.verbose(f"Shifting time by {shift}", target=str(file))
-
-        tag_set = _TAG_SETS.get((make, ext))
-        if tag_set is None:
-            log.error(f"Unsupported camera/extension: {make} {ext}; file skipped", target=str(file))
-            raise FileFailure(f"unsupported camera/extension: {make} {ext}")
-
-        ctx.backend.shift_tags(file, tag_set, shift, overwrite=overwrite)
-        if tz_tags:
-            ctx.backend.write_tags(file, tz_tags, overwrite=overwrite)
-
-        if make == MAKE_INSTA360 and ext == ".mp4":
-            _rename_insta360(file, shift, total_seconds_offset < 0)
-
-    return run_per_file(files, process, activity="Shifting Exif time", parallel=parallel)
+def decide_altitude_shift(meta: MediaMetadata, offset: float, overwrite: bool) -> list[Action]:
+    """Shift the recorded altitude; no altitude means there is nothing to shift."""
+    altitude = meta.altitude
+    if altitude is None:
+        return [Failed(meta.path, "no GPSAltitude to shift")]
+    new_alt = altitude + offset
+    log.verbose(f"Shifting altitude: {altitude} m -> {new_alt} m", target=str(meta.path))
+    return [WriteTags(meta.path, build_tags(SetExifOptions(altitude=new_alt)), overwrite)]
 
 
 def move_altitude(path: Path | list[Path], offset: float, overwrite: bool = False,
-                  parallel: bool = False) -> BatchResult[None]:
+                  parallel: bool = False, dry_run: bool = False) -> BatchResult[list[Action]]:
     """Shift GPSAltitude by a fixed offset (drone/ground-level correction)."""
     files = list_files(path)
 
-    def process(file: Path) -> None:
+    def process(file: Path) -> list[Action]:
         # -n 模式读到的已是按 GPSAltitudeRef 定了符号的十进制（Below Sea Level 为负）
-        altitude = ctx.backend.read_tags(file, ["GPSAltitude"]).get("GPSAltitude", "")
-        if is_missing_altitude(altitude):
-            log.warning("No GPSAltitude found, skipping", target=str(file))
-            raise FileFailure("no GPSAltitude to shift")
+        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, ["GPSAltitude"]))
+        return run(decide_altitude_shift(meta, offset, overwrite), dry_run=dry_run)
 
-        new_alt = float(altitude) + offset
-        log.verbose(f"Shifting altitude: {altitude} m -> {new_alt} m", target=str(file))
-        write_exif_tags(file, SetExifOptions(altitude=new_alt, overwrite=overwrite))
+    return run_per_file(files, process, activity=f"Shifting altitude by {offset} m",
+                        parallel=parallel, dry_run=dry_run)
 
-    return run_per_file(files, process, activity=f"Shifting altitude by {offset} m", parallel=parallel)
+
+def decide_convert(meta: MediaMetadata, output_dir: Path, offset_time: str,
+                   make: str | None, model: str | None) -> list[Action]:
+    """Rewrap one video into MP4 at its own creation time, then tag the result."""
+    media_time = mediatime.parse_media_time(meta.tags, offset_time, target=str(meta.path))
+    if media_time is None:
+        return [Failed(meta.path, "no valid timestamp")]
+
+    create_time_utc = media_time.astimezone(UTC)
+    output = output_dir / f"{meta.path.stem}.mp4"
+    source_is_mp4 = meta.path.suffix.lower() == ".mp4"
+    if not source_is_mp4 and output.exists():
+        return [Skip(meta.path, f"output already exists: {output.name}")]
+
+    tags = {"XMP-exif:DateTimeOriginal": create_time_utc.strftime("%Y:%m:%d %H:%M:%S") + offset_time}
+    if make:
+        tags["Make"] = make
+    if model:
+        tags["Model"] = model
+    return [
+        RemuxVideo(meta.path, output, create_time_utc.strftime("%Y-%m-%dT%H:%M:%S"),
+                   source_is_mp4=source_is_mp4,
+                   has_quicktime_create_date=bool(meta.get("QuickTime:CreateDate"))),
+        WriteTags(output, tags, overwrite=True),
+    ]
 
 
 def convert_to_mp4(path: Path | list[Path], make: str | None = None, model: str | None = None,
                    output_directory: Path | None = None,
                    offset_time: str = mediatime.DEFAULT_TZ_OFFSET,
-                   parallel: bool = False) -> BatchResult[None]:
+                   parallel: bool = False,
+                   dry_run: bool = False) -> BatchResult[list[Action]]:
     """Remux videos to MP4 with creation_time metadata + XMP tags (ffmpeg)."""
     # 入口处一次性校验 offset_time 格式，坏参数直接报错，而不是逐文件失败
     mediatime.parse_offset(offset_time)
     files = list_files(path)
     output_dir = output_directory if output_directory is not None else (files[0].parent if files else Path())
 
-    def process(file: Path) -> None:
-        output_path = output_dir / f"{file.stem}.mp4"
+    def process(file: Path) -> list[Action]:
         # 时间标签一次读齐；QuickTime:CreateDate 已在 TIME_TAGS 内，MP4 分支直接取用
-        tags = ctx.backend.read_tags(file, mediatime.TIME_TAGS)
-        media_time = mediatime.parse_media_time(tags, offset_time, target=str(file))
+        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, mediatime.TIME_TAGS))
+        return run(decide_convert(meta, output_dir, offset_time, make, model), dry_run=dry_run)
 
-        if media_time is None:
-            log.warning("No valid timestamp found; skipping", target=str(file))
-            raise FileFailure("no valid timestamp")
-
-        create_time_utc = media_time.astimezone(UTC)
-
-        create_time_str = create_time_utc.strftime("%Y:%m:%d %H:%M:%S") + offset_time
-        create_time_utc_str = create_time_utc.strftime("%Y-%m-%dT%H:%M:%S")
-
-        if file.suffix.lower() != ".mp4":
-            if output_path.exists():
-                log.warning("Output file already exists", target=str(output_path))
-                return
-            ret = subprocess.run(
-                ["ffmpeg", "-y", "-i", str(file), "-c", "copy",
-                 "-metadata", f"creation_time={create_time_utc_str}", str(output_path)],
-                capture_output=True)
-            if ret.returncode != 0:
-                log.error("Failed to convert to MP4", target=str(file))
-                raise FileFailure("ffmpeg failed to convert to MP4")
-            log.verbose("Converted to MP4", target=str(file))
-        else:
-            log.debug("File is already MP4", target=str(file))
-            quicktime_create_date = tags.get("QuickTime:CreateDate", "")
-            original_path = file.with_name(file.name + "_original")
-            shutil.move(str(file), str(original_path))
-            if not quicktime_create_date:
-                log.debug("Setting QuickTime:CreateDate", target=str(output_path))
-                ret = subprocess.run(
-                    ["ffmpeg", "-y", "-i", str(original_path),
-                     "-metadata", f"creation_time={create_time_utc_str}",
-                     "-c", "copy", "-map", "0", str(output_path)],
-                    capture_output=True)
-                if ret.returncode != 0:
-                    log.error("Failed to convert to MP4", target=str(file))
-                    raise FileFailure("ffmpeg failed to convert to MP4")
-            else:
-                shutil.copy2(original_path, output_path)
-
-        tags = {"XMP-exif:DateTimeOriginal": create_time_str}
-        if make:
-            tags["Make"] = make
-        if model:
-            tags["Model"] = model
-        write_exif_tags(output_path, SetExifOptions(tags=tags, overwrite=True))
-        log.verbose(f"Set tags: {', '.join(tags)}", target=str(output_path))
-
-    return run_per_file(files, process, activity="Converting to MP4", parallel=parallel)
+    return run_per_file(files, process, activity="Converting to MP4", parallel=parallel,
+                        dry_run=dry_run)
 
 
 def group_media_files(path: Path) -> None:

@@ -82,6 +82,19 @@ def quarantine(path: Path, folder_name: str | None) -> None:
         move_to_folder(path, folder_name)
 
 
+def _quarantine(path: Path, folder_name: str | None, dry_run: bool) -> None:
+    """Count a failed file, moving it aside only when the run is for real.
+
+    A dry run still classifies the file as failed — the exit code has to match
+    the run it previews — but moving it would make the preview the very thing
+    it was meant to avoid.
+    """
+    if dry_run and folder_name:
+        log.info(f"would move to {folder_name} (failed file)", target=str(path))
+        return
+    quarantine(path, folder_name)
+
+
 def run_per_file[T, R](
     files: list[Path],
     process: Callable[[Path], R],
@@ -89,6 +102,7 @@ def run_per_file[T, R](
     activity: str = "Processing",
     failed_folder_name: str | None = None,
     parallel: bool = False,
+    dry_run: bool = False,
 ) -> BatchResult[R]:
     """Apply process to every file; a per-file failure never aborts the batch.
 
@@ -101,6 +115,10 @@ def run_per_file[T, R](
     Catching broadly is the point: a systemic failure (missing exiftool, bad
     API key) repeats the error per file instead of silently dropping the rest
     of the batch, and the failure count is what tells the caller nothing worked.
+
+    `dry_run` changes nothing about the contract — the same files are counted —
+    it only stops the quarantine move, since a preview must not rearrange the
+    directory it is previewing.
     """
 
     def guarded(file: Path) -> R:
@@ -109,11 +127,11 @@ def run_per_file[T, R](
         except FileFailure as exc:
             log.debug(f"{activity} failed: {exc}", target=str(file))
             if exc.quarantine:
-                quarantine(file, failed_folder_name)
+                _quarantine(file, failed_folder_name, dry_run)
             return _FAILED
         except Exception as exc:  # per-file isolation is the whole contract
             log.error(f"{activity} failed: {exc}", target=str(file))
-            quarantine(file, failed_folder_name)
+            _quarantine(file, failed_folder_name, dry_run)
             return _FAILED
 
     raw = run_parallel(files, guarded, activity=activity, parallel=parallel)

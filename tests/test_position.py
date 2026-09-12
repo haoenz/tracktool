@@ -1,19 +1,23 @@
 """Tests for media time parsing and KML timestamp/point matching logic."""
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from conftest import TRACK_KML
 
 from tracktool import mediatime
+from tracktool.actions import Failed, Skip, WriteTags
 from tracktool.exif.position import (
     SetPositionOptions,
     TrackPoint,
     _find_best_track,
     _verify_or_skip,
+    decide_position,
     get_position_from_kml,
 )
 from tracktool.kml import xmlutil
+from tracktool.metadata import MediaMetadata
 
 
 class TestMediatimeParsing:
@@ -157,3 +161,104 @@ class TestKmlType:
         from tracktool.kml.kmlfile import TrackType, get_kml_type
 
         assert get_kml_type(kml) is TrackType.DEFAULT
+
+
+class TestDecidePosition:
+    """The rule as a function of one file's metadata — including what it does
+    not bother to look up, which is most of the point of pulling it out."""
+
+    TIME = {"ExifIFD:DateTimeOriginal": "2024:05:01 08:01:30", "ExifIFD:OffsetTimeOriginal": "+08:00"}
+    FULL_GPS = {"GPSLatitude": "39.1", "GPSLongitude": "116.1", "GPSAltitude": "110"}
+
+    @staticmethod
+    def _meta(**tags: str) -> MediaMetadata:
+        return MediaMetadata.of(Path("2024-05-01 a.jpg"), tags)
+
+    @staticmethod
+    def _finder(point: TrackPoint | None):
+        def find(media_time: datetime) -> TrackPoint | None:
+            return point
+
+        return find
+
+    @staticmethod
+    def _point(latitude: float = 39.1, longitude: float = 116.1, altitude: float = 110.0,
+               seconds: float = 0.0, inside: bool = True) -> TrackPoint:
+        return TrackPoint(latitude=latitude, longitude=longitude, altitude=altitude,
+                          seconds_from_nearest=seconds, inside_duration=inside)
+
+    def test_a_fully_tagged_file_never_searches_the_archive(self):
+        def unexpected(media_time: datetime) -> TrackPoint | None:
+            raise AssertionError("the archive was searched for a file that needs nothing")
+
+        result = decide_position(self._meta(**self.FULL_GPS), unexpected, SetPositionOptions())
+
+        assert result == [Skip(Path("2024-05-01 a.jpg"), "GPS data already exists")]
+
+    def test_a_track_match_plans_the_write(self):
+        result = decide_position(self._meta(**self.TIME), self._finder(self._point()),
+                                 SetPositionOptions(overwrite=True))
+
+        assert result == [WriteTags(Path("2024-05-01 a.jpg"), {
+            "GPSLatitude": "39.1", "GPSLatitudeRef": "N",
+            "GPSLongitude": "116.1", "GPSLongitudeRef": "E",
+            "GPSAltitudeRef": "Above Sea Level", "GPSAltitude": "110.0",
+        }, True)]
+
+    def test_the_decision_against_a_real_archive(self):
+        # 00:01:30 UTC 落在 [00:01, 00:02] 正中间，取到 00:02 那个点
+        cache = {"2024-05-01 test.kml": xmlutil.parse_string(TRACK_KML)}
+
+        result = decide_position(
+            self._meta(**self.TIME),
+            lambda media_time: _find_best_track(cache, media_time, multiday=False),
+            SetPositionOptions())
+
+        assert result[0].tags["GPSLatitude"] == "39.2"
+        assert result[0].tags["GPSAltitude"] == "120.0"
+
+    def test_no_timestamp_is_a_failure(self):
+        result = decide_position(self._meta(), self._finder(self._point()), SetPositionOptions())
+
+        assert result == [Failed(Path("2024-05-01 a.jpg"), "no valid timestamp")]
+
+    def test_no_track_match_is_a_failure(self):
+        result = decide_position(self._meta(**self.TIME), self._finder(None), SetPositionOptions())
+
+        assert result == [Failed(Path("2024-05-01 a.jpg"), "no matching GPS data in the KML archive")]
+
+    def test_a_match_beyond_the_time_limit_is_a_failure(self):
+        result = decide_position(self._meta(**self.TIME),
+                                 self._finder(self._point(seconds=90.0, inside=False)),
+                                 SetPositionOptions(max_time_diff_seconds=60))
+
+        assert result == [Failed(Path("2024-05-01 a.jpg"), "best match 90.0s outside the 60s limit")]
+
+    def test_the_existing_altitude_is_kept_when_the_track_has_none(self):
+        # KML 点的海拔是 0（未记录），沿用文件里已有的值
+        result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
+                                 self._finder(self._point(altitude=0.0)),
+                                 SetPositionOptions(force=True))
+
+        assert result[0].tags["GPSAltitude"] == "110.0"
+
+    def test_force_rewrites_even_a_fully_tagged_file(self):
+        result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
+                                 self._finder(self._point()), SetPositionOptions(force=True))
+
+        assert [type(action) for action in result] == [WriteTags]
+
+    def test_a_verification_mismatch_fails_without_quarantine(self):
+        result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
+                                 self._finder(self._point(latitude=40.0, longitude=117.0)),
+                                 SetPositionOptions(verify_existing_gps=True))
+
+        assert result == [Failed(Path("2024-05-01 a.jpg"), "existing GPS disagrees with the KML",
+                                 quarantine=False)]
+
+    def test_a_passing_verification_has_nothing_to_write(self):
+        result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
+                                 self._finder(self._point()),
+                                 SetPositionOptions(verify_existing_gps=True))
+
+        assert result == [Skip(Path("2024-05-01 a.jpg"), "existing GPS agrees with the KML match")]

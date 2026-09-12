@@ -1,7 +1,7 @@
 """EXIF tag reading and writing through the metadata backend.
 
-Ports Set-Exif (four GPS position input formats), Find-MissingTag (zero
-altitude counts as missing), Write-MediaInfo.
+Set-Exif accepts four GPS position input formats; Find-MissingTag counts a zero
+altitude as missing; Write-MediaInfo prints what a file records.
 """
 
 import re
@@ -9,9 +9,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import log, mediatime
+from ..actions import Action, WriteTags, run
 from ..context import ctx
 from ..errors import UserInputError
-from ..fileutil import BatchResult, FileFailure, run_per_file
+from ..fileutil import BatchResult, run_per_file
+from ..metadata import MediaMetadata, is_missing_altitude
 
 # Set-Exif 的四种 GPS 位置输入格式
 _DEFAULT_PATTERN = re.compile(
@@ -26,21 +28,6 @@ _EXIF_PATTERN = re.compile(
 
 class SetExifError(UserInputError):
     """The requested GPS position is not one of the accepted formats."""
-
-
-def is_missing_altitude(value: str | float | None) -> bool:
-    """Zero altitude (either direction) counts as missing, like an absent value.
-
-    exiftool is read in -n mode, so the value is a signed decimal ("100",
-    "-50") and a zero altitude is a plain 0 whichever hemisphere it is in.
-    """
-    if value is None or value == "":
-        return True
-    try:
-        return float(value) == 0
-    except (TypeError, ValueError):
-        # 非数值形态无法判为零，按旧行为视为有值
-        return False
 
 
 @dataclass
@@ -104,25 +91,20 @@ def list_files(path: Path | list[Path]) -> list[Path]:
 
 
 def set_exif(path: Path | list[Path], options: SetExifOptions,
-             parallel: bool = False) -> BatchResult[None]:
-    """Apply EXIF tags to one file, every file in a directory, or a file list."""
+             parallel: bool = False, dry_run: bool = False) -> BatchResult[list[Action]]:
+    """Apply EXIF tags to one file, every file in a directory, or a file list.
+
+    The same tags go to every file, so the decisions are built once and the
+    plan is one assignment per file.
+    """
     tags = build_tags(options)
     files = list_files(path)
 
-    def process(file: Path) -> None:
-        ctx.backend.write_tags(file, tags, overwrite=options.overwrite)
+    def process(file: Path) -> list[Action]:
+        return run([WriteTags(file, tags, options.overwrite)], dry_run=dry_run)
 
-    return run_per_file(files, process, activity="Setting Exif data", parallel=parallel)
-
-
-def write_exif_tags(file: Path, options: SetExifOptions) -> None:
-    """Write tags to one file, raising FileFailure when the write failed.
-
-    A per-file caller sits inside a batch of its own, so the inner failure has
-    to surface as its own: an inner BatchResult nobody reads would swallow it.
-    """
-    if not set_exif(file, options).ok:
-        raise FileFailure("failed to write EXIF tags")
+    return run_per_file(files, process, activity="Setting Exif data", parallel=parallel,
+                        dry_run=dry_run)
 
 
 @dataclass
@@ -142,10 +124,10 @@ def find_missing_tag(path: Path | list[Path], tags: list[str],
 
     def process(file: Path) -> MissingTagResult | None:
         # 全部待查标签一次读齐，N 个标签仍是一次往返
-        values = ctx.backend.read_tags(file, tags)
+        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, tags))
         missing: list[str] = []
         for tag in tags:
-            value = values.get(tag, "")
+            value = meta.get(tag)
             if not value:
                 missing.append(tag)
             elif tag == "GPSAltitude" and is_missing_altitude(value):
@@ -160,8 +142,10 @@ def find_missing_tag(path: Path | list[Path], tags: list[str],
 
 def print_media_info(path: Path) -> None:
     """Print timestamp, GPS position and altitude of a file."""
-    tags = ctx.backend.read_tags(path, [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"])
-    media_time = mediatime.parse_media_time(tags, target=str(path))
+    meta = MediaMetadata.of(
+        path, ctx.backend.read_tags(
+            path, [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"]))
+    media_time = mediatime.parse_media_time(meta.tags, target=str(path))
     print(media_time.isoformat() if media_time else "")
-    print(" ".join(v for v in (tags.get("GPSLatitude", ""), tags.get("GPSLongitude", "")) if v))
-    print(tags.get("GPSAltitude", ""))
+    print(" ".join(v for v in (meta.get("GPSLatitude"), meta.get("GPSLongitude")) if v))
+    print(meta.get("GPSAltitude"))

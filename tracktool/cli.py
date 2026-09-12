@@ -9,6 +9,7 @@ from rich import box
 from rich.table import Table
 
 from . import __version__, coords, dedup, googleapi, log, mediatime
+from .actions import Action, describe
 from .config import LEVELS
 from .context import ctx
 from .errors import EXIT_PARTIAL, EXIT_USER_ERROR, AppError, UserInputError
@@ -51,6 +52,8 @@ app.add_typer(config_app, name="config")
 ParallelOpt = Annotated[bool, typer.Option("--parallel", help=f"Process in parallel ({DEFAULT_WORKERS} threads)")]
 QuietOpt = Annotated[bool, typer.Option("--quiet", "-q", help="Only warnings and errors")]
 OffsetTimeOpt = Annotated[str, typer.Option("--offset-time", help="Default timezone offset")]
+DryRunOpt = Annotated[bool, typer.Option(
+    "--dry-run", help="Show what would be done without touching any file")]
 
 
 def _version_callback(value: bool) -> None:
@@ -93,6 +96,30 @@ def _finish(result: BatchResult[Any] | None) -> None:
     """
     if result is not None and result.failed:
         raise typer.Exit(code=EXIT_PARTIAL)
+
+
+def _report_plan(result: BatchResult[list[Action]], dry_run: bool) -> None:
+    """Print the steps a dry run would take, one row per step.
+
+    A file that cannot be processed has no step to show: its reason is in the
+    log right above, and the exit code still reports how many files failed.
+    """
+    if not dry_run:
+        return
+    table = Table(box=box.SIMPLE)
+    table.add_column("File")
+    table.add_column("Action")
+    table.add_column("Detail")
+    for plan in result.succeeded:
+        for action in plan:
+            kind, detail = describe(action)
+            table.add_row(str(action.file), kind, detail)
+    if table.row_count:
+        log.console().print(table)
+    else:
+        log.info("Nothing to do")
+    if result.failed:
+        log.warning(f"{len(result.failed)} file(s) would fail (see the log above)")
 
 
 # ── kml ─────────────────────────────────────────────────────────────────────
@@ -198,6 +225,7 @@ def exif_set(
     tags: Annotated[list[str] | None, typer.Option("--tag", "-t", help="Extra tags NAME=VALUE")] = None,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite original files")] = False,
     parallel: ParallelOpt = False,
+    dry_run: DryRunOpt = False,
 ) -> None:
     """Write EXIF tags (GPS position/altitude, Make/Model, arbitrary tags)."""
     path = _resolve_path(path)
@@ -209,7 +237,9 @@ def exif_set(
         tag_dict[name] = value
     options = exif_write.SetExifOptions(position=position, altitude=altitude, make=make,
                                         model=model, tags=tag_dict, overwrite=overwrite)
-    _finish(exif_write.set_exif(path, options, parallel))
+    result = exif_write.set_exif(path, options, parallel, dry_run=dry_run)
+    _report_plan(result, dry_run)
+    _finish(result)
 
 
 @exif_app.command("info")
@@ -255,6 +285,7 @@ def exif_set_position(
     multiday: Annotated[bool, typer.Option("--multiday", help="Also check ±1 day tracks")] = False,
     failed_folder: Annotated[str | None, typer.Option("--failed-folder", help="Move failures here")] = None,
     parallel: ParallelOpt = False,
+    dry_run: DryRunOpt = False,
 ) -> None:
     """Geotag media from the KML archive by timestamp matching."""
     path = _resolve_path(path)
@@ -262,7 +293,10 @@ def exif_set_position(
         max_time_diff_seconds=max_time_diff, overwrite=overwrite, force=force,
         verify_existing_gps=verify, max_distance_meters=max_distance,
         multiday=multiday, failed_folder_name=failed_folder)
-    _finish(exif_position.set_position_from_kml(path, zip_path, options, parallel))
+    result = exif_position.set_position_from_kml(path, zip_path, options, parallel,
+                                                dry_run=dry_run)
+    _report_plan(result, dry_run)
+    _finish(result)
 
 
 @exif_app.command("set-altitude")
@@ -272,10 +306,14 @@ def exif_set_altitude(
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     failed_folder: Annotated[str | None, typer.Option("--failed-folder", help="Move failures here")] = None,
     parallel: ParallelOpt = False,
+    dry_run: DryRunOpt = False,
 ) -> None:
     """Fill missing GPSAltitude from Google Elevation."""
     path = _resolve_path(path)
-    _finish(exif_google.set_altitude_from_google(path, overwrite, failed_folder, parallel, api_key))
+    result = exif_google.set_altitude_from_google(path, overwrite, failed_folder, parallel, api_key,
+                                                 dry_run=dry_run)
+    _report_plan(result, dry_run)
+    _finish(result)
 
 
 @exif_app.command("set-location")
@@ -286,10 +324,14 @@ def exif_set_location(
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     failed_folder: Annotated[str | None, typer.Option("--failed-folder", help="Move failures here")] = None,
     parallel: ParallelOpt = False,
+    dry_run: DryRunOpt = False,
 ) -> None:
     """Reverse geocode GPSPosition into IPTC City/State/Country tags."""
     path = _resolve_path(path)
-    _finish(exif_google.set_location_from_google(path, overwrite, failed_folder, parallel, api_key, language))
+    result = exif_google.set_location_from_google(path, overwrite, failed_folder, parallel, api_key,
+                                                 language, dry_run=dry_run)
+    _report_plan(result, dry_run)
+    _finish(result)
 
 
 @exif_app.command("move-time")
@@ -299,13 +341,17 @@ def exif_move_time(
     offset_time: Annotated[str | None, typer.Option("--offset-time", help="New timezone offset (SONY only)")] = None,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     parallel: ParallelOpt = False,
+    dry_run: DryRunOpt = False,
 ) -> None:
     """Shift EXIF timestamps; Insta360 files are renamed too."""
     path = _resolve_path(path)
     if not time_diff and not offset_time:
         log.error("At least one of --time-diff or --offset-time must be provided")
         raise typer.Exit(code=EXIT_USER_ERROR)
-    _finish(exif_media.move_exif_time(path, time_diff or "", offset_time or "", overwrite, parallel))
+    result = exif_media.move_exif_time(path, time_diff or "", offset_time or "", overwrite, parallel,
+                                      dry_run=dry_run)
+    _report_plan(result, dry_run)
+    _finish(result)
 
 
 @exif_app.command("move-altitude")
@@ -314,10 +360,13 @@ def exif_move_altitude(
     offset: Annotated[float, typer.Argument(help="Altitude offset in meters")],
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     parallel: ParallelOpt = False,
+    dry_run: DryRunOpt = False,
 ) -> None:
     """Shift GPSAltitude by a fixed offset."""
     path = _resolve_path(path)
-    _finish(exif_media.move_altitude(path, offset, overwrite, parallel))
+    result = exif_media.move_altitude(path, offset, overwrite, parallel, dry_run=dry_run)
+    _report_plan(result, dry_run)
+    _finish(result)
 
 
 @exif_app.command("to-mp4")
@@ -328,11 +377,15 @@ def exif_to_mp4(
     model: Annotated[str | None, typer.Option("--model", help="Camera model to write")] = None,
     offset_time: OffsetTimeOpt = mediatime.DEFAULT_TZ_OFFSET,
     parallel: ParallelOpt = False,
+    dry_run: DryRunOpt = False,
 ) -> None:
     """Remux videos to MP4 with creation_time + XMP tags (ffmpeg)."""
     path = _resolve_path(path)
     output_dir = _resolve_path(output_directory) if output_directory else None
-    _finish(exif_media.convert_to_mp4(path, make, model, output_dir, offset_time, parallel))
+    result = exif_media.convert_to_mp4(path, make, model, output_dir, offset_time, parallel,
+                                       dry_run=dry_run)
+    _report_plan(result, dry_run)
+    _finish(result)
 
 
 @exif_app.command("group")
@@ -349,10 +402,13 @@ def exif_resolve_missing(
     path: Annotated[Path, typer.Argument(help="Directory of media files")],
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     parallel: ParallelOpt = False,
+    dry_run: DryRunOpt = False,
 ) -> None:
     """Repair files missing GPSPosition/GPSAltitude (Google altitude, then KML position)."""
     path = _resolve_path(path)
-    _finish(exif_resolve.resolve_missing_gps(path, parallel, zip_path))
+    result = exif_resolve.resolve_missing_gps(path, parallel, zip_path, dry_run=dry_run)
+    _report_plan(result, dry_run)
+    _finish(result)
 
 
 @exif_app.command("resolve-vid")
@@ -363,10 +419,14 @@ def exif_resolve_vid(
     offset_time: OffsetTimeOpt = mediatime.DEFAULT_TZ_OFFSET,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     parallel: ParallelOpt = False,
+    dry_run: DryRunOpt = False,
 ) -> None:
     """Video pipeline: VID -> VID_original, convert to MP4, then repair GPS."""
     path = _resolve_path(path)
-    _finish(exif_resolve.resolve_vid_exif(path, make, model, offset_time, parallel, zip_path))
+    result = exif_resolve.resolve_vid_exif(path, make, model, offset_time, parallel, zip_path,
+                                           dry_run=dry_run)
+    _report_plan(result, dry_run)
+    _finish(result)
 
 
 # ── google ──────────────────────────────────────────────────────────────────

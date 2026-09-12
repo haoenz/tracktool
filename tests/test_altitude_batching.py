@@ -23,28 +23,30 @@ def _paths(tmp_path: Path, prefix: str, count: int) -> list[Path]:
     return [tmp_path / f"{prefix}{i}.jpg" for i in range(count)]
 
 
-def _install_backend(monkeypatch, files: list[Path], tags: dict[str, str]) -> None:
+def _install_backend(monkeypatch, files: list[Path], tags: dict[str, str]) -> InMemoryBackend:
     """Every listed file reports the same tags, so what these tests measure is
-    the batch boundary rather than any per-file difference."""
-    monkeypatch.setattr(ctx, "backend", InMemoryBackend({path: dict(tags) for path in files}))
+    the batch boundary rather than any per-file difference. Returns the double
+    so a test can check what was finally written."""
+    backend = InMemoryBackend({path: dict(tags) for path in files})
+    monkeypatch.setattr(ctx, "backend", backend)
+    return backend
 
 
 class TestOneElevationCallPerSelection:
     def test_one_call_covers_every_file(self, tmp_path: Path, monkeypatch):
         files = _paths(tmp_path, "p", 3)
-        _install_backend(monkeypatch, files, {"GPSLatitude": "39.0", "GPSLongitude": "116.0"})
+        backend = _install_backend(monkeypatch, files,
+                                   {"GPSLatitude": "39.0", "GPSLongitude": "116.0"})
         queried: list[list[tuple[float, float]]] = []
         monkeypatch.setattr(
             exif_google.googleapi, "get_altitudes",
             lambda points, api_key=None: queried.append(list(points)) or [10.0] * len(points))
-        written: list[Path] = []
-        monkeypatch.setattr(exif_google, "write_exif_tags",
-                            lambda file, options: written.append(file))
 
         result = exif_google.set_altitude_from_google(files)
 
         assert queried == [[(39.0, 116.0)] * 3], "整表一次查询"
-        assert written == files
+        assert [path for path, _, _ in backend.writes] == files
+        assert [tags["GPSAltitude"] for _, tags, _ in backend.writes] == ["10.0"] * 3
         assert result.ok
 
     def test_no_call_when_nothing_needs_altitude(self, tmp_path: Path, monkeypatch):
@@ -64,16 +66,17 @@ class TestOneElevationCallPerSelection:
         files = _paths(tmp_path, "p", 4)
         for path in files:
             path.touch()
-        _install_backend(monkeypatch, files, {"GPSLatitude": "39.0", "GPSLongitude": "116.0"})
+        backend = _install_backend(monkeypatch, files,
+                                   {"GPSLatitude": "39.0", "GPSLongitude": "116.0"})
         calls: list[int] = []
         monkeypatch.setattr(
             exif_google.googleapi, "get_altitudes",
             lambda points, api_key=None: calls.append(len(points)) or [1.0] * len(points))
-        monkeypatch.setattr(exif_google, "write_exif_tags", lambda file, options: None)
 
         result = exif_google.set_altitude_from_google(tmp_path)
 
         assert calls == [4]
+        assert len(backend.writes) == 4
         assert result.ok
 
 

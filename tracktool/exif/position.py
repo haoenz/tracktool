@@ -6,20 +6,28 @@ tracks (filename contains the date; ±1 day with -Multiday) via binary search
 on the when[] array, keep the nearest point; a match strictly inside a track's
 duration wins immediately, otherwise the smallest outside-diff is used when it
 is within MaxTimeDiffSeconds (default 60s).
+
+`decide_position` holds that whole rule as a function of one file's metadata
+and a track lookup, returning the steps to take; the batch only replays them.
 """
 
 import zipfile
 from bisect import bisect_left
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .. import coords, log, mediatime
+from ..actions import Action, Failed, Skip, WriteTags, run
 from ..context import ctx
 from ..errors import UserInputError
-from ..fileutil import BatchResult, FileFailure, run_per_file
+from ..fileutil import BatchResult, run_per_file
 from ..kml import archive, xmlutil
-from .write import SetExifOptions, is_missing_altitude, list_files, write_exif_tags
+from ..metadata import MediaMetadata
+from .write import SetExifOptions, build_tags, list_files
+
+POSITION_TAGS = [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"]
 
 
 @dataclass
@@ -98,6 +106,9 @@ class SetPositionOptions:
     failed_folder_name: str | None = None
 
 
+FindBestTrack = Callable[[datetime], "TrackPoint | None"]
+
+
 def _find_best_track(parsed_cache: dict[str, xmlutil.etree._ElementTree],
                      media_time: datetime, multiday: bool,
                      target_file: str | None = None) -> TrackPoint | None:
@@ -137,9 +148,55 @@ def _verify_or_skip(latitude: float, longitude: float, best: TrackPoint,
     return True
 
 
+def decide_position(meta: MediaMetadata, find_best: FindBestTrack,
+                    options: SetPositionOptions) -> list[Action]:
+    """What to do with one file, as a value: nothing here reads or writes.
+
+    `find_best` is the track lookup, handed over so a file that already has
+    everything is skipped without searching the archive at all — the archive
+    holds thousands of points and most files in a library are already tagged.
+    """
+    if meta.has_position and meta.has_altitude \
+            and not options.force and not options.verify_existing_gps:
+        log.debug(f"GPSPosition already exists: {meta.get('GPSLatitude')} {meta.get('GPSLongitude')}",
+                  target=str(meta.path))
+        log.debug(f"GPSAltitude already exists: {meta.get('GPSAltitude')}", target=str(meta.path))
+        return [Skip(meta.path, "GPS data already exists")]
+
+    media_time = mediatime.parse_media_time(meta.tags, target=str(meta.path))
+    if media_time is None:
+        return [Failed(meta.path, "no valid timestamp")]
+
+    best = find_best(media_time)
+    if best is None:
+        return [Failed(meta.path, "no matching GPS data in the KML archive")]
+    if best.seconds_from_nearest > options.max_time_diff_seconds:
+        return [Failed(meta.path, f"best match {round(best.seconds_from_nearest, 2)}s outside "
+                                  f"the {options.max_time_diff_seconds}s limit")]
+
+    position = meta.position
+    if options.verify_existing_gps and position is not None:
+        if not _verify_or_skip(position[0], position[1], best, options, str(meta.path)):
+            # 校验不符：文件保持原位（用户要的是核对结果，不是搬运）
+            return [Failed(meta.path, "existing GPS disagrees with the KML", quarantine=False)]
+        if meta.has_altitude and not options.force:
+            return [Skip(meta.path, "existing GPS agrees with the KML match")]
+
+    if best.latitude is None or best.longitude is None:
+        return [Failed(meta.path, "matched KML point carries no coordinates")]
+
+    # KML 没带海拔时沿用文件里已有的值
+    new_altitude = best.altitude or meta.altitude
+    return [WriteTags(meta.path,
+                      build_tags(SetExifOptions(position=f"{best.latitude} {best.longitude}",
+                                                altitude=new_altitude)),
+                      options.overwrite)]
+
+
 def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
                           options: SetPositionOptions | None = None,
-                          parallel: bool = False) -> BatchResult[None]:
+                          parallel: bool = False,
+                          dry_run: bool = False) -> BatchResult[list[Action]]:
     """Set GPS position/altitude on media files from the KML ZIP archive.
 
     A file list is accepted so one call can cover a whole selection: the archive
@@ -159,63 +216,14 @@ def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = No
 
     files = list_files(path)
 
-    def process(file: Path) -> None:
+    def process(file: Path) -> list[Action]:
         # 时间标签与 GPS 标签一次读齐，每个文件只往返 exiftool 一次
-        tags = ctx.backend.read_tags(
-            file, [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"])
-
-        latitude_text, longitude_text = tags.get("GPSLatitude"), tags.get("GPSLongitude")
-        latitude = float(latitude_text) if latitude_text is not None else None
-        longitude = float(longitude_text) if longitude_text is not None else None
-        if latitude is not None and longitude is not None:
-            log.debug(f"GPSPosition already exists: {latitude} {longitude}", target=str(file))
-
-        altitude_text = tags.get("GPSAltitude", "")
-        # 零海拔同样算没有海拔，否则 0 会被当成可信高度而跳过补全
-        has_altitude = not is_missing_altitude(altitude_text)
-        if has_altitude:
-            log.debug(f"GPSAltitude already exists: {altitude_text}", target=str(file))
-
-        # 如果已有数据，并且用户没有开启 Force 也没开启 Verify，直接跳过当前文件
-        if (latitude is not None and longitude is not None and has_altitude
-                and not options.force and not options.verify_existing_gps):
-            log.verbose("Skipping (GPS data already exists)", target=str(file))
-            return
-
-        media_time = mediatime.parse_media_time(tags, target=str(file))
-        if media_time is None:
-            log.error("No valid timestamp found; skipping", target=str(file))
-            raise FileFailure("no valid timestamp")
-
-        best = _find_best_track(parsed_cache, media_time, options.multiday, str(file))
-        if best is None:
-            log.warning("No matching GPS data found in KML archive", target=str(file))
-            raise FileFailure("no matching GPS data in the KML archive")
-        if best.seconds_from_nearest > options.max_time_diff_seconds:
-            log.warning(
-                f"Best matched KML is outside duration by {round(best.seconds_from_nearest, 2)} seconds, "
-                f"which exceeds the {options.max_time_diff_seconds}s limit", target=str(file))
-            raise FileFailure(f"best match {round(best.seconds_from_nearest, 2)}s outside the time limit")
-
-        if options.verify_existing_gps and latitude is not None and longitude is not None:
-            if not _verify_or_skip(latitude, longitude, best, options, str(file)):
-                # 校验不符：文件保持原位（用户要的是核对结果，不是搬运）
-                raise FileFailure("existing GPS disagrees with the KML", quarantine=False)
-
-        if best.latitude is not None and best.longitude is not None:
-            # 如果文件缺失位置或高度，或者用户开启了 Force，则同时打包更新
-            if latitude is None or longitude is None or not has_altitude or options.force:
-                new_position = f"{best.latitude} {best.longitude}"
-                # KML 没带海拔时沿用文件里已有的值
-                file_altitude = float(altitude_text) if not is_missing_altitude(altitude_text) else None
-                new_altitude = best.altitude or file_altitude
-                display_alt = f"{new_altitude} m" if new_altitude else "None"
-                log.verbose(f"Setting GPS position: {new_position}, altitude: {display_alt}", target=str(file))
-                write_exif_tags(file, SetExifOptions(position=new_position, altitude=new_altitude,
-                                                     overwrite=options.overwrite))
-        else:
-            log.warning("No matching GPS data found in KML archive", target=str(file))
-            raise FileFailure("matched KML point carries no coordinates")
+        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, POSITION_TAGS))
+        return run(decide_position(
+            meta, lambda media_time: _find_best_track(
+                parsed_cache, media_time, options.multiday, str(file)),
+            options), dry_run=dry_run)
 
     return run_per_file(files, process, activity="Setting GPS info from KML",
-                        failed_folder_name=options.failed_folder_name, parallel=parallel)
+                        failed_folder_name=options.failed_folder_name, parallel=parallel,
+                        dry_run=dry_run)

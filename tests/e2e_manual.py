@@ -67,7 +67,7 @@ def main() -> None:
             media_dir, str(zip_path),
             options=SetPositionOptions(max_time_diff_seconds=MAX_TIME_DIFF_SECONDS, overwrite=True,
                                        failed_folder_name="TrackPosFailed"))
-        assert batch.succeeded == [None, None]  # photo0 / photo1 已写入
+        assert [len(plan) for plan in batch.succeeded] == [1, 1]  # photo0 / photo1 各一条写入计划
         assert [p.name for p in batch.failed] == ["photo2.jpg"], batch.failed
 
         # photo0: 00:00 UTC 精确匹配 -> (39.0, 116.0, 100)

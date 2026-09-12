@@ -18,7 +18,12 @@ from tracktool.context import ctx
 from tracktool.exif.google import set_altitude_from_google
 from tracktool.exif.media import move_altitude
 from tracktool.exif.write import SetExifOptions, find_missing_tag, set_exif
-from tracktool.metadata import MetadataBackend
+from tracktool.metadata import MediaMetadata, MetadataBackend
+
+
+def _meta(**tags: str) -> MediaMetadata:
+    """Metadata as a value: the decisions need no file behind them."""
+    return MediaMetadata.of(Path("a.jpg"), tags)
 
 
 @pytest.fixture
