@@ -8,7 +8,7 @@ import typer
 from rich import box
 from rich.table import Table
 
-from . import __version__, dedup, log, mediatime
+from . import __version__, dedup, googleapi, log, mediatime
 from .config import LEVELS, ConfigError, config
 from .exif import google as exif_google
 from .exif import media as exif_media
@@ -364,8 +364,6 @@ def google_altitude(
     api_key: Annotated[str | None, typer.Option("--api-key", help="Google Maps API key")] = None,
 ) -> None:
     """Query elevations (auto-batched)."""
-    from . import googleapi
-
     elevations = googleapi.get_altitudes(coordinates, api_key)
     for coord, elevation in zip(coordinates, elevations, strict=False):
         print(f"{coord}\t{elevation}")
@@ -378,8 +376,6 @@ def google_location(
     language: Annotated[str, typer.Option("--language", help="Geocoding language")] = "en",
 ) -> None:
     """Reverse geocode a coordinate."""
-    from . import googleapi
-
     location = googleapi.get_location(coordinate, api_key, language=language)
     print(json.dumps(location.__dict__, ensure_ascii=False, indent=2))
 

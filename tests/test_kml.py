@@ -106,7 +106,7 @@ class TestAltitudeFromGoogle:
     def test_fills_altitudes_per_point(self, linestring_file: Path, monkeypatch):
         queries: list[str] = []
 
-        def fake_get_altitudes(coordinates, api_key=None, cfg=None):
+        def fake_get_altitudes(coordinates, api_key=None):
             queries.extend(coordinates)
             return [10.5, None, 12.5, 13.5]
 

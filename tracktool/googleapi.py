@@ -13,7 +13,7 @@ import requests
 
 from . import coords as coords_mod
 from . import log
-from .config import Config, config
+from .config import config
 
 ELEVATION_URL_PREFIX = "https://maps.googleapis.com/maps/api/elevation/json?locations="
 MAX_URL_LENGTH = 8192
@@ -26,8 +26,8 @@ class GoogleApiError(Exception):
     pass
 
 
-def _resolve_key(override: str | None, cfg: Config) -> str:
-    key = cfg.google_api_key(override)
+def _resolve_key(override: str | None) -> str:
+    key = config.google_api_key(override)
     if not key:
         raise GoogleApiError("API key is required. Set TRACKTOOL_GOOGLE_API_KEY, pass --api-key, or set it in config")
     return key
@@ -103,10 +103,9 @@ def get_altitudes(
     api_key: str | None = None,
     retry_count: int = 3,
     timeout: int = 30,
-    cfg: Config = config,
 ) -> list[float | None]:
     """Query elevations for coordinates in any supported format, auto-batched."""
-    key = _resolve_key(api_key, cfg)
+    key = _resolve_key(api_key)
     if not coordinates:
         return []
 
@@ -168,10 +167,9 @@ def get_location(
     retry_count: int = 3,
     timeout: int = 30,
     language: str = "en",
-    cfg: Config = config,
 ) -> Location:
     """Reverse geocode one coordinate."""
-    key = _resolve_key(api_key, cfg)
+    key = _resolve_key(api_key)
     decimal = _resolve_decimal(coordinate)
 
     api_url = f"{GEOCODE_URL}?latlng={decimal}&language={language}&key={key}"

@@ -142,6 +142,8 @@ def remove_bad_points(path: Path, bad_points: list[str]) -> None:
     log.info("Created cleaned track file", target=str(new_kml_path))
 
 
+# cfg 为测试注入点：tests/test_shared_rules.py 传入指向临时 ZIP 的 Config；若测试改用
+# 其他方式注入单例，可随测试一并移除。
 def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
               no_archive: bool = False, cfg: Config = config) -> None:
     """Merge multiple KMLs into one LineString (-Connected) or MultiGeometry."""
@@ -186,8 +188,7 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
             move_to_folder(path, str(cfg["kmlBackupDirName"] or "Backup"), archive_dir)
 
 
-def set_kml_altitude_from_google(path: Path, api_key: str | None = None,
-                                 cfg: Config = config) -> None:
+def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None:
     """Fill altitude for every LineString coordinate in place via Google Elevation."""
     tree = xmlutil.parse_file(path)
     coord_nodes = xmlutil.findall(tree, "//kml:LineString/kml:coordinates")
@@ -213,7 +214,7 @@ def set_kml_altitude_from_google(path: Path, api_key: str | None = None,
 
     log.info(f"Querying Google Elevation API for {len(all_lat_lon)} point(s)", target=str(path))
 
-    elevations = googleapi.get_altitudes(all_lat_lon, api_key=api_key, cfg=cfg)
+    elevations = googleapi.get_altitudes(all_lat_lon, api_key=api_key)
 
     # 将高程写回，重建 coordinates 文本
     for i, (node, index) in enumerate(alt_targets):

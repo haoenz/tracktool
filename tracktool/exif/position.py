@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .. import coords, exiftool, log, mediatime
+from ..config import Config, config
 from ..fileutil import quarantine, run_per_file
 from ..kml import archive, xmlutil
 from .write import SetExifOptions, list_files, set_exif
@@ -133,13 +134,12 @@ def _verify_or_skip(existing_position: str, best: TrackPoint,
     return True
 
 
+# cfg 为测试注入点：tests/test_batch_isolation.py 传入指向测试 ZIP 的临时 Config；若测试改用
+# 其他方式注入单例，可随测试一并移除。
 def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
                           options: SetPositionOptions | None = None,
-                          parallel: bool = False, cfg=None) -> None:
+                          parallel: bool = False, cfg: Config = config) -> None:
     """Set GPS position/altitude on media files from the KML ZIP archive."""
-    from ..config import config
-
-    cfg = cfg or config
     options = options or SetPositionOptions()
 
     zip_path = archive.resolve_zip_path(kml_zip_path, cfg)
