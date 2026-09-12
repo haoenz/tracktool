@@ -25,7 +25,8 @@ class TrackPoint:
     latitude: str
     longitude: str
     altitude: str
-    time_diff: float  # 正=在轨迹持续时间内，负=持续时间内最近点距离
+    seconds_from_nearest: float
+    inside_duration: bool
 
 
 def get_position_from_kml(tree: xmlutil.etree._ElementTree, time: datetime,
@@ -67,17 +68,16 @@ def get_position_from_kml(tree: xmlutil.etree._ElementTree, time: datetime,
     if whens[index] == time:
         is_inside = True
 
-    abs_time_diff = abs((time - whens[index]).total_seconds())
-    # 如果在KML记录的持续时间内，时间差为正；如果在持续时间外（采用了最前/最后的点），时间差为负
-    reported_time_diff = abs_time_diff if is_inside else -abs_time_diff
+    seconds_from_nearest = abs((time - whens[index]).total_seconds())
 
     log.verbose(f"Found GPS coordinate in {kml_name} (lon/lat/alt): {(coord_nodes[index].text or '').strip()}",
                 target=target_file)
     log.debug(f"KML timestamp: {whens[index]}", target=target_file)
-    log.debug(f"Time difference (inside: {is_inside}): {abs_time_diff} seconds", target=target_file)
+    log.debug(f"Time difference (inside: {is_inside}): {seconds_from_nearest} seconds", target=target_file)
 
     lon, lat, alt = (coord_nodes[index].text or "").split(" ")[:3]
-    return TrackPoint(latitude=lat, longitude=lon, altitude=alt, time_diff=reported_time_diff)
+    return TrackPoint(latitude=lat, longitude=lon, altitude=alt,
+                      seconds_from_nearest=seconds_from_nearest, inside_duration=is_inside)
 
 
 def _load_kml_cache(zip_path: Path) -> dict[str, str]:
@@ -99,6 +99,50 @@ class SetPositionOptions:
     max_distance_meters: int = 100
     multiday: bool = False
     failed_folder_name: str | None = None
+
+
+def _find_best_track(parsed_cache: dict[str, xmlutil.etree._ElementTree],
+                     media_time: datetime, multiday: bool,
+                     target_file: str | None = None) -> TrackPoint | None:
+    """Nearest point among KMLs whose name contains the media date (±1 day
+    with multiday): an in-duration match wins immediately, otherwise the
+    closest out-of-duration point is kept."""
+    dates = [media_time.strftime("%Y-%m-%d")]
+    if multiday:
+        dates.append((media_time - timedelta(days=1)).strftime("%Y-%m-%d"))
+        dates.append((media_time + timedelta(days=1)).strftime("%Y-%m-%d"))
+
+    best: TrackPoint | None = None
+    for kml_name, tree in parsed_cache.items():
+        if not any(date in kml_name for date in dates):
+            continue
+        pos = get_position_from_kml(tree, media_time.astimezone(UTC), target_file=target_file)
+        if pos is None:
+            continue
+        if pos.inside_duration:
+            return pos
+        if best is None or pos.seconds_from_nearest < best.seconds_from_nearest:
+            best = pos
+    return best
+
+
+def _verify_or_skip(existing_position: str, best: TrackPoint,
+                    options: SetPositionOptions, target_file: str | None = None) -> bool:
+    """Distance check of existing GPS against the KML match; False = skip the
+    file (mismatch beyond threshold and no force)."""
+    existing_dec = coords.decimal_coord(existing_position)
+    if not existing_dec:
+        return True
+    ex_lat, ex_lon = existing_dec.split(",")
+    distance = coords.geo_distance(float(ex_lat), float(ex_lon),
+                                   float(best.latitude), float(best.longitude))
+    if distance > options.max_distance_meters:
+        log.warning(f"Existing GPS and KML GPS differ by {round(distance, 2)} meters "
+                    f"(Threshold: {options.max_distance_meters}m)", target=target_file)
+        return options.force
+    log.debug(f"Existing GPS and KML GPS match within threshold ({round(distance, 2)} meters).",
+              target=target_file)
+    return True
 
 
 def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
@@ -142,66 +186,29 @@ def set_position_from_kml(path: Path, kml_zip_path: str | None = None,
                 quarantine(file, options.failed_folder_name)
             return
 
-        date_str = media_time.strftime("%Y-%m-%d")
-        matching_keys: list[str] = []
-        for key in parsed_cache:
-            if date_str in key:
-                matching_keys.append(key)
-            elif options.multiday:
-                prev = (media_time - timedelta(days=1)).strftime("%Y-%m-%d")
-                nxt = (media_time + timedelta(days=1)).strftime("%Y-%m-%d")
-                if prev in key or nxt in key:
-                    matching_keys.append(key)
-
-        best: TrackPoint | None = None
-        best_abs_diff = float("inf")
-        if matching_keys:
-            for kml_name in matching_keys:
-                pos = get_position_from_kml(parsed_cache[kml_name], media_time.astimezone(UTC),
-                                            target_file=str(file))
-                if pos is None:
-                    continue
-                is_inside = pos.time_diff >= 0
-                abs_diff = abs(pos.time_diff)
-                if is_inside:
-                    # 找到了在持续时间内匹配的KML，表明必定拍自此期间，直接采用它
-                    best, best_abs_diff = pos, abs_diff
-                    break
-                if abs_diff < best_abs_diff:
-                    best, best_abs_diff = pos, abs_diff
-
-        lat = lon = alt = None
-        if best is not None and best_abs_diff <= options.max_time_diff_seconds:
-            lat, lon, alt = best.latitude, best.longitude, best.altitude
-
-            if options.verify_existing_gps and existing_position:
-                existing_dec = coords.decimal_coord(existing_position)
-                if existing_dec:
-                    ex_lat, ex_lon = existing_dec.split(",")
-                    distance = coords.geo_distance(float(ex_lat), float(ex_lon), float(lat), float(lon))
-                    if distance > options.max_distance_meters:
-                        log.warning(
-                            f"Existing GPS and KML GPS differ by {round(distance, 2)} meters "
-                            f"(Threshold: {options.max_distance_meters}m)", target=str(file))
-                        if not options.force:
-                            return
-                    else:
-                        log.debug(
-                            f"Existing GPS and KML GPS match within threshold ({round(distance, 2)} meters).",
-                            target=str(file))
-        elif best is not None:
+        best = _find_best_track(parsed_cache, media_time, options.multiday, str(file))
+        if best is None:
+            log.warning("No matching GPS data found in KML archive", target=str(file))
+            if options.failed_folder_name:
+                quarantine(file, options.failed_folder_name)
+            return
+        if best.seconds_from_nearest > options.max_time_diff_seconds:
             log.warning(
-                f"Best matched KML is outside duration by {round(best_abs_diff, 2)} seconds, "
+                f"Best matched KML is outside duration by {round(best.seconds_from_nearest, 2)} seconds, "
                 f"which exceeds the {options.max_time_diff_seconds}s limit", target=str(file))
             if options.failed_folder_name:
                 quarantine(file, options.failed_folder_name)
             return
 
-        if lat and lon:
+        if (options.verify_existing_gps and existing_position
+                and not _verify_or_skip(existing_position, best, options, str(file))):
+            return
+
+        if best.latitude and best.longitude:
             # 如果文件缺失位置或高度，或者用户开启了 Force，则同时打包更新
             if not existing_position or not existing_altitude or options.force:
-                new_position = f"{lat} {lon}"
-                new_altitude = alt if alt else existing_altitude
+                new_position = f"{best.latitude} {best.longitude}"
+                new_altitude = best.altitude if best.altitude else existing_altitude
                 display_alt = f"{new_altitude} m" if new_altitude else "None"
                 log.verbose(f"Setting GPS position: {new_position}, altitude: {display_alt}", target=str(file))
                 set_exif(file, SetExifOptions(position=new_position, altitude=float(new_altitude)
