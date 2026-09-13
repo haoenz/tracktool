@@ -538,15 +538,19 @@ def config_show() -> None:
 
 @config_app.command("set")
 def config_set(
-    key: Annotated[str, typer.Argument(help="Config key")],
-    value: Annotated[str, typer.Argument(help="Config value")],
+    key: Annotated[str | None, typer.Argument(help="Config key")] = None,
+    value: Annotated[str | None, typer.Argument(help="Config value")] = None,
 ) -> None:
     """Set a configuration value (e.g. google_api_key, kml_zip_path, log_level)."""
+    available = ", ".join(sorted(DEFAULTS))
+    if key is None:
+        raise UserInputError(f"Usage: tracktool config set <key> <value>. Available keys: {available}")
     if key not in DEFAULTS:
-        available = ", ".join(sorted(DEFAULTS))
         close = difflib.get_close_matches(key, DEFAULTS, n=1)
         hint = f" (closest: {close[0]})" if close else ""
         raise UserInputError(f"Unknown config key: {key}. Available keys: {available}{hint}")
+    if value is None:
+        raise UserInputError(f"Missing value for {key}. Available keys: {available}")
     value = normalize(key, value)
     ctx.config[key] = value
     ctx.config.save()

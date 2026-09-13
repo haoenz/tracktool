@@ -183,6 +183,20 @@ class TestConfigSetCommand:
         assert result.exit_code == 1
         assert json.loads(path.read_text(encoding="utf-8"))["log-level"] == "DEBUG"
 
+    def test_missing_value_lists_keys(self, tmp_path: Path, monkeypatch):
+        # 参数解析层的缺参报错也要带键列表，不能只剩 typer 的 usage 提示
+        path = self._install(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "set", "log_level"])
+        assert result.exit_code == 1
+        assert "Available keys" in str(result.exception)
+        assert json.loads(path.read_text(encoding="utf-8"))["log_level"] == "INFO"
+
+    def test_no_arguments_lists_keys(self, tmp_path: Path, monkeypatch):
+        path = self._install(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "set"])
+        assert result.exit_code == 1
+        assert "Available keys" in str(result.exception)
+
 
 class TestDedup:
     def test_hash_and_compare(self, tmp_path: Path):
