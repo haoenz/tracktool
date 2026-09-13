@@ -1,5 +1,6 @@
 """Typer CLI application wiring every subsystem command."""
 
+import difflib
 import json
 from pathlib import Path
 from typing import Annotated, Any
@@ -10,7 +11,7 @@ from rich.table import Table
 
 from . import __version__, coords, dedup, googleapi, log, mediatime
 from .actions import Action, describe
-from .config import normalize
+from .config import DEFAULTS, normalize
 from .context import ctx
 from .errors import EXIT_PARTIAL, EXIT_USER_ERROR, AppError, UserInputError
 from .exif import google as exif_google
@@ -542,7 +543,10 @@ def config_set(
 ) -> None:
     """Set a configuration value (e.g. google_api_key, kml_zip_path, log_level)."""
     if key not in ctx.config:
-        raise UserInputError(f"Unknown config key: {key}")
+        available = ", ".join(sorted(DEFAULTS))
+        close = difflib.get_close_matches(key, DEFAULTS, n=1)
+        hint = f" (closest: {close[0]})" if close else ""
+        raise UserInputError(f"Unknown config key: {key}. Available keys: {available}{hint}")
     value = normalize(key, value)
     ctx.config[key] = value
     ctx.config.save()
