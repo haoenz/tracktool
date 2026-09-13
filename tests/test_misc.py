@@ -172,6 +172,17 @@ class TestConfigSetCommand:
         stored = json.loads(path.read_text(encoding="utf-8"))
         assert "log-level" not in stored
 
+    def test_unknown_key_rejected_even_if_already_in_file(self, tmp_path: Path, monkeypatch):
+        # 合法键集合是 DEFAULTS 而非已加载数据：文件里已有的垃圾键同样放不进 config set
+        path = self._install(tmp_path, monkeypatch)
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        stored["log-level"] = "DEBUG"  # 模拟历史遗留的垃圾键
+        path.write_text(json.dumps(stored), encoding="utf-8")
+        monkeypatch.setattr(ctx, "config", Config(path=path).load())
+        result = runner.invoke(app, ["config", "set", "log-level", "VERBOSE"])
+        assert result.exit_code == 1
+        assert json.loads(path.read_text(encoding="utf-8"))["log-level"] == "DEBUG"
+
 
 class TestDedup:
     def test_hash_and_compare(self, tmp_path: Path):

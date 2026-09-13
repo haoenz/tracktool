@@ -542,7 +542,7 @@ def config_set(
     value: Annotated[str, typer.Argument(help="Config value")],
 ) -> None:
     """Set a configuration value (e.g. google_api_key, kml_zip_path, log_level)."""
-    if key not in ctx.config:
+    if key not in DEFAULTS:
         available = ", ".join(sorted(DEFAULTS))
         close = difflib.get_close_matches(key, DEFAULTS, n=1)
         hint = f" (closest: {close[0]})" if close else ""
