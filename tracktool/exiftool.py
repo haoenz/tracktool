@@ -38,6 +38,7 @@ from typing import Any
 from . import log
 from .errors import ToolError
 from .metadata import MetadataBackend
+from .paths import display_path
 
 ERROR_PATTERN = re.compile(r"\bError\b")
 
@@ -129,11 +130,11 @@ def _parse_read_output(lines: list[str], path: Path) -> dict[str, Any]:
         payload = json.loads("\n".join(lines))
         record = payload[0]
     except (json.JSONDecodeError, IndexError, TypeError) as exc:
-        raise ExiftoolError(f"Unreadable exiftool JSON output for {path}: {exc}") from exc
+        raise ExiftoolError(f"Unreadable exiftool JSON output for {display_path(path)}: {exc}") from exc
     if not isinstance(record, dict):
-        raise ExiftoolError(f"Unexpected exiftool JSON record for {path}: {record!r}")
+        raise ExiftoolError(f"Unexpected exiftool JSON record for {display_path(path)}: {record!r}")
     if "Error" in record:
-        raise ExiftoolError(f"Exiftool failed to read {path}: {record['Error']}")
+        raise ExiftoolError(f"Exiftool failed to read {display_path(path)}: {record['Error']}")
     return {key: value for key, value in record.items() if key != "SourceFile"}
 
 

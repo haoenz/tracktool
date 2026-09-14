@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .. import log
 from ..errors import UserInputError
+from ..paths import display_path
 from . import kmlfile, xmlutil
 from .kmlfile import TrackType
 
@@ -78,7 +79,7 @@ def add_track_to_desktop_collection(path: Path, collection_path: Path) -> None:
     ns = xmlutil.doc_ns(tree)
     top_folder = xmlutil.find(tree, "/kml:kml/kml:Folder")
     if top_folder is None:
-        raise UserInputError(f"Collection KML has no top-level Folder: {collection_path}")
+        raise UserInputError(f"Collection KML has no top-level Folder: {display_path(collection_path)}")
 
     year_folder = xmlutil.find(tree, f"/kml:kml/kml:Folder/kml:Folder[kml:name='{year}']")
     if year_folder is None:
@@ -142,7 +143,7 @@ def add_track_to_mobile_collection(path: Path, collection_path: Path) -> None:
     tree = xmlutil.parse_file(collection_path)
     multi_geom = xmlutil.find(tree, "//kml:MultiGeometry")
     if multi_geom is None:
-        raise UserInputError(f"Mobile collection KML has no MultiGeometry: {collection_path}")
+        raise UserInputError(f"Mobile collection KML has no MultiGeometry: {display_path(collection_path)}")
     track_id = path.stem
 
     existing = xmlutil.find(tree, f"//kml:LineString[@id='{track_id}']")

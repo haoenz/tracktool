@@ -17,6 +17,7 @@ from .. import log, mediatime
 from ..actions import Action
 from ..errors import UserInputError
 from ..fileutil import BatchResult, move_to_folder
+from ..paths import display_path
 from .google import set_altitude_from_google
 from .media import convert_to_mp4
 from .position import SetPositionOptions, set_position_from_kml
@@ -52,7 +53,7 @@ def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | 
         return result
 
     for entry in missing.succeeded:
-        log.verbose(f"File: {entry.file}, Missing: {', '.join(entry.missing_tags)}")
+        log.verbose(f"File: {display_path(entry.file)}, Missing: {', '.join(entry.missing_tags)}")
 
     # 仅缺失海拔的文件
     missing_alt_only = [r for r in missing.succeeded
@@ -93,7 +94,7 @@ def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = No
 
     vid_original_path = path / "VID_original"
     if vid_original_path.exists():
-        raise UserInputError(f"{vid_original_path} already exists; remove or rename it before re-running")
+        raise UserInputError(f"{display_path(vid_original_path)} already exists; remove or rename it before re-running")
 
     if dry_run:
         # 预演不动目录：待处理的文件此刻还在 VID 里
@@ -107,14 +108,14 @@ def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = No
         log.info("Created new VID directory")
         source = vid_original_path
 
-    log.info(f"Processing media files from {source}")
+    log.info(f"Processing media files from {display_path(source)}")
     result: BatchResult[list[Action]] = BatchResult()
     result.merge(convert_to_mp4(source, make=make, model=model, output_directory=vid_path,
                                 offset_time=offset_time, parallel=parallel, dry_run=dry_run))
 
     if dry_run:
         # 补 GPS 的对象要等上一步产出，预演只能说明会做这一步
-        log.info(f"would then repair GPS on the videos produced in {vid_path}")
+        log.info(f"would then repair GPS on the videos produced in {display_path(vid_path)}")
         return result
 
     result.merge(resolve_missing_gps(vid_path, parallel=parallel, kml_zip_path=kml_zip_path))

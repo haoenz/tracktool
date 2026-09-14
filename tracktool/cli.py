@@ -25,6 +25,7 @@ from .kml import archive as kml_archive
 from .kml import edit as kml_edit
 from .kml import kmlfile
 from .kml.kmlfile import TrackType
+from .paths import display_path
 from .progress import DEFAULT_WORKERS
 
 # typer/_click 给用法错误（UsageError：命令名打错、选项不认识、缺必填参数）
@@ -84,7 +85,7 @@ def main(
 def _resolve_path(path: Path, must_exist: bool = True) -> Path:
     path = path.expanduser().resolve()
     if must_exist and not path.exists():
-        log.error(f"Path does not exist: {path}")
+        log.error(f"Path does not exist: {display_path(path)}")
         raise typer.Exit(code=EXIT_USER_ERROR)
     return path
 
@@ -114,7 +115,7 @@ def _report_plan(result: BatchResult[list[Action]], dry_run: bool) -> None:
     for plan in result.succeeded:
         for action in plan:
             kind, detail = describe(action)
-            table.add_row(str(action.file), kind, detail)
+            table.add_row(display_path(action.file), kind, detail)
     if table.row_count:
         log.console().print(table)
     else:
@@ -267,7 +268,7 @@ def exif_find_missing(
     table.add_column("File")
     table.add_column("Missing")
     for result in batch.succeeded:
-        table.add_row(str(result.file), ", ".join(result.missing_tags))
+        table.add_row(display_path(result.file), ", ".join(result.missing_tags))
     log.console().print(table)
     if not batch.succeeded:
         log.info("No files missing the requested tags")
@@ -483,7 +484,7 @@ def hash_dirs(
     directories = [_resolve_path(d) for d in directories]
     results = dedup.get_directories_hash(directories, include, exclude, hash_log, clear_invalid)
     for result in results:
-        print(f"{result.directory} ({len(result.hashes)} files)")
+        print(f"{display_path(result.directory)} ({len(result.hashes)} files)")
 
 
 @hash_app.command("compare")
@@ -498,9 +499,9 @@ def hash_compare(
     directories = [_resolve_path(d) for d in directories]
     result = dedup.compare_directories(directories, include, exclude, unique, hash_log)
     for directory, files in result.items():
-        print(f"{directory}: {len(files)} file(s)")
+        print(f"{display_path(directory)}: {len(files)} file(s)")
         for file in files:
-            print(f"  {file}")
+            print(f"  {display_path(file)}")
 
 
 @hash_app.command("dupes")
@@ -517,7 +518,7 @@ def hash_dupes(
     for group in groups:
         print(f"{group.md5}:")
         for file in group.files:
-            print(f"  {file}")
+            print(f"  {display_path(file)}")
 
 
 @hash_app.command("clear-log")

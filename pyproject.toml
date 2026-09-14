@@ -71,7 +71,7 @@ layers = [
     "tracktool.context",
     "tracktool.log",
     "tracktool.config",
-    "tracktool.errors | tracktool.metadata | tracktool.coords | tracktool.progress",
+    "tracktool.errors | tracktool.metadata | tracktool.coords | tracktool.progress | tracktool.paths",
 ]
 ignore_imports = [
     # AppContext 的后端工厂按导入期环规避约定懒加载 exiftool

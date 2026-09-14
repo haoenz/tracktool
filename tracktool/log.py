@@ -16,10 +16,13 @@ the caller decides whether that is a warning, an error, or ignorable).
 
 Wording: fact before consequence ("...; file skipped", "...; keeping existing
 hash"), no trailing punctuation; stored tags by EXIF tag name (GPSPosition),
-concepts in plain words (GPS data).
+concepts in plain words (GPS data). Paths are drawn the way the user's own
+shell would draw them (paths.display_path): relative to the working directory,
+`~...` below home, absolute when neither reads better.
 """
 
 import logging
+from pathlib import Path
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -27,6 +30,7 @@ from rich.theme import Theme
 
 from .config import LEVELS
 from .errors import UserInputError
+from .paths import display_path
 
 VERBOSE = 15  # between DEBUG (10) and INFO (20)
 logging.addLevelName(VERBOSE, "VERBOSE")
@@ -54,29 +58,33 @@ def set_level(level: str) -> None:
     _logger.setLevel(_LEVEL_NUMBERS[level])
 
 
-def _log(message: str, level: str = "INFO", target: str | None = None) -> None:
-    """Log a message; `target` is prefixed to the message as "[target] message"."""
-    text = f"[{target}] {message}" if target else message
+def _log(message: str, level: str = "INFO", target: str | Path | None = None) -> None:
+    """Log a message; `target` is prefixed to the message as "[target] message".
+
+    The target is always a path, so it goes through display_path: a log line
+    reads with the paths the user's own shell would have shown.
+    """
+    text = f"[{display_path(target)}] {message}" if target else message
     _logger.log(_LEVEL_NUMBERS[level], text)
 
 
-def debug(message: str, target: str | None = None) -> None:
+def debug(message: str, target: str | Path | None = None) -> None:
     _log(message, "DEBUG", target)
 
 
-def verbose(message: str, target: str | None = None) -> None:
+def verbose(message: str, target: str | Path | None = None) -> None:
     _log(message, "VERBOSE", target)
 
 
-def info(message: str, target: str | None = None) -> None:
+def info(message: str, target: str | Path | None = None) -> None:
     _log(message, "INFO", target)
 
 
-def warning(message: str, target: str | None = None) -> None:
+def warning(message: str, target: str | Path | None = None) -> None:
     _log(message, "WARNING", target)
 
 
-def error(message: str, target: str | None = None) -> None:
+def error(message: str, target: str | Path | None = None) -> None:
     _log(message, "ERROR", target)
 
 

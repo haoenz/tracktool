@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import log
 from .errors import UserInputError
+from .paths import display_path
 
 # 扩展名 -> 媒体类别（group_media_files 的子目录名与发现过滤共用这一份）
 MEDIA_EXTENSIONS: dict[str, str] = {
@@ -34,7 +35,7 @@ def list_files(path: Path | list[Path]) -> list[Path]:
     if path.is_file():
         return [path]
     if not path.is_dir():
-        raise UserInputError(f"Path does not exist: {path}")
+        raise UserInputError(f"Path does not exist: {display_path(path)}")
     files = sorted(p for p in path.iterdir() if p.is_file())
     media = [p for p in files if is_media(p)]
     if skipped := len(files) - len(media):

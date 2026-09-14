@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import UserInputError
+from .paths import display_path
 
 CONFIG_DIR = Path.home() / ".tracktool"
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -57,9 +58,9 @@ class Config:
             try:
                 loaded = json.loads(self.path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
-                raise ConfigError(f"Failed to read config {self.path}: {exc}") from exc
+                raise ConfigError(f"Failed to read config {display_path(self.path)}: {exc}") from exc
             if not isinstance(loaded, dict):
-                raise ConfigError(f"Config {self.path} is not a JSON object")
+                raise ConfigError(f"Config {display_path(self.path)} is not a JSON object")
             self._data.update(loaded)
         return self
 

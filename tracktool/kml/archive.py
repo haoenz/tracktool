@@ -21,6 +21,7 @@ from .. import log
 from ..context import ctx
 from ..errors import UserInputError
 from ..fileutil import move_to_folder
+from ..paths import display_path
 from ..workspace import resolve_zip_path
 from . import collections, kmlfile, xmlutil
 from .kmlfile import TrackType
@@ -31,7 +32,7 @@ def ensure_archive_directory(archive_dir: Path) -> None:
     try:
         archive_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise UserInputError(f"Cannot create archive directory {archive_dir}: {exc}") from exc
+        raise UserInputError(f"Cannot create archive directory {display_path(archive_dir)}: {exc}") from exc
 
 
 def ensure_zip_file(zip_file: Path) -> None:
@@ -48,7 +49,7 @@ def ensure_zip_file(zip_file: Path) -> None:
         with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED):
             pass
     except OSError as exc:
-        raise UserInputError(f"Cannot create KML compressed file {zip_file}: {exc}") from exc
+        raise UserInputError(f"Cannot create KML compressed file {display_path(zip_file)}: {exc}") from exc
     log.info("Created new ZIP archive", target=str(zip_file))
 
 
@@ -85,7 +86,7 @@ def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = P
 
     target_path = output_directory / Path(entry_name).name
     if target_path.exists():
-        raise UserInputError(f"File already exists at destination: {target_path}")
+        raise UserInputError(f"File already exists at destination: {display_path(target_path)}")
 
     with zipfile.ZipFile(zip_path) as zf, zf.open(entry_name) as src, open(target_path, "wb") as dst:
         shutil.copyfileobj(src, dst)
@@ -158,11 +159,11 @@ def _inspect_archive(kml_name: str, zip_file: Path, desktop_collection: Path,
 
     problems: list[str] = []
     if not zip_exists:
-        problems.append(f"KML compressed file does not exist: {zip_file}")
+        problems.append(f"KML compressed file does not exist: {display_path(zip_file)}")
     elif zip_entry is None:
         problems.append(f"Track not found in ZIP: {kml_name}")
     if not desktop_exists:
-        problems.append(f"Collection KML file does not exist: {desktop_collection}")
+        problems.append(f"Collection KML file does not exist: {display_path(desktop_collection)}")
     elif not in_desktop:
         problems.append(f"Track not found in collection: {kml_name}")
     if mobile_exists and not in_mobile:

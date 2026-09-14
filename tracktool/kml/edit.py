@@ -13,6 +13,7 @@ from .. import googleapi, log
 from ..context import ctx
 from ..errors import UserInputError
 from ..fileutil import move_to_folder
+from ..paths import display_path
 from ..workspace import resolve_zip_path
 from . import archive, kmlfile, xmlutil
 from .collections import new_empty_kml
@@ -185,7 +186,7 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
 
     output_path = output_path.resolve()
     xmlutil.save(output_tree, output_path)
-    log.info(f"Saved merged KML to: {output_path}")
+    log.info(f"Saved merged KML to: {display_path(output_path)}")
 
     if zip_file is not None:
         archive_dir = zip_file.parent
@@ -288,4 +289,4 @@ def convert_kml_to_multigeometry(path: Path, output_path: Path | None = None) ->
     if output_path is None:
         output_path = path.parent / f"{path.stem}-Merged.kml"
     xmlutil.save(output_tree, output_path.resolve())
-    log.info(f"Saved merged KML to: {output_path}", target=str(path))
+    log.info(f"Saved merged KML to: {display_path(output_path)}", target=str(path))

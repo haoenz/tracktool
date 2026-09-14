@@ -26,6 +26,7 @@ from ..fileutil import BatchResult, run_per_file
 from ..kml import xmlutil
 from ..kml.track import Track, TrackMatch
 from ..metadata import MediaMetadata
+from ..paths import display_path
 from ..workspace import resolve_zip_path
 from .write import SetExifOptions, build_tags
 
@@ -45,7 +46,7 @@ def _load_tracks(zip_path: Path) -> list[Track]:
                 tracks.append(Track.from_kml(xmlutil.parse_string(text), name))
             except UserInputError as exc:
                 log.warning(f"Skipping broken KML track: {exc}")
-    log.info(f"Loaded {len(tracks)} KML files into memory from ZIP: {zip_path}")
+    log.info(f"Loaded {len(tracks)} KML files into memory from ZIP: {display_path(zip_path)}")
     return tracks
 
 
@@ -167,7 +168,7 @@ def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = No
     try:
         tracks = _load_tracks(zip_path)
     except (OSError, BadZipFile) as exc:
-        raise UserInputError(f"Failed to read KML archive file: {zip_path}") from exc
+        raise UserInputError(f"Failed to read KML archive file: {display_path(zip_path)}") from exc
 
     files = list_files(path)
 
