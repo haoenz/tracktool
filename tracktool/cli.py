@@ -156,9 +156,11 @@ def kml_pop(
     kml_name: Annotated[str, typer.Argument(help="Track name to restore")],
     track_type: Annotated[TrackType, typer.Option("--type", help="Track type")] = TrackType.DEFAULT,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    force: Annotated[bool, typer.Option(
+        "--force", help="Warn instead of stopping when the archive disagrees")] = False,
 ) -> None:
-    """Restore a KML from the archive: extract from ZIP, remove from collections."""
-    kml_archive.pop_kml_archive(kml_name, track_type, zip_path)
+    """Restore a KML from the archive: extract into the current directory, remove from collections."""
+    kml_archive.pop_kml_archive(kml_name, track_type, zip_path, force)
 
 
 @kml_app.command("split")

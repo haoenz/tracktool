@@ -176,12 +176,18 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
             xmlutil.sub(ls, "coordinates", ls_coords)
         log.info(f"Merged {len(all_line_strings)} track(s) into MultiGeometry")
 
+    # 归档位置与压缩包先备好，再写合并结果：归档这一步失败不该留下一个半成品
+    if no_archive:
+        zip_file = None
+    else:
+        zip_file = resolve_zip_path(None)
+        archive.ensure_zip_file(zip_file)
+
     output_path = output_path.resolve()
     xmlutil.save(output_tree, output_path)
     log.info(f"Saved merged KML to: {output_path}")
 
-    if not no_archive:
-        zip_file = resolve_zip_path(None)
+    if zip_file is not None:
         archive_dir = zip_file.parent
         for path in paths:
             archive.push_compressed_kml(path, zip_file)

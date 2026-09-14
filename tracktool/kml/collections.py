@@ -4,6 +4,8 @@ The desktop collection nests one Folder per year and one Document per month;
 the mobile collection is a flat MultiGeometry of LineStrings keyed by track
 name. Both live next to the ZIP archive, named after the track type, and both
 skip a track that is already in — adding twice is a warning, not a duplicate.
+Both can also be asked whether they hold a track, which is how a restore
+checks the archive before it touches anything.
 """
 
 import re
@@ -106,10 +108,21 @@ def add_track_to_desktop_collection(path: Path, collection_path: Path) -> None:
     log.info(f"Added track to collection: {path.stem}", target=str(collection_path))
 
 
+def _find_desktop_placemark(tree: xmlutil.etree._ElementTree,
+                            track_name: str) -> xmlutil.etree._Element | None:
+    """The first desktop Placemark whose name contains the track name."""
+    return xmlutil.find(tree, f"//kml:Placemark[kml:name[contains(., '{track_name}')]]")
+
+
+def has_desktop_track(track_name: str, collection_path: Path) -> bool:
+    """Whether the desktop collection holds this track."""
+    return _find_desktop_placemark(xmlutil.parse_file(collection_path), track_name) is not None
+
+
 def remove_track_from_desktop_collection(track_name: str, collection_path: Path) -> None:
     """Drop every desktop Placemark whose name contains the track name."""
     tree = xmlutil.parse_file(collection_path)
-    track = xmlutil.find(tree, f"//kml:Placemark[kml:name[contains(., '{track_name}')]]")
+    track = _find_desktop_placemark(tree, track_name)
     if track is None:
         log.warning(f"Track not found in collection: {track_name}", target=str(collection_path))
         return
@@ -145,10 +158,21 @@ def add_track_to_mobile_collection(path: Path, collection_path: Path) -> None:
     log.info(f"Added track to mobile collection: {track_id}", target=str(collection_path))
 
 
+def _find_mobile_linestring(tree: xmlutil.etree._ElementTree,
+                            track_name: str) -> xmlutil.etree._Element | None:
+    """The mobile LineString whose id is the track name."""
+    return xmlutil.find(tree, f"//kml:LineString[@id='{track_name}']")
+
+
+def has_mobile_track(track_name: str, collection_path: Path) -> bool:
+    """Whether the mobile collection holds this track."""
+    return _find_mobile_linestring(xmlutil.parse_file(collection_path), track_name) is not None
+
+
 def remove_track_from_mobile_collection(track_name: str, collection_path: Path) -> None:
     """Drop the LineString whose id matches the track name."""
     tree = xmlutil.parse_file(collection_path)
-    ls = xmlutil.find(tree, f"//kml:LineString[@id='{track_name}']")
+    ls = _find_mobile_linestring(tree, track_name)
     if ls is None:
         log.warning(f"Track not found in mobile collection: {track_name}", target=str(collection_path))
         return
