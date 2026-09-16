@@ -29,7 +29,7 @@ def _serve(monkeypatch, record: dict) -> list[tuple[str, ...]]:
     """Answer every persistent call with `record` and count the calls made."""
     calls: list[tuple[str, ...]] = []
 
-    def fake(*params: str) -> list[str]:
+    def fake(*params: str, config: object = None) -> list[str]:
         calls.append(params)
         return json.dumps([record]).splitlines()
 
@@ -109,7 +109,7 @@ class TestReadTags:
 
     def test_malformed_output_is_a_tool_failure(self, monkeypatch, tmp_path):
         monkeypatch.setattr(exiftool, "invoke_persistent",
-                            lambda *params: ["perl: warning: Setting locale failed."])
+                            lambda *params, config=None: ["perl: warning: Setting locale failed."])
 
         with pytest.raises(exiftool.ExiftoolError, match="Unreadable exiftool JSON output"):
             exiftool.read_tags(tmp_path / "p.jpg", ["Make"])
@@ -198,9 +198,9 @@ class TestPositionReadsEachFileOnce:
         reads: list[tuple[str, ...]] = []
         original = exiftool.invoke_persistent
 
-        def counting(*params: str) -> list[str]:
+        def counting(*params: str, config: object = None) -> list[str]:
             reads.append(params)
-            return original(*params)
+            return original(*params, config=config)
 
         # 计数范围只覆盖批量本身：标签写入走一次性进程，不经过持久进程
         monkeypatch.setattr(exiftool, "invoke_persistent", counting)

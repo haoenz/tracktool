@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from . import log
+from .config import Config
 from .errors import ToolError
 from .metadata import MetadataBackend
 from .paths import display_path
@@ -54,11 +55,15 @@ class ExiftoolError(ToolError):
     """Raised when exiftool is unavailable or its output contains an error."""
 
 
-def _filters() -> list[re.Pattern[str]]:
-    # 延迟导入：context 在导入期就要构造默认后端，而默认后端就是本模块
-    from .context import ctx
+def _filters(config: Config | None) -> list[re.Pattern[str]]:
+    """The config's ignorable-warning patterns, compiled.
 
-    return [re.compile(f) for f in ctx.config.output_filters]
+    A caller with no config (this module used on its own) filters nothing, so
+    every Error line reads as a failure — the conservative direction. The
+    application always passes one: ExiftoolBackend carries the Config it serves,
+    because this module sits below the container that assembles it.
+    """
+    return [re.compile(pattern) for pattern in (config.output_filters if config is not None else [])]
 
 
 def _check_output(output: list[str], filters: list[re.Pattern[str]], cmd_desc: str) -> list[str]:
@@ -71,7 +76,7 @@ def _check_output(output: list[str], filters: list[re.Pattern[str]], cmd_desc: s
     return lines
 
 
-def invoke(*params: str) -> list[str]:
+def invoke(*params: str, config: Config | None = None) -> list[str]:
     """Run exiftool once with the given arguments (one-shot subprocess)."""
     cmd = [_EXECUTABLE, *params]
     try:
@@ -81,7 +86,7 @@ def invoke(*params: str) -> list[str]:
     except subprocess.TimeoutExpired as exc:
         raise ExiftoolError(f"exiftool timed out: {' '.join(cmd[:4])}") from exc
     output = (proc.stdout + proc.stderr).splitlines()
-    return _check_output(output, _filters(), " ".join(cmd[:4]))
+    return _check_output(output, _filters(config), " ".join(cmd[:4]))
 
 
 def _split_tag(tag: str) -> tuple[str, str]:
@@ -157,7 +162,6 @@ class _StayOpenProcess:
     def __init__(self) -> None:
         self._proc: subprocess.Popen[str] | None = None
         self._lock = threading.Lock()
-        self._filters = _filters()
         self._closed = False
         self._stderr = tempfile.TemporaryFile()
         self._stderr_offset = 0
@@ -192,7 +196,7 @@ class _StayOpenProcess:
         text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
         return text.splitlines()
 
-    def execute(self, args: list[str]) -> list[str]:
+    def execute(self, args: list[str], filters: list[re.Pattern[str]]) -> list[str]:
         """Run one command through the persistent process, return stdout lines."""
         with _StayOpenProcess._marker_lock:
             _StayOpenProcess._marker_counter += 1
@@ -216,7 +220,7 @@ class _StayOpenProcess:
             diagnostics = self._read_new_diagnostics()
 
         # 诊断里的 Error 才是失败信号，它不参与返回值
-        _check_output([*lines, *diagnostics], self._filters, "stay_open execute")
+        _check_output([*lines, *diagnostics], filters, "stay_open execute")
         return lines
 
     def close(self) -> None:
@@ -243,9 +247,9 @@ def _get_process() -> _StayOpenProcess:
     return proc
 
 
-def invoke_persistent(*params: str) -> list[str]:
+def invoke_persistent(*params: str, config: Config | None = None) -> list[str]:
     """Run a command through the thread-local persistent exiftool process."""
-    return _get_process().execute(list(params))
+    return _get_process().execute(list(params), _filters(config))
 
 
 def close_thread_process() -> None:
@@ -269,7 +273,7 @@ def _large_file_args(path: Path) -> list[str]:
     return []
 
 
-def read_tags(path: Path, tags: Sequence[str]) -> dict[str, str]:
+def read_tags(path: Path, tags: Sequence[str], *, config: Config | None = None) -> dict[str, str]:
     """Read every requested tag in a single exiftool call.
 
     Values come out in numeric mode (`-n`), so GPS tags arrive as signed
@@ -278,15 +282,15 @@ def read_tags(path: Path, tags: Sequence[str]) -> dict[str, str]:
     once is what keeps a file at one round-trip instead of one per tag.
     """
     requested = list(dict.fromkeys(tags))
-    lines = invoke_persistent("-j", "-G1", "-n", *[f"-{tag}" for tag in requested], str(path))
+    lines = invoke_persistent("-j", "-G1", "-n", *[f"-{tag}" for tag in requested], str(path), config=config)
     payload = _parse_read_output(lines, path)
     return {tag: str(payload[key]).strip() for tag in requested
             if (key := _resolve_key(payload, tag)) is not None}
 
 
-def get_media_tag(path: Path, tag: str) -> str:
+def get_media_tag(path: Path, tag: str, *, config: Config | None = None) -> str:
     """Read a single tag; empty string when absent."""
-    return read_tags(path, [tag]).get(tag, "")
+    return read_tags(path, [tag], config=config).get(tag, "")
 
 
 def _shift_amount(delta: timedelta) -> str:
@@ -303,16 +307,25 @@ def _shift_amount(delta: timedelta) -> str:
 
 
 class ExiftoolBackend(MetadataBackend):
-    """The MetadataBackend over a persistent exiftool process."""
+    """The MetadataBackend over a persistent exiftool process.
+
+    The backend carries the Config it serves. It sits below the container that
+    assembles it, so the config arrives as a constructor argument rather than
+    being reached for through that container — which is what keeps the two
+    modules out of an import cycle.
+    """
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
 
     def read_tags(self, path: Path, tags: Sequence[str]) -> dict[str, str]:
-        return read_tags(path, tags)
+        return read_tags(path, tags, config=self._config)
 
     def write_tags(self, path: Path, tags: Mapping[str, str], *, overwrite: bool = False) -> None:
         params = [str(path), *(f"-{tag}={value}" for tag, value in tags.items())]
         if overwrite:
             params.append("-overwrite_original")
-        invoke(*params, *_large_file_args(path))
+        invoke(*params, *_large_file_args(path), config=self._config)
 
     def shift_tags(self, path: Path, tags: Sequence[str], delta: timedelta,
                    *, overwrite: bool = False) -> None:
@@ -321,4 +334,4 @@ class ExiftoolBackend(MetadataBackend):
         params = [str(path), *(f"-{tag}{sign}{operand}" for tag in tags)]
         if overwrite:
             params.append("-overwrite_original")
-        invoke(*params, *_large_file_args(path))
+        invoke(*params, *_large_file_args(path), config=self._config)

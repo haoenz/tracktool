@@ -14,6 +14,7 @@ import pytest
 from conftest import InMemoryBackend
 
 from tracktool import exiftool, googleapi
+from tracktool.config import Config
 from tracktool.context import ctx
 from tracktool.exif.google import set_altitude_from_google
 from tracktool.exif.media import move_altitude
@@ -31,7 +32,7 @@ def backend(monkeypatch) -> InMemoryBackend:
     """Install the double, and make any real exiftool call a hard failure."""
     double = InMemoryBackend()
 
-    def escaped(*params: object) -> list[str]:
+    def escaped(*params: object, config: object = None) -> list[str]:
         raise AssertionError("a real exiftool call escaped the seam")
 
     monkeypatch.setattr(exiftool, "invoke", escaped)
@@ -50,7 +51,7 @@ def photo(tmp_path: Path) -> Path:
 
 class TestTheSeam:
     def test_the_exiftool_adapter_satisfies_the_protocol(self):
-        assert isinstance(exiftool.ExiftoolBackend(), MetadataBackend)
+        assert isinstance(exiftool.ExiftoolBackend(Config()), MetadataBackend)
 
 
 class TestFindMissingTag:
@@ -134,9 +135,9 @@ class TestExiftoolArgv:
 
     def test_a_negative_shift_becomes_the_minus_operator(self, monkeypatch, tmp_path):
         calls: list[tuple[str, ...]] = []
-        monkeypatch.setattr(exiftool, "invoke", lambda *params: calls.append(params) or [])
+        monkeypatch.setattr(exiftool, "invoke", lambda *params, config=None: calls.append(params) or [])
 
-        exiftool.ExiftoolBackend().shift_tags(
+        exiftool.ExiftoolBackend(Config()).shift_tags(
             tmp_path / "x.jpg", ["DateTimeOriginal"], timedelta(hours=-2), overwrite=True)
 
         assert calls == [(str(tmp_path / "x.jpg"),
@@ -145,8 +146,8 @@ class TestExiftoolArgv:
 
     def test_a_write_spells_an_assignment(self, monkeypatch, tmp_path):
         calls: list[tuple[str, ...]] = []
-        monkeypatch.setattr(exiftool, "invoke", lambda *params: calls.append(params) or [])
+        monkeypatch.setattr(exiftool, "invoke", lambda *params, config=None: calls.append(params) or [])
 
-        exiftool.ExiftoolBackend().write_tags(tmp_path / "x.jpg", {"IPTC:City": "Beijing"})
+        exiftool.ExiftoolBackend(Config()).write_tags(tmp_path / "x.jpg", {"IPTC:City": "Beijing"})
 
         assert calls == [(str(tmp_path / "x.jpg"), "-IPTC:City=Beijing")]

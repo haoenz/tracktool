@@ -58,7 +58,9 @@ ignore_missing_imports = true
 [tool.importlinter]
 root_packages = ["tracktool"]
 
-# 分层：cli 只在顶上；功能包在中间；编排在功能包之下；底层按实际依赖边排。
+# 一条轴，自上而下：入口 → 功能 → 编排 → 运行时容器 → 外部工具适配器 → 管线与值。
+# 容器在适配器之上（它装配适配器），适配器不反向读取容器（配置由构造函数交给它），
+# 因此本契约没有例外。
 [[tool.importlinter.contracts]]
 name = "cli on top, features in the middle, plumbing below"
 type = "layers"
@@ -67,17 +69,12 @@ layers = [
     "tracktool.exif | tracktool.dedup",
     "tracktool.kml",
     "tracktool.actions | tracktool.workspace | tracktool.discover | tracktool.googleapi | tracktool.mediatime",
-    "tracktool.exiftool | tracktool.fileutil",
+    "tracktool.fileutil",
     "tracktool.context",
+    "tracktool.exiftool",
     "tracktool.log",
     "tracktool.config",
     "tracktool.errors | tracktool.metadata | tracktool.coords | tracktool.progress | tracktool.paths",
-]
-ignore_imports = [
-    # AppContext 的后端工厂按导入期环规避约定懒加载 exiftool
-    "tracktool.context -> tracktool.exiftool",
-    # 进度回调的默认实现同样懒加载，执行层不依赖 rich
-    "tracktool.context -> tracktool.progress",
 ]
 
 # exif 只读 kml 的轨迹模型与 XML 工具；归档编排（进 collection、搬备份）不归它管
