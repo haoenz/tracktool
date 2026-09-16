@@ -192,7 +192,7 @@ class TestConfigSetCommand:
         assert json.loads(path.read_text(encoding="utf-8"))["log_level"] == "INFO"
 
     def test_no_arguments_lists_keys(self, tmp_path: Path, monkeypatch):
-        path = self._install(tmp_path, monkeypatch)
+        self._install(tmp_path, monkeypatch)  # 只为让键列表可查；本测试不读回文件
         result = runner.invoke(app, ["config", "set"])
         assert result.exit_code == 1
         assert "Available keys" in str(result.exception)
