@@ -44,7 +44,7 @@ tracktool kml push ./2024-05-01\ 徒步.kml
 
 ## 配置
 
-配置文件位于 `~/.tracktool/config.json`，字段：`log_level`、`kml_zip_path`、`kml_backup_dir_name`、`output_filters`、`google_api_key`。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
+配置文件是项目根目录的 `config.json`，字段：`log_level`、`kml_zip_path`、`kml_backup_dir_name`、`output_filters`、`google_api_key`。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
 
 ## 实现说明
 

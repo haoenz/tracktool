@@ -1,8 +1,8 @@
 """Configuration management.
 
-Config lives at ~/.tracktool/config.json. The Google Maps API key resolution
-order is: environment variable TRACKTOOL_GOOGLE_API_KEY > CLI parameter >
-config file.
+Config lives in the project root as `config.json`. The Google Maps API key
+resolution order is: environment variable TRACKTOOL_GOOGLE_API_KEY > CLI
+parameter > config file.
 """
 
 import json
@@ -13,8 +13,10 @@ from typing import Any
 from .errors import UserInputError
 from .paths import display_path
 
-CONFIG_DIR = Path.home() / ".tracktool"
-CONFIG_PATH = CONFIG_DIR / "config.json"
+# Anchored to the source tree, not the working directory: the settings are
+# global to the tool, so a run from inside a photo folder must find the same
+# file as a run from the project root.
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 
 ENV_API_KEY = "TRACKTOOL_GOOGLE_API_KEY"
 

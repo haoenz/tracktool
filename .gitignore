@@ -10,3 +10,5 @@ dist/
 ai-notes/
 .zcode/
 .workbuddy/
+/config.json
+/sandbox/
