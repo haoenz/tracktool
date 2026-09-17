@@ -63,3 +63,12 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 - 并行处理使用线程池（I/O 密集负载）
 - `kml fill-altitude` 只补**整轨都没有高程**的轨迹（手绘规划那种）。KML 里一条轨迹＝一个 Placemark，判据是**逐条**的：一条轨迹上只要有一个点带非零海拔，这条就整条不写（那是设备记录的真实高程，不该被 DEM 值替换），同一份文件里的手绘轨迹照补；零海拔与缺分量同义，都算没有。媒体侧的 `exif fill-altitude` 则是逐文件地只补缺失标签
 - API key 支持环境变量注入，避免明文入库
+
+## 测试
+
+```bash
+uv run pytest                       # 全部（含真实 exiftool / ffmpeg 的集成用例）
+uv run pytest -m "not integration"  # 只跑内存替身，不碰外部工具
+```
+
+需要真实工具的用例打 `integration` 标记（`tests/test_e2e.py` 走完整链路：ffmpeg 造样本、exiftool 读写、轨迹从 ZIP 归档读出），工具缺席时自动跳过。`MetadataBackend` 的两套实现（真实 exiftool 与内存替身）跑同一份断言（`tests/fixtures/backend_contract.py`），替身因此不能与真身漂移。

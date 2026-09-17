@@ -5,29 +5,21 @@ is_missing_altitude predicate the two rules diverged: show-missing only knew
 the above-sea-level wording, so below-sea-level files looked healthy but were
 still "repaired" by fill-altitude."""
 
-import shutil
-import subprocess
 from pathlib import Path
 
-import pytest
+from conftest import requires_media_tools
+from fixtures.media import make_test_jpeg
 
 from tracktool import exiftool
 from tracktool.exif.write import find_missing_tag
 
-pytestmark = pytest.mark.skipif(shutil.which("exiftool") is None, reason="requires exiftool")
-
-
-def _make_jpeg(path: Path) -> None:
-    ret = subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x64", "-frames:v", "1", str(path)],
-        capture_output=True)
-    assert ret.returncode == 0, ret.stderr.decode(errors="replace")
+pytestmark = requires_media_tools
 
 
 class TestFindMissingAltitudeEndToEnd:
     def test_below_sea_level_zero_counts_as_missing(self, tmp_path: Path):
         photo = tmp_path / "photo.jpg"
-        _make_jpeg(photo)
+        make_test_jpeg(photo)
         exiftool.invoke(str(photo), "-GPSAltitude=0", "-GPSAltitudeRef=Below Sea Level",
                         "-overwrite_original")
 
@@ -39,7 +31,7 @@ class TestFindMissingAltitudeEndToEnd:
 
     def test_real_altitude_not_reported(self, tmp_path: Path):
         photo = tmp_path / "photo.jpg"
-        _make_jpeg(photo)
+        make_test_jpeg(photo)
         exiftool.invoke(str(photo), "-GPSAltitude=12.5", "-GPSAltitudeRef=Below Sea Level",
                         "-overwrite_original")
 

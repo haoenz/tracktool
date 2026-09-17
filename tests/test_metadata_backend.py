@@ -5,6 +5,10 @@ in-memory double is enough to drive the read/decide/write rules directly. The
 double is installed *over* fatal exiftool primitives, so a call that still
 escapes the seam fails the test instead of quietly shelling out — which is what
 makes "this rule needs no subprocess" an assertion rather than a claim.
+
+The double also has to answer like the real adapter. The promises both backends
+make live in `fixtures/backend_contract.py` and are asserted here (always) and
+against exiftool (in test_exiftool_backend).
 """
 
 from datetime import timedelta
@@ -12,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from conftest import InMemoryBackend
+from fixtures.backend_contract import BackendContract
 
 from tracktool import exiftool, googleapi
 from tracktool.config import Config
@@ -52,6 +57,14 @@ def photo(tmp_path: Path) -> Path:
 class TestTheSeam:
     def test_the_exiftool_adapter_satisfies_the_protocol(self):
         assert isinstance(exiftool.ExiftoolBackend(Config()), MetadataBackend)
+
+
+class TestInMemoryBackendContract(BackendContract):
+    """This module's `backend` and `photo` fixtures are what the contract runs on.
+
+    The same assertions run against the real adapter in test_exiftool_backend,
+    which is what keeps the double from drifting away from the thing it doubles.
+    """
 
 
 class TestFindMissingTag:

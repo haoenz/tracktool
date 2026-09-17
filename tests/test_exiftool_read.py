@@ -8,21 +8,17 @@ signed decimals instead of display text.
 """
 
 import json
-import shutil
-import subprocess
 import zipfile
-from pathlib import Path
 
 import pytest
-from conftest import TRACK_KML
+from conftest import TRACK_KML, requires_media_tools
+from fixtures.media import make_test_jpeg
 
 from tracktool import exiftool
 from tracktool.config import Config
 from tracktool.context import ctx
 from tracktool.exif.position import GeotagOptions, geotag_from_kml
 from tracktool.exif.write import find_missing_tag
-
-requires_exiftool = pytest.mark.skipif(shutil.which("exiftool") is None, reason="requires exiftool")
 
 
 def _serve(monkeypatch, record: dict) -> list[tuple[str, ...]]:
@@ -35,13 +31,6 @@ def _serve(monkeypatch, record: dict) -> list[tuple[str, ...]]:
 
     monkeypatch.setattr(exiftool, "invoke_persistent", fake)
     return calls
-
-
-def _make_jpeg(path: Path) -> None:
-    ret = subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x64", "-frames:v", "1", str(path)],
-        capture_output=True)
-    assert ret.returncode == 0, ret.stderr.decode(errors="replace")
 
 
 class TestReadTags:
@@ -137,13 +126,14 @@ class TestBatchedCallers:
         assert batch.ok
 
 
-@requires_exiftool
 class TestReadTagsAgainstExiftool:
+    pytestmark = requires_media_tools
+
     def test_tags_read_cleanly_while_stderr_has_noise(self, tmp_path):
         """The first persistent call is where perl writes its locale warning;
         that warning used to be returned as the tag value."""
         photo = tmp_path / "p.jpg"
-        _make_jpeg(photo)
+        make_test_jpeg(photo)
 
         tags = exiftool.read_tags(photo, ["GPSPosition", "GPSAltitude", "Make"])
 
@@ -153,7 +143,7 @@ class TestReadTagsAgainstExiftool:
 
     def test_later_reads_are_not_polluted_by_the_startup_warning(self, tmp_path):
         photo = tmp_path / "p.jpg"
-        _make_jpeg(photo)
+        make_test_jpeg(photo)
         exiftool.invoke(str(photo), "-GPSAltitude=7", "-GPSAltitudeRef=Above Sea Level",
                         "-overwrite_original")
 
@@ -162,7 +152,7 @@ class TestReadTagsAgainstExiftool:
 
     def test_below_sea_level_reads_as_a_negative_number(self, tmp_path):
         photo = tmp_path / "p.jpg"
-        _make_jpeg(photo)
+        make_test_jpeg(photo)
         exiftool.invoke(str(photo), "-GPSAltitude=50", "-GPSAltitudeRef=Below Sea Level",
                         "-overwrite_original")
 
@@ -176,13 +166,14 @@ class TestReadTagsAgainstExiftool:
             exiftool.read_tags(bad, ["GPSPosition"])
 
 
-@requires_exiftool
 class TestPositionReadsEachFileOnce:
+    pytestmark = requires_media_tools
+
     def test_geotag_uses_one_round_trip_per_file(self, tmp_path, monkeypatch):
         media_dir = tmp_path / "media"
         media_dir.mkdir()
         photo = media_dir / "2024-05-01 a.jpg"
-        _make_jpeg(photo)
+        make_test_jpeg(photo)
         # 拍摄时间在轨迹 [00:00, 00:03] UTC 内
         exiftool.invoke(str(photo),
                         "-ExifIFD:DateTimeOriginal=2024:05:01 08:01:30",

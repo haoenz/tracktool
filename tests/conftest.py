@@ -1,12 +1,23 @@
 """Shared test constants, fixtures and doubles."""
 
+import shutil
 from collections.abc import Mapping, Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from tracktool.context import RunMode, ctx
+
+_MEDIA_TOOLS = ("exiftool", "ffmpeg")
+
+# 走真实外部工具的用例贴上它：`-m "not integration"` 于是得到一个不碰外部工具的
+# 运行，而工具缺席时这些用例是跳过而不是失败（skipif 管跳过，标记管筛选）。
+requires_media_tools = [
+    pytest.mark.integration,
+    pytest.mark.skipif(not all(shutil.which(tool) for tool in _MEDIA_TOOLS),
+                       reason="requires " + " and ".join(_MEDIA_TOOLS)),
+]
 
 TRACK_KML = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
@@ -29,6 +40,25 @@ TRACK_KML = """<?xml version="1.0" encoding="UTF-8"?>
 </Folder>
 </Document>
 </kml>"""
+
+
+_STAMP_FORMAT = "%Y:%m:%d %H:%M:%S"
+
+
+def _shift_stamp(value: str | None, delta: timedelta) -> str | None:
+    """The stamp moved by delta, or None when the double cannot move it.
+
+    The double knows exiftool's canonical `YYYY:MM:DD HH:MM:SS` form, which is
+    what the app's own writes produce; any other form is left as it was, so a
+    test that needs one belongs against the real backend.
+    """
+    if not value:
+        return None
+    try:
+        stamp = datetime.strptime(value, _STAMP_FORMAT)
+    except ValueError:
+        return None
+    return (stamp + delta).strftime(_STAMP_FORMAT)
 
 
 class InMemoryBackend:
@@ -56,7 +86,18 @@ class InMemoryBackend:
 
     def shift_tags(self, path: Path, tags: Sequence[str], delta: timedelta,
                    *, overwrite: bool = False) -> None:
+        """The shift lands on the double's own tags, not just on the record.
+
+        Recording alone would let a rule that reads a time back after shifting
+        it pass here and fail on a real file, which is the drift the backend
+        contract exists to catch.
+        """
         self.shifts.append((Path(path), tuple(tags), delta, overwrite))
+        available = self.tags.setdefault(Path(path), {})
+        for tag in tags:
+            moved = _shift_stamp(available.get(tag), delta)
+            if moved is not None:
+                available[tag] = moved
 
 
 @pytest.fixture(autouse=True)

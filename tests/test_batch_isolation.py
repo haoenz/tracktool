@@ -6,13 +6,12 @@ one is configured. Before the run_per_file refactor only exif/google.py did
 this; position.py and media.py aborted the whole batch on the first error.
 """
 
-import shutil
-import subprocess
 import zipfile
 from pathlib import Path
 
 import pytest
-from conftest import TRACK_KML
+from conftest import TRACK_KML, requires_media_tools
+from fixtures.media import make_test_jpeg
 from typer.testing import CliRunner
 
 from tracktool import cli, exiftool
@@ -21,22 +20,14 @@ from tracktool.context import ctx
 from tracktool.exif.position import GeotagOptions, geotag_from_kml
 
 # 测试依赖真实 exiftool（读标签 / 写 GPS），以及 ffmpeg 生成样本 JPEG
-pytestmark = pytest.mark.skipif(shutil.which("exiftool") is None, reason="requires exiftool")
+pytestmark = requires_media_tools
 
 runner = CliRunner()
 
 
-def _make_jpeg(path: Path) -> None:
-    """Real one-frame JPEG (exiftool rejects hand-written minimal bytes)."""
-    ret = subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x64", "-frames:v", "1", str(path)],
-        capture_output=True)
-    assert ret.returncode == 0, ret.stderr.decode(errors="replace")
-
-
 def _make_geotaggable_jpeg(path: Path) -> None:
     """JPEG with a timestamp inside the track (00:01:30 UTC = 08:01:30+08:00)."""
-    _make_jpeg(path)
+    make_test_jpeg(path)
     exiftool.invoke(str(path),
                     "-ExifIFD:DateTimeOriginal=2024:05:01 08:01:30",
                     "-ExifIFD:OffsetTimeOriginal=+08:00",
@@ -103,7 +94,7 @@ class TestSetPositionBatchIsolation:
         _make_geotaggable_jpeg(good)
         # 可读但无时间戳的 JPEG：media_time 为 None 的显式失败路径
         timeless = media_dir / "timeless.jpg"
-        _make_jpeg(timeless)
+        make_test_jpeg(timeless)
 
         geotag_from_kml(media_dir, options=GeotagOptions(
             failed_folder_name="Failed"))
