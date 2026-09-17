@@ -216,38 +216,54 @@ def resolve_missing_gps(path: Path, parallel: bool = False,
 def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = None,
                      offset_time: str = mediatime.DEFAULT_TZ_OFFSET, parallel: bool = False,
                      kml_zip_path: str | None = None) -> BatchResult[list[Action]]:
-    """VID → VID_original，转换 MP4 到新 VID，再补全 GPS。"""
+    """VID → VID_original，转换 MP4 到新 VID，再补全 GPS；重跑从断点继续。
+
+    每一步做没做过，由磁盘上的现状说明：VID_original 在就是改过名了，新 VID 在
+    就是建过了，VID_original 里剩下的视频接着转，转好的接着补 GPS。中断（含
+    Ctrl-C）之后重跑会接着做完，而不是被「VID_original 已存在」挡住、让用户手工
+    收拾半个目录。
+    """
     path = path.resolve()
     vid_path = path / "VID"
-    if not vid_path.is_dir():
-        log.info("VID subdirectory not found")
-        return BatchResult()
-
     vid_original_path = path / "VID_original"
-    if vid_original_path.exists():
-        raise UserInputError(f"{display_path(vid_original_path)} already exists; remove or rename it before re-running")
+    result: BatchResult[list[Action]] = BatchResult()
 
-    if ctx.is_plan:
-        # 预演不动目录：待处理的文件此刻还在 VID 里
-        source = vid_path
+    if vid_original_path.exists() and not vid_original_path.is_dir():
+        raise UserInputError(f"{display_path(vid_original_path)} is in the way; move it aside before re-running")
+
+    # 第一步：VID → VID_original。已经改过名（包括上次中断留下的一半）就跳过
+    if vid_original_path.is_dir():
+        log.info(f"Continuing from {display_path(vid_original_path)}", target=str(path))
+    elif not vid_path.is_dir():
+        log.info("VID subdirectory not found")
+        return result
+    elif ctx.is_plan:
+        # 预演不动目录：待转换的文件此刻还在 VID 里
         log.info(f"would rename {vid_path.name} to {vid_original_path.name} "
                  f"and create a new {vid_path.name}")
     else:
         vid_path.rename(vid_original_path)
         log.info("Renamed VID to VID_original")
-        vid_path.mkdir()
-        log.info("Created new VID directory")
-        source = vid_original_path
 
+    # 第二步：新的 VID 目录。改名之后才谈得上；预演只说明，不建
+    if not vid_path.is_dir():
+        if ctx.is_plan:
+            log.info(f"would create a new {vid_path.name}")
+        else:
+            vid_path.mkdir()
+            log.info("Created new VID directory")
+
+    # 第三步：转换。源目录是文件此刻真正所在的那个：改过名就是 VID_original，
+    # 还没改（预演）就是 VID
+    source = vid_original_path if vid_original_path.is_dir() else vid_path
     log.info(f"Processing media files from {display_path(source)}")
-    result: BatchResult[list[Action]] = BatchResult()
     result.merge(convert_to_mp4(source, make=make, model=model, output_directory=vid_path,
                                 offset_time=offset_time, parallel=parallel))
 
-    if ctx.is_plan:
-        # 补 GPS 的对象要等上一步产出，预演只能说明会做这一步
+    # 第四步：补 GPS——它的输入是上一步的产物。两个目录都在，才说明产物已落盘；
+    # 预演里新 VID 还没建出来，所以说一句会做这一步，然后到此为止
+    if not (vid_path.is_dir() and vid_original_path.is_dir()):
         log.info(f"would then repair GPS on the videos produced in {display_path(vid_path)}")
         return result
-
     result.merge(resolve_missing_gps(vid_path, parallel=parallel, kml_zip_path=kml_zip_path))
     return result

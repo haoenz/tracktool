@@ -20,6 +20,7 @@ from tracktool.cli import app
 from tracktool.config import Config
 from tracktool.context import ctx
 from tracktool.errors import UserInputError
+from tracktool.fileutil import BatchResult
 from tracktool.kml import xmlutil
 from tracktool.kml.kmlfile import TrackType
 
@@ -190,9 +191,90 @@ class TestResolveVid:
         assert result.ok and not result.succeeded
         assert list(tmp_path.iterdir()) == []
 
-    def test_an_existing_vid_original_stops_the_run(self, tmp_path: Path):
+    def test_a_file_where_vid_original_belongs_is_a_user_error(self, tmp_path: Path):
         (tmp_path / "VID").mkdir()
-        (tmp_path / "VID_original").mkdir()
+        (tmp_path / "VID_original").write_text("occupied", encoding="utf-8")
 
-        with pytest.raises(UserInputError, match="already exists"):
+        with pytest.raises(UserInputError, match="in the way"):
             workflows.resolve_vid_exif(tmp_path)
+
+
+class TestResolveVidResumes:
+    """重跑接着做：每一步做没做过由磁盘上的现状决定，而不是被一个已存在的
+    VID_original 拦下、让用户手工收拾半个目录。"""
+
+    @staticmethod
+    def _stub(monkeypatch) -> dict[str, object]:
+        """把转换与补 GPS 换成记录调用的替身，测试不碰 ffmpeg / exiftool。"""
+        calls: dict[str, object] = {}
+
+        def convert(source, **kwargs):
+            calls["convert"] = (source, kwargs["output_directory"])
+            return BatchResult()
+
+        def repair(path, **kwargs):
+            calls["repair"] = path
+            return BatchResult()
+
+        monkeypatch.setattr(workflows, "convert_to_mp4", convert)
+        monkeypatch.setattr(workflows, "resolve_missing_gps", repair)
+        return calls
+
+    def test_a_first_run_swaps_the_directory_and_converts_from_the_original(self, tmp_path: Path, monkeypatch):
+        calls = self._stub(monkeypatch)
+        (tmp_path / "VID").mkdir()
+        (tmp_path / "VID" / "a.mp4").touch()
+
+        result = workflows.resolve_vid_exif(tmp_path)
+
+        assert result.ok
+        assert (tmp_path / "VID_original" / "a.mp4").is_file()
+        assert (tmp_path / "VID").is_dir() and not any((tmp_path / "VID").iterdir())
+        assert calls["convert"] == ((tmp_path / "VID_original").resolve(), (tmp_path / "VID").resolve())
+        assert calls["repair"] == (tmp_path / "VID").resolve()
+
+    def test_a_rerun_after_an_interruption_converts_what_is_left(self, tmp_path: Path, monkeypatch):
+        calls = self._stub(monkeypatch)
+        (tmp_path / "VID_original").mkdir()  # 名字改完了
+        (tmp_path / "VID_original" / "a.mp4").touch()
+        (tmp_path / "VID").mkdir()  # 转换做到一半
+
+        result = workflows.resolve_vid_exif(tmp_path)
+
+        assert result.ok
+        assert calls["convert"] == ((tmp_path / "VID_original").resolve(), (tmp_path / "VID").resolve())
+        assert calls["repair"] == (tmp_path / "VID").resolve()
+
+    def test_a_rerun_recreates_the_directory_an_interruption_left_out(self, tmp_path: Path, monkeypatch):
+        calls = self._stub(monkeypatch)
+        (tmp_path / "VID_original").mkdir()  # 改名做完，新目录还没建
+
+        workflows.resolve_vid_exif(tmp_path)
+
+        assert (tmp_path / "VID").is_dir()
+        assert calls["convert"] == ((tmp_path / "VID_original").resolve(), (tmp_path / "VID").resolve())
+        assert calls["repair"] == (tmp_path / "VID").resolve()
+
+    def test_a_preview_of_a_first_run_leaves_the_directory_alone(self, tmp_path: Path, monkeypatch, plan_mode):
+        calls = self._stub(monkeypatch)
+        (tmp_path / "VID").mkdir()
+        (tmp_path / "VID" / "a.mp4").touch()
+
+        workflows.resolve_vid_exif(tmp_path)
+
+        assert not (tmp_path / "VID_original").exists()
+        assert (tmp_path / "VID" / "a.mp4").is_file()
+        # 待转换的文件还在 VID 里，所以预演里的源就是 VID；补 GPS 那一步只说明会做
+        assert calls["convert"] == ((tmp_path / "VID").resolve(), (tmp_path / "VID").resolve())
+        assert "repair" not in calls
+
+    def test_a_preview_of_a_rerun_reaches_the_repair_it_can_preview(self, tmp_path: Path, monkeypatch, plan_mode):
+        calls = self._stub(monkeypatch)
+        (tmp_path / "VID_original").mkdir()
+        (tmp_path / "VID").mkdir()
+
+        workflows.resolve_vid_exif(tmp_path)
+
+        # 两个目录都在：产物已经落盘，这一步的预览是真的，不是一句「会做」
+        assert calls["convert"] == ((tmp_path / "VID_original").resolve(), (tmp_path / "VID").resolve())
+        assert calls["repair"] == (tmp_path / "VID").resolve()
