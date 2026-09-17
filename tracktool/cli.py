@@ -219,7 +219,7 @@ def kml_set_altitude(
     path: Annotated[Path, typer.Argument(help="KML file to update in place")],
     api_key: Annotated[str | None, typer.Option("--api-key", help="Google Maps API key")] = None,
 ) -> None:
-    """Fill altitude for every LineString coordinate via Google Elevation."""
+    """Fill altitude for the tracks that carry none (Google Elevation)."""
     path = _resolve_path(path)
     kml_edit.set_kml_altitude_from_google(path, api_key)
 

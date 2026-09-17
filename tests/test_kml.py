@@ -116,30 +116,92 @@ LINESTRING_KML = """<?xml version="1.0" encoding="UTF-8"?>
 </kml>"""
 
 
+PLACEMARK_KML = ("<Placemark><LineString><coordinates>{coordinates}</coordinates>"
+                 "</LineString></Placemark>")
+
+DOCUMENT_KML = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+{placemarks}
+</Document>
+</kml>"""
+
+
 class TestAltitudeFromGoogle:
+    """只有整轨都没有高程的轨迹才补（手绘）；带任何一点真实海拔的轨迹整条不动。"""
+
     @pytest.fixture
     def linestring_file(self, tmp_path: Path) -> Path:
         path = tmp_path / "tracks.kml"
         path.write_text(LINESTRING_KML, encoding="utf-8")
         return path
 
-    def test_fills_altitudes_per_point(self, linestring_file: Path, monkeypatch):
-        queries: list[str] = []
+    @staticmethod
+    def _tracks(tmp_path: Path, *coordinates: str) -> Path:
+        """One Placemark — one track — per argument."""
+        path = tmp_path / "tracks.kml"
+        placemarks = "\n".join(PLACEMARK_KML.format(coordinates=item) for item in coordinates)
+        path.write_text(DOCUMENT_KML.format(placemarks=placemarks), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _altitudes(monkeypatch, values: list[float | None]) -> list[tuple[float, float]]:
+        """Stub the API out and hand back the list it will be asked for."""
+        queries: list[tuple[float, float]] = []
 
         def fake_get_altitudes(points, api_key=None):
             queries.extend(points)
-            return [10.5, None, 12.5, 13.5]
+            return values
 
         monkeypatch.setattr(edit.googleapi, "get_altitudes", fake_get_altitudes)
+        return queries
+
+    @staticmethod
+    def _coordinates(path: Path) -> list[str | None]:
+        tree = xmlutil.parse_file(path)
+        return [c.text for c in xmlutil.findall(tree, "//kml:LineString/kml:coordinates")]
+
+    def test_fills_altitudes_per_point(self, linestring_file: Path, monkeypatch):
+        queries = self._altitudes(monkeypatch, [10.5, None, 12.5, 13.5])
         edit.set_kml_altitude_from_google(linestring_file, "key")
 
         assert queries == [(39.0, 116.0), (39.1, 116.1), (40.0, 117.0), (40.1, 117.1)]
-        tree = xmlutil.parse_file(linestring_file)
-        texts = [c.text or "" for c in xmlutil.findall(tree, "//kml:coordinates")]
-        assert texts == [
+        assert self._coordinates(linestring_file) == [
             "116.0,39.0,10.5 116.1,39.1,0",  # None 高程写为 0
             "117.0,40.0,12.5 bad 117.1,40.1,13.5",  # 无效元组跳过且原样保留
             " ",  # 无有效坐标的节点不回写
+        ]
+
+    def test_a_track_without_any_altitude_is_filled(self, tmp_path: Path, monkeypatch):
+        path = self._tracks(tmp_path, "116.0,39.0 116.1,39.1,0")  # 缺分量与 0 都算没有海拔
+        queries = self._altitudes(monkeypatch, [10.5, 12.5])
+        edit.set_kml_altitude_from_google(path, "key")
+
+        assert queries == [(39.0, 116.0), (39.1, 116.1)]
+        assert self._coordinates(path) == ["116.0,39.0,10.5 116.1,39.1,12.5"]
+
+    def test_a_track_with_one_real_altitude_is_left_alone(self, tmp_path: Path, monkeypatch):
+        path = self._tracks(tmp_path, "116.0,39.0 116.1,39.1,110.0")
+        before = path.read_bytes()
+
+        def fail(*args, **kwargs):
+            raise AssertionError("Google Elevation must not be queried")
+
+        monkeypatch.setattr(edit.googleapi, "get_altitudes", fail)
+        edit.set_kml_altitude_from_google(path, "key")
+
+        assert path.read_bytes() == before
+
+    def test_only_the_tracks_without_altitude_are_filled(self, tmp_path: Path, monkeypatch):
+        """一个文件里两种轨迹并存：设备记录的那条整条不动，手绘的那条才补。"""
+        path = self._tracks(tmp_path, "116.0,39.0 116.1,39.1,110.0", "117.0,40.0 117.1,40.1")
+        queries = self._altitudes(monkeypatch, [12.5, 13.5])
+        edit.set_kml_altitude_from_google(path, "key")
+
+        assert queries == [(40.0, 117.0), (40.1, 117.1)]  # 只查了缺高程的那条
+        assert self._coordinates(path) == [
+            "116.0,39.0 116.1,39.1,110.0",
+            "117.0,40.0,12.5 117.1,40.1,13.5",
         ]
 
 

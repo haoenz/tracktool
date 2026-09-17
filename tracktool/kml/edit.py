@@ -13,6 +13,7 @@ from .. import googleapi, log
 from ..context import ctx
 from ..errors import UserInputError
 from ..fileutil import move_to_folder
+from ..metadata import is_missing_altitude
 from ..paths import display_path
 from ..workspace import resolve_zip_path
 from . import archive, kmlfile, xmlutil
@@ -195,8 +196,22 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
             move_to_folder(path, ctx.config.kml_backup_dir_name, archive_dir)
 
 
+def _track_of(node: xmlutil.etree._Element) -> xmlutil.etree._Element:
+    """The track a coordinates node belongs to: its Placemark, else its LineString."""
+    placemarks = node.xpath("ancestor::*[local-name()='Placemark'][1]")
+    return placemarks[0] if placemarks else node.getparent()
+
+
 def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None:
-    """Fill altitude for every LineString coordinate in place via Google Elevation."""
+    """Fill altitude in place for every track whose coordinates have none.
+
+    A track is a Placemark, so one file — an archive collection, say — holds
+    both kinds at once. One real altitude anywhere in a track means it carries
+    the elevations its device recorded, and that track is left alone rather
+    than flattened to DEM values (with 0 written where the API has no answer).
+    Tracks with no altitude on any point — the hand-drawn ones — are what it
+    fills; a file where no track qualifies is not written at all.
+    """
     tree = xmlutil.parse_file(path)
     coord_nodes = xmlutil.findall(tree, "//kml:LineString/kml:coordinates")
     if not coord_nodes:
@@ -204,20 +219,41 @@ def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None
         return
 
     # KML 坐标格式: "lon,lat,alt lon,lat,alt ..."
+    parsed: list[tuple[xmlutil.etree._Element, list[str], list[int]]] = []
+    has_altitude: dict[xmlutil.etree._Element, bool] = {}
+    for node in coord_nodes:
+        tuples = (node.text or "").strip().split()
+        indexes = [i for i, tup in enumerate(tuples) if len(tup.split(",")) >= 2]
+        if not indexes:
+            continue
+        parsed.append((node, tuples, indexes))
+        # 第三分量缺失与 0 同义（is_missing_altitude 数值判零）
+        carrying = any(len(tuples[i].split(",")) > 2
+                       and not is_missing_altitude(tuples[i].split(",")[2]) for i in indexes)
+        track = _track_of(node)
+        has_altitude[track] = has_altitude.get(track, False) or carrying
+
+    skipped = sum(1 for carrying in has_altitude.values() if carrying)
+    if skipped:
+        log.info(f"Tracks already carrying altitude: {skipped} of {len(has_altitude)}, left alone",
+                 target=str(path))
+
     tuples_by_node: dict[xmlutil.etree._Element, list[str]] = {}
     alt_targets: list[tuple[xmlutil.etree._Element, int]] = []  # 下标与 points 对齐
     points: list[tuple[float, float]] = []
-    for node in coord_nodes:
-        tuples = (node.text or "").strip().split()
-        for i, tup in enumerate(tuples):
-            parts = tup.split(",")
-            if len(parts) < 2:
-                continue
-            if node not in tuples_by_node:
-                tuples_by_node[node] = tuples
+    for node, tuples, indexes in parsed:
+        if has_altitude[_track_of(node)]:
+            continue
+        tuples_by_node[node] = tuples
+        for i in indexes:
+            parts = tuples[i].split(",")
             # KML 是 lon,lat，而 API 与领域模型都用 (lat, lon)
             points.append((float(parts[1]), float(parts[0])))
             alt_targets.append((node, i))
+
+    if not points:
+        log.info("Every track already carries altitude, nothing to fill", target=str(path))
+        return
 
     log.info(f"Querying Google Elevation API for {len(points)} point(s)", target=str(path))
 
