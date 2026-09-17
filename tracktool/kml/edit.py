@@ -98,7 +98,7 @@ def split_kml(path: Path, split_points: list[str]) -> None:
             log.info("Created split track file", target=str(new_kml_path))
 
 
-def remove_bad_points(path: Path, bad_points: list[str]) -> None:
+def prune_points(path: Path, bad_points: list[str]) -> None:
     """Remove one point, or the inclusive range between two, as <name>-Fixed.kml."""
     if len(bad_points) > 2:
         raise UserInputError(f"Too many bad points specified (max 2): {len(bad_points)}")
@@ -202,7 +202,7 @@ def _track_of(node: xmlutil.etree._Element) -> xmlutil.etree._Element:
     return placemarks[0] if placemarks else node.getparent()
 
 
-def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None:
+def fill_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None:
     """Fill altitude in place for every track whose coordinates have none.
 
     A track is a Placemark, so one file — an archive collection, say — holds

@@ -41,7 +41,7 @@ class TestOneElevationCallPerSelection:
             exif_google.googleapi, "get_altitudes",
             lambda points, api_key=None: queried.append(list(points)) or [10.0] * len(points))
 
-        result = exif_google.set_altitude_from_google(files)
+        result = exif_google.fill_altitude_from_google(files)
 
         assert queried == [[(39.0, 116.0)] * 3], "整表一次查询"
         assert [path for path, _, _ in backend.writes] == files
@@ -56,7 +56,7 @@ class TestOneElevationCallPerSelection:
         monkeypatch.setattr(exif_google.googleapi, "get_altitudes",
                             lambda points, api_key=None: queried.append(points))
 
-        result = exif_google.set_altitude_from_google(files)
+        result = exif_google.fill_altitude_from_google(files)
 
         assert queried == []
         assert result.ok
@@ -72,7 +72,7 @@ class TestOneElevationCallPerSelection:
             exif_google.googleapi, "get_altitudes",
             lambda points, api_key=None: calls.append(len(points)) or [1.0] * len(points))
 
-        result = exif_google.set_altitude_from_google(tmp_path)
+        result = exif_google.fill_altitude_from_google(tmp_path)
 
         assert calls == [4]
         assert len(backend.writes) == 4
@@ -90,7 +90,7 @@ class TestOneElevationCallPerSelection:
         monkeypatch.setattr(exif_google.googleapi, "get_altitudes",
                             lambda points, api_key=None: [None, 10.0])
 
-        result = exif_google.set_altitude_from_google(files, failed_folder_name="NoElev")
+        result = exif_google.fill_altitude_from_google(files, failed_folder_name="NoElev")
 
         assert [p.name for p in result.failed] == ["p0.jpg"]
         assert result.succeeded and (tmp_path / "NoElev" / "p0.jpg").is_file()
@@ -107,10 +107,10 @@ class TestRepairPassesTheWholeSelectionToEachStage:
                                 [*altitude_only, *position_only]))
         calls: list[tuple[str, list[Path]]] = []
         monkeypatch.setattr(
-            workflows, "set_altitude_from_google",
+            workflows, "fill_altitude_from_google",
             lambda files, **kwargs: calls.append(("altitude", list(files))) or BatchResult())
         monkeypatch.setattr(
-            workflows, "set_position_from_kml",
+            workflows, "geotag_from_kml",
             lambda files, zip_path=None, **kwargs: calls.append(("position", list(files))) or BatchResult())
         monkeypatch.setattr(workflows, "_organize_repaired", lambda files: None)
 
@@ -127,7 +127,7 @@ class TestRepairPassesTheWholeSelectionToEachStage:
                               [tmp_path / "unreadable.jpg"])
         monkeypatch.setattr(workflows, "find_missing_tag",
                             lambda path, tags, parallel=False: missing)
-        monkeypatch.setattr(workflows, "set_position_from_kml",
+        monkeypatch.setattr(workflows, "geotag_from_kml",
                             lambda files, zip_path=None, **kwargs: BatchResult([], [files[0]]))
 
         result = workflows.resolve_missing_gps(tmp_path)

@@ -54,7 +54,7 @@ MAX_DISTANCE_METERS = 100
 
 
 @dataclass
-class SetPositionOptions:
+class GeotagOptions:
     max_time_diff_seconds: int = MAX_TIME_DIFF_SECONDS
     overwrite: bool = False
     force: bool = False
@@ -95,7 +95,7 @@ def _find_best_track(tracks: list[Track], media_time: datetime, multiday: bool,
 
 
 def _verify_or_skip(latitude: float, longitude: float, best: TrackMatch,
-                    options: SetPositionOptions, target_file: str | None = None) -> bool:
+                    options: GeotagOptions, target_file: str | None = None) -> bool:
     """Distance check of existing GPS against the KML match; False = skip the
     file (mismatch beyond threshold and no force)."""
     distance = coords.geo_distance(latitude, longitude,
@@ -110,7 +110,7 @@ def _verify_or_skip(latitude: float, longitude: float, best: TrackMatch,
 
 
 def decide_position(meta: MediaMetadata, find_best: FindBestTrack,
-                    options: SetPositionOptions) -> list[Action]:
+                    options: GeotagOptions) -> list[Action]:
     """What to do with one file, as a value: nothing here reads or writes.
 
     `find_best` is the track lookup, handed over so a file that already has
@@ -151,15 +151,15 @@ def decide_position(meta: MediaMetadata, find_best: FindBestTrack,
                       options.overwrite)]
 
 
-def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
-                          options: SetPositionOptions | None = None,
+def geotag_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
+                          options: GeotagOptions | None = None,
                           parallel: bool = False) -> BatchResult[list[Action]]:
     """Set GPS position/altitude on media files from the KML ZIP archive.
 
     A file list is accepted so one call can cover a whole selection: the archive
     is read and parsed once for the batch, not once per file.
     """
-    options = options or SetPositionOptions()
+    options = options or GeotagOptions()
 
     zip_path = resolve_zip_path(kml_zip_path)
 

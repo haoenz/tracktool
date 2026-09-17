@@ -14,8 +14,8 @@ from fixtures.media import make_test_jpeg  # noqa: E402
 from tracktool import exiftool, mediatime  # noqa: E402
 from tracktool.exif.position import (  # noqa: E402
     MAX_TIME_DIFF_SECONDS,
-    SetPositionOptions,
-    set_position_from_kml,
+    GeotagOptions,
+    geotag_from_kml,
 )
 from tracktool.exif.write import SetExifOptions, find_missing_tag, set_exif  # noqa: E402
 
@@ -54,15 +54,15 @@ def main() -> None:
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("2024-05-01 hike.kml", track)
 
-        # ── 验证 1：find-missing 找出全部缺失 GPS 的照片 ──
+        # ── 验证 1：show-missing 找出全部缺失 GPS 的照片 ──
         missing = find_missing_tag(media_dir, ["GPSPosition", "GPSAltitude"])
         assert len(missing.succeeded) == 3, f"expected 3 missing, got {len(missing.succeeded)}"
         assert missing.ok
 
-        # ── 验证 2：set_position_from_kml 写入 GPS ──
-        batch = set_position_from_kml(
+        # ── 验证 2：geotag_from_kml 写入 GPS ──
+        batch = geotag_from_kml(
             media_dir, str(zip_path),
-            options=SetPositionOptions(max_time_diff_seconds=MAX_TIME_DIFF_SECONDS, overwrite=True,
+            options=GeotagOptions(max_time_diff_seconds=MAX_TIME_DIFF_SECONDS, overwrite=True,
                                        failed_folder_name="TrackPosFailed"))
         assert [len(plan) for plan in batch.succeeded] == [1, 1]  # photo0 / photo1 各一条写入计划
         assert [p.name for p in batch.failed] == ["photo2.jpg"], batch.failed
@@ -84,7 +84,7 @@ def main() -> None:
         assert (failed_dir / "photo2.jpg").is_file(), "photo2 should be moved to TrackPosFailed"
         print(f"photo2 -> moved to {failed_dir}")
 
-        # ── 验证 3：修复后 find-missing 只剩 0 个（photo2 已移走）──
+        # ── 验证 3：修复后 show-missing 只剩 0 个（photo2 已移走）──
         missing_after = find_missing_tag(media_dir, ["GPSPosition", "GPSAltitude"])
         assert missing_after.succeeded == [], [str(m.file) for m in missing_after.succeeded]
 

@@ -76,7 +76,7 @@ def _location_tags(lookup: Lookup, api_key: str | None, language: str,
     return [WriteTags(lookup.file, tags, overwrite)]
 
 
-def set_altitude_from_google(path: Path | list[Path], overwrite: bool = False,
+def fill_altitude_from_google(path: Path | list[Path], overwrite: bool = False,
                              failed_folder_name: str | None = None,
                              parallel: bool = False, api_key: str | None = None,
                              ) -> BatchResult[list[Action]]:

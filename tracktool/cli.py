@@ -138,14 +138,20 @@ def _print_plan(result: BatchResult[Any]) -> None:
 @kml_app.command("type")
 def kml_type(
     path: Annotated[Path, typer.Argument(help="KML file")],
-    set_type: Annotated[TrackType | None, typer.Option("--set", help="Set track type (Default/Train/Flight)")] = None,
 ) -> None:
-    """Get or set the track type (TrackTags)."""
+    """Print the track type (TrackTags)."""
     path = _resolve_path(path)
-    if set_type:
-        kmlfile.set_kml_type(path, set_type)
-    else:
-        print(kmlfile.get_kml_type(path))
+    print(kmlfile.get_kml_type(path))
+
+
+@kml_app.command("set-type")
+def kml_set_type(
+    path: Annotated[Path, typer.Argument(help="KML file")],
+    track_type: Annotated[TrackType, typer.Argument(help="Track type (Default/Train/Flight)")],
+) -> None:
+    """Set the track type (TrackTags) of a KML."""
+    path = _resolve_path(path)
+    kmlfile.set_kml_type(path, track_type)
 
 
 @kml_app.command("push")
@@ -182,14 +188,14 @@ def kml_split(
     kml_edit.split_kml(path, split_points)
 
 
-@kml_app.command("remove-bad")
-def kml_remove_bad(
+@kml_app.command("prune")
+def kml_prune(
     path: Annotated[Path, typer.Argument(help="KML file")],
     bad_points: Annotated[list[str], typer.Argument(help="One point, or two points as a range (max 2)")],
 ) -> None:
     """Remove bad points (or the range between two) from a track."""
     path = _resolve_path(path)
-    kml_edit.remove_bad_points(path, bad_points)
+    kml_edit.prune_points(path, bad_points)
 
 
 @kml_app.command("merge")
@@ -214,14 +220,14 @@ def kml_to_multigeom(
     kml_edit.convert_kml_to_multigeometry(path, output_path)
 
 
-@kml_app.command("set-altitude")
-def kml_set_altitude(
+@kml_app.command("fill-altitude")
+def kml_fill_altitude(
     path: Annotated[Path, typer.Argument(help="KML file to update in place")],
     api_key: Annotated[str | None, typer.Option("--api-key", help="Google Maps API key")] = None,
 ) -> None:
     """Fill altitude for the tracks that carry none (Google Elevation)."""
     path = _resolve_path(path)
-    kml_edit.set_kml_altitude_from_google(path, api_key)
+    kml_edit.fill_kml_altitude_from_google(path, api_key)
 
 
 # ── exif ────────────────────────────────────────────────────────────────────
@@ -261,8 +267,8 @@ def exif_info(
     exif_write.print_media_info(path)
 
 
-@exif_app.command("find-missing")
-def exif_find_missing(
+@exif_app.command("show-missing")
+def exif_show_missing(
     path: Annotated[Path, typer.Argument(help="File or directory")],
     tags: Annotated[list[str], typer.Argument(help="Tags to check, e.g. GPSPosition GPSAltitude")],
     parallel: ParallelOpt = False,
@@ -281,8 +287,8 @@ def exif_find_missing(
     _finish(batch)
 
 
-@exif_app.command("set-position")
-def exif_set_position(
+@exif_app.command("geotag")
+def exif_geotag(
     path: Annotated[Path, typer.Argument(help="File or directory")],
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     max_time_diff: Annotated[int, typer.Option(
@@ -298,16 +304,16 @@ def exif_set_position(
 ) -> None:
     """Geotag media from the KML archive by timestamp matching."""
     path = _resolve_path(path)
-    options = exif_position.SetPositionOptions(
+    options = exif_position.GeotagOptions(
         max_time_diff_seconds=max_time_diff, overwrite=overwrite, force=force,
         verify_existing_gps=verify, max_distance_meters=max_distance,
         multiday=multiday, failed_folder_name=failed_folder)
-    result = exif_position.set_position_from_kml(path, zip_path, options, parallel)
+    result = exif_position.geotag_from_kml(path, zip_path, options, parallel)
     _finish(result)
 
 
-@exif_app.command("set-altitude")
-def exif_set_altitude(
+@exif_app.command("fill-altitude")
+def exif_fill_altitude(
     path: Annotated[Path, typer.Argument(help="File or directory")],
     api_key: Annotated[str | None, typer.Option("--api-key", help="Google Maps API key")] = None,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
@@ -316,7 +322,7 @@ def exif_set_altitude(
 ) -> None:
     """Fill missing GPSAltitude from Google Elevation."""
     path = _resolve_path(path)
-    result = exif_google.set_altitude_from_google(path, overwrite, failed_folder, parallel, api_key)
+    result = exif_google.fill_altitude_from_google(path, overwrite, failed_folder, parallel, api_key)
     _finish(result)
 
 
@@ -336,10 +342,10 @@ def exif_set_location(
     _finish(result)
 
 
-@exif_app.command("move-time")
-def exif_move_time(
+@exif_app.command("shift-time")
+def exif_shift_time(
     path: Annotated[Path, typer.Argument(help="File or directory")],
-    time_diff: Annotated[str | None, typer.Option("--time-diff", help="Shift like +1h30m, -2d")] = None,
+    time_diff: Annotated[str | None, typer.Option("--by", help="Shift like +1h30m, -2d")] = None,
     offset_time: Annotated[str | None, typer.Option("--offset-time", help="New timezone offset (SONY only)")] = None,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     parallel: ParallelOpt = False,
@@ -347,14 +353,14 @@ def exif_move_time(
     """Shift EXIF timestamps; Insta360 files are renamed too."""
     path = _resolve_path(path)
     if not time_diff and not offset_time:
-        log.error("At least one of --time-diff or --offset-time must be provided")
+        log.error("At least one of --by or --offset-time must be provided")
         raise typer.Exit(code=EXIT_USER_ERROR)
-    result = exif_media.move_exif_time(path, time_diff or "", offset_time or "", overwrite, parallel)
+    result = exif_media.shift_exif_time(path, time_diff or "", offset_time or "", overwrite, parallel)
     _finish(result)
 
 
-@exif_app.command("move-altitude")
-def exif_move_altitude(
+@exif_app.command("shift-altitude")
+def exif_shift_altitude(
     path: Annotated[Path, typer.Argument(help="File or directory")],
     offset: Annotated[float, typer.Argument(help="Altitude offset in meters")],
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
@@ -362,7 +368,7 @@ def exif_move_altitude(
 ) -> None:
     """Shift GPSAltitude by a fixed offset."""
     path = _resolve_path(path)
-    result = exif_media.move_altitude(path, offset, overwrite, parallel)
+    result = exif_media.shift_altitude(path, offset, overwrite, parallel)
     _finish(result)
 
 
@@ -391,8 +397,8 @@ def exif_group(
     exif_media.group_media_files(path)
 
 
-@exif_app.command("resolve-missing")
-def exif_resolve_missing(
+@exif_app.command("repair")
+def exif_repair(
     path: Annotated[Path, typer.Argument(help="Directory of media files")],
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     parallel: ParallelOpt = False,
@@ -403,8 +409,8 @@ def exif_resolve_missing(
     _finish(result)
 
 
-@exif_app.command("resolve-vid")
-def exif_resolve_vid(
+@exif_app.command("repair-vid")
+def exif_repair_vid(
     path: Annotated[Path, typer.Argument(help="Directory containing a VID subdirectory")],
     make: Annotated[str | None, typer.Option("--make", help="Camera make to write")] = None,
     model: Annotated[str | None, typer.Option("--model", help="Camera model to write")] = None,
@@ -463,11 +469,11 @@ def hash_dirs(
     include: Annotated[str, typer.Option("--include", help="Include regex on full path")] = ".*",
     exclude: Annotated[str, typer.Option("--exclude", help="Exclude regex on full path")] = "^$",
     hash_log: Annotated[Path | None, typer.Option("--log", help="Hash log JSON path")] = None,
-    clear_invalid: Annotated[bool, typer.Option("--clear-invalid", help="Drop entries for deleted files")] = False,
+    prune: Annotated[bool, typer.Option("--prune", help="Drop entries for deleted files")] = False,
 ) -> None:
     """Compute/update MD5 hashes for directory contents."""
     directories = [_resolve_path(d) for d in directories]
-    results = dedup.get_directories_hash(directories, include, exclude, hash_log, clear_invalid)
+    results = dedup.get_directories_hash(directories, include, exclude, hash_log, prune)
     for result in results:
         print(f"{display_path(result.directory)} ({len(result.hashes)} files)")
 
@@ -506,13 +512,13 @@ def hash_dupes(
             print(f"  {display_path(file)}")
 
 
-@hash_app.command("clear-log")
-def hash_clear_log(
+@hash_app.command("prune")
+def hash_prune(
     hash_log: Annotated[Path, typer.Argument(help="Hash log JSON path")],
 ) -> None:
     """Remove entries for deleted files from the hash log."""
     hash_log = _resolve_path(hash_log)
-    dedup.clear_hash_log(hash_log)
+    dedup.prune_hash_log(hash_log)
 
 
 # ── config ──────────────────────────────────────────────────────────────────

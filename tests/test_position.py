@@ -9,7 +9,7 @@ from conftest import TRACK_KML
 from tracktool import mediatime
 from tracktool.actions import Failed, Skip, WriteTags
 from tracktool.exif.position import (
-    SetPositionOptions,
+    GeotagOptions,
     _find_best_track,
     _verify_or_skip,
     decide_position,
@@ -149,17 +149,17 @@ class TestVerifyOrSkip:
 
     def test_matching_position_proceeds(self):
         assert _verify_or_skip(39.0, 116.0, self._match(39.0, 116.0),
-                               SetPositionOptions()) is True
+                               GeotagOptions()) is True
 
     def test_mismatch_beyond_threshold_skips(self):
         far = self._match(40.0, 117.0)
-        assert _verify_or_skip(39.0, 116.0, far, SetPositionOptions()) is False
-        assert _verify_or_skip(39.0, 116.0, far, SetPositionOptions(force=True)) is True
+        assert _verify_or_skip(39.0, 116.0, far, GeotagOptions()) is False
+        assert _verify_or_skip(39.0, 116.0, far, GeotagOptions(force=True)) is True
 
     def test_equator_position_is_a_real_coordinate(self):
         # 纬度 0 是合法坐标，不能因为 falsy 被当成「没有位置」
         assert _verify_or_skip(0.0, 116.0, self._match(0.0, 116.0),
-                               SetPositionOptions()) is True
+                               GeotagOptions()) is True
 
 
 class TestKmlType:
@@ -213,13 +213,13 @@ class TestDecidePosition:
         def unexpected(media_time: datetime) -> TrackMatch | None:
             raise AssertionError("the archive was searched for a file that needs nothing")
 
-        result = decide_position(self._meta(**self.FULL_GPS), unexpected, SetPositionOptions())
+        result = decide_position(self._meta(**self.FULL_GPS), unexpected, GeotagOptions())
 
         assert result == [Skip(Path("2024-05-01 a.jpg"), "GPS data already exists")]
 
     def test_a_track_match_plans_the_write(self):
         result = decide_position(self._meta(**self.TIME), self._finder(self._match()),
-                                 SetPositionOptions(overwrite=True))
+                                 GeotagOptions(overwrite=True))
 
         assert result == [WriteTags(Path("2024-05-01 a.jpg"), {
             "GPSLatitude": "39.1", "GPSLatitudeRef": "N",
@@ -234,25 +234,25 @@ class TestDecidePosition:
         result = decide_position(
             self._meta(**self.TIME),
             lambda media_time: _find_best_track(tracks, media_time, multiday=False),
-            SetPositionOptions())
+            GeotagOptions())
 
         assert result[0].tags["GPSLatitude"] == "39.2"
         assert result[0].tags["GPSAltitude"] == "120.0"
 
     def test_no_timestamp_is_a_failure(self):
-        result = decide_position(self._meta(), self._finder(self._match()), SetPositionOptions())
+        result = decide_position(self._meta(), self._finder(self._match()), GeotagOptions())
 
         assert result == [Failed(Path("2024-05-01 a.jpg"), "no valid timestamp")]
 
     def test_no_track_match_is_a_failure(self):
-        result = decide_position(self._meta(**self.TIME), self._finder(None), SetPositionOptions())
+        result = decide_position(self._meta(**self.TIME), self._finder(None), GeotagOptions())
 
         assert result == [Failed(Path("2024-05-01 a.jpg"), "no matching GPS data in the KML archive")]
 
     def test_a_match_beyond_the_time_limit_is_a_failure(self):
         result = decide_position(self._meta(**self.TIME),
                                  self._finder(self._match(seconds=90.0, inside=False)),
-                                 SetPositionOptions(max_time_diff_seconds=60))
+                                 GeotagOptions(max_time_diff_seconds=60))
 
         assert result == [Failed(Path("2024-05-01 a.jpg"), "best match 90.0s outside the 60s limit")]
 
@@ -260,20 +260,20 @@ class TestDecidePosition:
         # KML 点的海拔是 0（未记录），沿用文件里已有的值
         result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
                                  self._finder(self._match(altitude=0.0)),
-                                 SetPositionOptions(force=True))
+                                 GeotagOptions(force=True))
 
         assert result[0].tags["GPSAltitude"] == "110.0"
 
     def test_force_rewrites_even_a_fully_tagged_file(self):
         result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
-                                 self._finder(self._match()), SetPositionOptions(force=True))
+                                 self._finder(self._match()), GeotagOptions(force=True))
 
         assert [type(action) for action in result] == [WriteTags]
 
     def test_a_verification_mismatch_fails_without_quarantine(self):
         result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
                                  self._finder(self._match(latitude=40.0, longitude=117.0)),
-                                 SetPositionOptions(verify_existing_gps=True))
+                                 GeotagOptions(verify_existing_gps=True))
 
         assert result == [Failed(Path("2024-05-01 a.jpg"), "existing GPS disagrees with the KML",
                                  quarantine=False)]
@@ -281,6 +281,6 @@ class TestDecidePosition:
     def test_a_passing_verification_has_nothing_to_write(self):
         result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
                                  self._finder(self._match()),
-                                 SetPositionOptions(verify_existing_gps=True))
+                                 GeotagOptions(verify_existing_gps=True))
 
         assert result == [Skip(Path("2024-05-01 a.jpg"), "existing GPS agrees with the KML match")]

@@ -19,7 +19,7 @@ from conftest import TRACK_KML
 from tracktool import exiftool
 from tracktool.config import Config
 from tracktool.context import ctx
-from tracktool.exif.position import SetPositionOptions, set_position_from_kml
+from tracktool.exif.position import GeotagOptions, geotag_from_kml
 from tracktool.exif.write import find_missing_tag
 
 requires_exiftool = pytest.mark.skipif(shutil.which("exiftool") is None, reason="requires exiftool")
@@ -178,7 +178,7 @@ class TestReadTagsAgainstExiftool:
 
 @requires_exiftool
 class TestPositionReadsEachFileOnce:
-    def test_set_position_from_kml_uses_one_round_trip_per_file(self, tmp_path, monkeypatch):
+    def test_geotag_uses_one_round_trip_per_file(self, tmp_path, monkeypatch):
         media_dir = tmp_path / "media"
         media_dir.mkdir()
         photo = media_dir / "2024-05-01 a.jpg"
@@ -204,7 +204,7 @@ class TestPositionReadsEachFileOnce:
 
         # 计数范围只覆盖批量本身：标签写入走一次性进程，不经过持久进程
         monkeypatch.setattr(exiftool, "invoke_persistent", counting)
-        set_position_from_kml(media_dir, options=SetPositionOptions(
+        geotag_from_kml(media_dir, options=GeotagOptions(
             overwrite=True, failed_folder_name="Failed"))
 
         assert len(reads) == 1, reads

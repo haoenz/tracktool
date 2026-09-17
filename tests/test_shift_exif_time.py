@@ -1,6 +1,6 @@
-"""Unit tests for the move_exif_time rules: offset/time-diff resolution, the
+"""Unit tests for the shift_exif_time rules: offset/time-diff resolution, the
 (make, ext) tag-set table, the Insta360 name sync, and the decisions the two
-move commands take per file."""
+shift commands take per file."""
 
 import logging
 from datetime import timedelta

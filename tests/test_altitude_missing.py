@@ -1,9 +1,9 @@
 """End-to-end regression for issue #4 with real exiftool: a file whose
 GPSAltitude is 0 below sea level must be reported missing by find_missing_tag,
-matching what set_altitude_from_google repairs. Before the shared
-is_missing_altitude predicate the two rules diverged: find-missing only knew
+matching what fill_altitude_from_google repairs. Before the shared
+is_missing_altitude predicate the two rules diverged: show-missing only knew
 the above-sea-level wording, so below-sea-level files looked healthy but were
-still "repaired" by set-altitude."""
+still "repaired" by fill-altitude."""
 
 import shutil
 import subprocess

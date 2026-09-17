@@ -251,7 +251,7 @@ class TestDedup:
 
         # clear log drops entries for deleted files
         (directory / "f.txt").unlink()
-        dedup.clear_hash_log(log_path)
+        dedup.prune_hash_log(log_path)
         stored = json.loads(log_path.read_text(encoding="utf-8"))
         assert str(directory / "f.txt") not in stored
 

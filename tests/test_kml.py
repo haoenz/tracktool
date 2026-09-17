@@ -62,7 +62,7 @@ class TestSplitKml:
 
 class TestRemoveBadPoints:
     def test_remove_single(self, track_file: Path):
-        edit.remove_bad_points(track_file, ["116.1 39.1 110"])
+        edit.prune_points(track_file, ["116.1 39.1 110"])
         fixed = track_file.parent / "2024-05-01 test-Fixed.kml"
         assert fixed.is_file()
         tree = xmlutil.parse_file(fixed)
@@ -70,14 +70,14 @@ class TestRemoveBadPoints:
         assert len(xmlutil.findall(tree, "//kml:when")) == 3
 
     def test_remove_range(self, track_file: Path):
-        edit.remove_bad_points(track_file, ["116.0 39.0 100", "116.1 39.1 110"])
+        edit.prune_points(track_file, ["116.0 39.0 100", "116.1 39.1 110"])
         fixed = track_file.parent / "2024-05-01 test-Fixed.kml"
         tree = xmlutil.parse_file(fixed)
         assert len(xmlutil.findall(tree, "//gx:coord")) == 2
 
     def test_too_many_points_raises(self, track_file: Path):
         with pytest.raises(ValueError):
-            edit.remove_bad_points(track_file, ["a", "b", "c"])
+            edit.prune_points(track_file, ["a", "b", "c"])
 
 
 class TestMergeKml:
@@ -163,7 +163,7 @@ class TestAltitudeFromGoogle:
 
     def test_fills_altitudes_per_point(self, linestring_file: Path, monkeypatch):
         queries = self._altitudes(monkeypatch, [10.5, None, 12.5, 13.5])
-        edit.set_kml_altitude_from_google(linestring_file, "key")
+        edit.fill_kml_altitude_from_google(linestring_file, "key")
 
         assert queries == [(39.0, 116.0), (39.1, 116.1), (40.0, 117.0), (40.1, 117.1)]
         assert self._coordinates(linestring_file) == [
@@ -175,7 +175,7 @@ class TestAltitudeFromGoogle:
     def test_a_track_without_any_altitude_is_filled(self, tmp_path: Path, monkeypatch):
         path = self._tracks(tmp_path, "116.0,39.0 116.1,39.1,0")  # 缺分量与 0 都算没有海拔
         queries = self._altitudes(monkeypatch, [10.5, 12.5])
-        edit.set_kml_altitude_from_google(path, "key")
+        edit.fill_kml_altitude_from_google(path, "key")
 
         assert queries == [(39.0, 116.0), (39.1, 116.1)]
         assert self._coordinates(path) == ["116.0,39.0,10.5 116.1,39.1,12.5"]
@@ -188,7 +188,7 @@ class TestAltitudeFromGoogle:
             raise AssertionError("Google Elevation must not be queried")
 
         monkeypatch.setattr(edit.googleapi, "get_altitudes", fail)
-        edit.set_kml_altitude_from_google(path, "key")
+        edit.fill_kml_altitude_from_google(path, "key")
 
         assert path.read_bytes() == before
 
@@ -196,7 +196,7 @@ class TestAltitudeFromGoogle:
         """一个文件里两种轨迹并存：设备记录的那条整条不动，手绘的那条才补。"""
         path = self._tracks(tmp_path, "116.0,39.0 116.1,39.1,110.0", "117.0,40.0 117.1,40.1")
         queries = self._altitudes(monkeypatch, [12.5, 13.5])
-        edit.set_kml_altitude_from_google(path, "key")
+        edit.fill_kml_altitude_from_google(path, "key")
 
         assert queries == [(40.0, 117.0), (40.1, 117.1)]  # 只查了缺高程的那条
         assert self._coordinates(path) == [
@@ -397,7 +397,7 @@ class TestTrackType:
         return kml
 
     def test_set_get_roundtrip(self, tmp_path: Path):
-        # --set 写入的是英文名（如 "Train"），get 必须能读回，不再落 Unknown
+        # kml set-type 写入的是英文名（如 "Train"），get 必须能读回，不再落 Unknown
         kml = self._kml_with_track_tags(tmp_path, "火车")
         kmlfile.set_kml_type(kml, TrackType.TRAIN)
         assert kmlfile.get_kml_type(kml) is TrackType.TRAIN
@@ -412,7 +412,7 @@ class TestTrackType:
     def test_cli_set_then_get(self, tmp_path: Path):
         kml = self._kml_with_track_tags(tmp_path, "火车")
 
-        result = runner.invoke(app, ["kml", "type", str(kml), "--set", "Train"])
+        result = runner.invoke(app, ["kml", "set-type", str(kml), "Train"])
         assert result.exit_code == 0
         result = runner.invoke(app, ["kml", "type", str(kml)])
         assert result.exit_code == 0
@@ -422,7 +422,7 @@ class TestTrackType:
         # 非法类型值在 CLI 入口被 typer 拒绝，不再流向下游
         kml = tmp_path / "2024-05-01 test.kml"
         kml.write_text(TRACK_KML, encoding="utf-8")
-        result = runner.invoke(app, ["kml", "type", str(kml), "--set", "Bogus"])
+        result = runner.invoke(app, ["kml", "set-type", str(kml), "Bogus"])
         assert result.exit_code != 0
 
     def test_cli_invalid_case_rejected(self, tmp_path: Path):

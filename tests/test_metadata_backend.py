@@ -16,8 +16,8 @@ from conftest import InMemoryBackend
 from tracktool import exiftool, googleapi
 from tracktool.config import Config
 from tracktool.context import ctx
-from tracktool.exif.google import set_altitude_from_google
-from tracktool.exif.media import move_altitude
+from tracktool.exif.google import fill_altitude_from_google
+from tracktool.exif.media import shift_altitude
 from tracktool.exif.write import SetExifOptions, find_missing_tag, set_exif
 from tracktool.metadata import MediaMetadata, MetadataBackend
 
@@ -96,7 +96,7 @@ class TestSetExif:
 
 class TestMoveAltitude:
     def test_a_file_without_altitude_is_left_alone(self, backend, photo):
-        result = move_altitude(photo, 5)
+        result = shift_altitude(photo, 5)
 
         assert not result.ok
         assert backend.writes == []
@@ -104,7 +104,7 @@ class TestMoveAltitude:
     def test_the_shifted_altitude_is_written(self, backend, photo):
         backend.tags[photo] = {"GPSAltitude": "100"}
 
-        move_altitude(photo, -2.5)
+        shift_altitude(photo, -2.5)
 
         assert backend.writes == [
             (photo, {"GPSAltitudeRef": "Above Sea Level", "GPSAltitude": "97.5"}, False)]
@@ -119,7 +119,7 @@ class TestGoogleAltitude:
 
         monkeypatch.setattr(googleapi, "get_altitudes", unexpected)
 
-        result = set_altitude_from_google(photo, overwrite=True)
+        result = fill_altitude_from_google(photo, overwrite=True)
 
         assert result.ok
         assert backend.writes == []

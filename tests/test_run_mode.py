@@ -55,7 +55,7 @@ class TestKmlWritesAreReported:
     def test_cleaning_bad_points_leaves_no_fixed_file(self, tmp_path: Path, plan_mode):
         source = _kml(tmp_path)
 
-        runner.invoke(app, ["--dry-run", "kml", "remove-bad", str(source), "116.1 39.1 110"])
+        runner.invoke(app, ["--dry-run", "kml", "prune", str(source), "116.1 39.1 110"])
 
         assert sorted(p.name for p in tmp_path.glob("*.kml")) == [source.name]
 
@@ -70,7 +70,7 @@ class TestKmlWritesAreReported:
             encoding="utf-8",
         )
 
-        runner.invoke(app, ["--dry-run", "kml", "type", str(source), "--set", "Flight"])
+        runner.invoke(app, ["--dry-run", "kml", "set-type", str(source), "Flight"])
 
         node = xmlutil.find(
             xmlutil.parse_file(source),
@@ -157,7 +157,7 @@ class TestMovesAndSideFilesAreReported:
         hash_log = tmp_path / "hashes.json"
         hash_log.write_text('{"gone.txt": {"MD5": "X", "LastWriteTime": 1}}', encoding="utf-8")
 
-        dedup.clear_hash_log(hash_log)
+        dedup.prune_hash_log(hash_log)
 
         assert "gone.txt" in hash_log.read_text(encoding="utf-8")
 
@@ -173,12 +173,12 @@ class TestMovesAndSideFilesAreReported:
 
 class TestReadOnlyCommandsStillReport:
     def test_find_missing_prints_its_findings_without_a_plan(self, tmp_path: Path, monkeypatch):
-        # find-missing 只读：它的结果不是计划，预演不该把它换成一张空表
+        # show-missing 只读：它的结果不是计划，预演不该把它换成一张空表
         (tmp_path / "a.jpg").touch()
         monkeypatch.setattr(ctx, "backend", InMemoryBackend())
 
         result = runner.invoke(app,
-                               ["--dry-run", "exif", "find-missing", str(tmp_path), "GPSPosition"])
+                               ["--dry-run", "exif", "show-missing", str(tmp_path), "GPSPosition"])
 
         assert result.exit_code == 0, result.output
         assert "GPSPosition" in result.output
@@ -191,7 +191,7 @@ class TestTheFlagIsGlobal:
         monkeypatch.setattr(ctx, "backend", backend)
         (tmp_path / "a.jpg").touch()
 
-        result = runner.invoke(app, ["--dry-run", "exif", "move-altitude", str(tmp_path), "10"])
+        result = runner.invoke(app, ["--dry-run", "exif", "shift-altitude", str(tmp_path), "10"])
 
         assert result.exit_code == 0, result.output
         assert backend.writes == []
@@ -202,7 +202,7 @@ class TestTheFlagIsGlobal:
         monkeypatch.setattr(ctx, "backend", backend)
         (tmp_path / "a.jpg").touch()
 
-        result = runner.invoke(app, ["exif", "move-altitude", str(tmp_path), "10"])
+        result = runner.invoke(app, ["exif", "shift-altitude", str(tmp_path), "10"])
 
         assert result.exit_code == 0, result.output
         assert backend.writes == [(tmp_path / "a.jpg",

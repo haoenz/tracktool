@@ -75,14 +75,14 @@ def _update_files_hash_log(files: list[Path], hash_log: dict) -> tuple[int, int]
 
 
 def get_directories_hash(directories: list[Path], include: str = ".*", exclude: str = "^$",
-                         hash_log_path: Path | None = None, clear_invalid: bool = False) -> list[DirectoryHash]:
+                         hash_log_path: Path | None = None, prune: bool = False) -> list[DirectoryHash]:
     """Compute/update MD5 hashes for files in directories, optionally persisted."""
     hash_log: dict = {}
     if hash_log_path is not None:
         log.debug("Loading hash log from file", target=str(hash_log_path))
-        if clear_invalid:
-            log.info("Clearing invalid entries from hash log", target=str(hash_log_path))
-            clear_hash_log(hash_log_path)
+        if prune:
+            log.info("Pruning obsolete entries from hash log", target=str(hash_log_path))
+            prune_hash_log(hash_log_path)
         hash_log = _load_hash_log(hash_log_path)
 
     target_files: dict[Path, list[Path]] = {}
@@ -157,7 +157,7 @@ class DuplicateGroup:
 
 def find_duplicate_files(directory: Path, hash_log_path: Path | None = None) -> list[DuplicateGroup]:
     """Group files with identical MD5; returns groups with more than one file."""
-    hashes = get_directories_hash([directory], clear_invalid=True, hash_log_path=hash_log_path)
+    hashes = get_directories_hash([directory], prune=True, hash_log_path=hash_log_path)
 
     log.info("Searching for duplicate files by MD5 hash", target=str(directory))
     groups: dict[str, list[Path]] = {}
@@ -169,7 +169,7 @@ def find_duplicate_files(directory: Path, hash_log_path: Path | None = None) -> 
     return duplicates
 
 
-def clear_hash_log(hash_log_path: Path) -> None:
+def prune_hash_log(hash_log_path: Path) -> None:
     """Drop entries whose files no longer exist."""
     hash_log = _load_hash_log(hash_log_path)
 

@@ -20,10 +20,10 @@ uv tool install .        # 或 pip install .
 
 ```bash
 # 按轨迹给照片写入 GPS（已有 GPS 的跳过；失败文件移入 TrackPosFailed）
-tracktool exif set-position ./photos --overwrite --failed-folder TrackPosFailed
+tracktool exif geotag ./photos --overwrite --failed-folder TrackPosFailed
 
 # 一键修复缺失 GPSPosition/GPSAltitude 的媒体
-tracktool exif resolve-missing ./VID
+tracktool exif repair ./VID
 
 # 归档新轨迹（一次可给多条：聚合与压缩包各读写一次）
 tracktool kml push ./2024-05-01\ 徒步.kml ./2024-05-02\ 徒步.kml
@@ -50,7 +50,7 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 
 命令名、选项拼写错误、缺必填参数都退 1：typer 内部把这类用法错误记作 2，与「外部工具/API 失败」同值，入口处已把这一来源归一到 1，因此 **2 只表示外部依赖失败**。
 
-批量命令遇到单个坏文件不会中止整批：该文件计入失败清单（给了 `--failed-folder` 就移入该目录），其余文件照常处理，命令以 3 退出，日志里给出 `N file(s) failed` 汇总。`kml push` 与修复编排（`resolve-missing`）都把整个文件列表交给批量入口，因此一次 Google 高程请求可覆盖最多 512 个坐标，KML 归档只加载解析一次，进档 N 条轨迹也只读写一次聚合与压缩包。
+批量命令遇到单个坏文件不会中止整批：该文件计入失败清单（给了 `--failed-folder` 就移入该目录），其余文件照常处理，命令以 3 退出，日志里给出 `N file(s) failed` 汇总。`kml push` 与修复编排（`repair`）都把整个文件列表交给批量入口，因此一次 Google 高程请求可覆盖最多 512 个坐标，KML 归档只加载解析一次，进档 N 条轨迹也只读写一次聚合与压缩包。
 
 ## 配置
 
@@ -61,5 +61,5 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 - exiftool 以 `-stay_open` 常驻进程通信（每线程一个），批量处理不必为每个文件启动一次进程
 - 日志与标准输出里的路径按用户视角显示：优先相对当前工作目录（且至多向上一级），否则在家目录之下显示为 `~...`，再不然用绝对路径。写进文件的值（配置文件、哈希日志）不受影响，保持原样
 - 并行处理使用线程池（I/O 密集负载）
-- `kml set-altitude` 只补**整轨都没有高程**的轨迹（手绘规划那种）。KML 里一条轨迹＝一个 Placemark，判据是**逐条**的：一条轨迹上只要有一个点带非零海拔，这条就整条不写（那是设备记录的真实高程，不该被 DEM 值替换），同一份文件里的手绘轨迹照补；零海拔与缺分量同义，都算没有。媒体侧的 `exif set-altitude` 则是逐文件地只补缺失标签
+- `kml fill-altitude` 只补**整轨都没有高程**的轨迹（手绘规划那种）。KML 里一条轨迹＝一个 Placemark，判据是**逐条**的：一条轨迹上只要有一个点带非零海拔，这条就整条不写（那是设备记录的真实高程，不该被 DEM 值替换），同一份文件里的手绘轨迹照补；零海拔与缺分量同义，都算没有。媒体侧的 `exif fill-altitude` 则是逐文件地只补缺失标签
 - API key 支持环境变量注入，避免明文入库

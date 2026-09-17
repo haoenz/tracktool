@@ -16,9 +16,9 @@ is the difference between one read and one write of a 40 MiB archive and one
 per track.
 
 The commands that live here are the ones that are a sequence rather than an
-action: filing tracks into the archive, and the two repairs — resolve-missing
+action: filing tracks into the archive, and the two repairs — repair
 fills GPSAltitude from Google before GPSPosition from the KML archive, and
-marks what it fixed in a GoogleAltOK folder; resolve-vid turns a VID directory
+marks what it fixed in a GoogleAltOK folder; repair-vid turns a VID directory
 into VID_original, converts its videos into a fresh VID, and repairs those. A
 preview goes through the same steps and stops at the same places, so the steps
 it cannot show are the ones whose *inputs* the earlier steps produce — the
@@ -40,9 +40,9 @@ from . import log, mediatime
 from .actions import Action, Step, run
 from .context import ctx
 from .errors import UserInputError
-from .exif.google import set_altitude_from_google
+from .exif.google import fill_altitude_from_google
 from .exif.media import convert_to_mp4
-from .exif.position import SetPositionOptions, set_position_from_kml
+from .exif.position import GeotagOptions, geotag_from_kml
 from .exif.write import find_missing_tag
 from .fileutil import BatchResult, move_to_folder
 from .kml import archive, collections, kmlfile
@@ -196,7 +196,7 @@ def resolve_missing_gps(path: Path, parallel: bool = False,
     if missing_alt_only:
         log.info(f"Processing {len(missing_alt_only)} files missing only GPSAltitude")
         files = [r.file for r in missing_alt_only]
-        result.merge(set_altitude_from_google(files, overwrite=True,
+        result.merge(fill_altitude_from_google(files, overwrite=True,
                                               failed_folder_name="GoogleAltFailed",
                                               parallel=parallel))
         # 预演时这步由 move_to_folder 自己拒绝执行并说明
@@ -206,8 +206,8 @@ def resolve_missing_gps(path: Path, parallel: bool = False,
     missing_pos = [r for r in missing.succeeded if POSITION in r.missing_tags]
     if missing_pos:
         log.info(f"Processing {len(missing_pos)} files missing GPSPosition")
-        result.merge(set_position_from_kml([r.file for r in missing_pos], kml_zip_path,
-                                           options=SetPositionOptions(overwrite=True,
+        result.merge(geotag_from_kml([r.file for r in missing_pos], kml_zip_path,
+                                           options=GeotagOptions(overwrite=True,
                                                                       failed_folder_name="TrackPosFailed"),
                                            parallel=parallel))
     return result

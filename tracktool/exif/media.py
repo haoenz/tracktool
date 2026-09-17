@@ -150,7 +150,7 @@ def decide_time_shift(meta: MediaMetadata, time_diff: str, offset_time: str,
     return actions
 
 
-def move_exif_time(path: Path | list[Path], time_diff: str = "", offset_time: str = "",
+def shift_exif_time(path: Path | list[Path], time_diff: str = "", offset_time: str = "",
                    overwrite: bool = False, parallel: bool = False) -> BatchResult[list[Action]]:
     """Shift EXIF timestamps; OffsetTime only supported for SONY. Insta360 files renamed."""
     if not time_diff and not offset_time:
@@ -176,7 +176,7 @@ def decide_altitude_shift(meta: MediaMetadata, offset: float, overwrite: bool) -
     return [WriteTags(meta.path, build_tags(SetExifOptions(altitude=new_alt)), overwrite)]
 
 
-def move_altitude(path: Path | list[Path], offset: float, overwrite: bool = False,
+def shift_altitude(path: Path | list[Path], offset: float, overwrite: bool = False,
                   parallel: bool = False) -> BatchResult[list[Action]]:
     """Shift GPSAltitude by a fixed offset (drone/ground-level correction)."""
     files = list_files(path)

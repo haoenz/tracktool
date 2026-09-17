@@ -18,7 +18,7 @@ from typer.testing import CliRunner
 from tracktool import cli, exiftool
 from tracktool.config import Config
 from tracktool.context import ctx
-from tracktool.exif.position import SetPositionOptions, set_position_from_kml
+from tracktool.exif.position import GeotagOptions, geotag_from_kml
 
 # 测试依赖真实 exiftool（读标签 / 写 GPS），以及 ffmpeg 生成样本 JPEG
 pytestmark = pytest.mark.skipif(shutil.which("exiftool") is None, reason="requires exiftool")
@@ -72,7 +72,7 @@ def _batch_with_bad_file(media_dir: Path, parallel: bool = False) -> list[Path]:
     bad = media_dir / "no-time.jpg"
     bad.write_bytes(b"\x00")
 
-    set_position_from_kml(media_dir, options=SetPositionOptions(failed_folder_name="Failed"),
+    geotag_from_kml(media_dir, options=GeotagOptions(failed_folder_name="Failed"),
                           parallel=parallel)
     return [good1, good2]
 
@@ -105,7 +105,7 @@ class TestSetPositionBatchIsolation:
         timeless = media_dir / "timeless.jpg"
         _make_jpeg(timeless)
 
-        set_position_from_kml(media_dir, options=SetPositionOptions(
+        geotag_from_kml(media_dir, options=GeotagOptions(
             failed_folder_name="Failed"))
 
         assert exiftool.get_media_tag(good, "GPSPosition")
@@ -118,7 +118,7 @@ class TestSetPositionBatchIsolation:
         bad = media_dir / "no-time.jpg"
         bad.write_bytes(b"\x00")
 
-        result = set_position_from_kml(media_dir, options=SetPositionOptions(
+        result = geotag_from_kml(media_dir, options=GeotagOptions(
             failed_folder_name="Failed"))
 
         assert [len(plan) for plan in result.succeeded] == [1, 1]  # 两个好文件各一条写入计划
@@ -132,7 +132,7 @@ class TestCliExitCodeReflectsBatch:
 
     def _invoke(self, media_dir: Path, zip_path: str):
         # media_dir fixture 已把 ctx.config 指向临时路径，CLI 不会读用户真实配置
-        return runner.invoke(cli.app, ["exif", "set-position", str(media_dir),
+        return runner.invoke(cli.app, ["exif", "geotag", str(media_dir),
                                        "--zip", zip_path, "--failed-folder", "Failed",
                                        "--overwrite"])
 

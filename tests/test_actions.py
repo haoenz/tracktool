@@ -183,7 +183,7 @@ class TestPreviewStopsAtBillableWork:
 
         monkeypatch.setattr(exif_google.googleapi, "get_altitudes", unexpected)
 
-        result = exif_google.set_altitude_from_google(files)
+        result = exif_google.fill_altitude_from_google(files)
 
         plan = [action for per_file in result.succeeded for action in per_file]
         assert all(isinstance(action, Lookup) for action in plan)
