@@ -77,7 +77,7 @@ def build_tags(options: SetExifOptions) -> dict[str, str]:
 
 
 def set_exif(path: Path | list[Path], options: SetExifOptions,
-             parallel: bool = False, dry_run: bool = False) -> BatchResult[list[Action]]:
+             parallel: bool = False) -> BatchResult[list[Action]]:
     """Apply EXIF tags to one file, every file in a directory, or a file list.
 
     The same tags go to every file, so the decisions are built once and the
@@ -87,10 +87,9 @@ def set_exif(path: Path | list[Path], options: SetExifOptions,
     files = list_files(path)
 
     def process(file: Path) -> list[Action]:
-        return run([WriteTags(file, tags, options.overwrite)], dry_run=dry_run)
+        return run([WriteTags(file, tags, options.overwrite)])
 
-    return run_per_file(files, process, activity="Setting Exif data", parallel=parallel,
-                        dry_run=dry_run)
+    return run_per_file(files, process, activity="Setting Exif data", parallel=parallel)
 
 
 @dataclass

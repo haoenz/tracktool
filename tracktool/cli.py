@@ -12,7 +12,7 @@ from rich.table import Table
 from . import __version__, coords, dedup, googleapi, log, mediatime
 from .actions import describe
 from .config import DEFAULTS, normalize
-from .context import ctx
+from .context import RunMode, ctx
 from .errors import EXIT_PARTIAL, EXIT_USER_ERROR, AppError, UserInputError
 from .exif import google as exif_google
 from .exif import media as exif_media
@@ -54,8 +54,6 @@ app.add_typer(config_app, name="config")
 ParallelOpt = Annotated[bool, typer.Option("--parallel", help=f"Process in parallel ({DEFAULT_WORKERS} threads)")]
 QuietOpt = Annotated[bool, typer.Option("--quiet", "-q", help="Only warnings and errors")]
 OffsetTimeOpt = Annotated[str, typer.Option("--offset-time", help="Default timezone offset")]
-DryRunOpt = Annotated[bool, typer.Option(
-    "--dry-run", help="Show what would be done without touching any file")]
 
 
 def _version_callback(value: bool) -> None:
@@ -70,7 +68,13 @@ def main(
                                                     is_eager=True, help="Show version and exit")] = None,
     verbose: Annotated[int, typer.Option("--verbose", "-v", count=True, help="-v VERBOSE, -vv DEBUG")] = 0,
     quiet: QuietOpt = False,
+    dry_run: Annotated[bool, typer.Option(
+        "--dry-run", help="Show what would be done without writing any file")] = False,
 ) -> None:
+    # --dry-run 是整次运行的模式，不是某个命令的开关：声明一次，所有写命令自动
+    # 生效（写入集中在少数几个原语上，见 context.RunMode）。代价是它必须写在
+    # 子命令之前——`tracktool --dry-run kml push a.kml`。
+    ctx.mode = RunMode.PLAN if dry_run else RunMode.APPLY
     ctx.config.load()
     if verbose == 1:
         log.set_level("VERBOSE")
@@ -90,14 +94,14 @@ def _resolve_path(path: Path, must_exist: bool = True) -> Path:
     return path
 
 
-def _finish(result: BatchResult[Any], dry_run: bool = False) -> None:
+def _finish(result: BatchResult[Any]) -> None:
     """Report a dry run's plan, then exit 3 when files were left unprocessed.
 
     Showing what a command would do and reporting what it could not do are one
     call on purpose: a command that shows a plan owes the same exit code, and
     keeping the two apart is how one of them gets dropped after an edit.
     """
-    if dry_run:
+    if ctx.is_plan:
         _print_plan(result)
     if result.failed:
         raise typer.Exit(code=EXIT_PARTIAL)
@@ -108,13 +112,17 @@ def _print_plan(result: BatchResult[Any]) -> None:
 
     A file that cannot be processed has no step to show: its reason is in the
     log right above, and the exit code still reports how many files failed.
+    Entries that are not plans (a read-only command's findings) have nothing to
+    preview — that command has already printed its own answer.
     """
+    if result.succeeded and not any(isinstance(entry, list) for entry in result.succeeded):
+        return
     table = Table(box=box.SIMPLE)
     table.add_column("File")
     table.add_column("Action")
     table.add_column("Detail")
     for plan in result.succeeded:
-        for action in plan:
+        for action in plan if isinstance(plan, list) else ():
             kind, detail = describe(action)
             table.add_row(display_path(action.file), kind, detail)
     if table.row_count:
@@ -230,7 +238,6 @@ def exif_set(
     tags: Annotated[list[str] | None, typer.Option("--tag", "-t", help="Extra tags NAME=VALUE")] = None,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite original files")] = False,
     parallel: ParallelOpt = False,
-    dry_run: DryRunOpt = False,
 ) -> None:
     """Write EXIF tags (GPS position/altitude, Make/Model, arbitrary tags)."""
     path = _resolve_path(path)
@@ -242,8 +249,8 @@ def exif_set(
         tag_dict[name] = value
     options = exif_write.SetExifOptions(position=position, altitude=altitude, make=make,
                                         model=model, tags=tag_dict, overwrite=overwrite)
-    result = exif_write.set_exif(path, options, parallel, dry_run=dry_run)
-    _finish(result, dry_run)
+    result = exif_write.set_exif(path, options, parallel)
+    _finish(result)
 
 
 @exif_app.command("info")
@@ -289,7 +296,6 @@ def exif_set_position(
     multiday: Annotated[bool, typer.Option("--multiday", help="Also check ±1 day tracks")] = False,
     failed_folder: Annotated[str | None, typer.Option("--failed-folder", help="Move failures here")] = None,
     parallel: ParallelOpt = False,
-    dry_run: DryRunOpt = False,
 ) -> None:
     """Geotag media from the KML archive by timestamp matching."""
     path = _resolve_path(path)
@@ -297,9 +303,8 @@ def exif_set_position(
         max_time_diff_seconds=max_time_diff, overwrite=overwrite, force=force,
         verify_existing_gps=verify, max_distance_meters=max_distance,
         multiday=multiday, failed_folder_name=failed_folder)
-    result = exif_position.set_position_from_kml(path, zip_path, options, parallel,
-                                                dry_run=dry_run)
-    _finish(result, dry_run)
+    result = exif_position.set_position_from_kml(path, zip_path, options, parallel)
+    _finish(result)
 
 
 @exif_app.command("set-altitude")
@@ -309,13 +314,11 @@ def exif_set_altitude(
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     failed_folder: Annotated[str | None, typer.Option("--failed-folder", help="Move failures here")] = None,
     parallel: ParallelOpt = False,
-    dry_run: DryRunOpt = False,
 ) -> None:
     """Fill missing GPSAltitude from Google Elevation."""
     path = _resolve_path(path)
-    result = exif_google.set_altitude_from_google(path, overwrite, failed_folder, parallel, api_key,
-                                                 dry_run=dry_run)
-    _finish(result, dry_run)
+    result = exif_google.set_altitude_from_google(path, overwrite, failed_folder, parallel, api_key)
+    _finish(result)
 
 
 @exif_app.command("set-location")
@@ -326,13 +329,12 @@ def exif_set_location(
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     failed_folder: Annotated[str | None, typer.Option("--failed-folder", help="Move failures here")] = None,
     parallel: ParallelOpt = False,
-    dry_run: DryRunOpt = False,
 ) -> None:
     """Reverse geocode GPSPosition into IPTC City/State/Country tags."""
     path = _resolve_path(path)
     result = exif_google.set_location_from_google(path, overwrite, failed_folder, parallel, api_key,
-                                                 language, dry_run=dry_run)
-    _finish(result, dry_run)
+                                                 language)
+    _finish(result)
 
 
 @exif_app.command("move-time")
@@ -342,16 +344,14 @@ def exif_move_time(
     offset_time: Annotated[str | None, typer.Option("--offset-time", help="New timezone offset (SONY only)")] = None,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     parallel: ParallelOpt = False,
-    dry_run: DryRunOpt = False,
 ) -> None:
     """Shift EXIF timestamps; Insta360 files are renamed too."""
     path = _resolve_path(path)
     if not time_diff and not offset_time:
         log.error("At least one of --time-diff or --offset-time must be provided")
         raise typer.Exit(code=EXIT_USER_ERROR)
-    result = exif_media.move_exif_time(path, time_diff or "", offset_time or "", overwrite, parallel,
-                                      dry_run=dry_run)
-    _finish(result, dry_run)
+    result = exif_media.move_exif_time(path, time_diff or "", offset_time or "", overwrite, parallel)
+    _finish(result)
 
 
 @exif_app.command("move-altitude")
@@ -360,12 +360,11 @@ def exif_move_altitude(
     offset: Annotated[float, typer.Argument(help="Altitude offset in meters")],
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     parallel: ParallelOpt = False,
-    dry_run: DryRunOpt = False,
 ) -> None:
     """Shift GPSAltitude by a fixed offset."""
     path = _resolve_path(path)
-    result = exif_media.move_altitude(path, offset, overwrite, parallel, dry_run=dry_run)
-    _finish(result, dry_run)
+    result = exif_media.move_altitude(path, offset, overwrite, parallel)
+    _finish(result)
 
 
 @exif_app.command("to-mp4")
@@ -376,14 +375,12 @@ def exif_to_mp4(
     model: Annotated[str | None, typer.Option("--model", help="Camera model to write")] = None,
     offset_time: OffsetTimeOpt = mediatime.DEFAULT_TZ_OFFSET,
     parallel: ParallelOpt = False,
-    dry_run: DryRunOpt = False,
 ) -> None:
     """Remux videos to MP4 with creation_time + XMP tags (ffmpeg)."""
     path = _resolve_path(path)
     output_dir = _resolve_path(output_directory) if output_directory else None
-    result = exif_media.convert_to_mp4(path, make, model, output_dir, offset_time, parallel,
-                                       dry_run=dry_run)
-    _finish(result, dry_run)
+    result = exif_media.convert_to_mp4(path, make, model, output_dir, offset_time, parallel)
+    _finish(result)
 
 
 @exif_app.command("group")
@@ -400,12 +397,11 @@ def exif_resolve_missing(
     path: Annotated[Path, typer.Argument(help="Directory of media files")],
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     parallel: ParallelOpt = False,
-    dry_run: DryRunOpt = False,
 ) -> None:
     """Repair files missing GPSPosition/GPSAltitude (Google altitude, then KML position)."""
     path = _resolve_path(path)
-    result = exif_resolve.resolve_missing_gps(path, parallel, zip_path, dry_run=dry_run)
-    _finish(result, dry_run)
+    result = exif_resolve.resolve_missing_gps(path, parallel, zip_path)
+    _finish(result)
 
 
 @exif_app.command("resolve-vid")
@@ -416,13 +412,11 @@ def exif_resolve_vid(
     offset_time: OffsetTimeOpt = mediatime.DEFAULT_TZ_OFFSET,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     parallel: ParallelOpt = False,
-    dry_run: DryRunOpt = False,
 ) -> None:
     """Video pipeline: VID -> VID_original, convert to MP4, then repair GPS."""
     path = _resolve_path(path)
-    result = exif_resolve.resolve_vid_exif(path, make, model, offset_time, parallel, zip_path,
-                                           dry_run=dry_run)
-    _finish(result, dry_run)
+    result = exif_resolve.resolve_vid_exif(path, make, model, offset_time, parallel, zip_path)
+    _finish(result)
 
 
 # ── google ──────────────────────────────────────────────────────────────────
@@ -547,6 +541,11 @@ def config_set(
     if value is None:
         raise UserInputError(f"Missing value for {key}. Available keys: {available}")
     value = normalize(key, value)
+    if ctx.is_plan:
+        # 配置不走那些文件原语（config 在最底层，读不到运行模式），
+        # 所以这条命令自己声明；写一行配置本来也就是它的全部工作
+        log.info(f"Would set {key} = {value}")
+        return
     ctx.config[key] = value
     ctx.config.save()
     if key == "log_level":

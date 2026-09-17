@@ -10,7 +10,6 @@ process or an ffmpeg run in the way.
 """
 
 import re
-import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -19,7 +18,7 @@ from ..actions import Action, Failed, RemuxVideo, Rename, ShiftTags, Skip, Write
 from ..context import ctx
 from ..discover import MEDIA_EXTENSIONS, list_files
 from ..errors import UserInputError
-from ..fileutil import BatchResult, run_per_file
+from ..fileutil import BatchResult, move_to_folder, run_per_file
 from ..metadata import MediaMetadata
 from ..tags import (
     ALTITUDE,
@@ -152,8 +151,7 @@ def decide_time_shift(meta: MediaMetadata, time_diff: str, offset_time: str,
 
 
 def move_exif_time(path: Path | list[Path], time_diff: str = "", offset_time: str = "",
-                   overwrite: bool = False, parallel: bool = False,
-                   dry_run: bool = False) -> BatchResult[list[Action]]:
+                   overwrite: bool = False, parallel: bool = False) -> BatchResult[list[Action]]:
     """Shift EXIF timestamps; OffsetTime only supported for SONY. Insta360 files renamed."""
     if not time_diff and not offset_time:
         raise UserInputError("At least one of time_diff or offset_time must be provided.")
@@ -163,10 +161,9 @@ def move_exif_time(path: Path | list[Path], time_diff: str = "", offset_time: st
     def process(file: Path) -> list[Action]:
         # Make 与 OffsetTime 一次读齐，每个文件只往返 exiftool 一次
         meta = MediaMetadata.of(file, ctx.backend.read_tags(file, SHIFT_TAGS))
-        return run(decide_time_shift(meta, time_diff, offset_time, overwrite), dry_run=dry_run)
+        return run(decide_time_shift(meta, time_diff, offset_time, overwrite))
 
-    return run_per_file(files, process, activity="Shifting Exif time", parallel=parallel,
-                        dry_run=dry_run)
+    return run_per_file(files, process, activity="Shifting Exif time", parallel=parallel)
 
 
 def decide_altitude_shift(meta: MediaMetadata, offset: float, overwrite: bool) -> list[Action]:
@@ -180,17 +177,17 @@ def decide_altitude_shift(meta: MediaMetadata, offset: float, overwrite: bool) -
 
 
 def move_altitude(path: Path | list[Path], offset: float, overwrite: bool = False,
-                  parallel: bool = False, dry_run: bool = False) -> BatchResult[list[Action]]:
+                  parallel: bool = False) -> BatchResult[list[Action]]:
     """Shift GPSAltitude by a fixed offset (drone/ground-level correction)."""
     files = list_files(path)
 
     def process(file: Path) -> list[Action]:
         # -n 模式读到的已是按 GPSAltitudeRef 定了符号的十进制（Below Sea Level 为负）
         meta = MediaMetadata.of(file, ctx.backend.read_tags(file, (ALTITUDE,)))
-        return run(decide_altitude_shift(meta, offset, overwrite), dry_run=dry_run)
+        return run(decide_altitude_shift(meta, offset, overwrite))
 
     return run_per_file(files, process, activity=f"Shifting altitude by {offset} m",
-                        parallel=parallel, dry_run=dry_run)
+                        parallel=parallel)
 
 
 def decide_convert(meta: MediaMetadata, output_dir: Path, offset_time: str,
@@ -222,8 +219,7 @@ def decide_convert(meta: MediaMetadata, output_dir: Path, offset_time: str,
 def convert_to_mp4(path: Path | list[Path], make: str | None = None, model: str | None = None,
                    output_directory: Path | None = None,
                    offset_time: str = mediatime.DEFAULT_TZ_OFFSET,
-                   parallel: bool = False,
-                   dry_run: bool = False) -> BatchResult[list[Action]]:
+                   parallel: bool = False) -> BatchResult[list[Action]]:
     """Remux videos to MP4 with creation_time metadata + XMP tags (ffmpeg)."""
     # 入口处一次性校验 offset_time 格式，坏参数直接报错，而不是逐文件失败
     mediatime.parse_offset(offset_time)
@@ -233,10 +229,9 @@ def convert_to_mp4(path: Path | list[Path], make: str | None = None, model: str 
     def process(file: Path) -> list[Action]:
         # 时间标签一次读齐；QuickTime:CreateDate 已在 TIME_TAGS 内，MP4 分支直接取用
         meta = MediaMetadata.of(file, ctx.backend.read_tags(file, TIME_TAGS))
-        return run(decide_convert(meta, output_dir, offset_time, make, model), dry_run=dry_run)
+        return run(decide_convert(meta, output_dir, offset_time, make, model))
 
-    return run_per_file(files, process, activity="Converting to MP4", parallel=parallel,
-                        dry_run=dry_run)
+    return run_per_file(files, process, activity="Converting to MP4", parallel=parallel)
 
 
 def group_media_files(path: Path) -> None:
@@ -251,13 +246,4 @@ def group_media_files(path: Path) -> None:
         sub_dir = MEDIA_EXTENSIONS.get(file.suffix.lower())
         if sub_dir is None:
             continue
-        target_dir = path / sub_dir
-        if not target_dir.is_dir():
-            target_dir.mkdir()
-            log.info(f"Created subdirectory: {sub_dir}", target=str(path))
-        target_path = target_dir / file.name
-        if target_path.exists():
-            log.warning("File already exists in target directory", target=str(target_path))
-        else:
-            shutil.move(str(file), str(target_path))
-            log.verbose(f"Moved to {sub_dir}", target=str(target_path))
+        move_to_folder(file, sub_dir, path)

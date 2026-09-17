@@ -9,12 +9,14 @@ from pathlib import Path
 
 import pytest
 import typer
+from conftest import TRACK_KML
 from lxml import etree
 from typer.testing import CliRunner
 
 from tracktool import cli, exiftool
 from tracktool.cli import app, cli_main
 from tracktool.config import ConfigError
+from tracktool.context import RunMode, ctx
 from tracktool.errors import EXIT_TOOL_ERROR, AppError, ToolError, UserInputError
 from tracktool.exif.write import SetExifError
 from tracktool.exiftool import ExiftoolError
@@ -146,11 +148,12 @@ class TestExitCodeTable:
         cli._finish(BatchResult(succeeded=[None]))
         cli._finish(BatchResult())  # nothing to process is still success
 
-    def test_dry_run_batch_reports_the_failure_and_still_exits_three(self, tmp_path: Path, caplog):
+    def test_preview_batch_reports_the_failure_and_still_exits_three(self, tmp_path: Path,
+                                                                    plan_mode, caplog):
         # 预演与退出码同属一次调用：会显示计划的命令照样要为失败的文件退 3
         batch = BatchResult(failed=[tmp_path / "bad.jpg"])
         with pytest.raises(typer.Exit) as exc_info:
-            cli._finish(batch, dry_run=True)
+            cli._finish(batch)
         assert exc_info.value.exit_code == cli.EXIT_PARTIAL
         assert "would fail" in caplog.text
 
@@ -159,6 +162,43 @@ class TestExitCodeTable:
         with pytest.raises(typer.Exit) as exc_info:
             cli._finish(batch)
         assert exc_info.value.exit_code == cli.EXIT_PARTIAL == 3
+
+
+class TestRunModeFlag:
+    """--dry-run 是整次运行的模式：声明一次，写在子命令之前。"""
+
+    @staticmethod
+    def _kml(tmp_path: Path) -> str:
+        kml = tmp_path / "2024-05-01 test.kml"
+        kml.write_text(TRACK_KML, encoding="utf-8")
+        return str(kml)
+
+    def test_the_flag_sits_before_the_subcommand(self, tmp_path: Path):
+        result = runner.invoke(app, ["--dry-run", "kml", "type", self._kml(tmp_path)])
+
+        assert result.exit_code == 0, result.output
+        assert ctx.mode is RunMode.PLAN
+
+    def test_without_the_flag_the_run_applies(self, tmp_path: Path):
+        result = runner.invoke(app, ["kml", "type", self._kml(tmp_path)])
+
+        assert result.exit_code == 0, result.output
+        assert ctx.mode is RunMode.APPLY
+
+    def test_after_the_subcommand_it_is_a_usage_error(self, tmp_path: Path):
+        result = runner.invoke(app, ["kml", "split", self._kml(tmp_path),
+                                     "2024-05-01T00:01:00Z", "--dry-run"])
+
+        assert result.exit_code != 0
+        # 旧写法明确不再成立：把开关收到全局一处，代价就是这个
+        assert "--dry-run" in result.output
+
+    def test_a_command_that_never_had_the_flag_now_has_it(self, tmp_path: Path):
+        result = runner.invoke(app, ["--dry-run", "kml", "split", self._kml(tmp_path),
+                                     "2024-05-01T00:01:00Z"])
+
+        assert result.exit_code == 0, result.output
+        assert not (tmp_path / "2024-05-01 test-Splited-1.kml").exists()
 
 
 class TestToolUnavailable:

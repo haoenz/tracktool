@@ -153,8 +153,7 @@ def decide_position(meta: MediaMetadata, find_best: FindBestTrack,
 
 def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
                           options: SetPositionOptions | None = None,
-                          parallel: bool = False,
-                          dry_run: bool = False) -> BatchResult[list[Action]]:
+                          parallel: bool = False) -> BatchResult[list[Action]]:
     """Set GPS position/altitude on media files from the KML ZIP archive.
 
     A file list is accepted so one call can cover a whole selection: the archive
@@ -177,8 +176,7 @@ def set_position_from_kml(path: Path | list[Path], kml_zip_path: str | None = No
         return run(decide_position(
             meta, lambda media_time: _find_best_track(
                 tracks, media_time, options.multiday, str(file)),
-            options), dry_run=dry_run)
+            options))
 
     return run_per_file(files, process, activity="Setting GPS info from KML",
-                        failed_folder_name=options.failed_folder_name, parallel=parallel,
-                        dry_run=dry_run)
+                        failed_folder_name=options.failed_folder_name, parallel=parallel)

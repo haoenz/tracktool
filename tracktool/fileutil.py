@@ -63,13 +63,21 @@ class BatchResult[R]:
 
 
 def move_to_folder(path: Path, folder_name: str, parent_directory: Path | None = None) -> None:
-    """Move file into folder_name, creating it if needed."""
+    """Move file into folder_name, creating it if needed.
+
+    Under PLAN mode the move is reported rather than made: a preview must not
+    rearrange the directory it is previewing, and this is the one place every
+    move of a file goes through.
+    """
     target_parent = parent_directory if parent_directory is not None else path.parent
     target_dir = target_parent / folder_name
+    target_path = target_dir / path.name
+    if ctx.is_plan:
+        log.info(f"Would move into {folder_name}", target=str(target_path))
+        return
     if not target_dir.is_dir():
         target_dir.mkdir()
         log.info(f"Created folder: {folder_name}", target=str(target_dir))
-    target_path = target_dir / path.name
     if target_path.exists():
         log.warning(f"File already exists in {folder_name} folder", target=str(target_path))
         return
@@ -83,19 +91,6 @@ def quarantine(path: Path, folder_name: str | None) -> None:
         move_to_folder(path, folder_name)
 
 
-def _quarantine(path: Path, folder_name: str | None, dry_run: bool) -> None:
-    """Count a failed file, moving it aside only when the run is for real.
-
-    A dry run still classifies the file as failed — the exit code has to match
-    the run it previews — but moving it would make the preview the very thing
-    it was meant to avoid.
-    """
-    if dry_run and folder_name:
-        log.info(f"would move to {folder_name} (failed file)", target=str(path))
-        return
-    quarantine(path, folder_name)
-
-
 def run_per_file[T, R](
     files: list[Path],
     process: Callable[[Path], R],
@@ -103,7 +98,6 @@ def run_per_file[T, R](
     activity: str = "Processing",
     failed_folder_name: str | None = None,
     parallel: bool = False,
-    dry_run: bool = False,
 ) -> BatchResult[R]:
     """Apply process to every file; a per-file failure never aborts the batch.
 
@@ -117,9 +111,9 @@ def run_per_file[T, R](
     API key) repeats the error per file instead of silently dropping the rest
     of the batch, and the failure count is what tells the caller nothing worked.
 
-    `dry_run` changes nothing about the contract — the same files are counted —
-    it only stops the quarantine move, since a preview must not rearrange the
-    directory it is previewing.
+    The run mode changes nothing about the contract — the same files are
+    counted — because a preview has to report the exit code of the run it
+    previews; it only stops the quarantine move, which move_to_folder does.
     """
 
     def guarded(file: Path) -> R:
@@ -128,11 +122,11 @@ def run_per_file[T, R](
         except FileFailure as exc:
             log.debug(f"{activity} failed: {exc}", target=str(file))
             if exc.quarantine:
-                _quarantine(file, failed_folder_name, dry_run)
+                quarantine(file, failed_folder_name)
             return _FAILED
         except Exception as exc:  # per-file isolation is the whole contract
             log.error(f"{activity} failed: {exc}", target=str(file))
-            _quarantine(file, failed_folder_name, dry_run)
+            quarantine(file, failed_folder_name)
             return _FAILED
 
     raw = run_parallel(files, guarded, parallel=parallel,

@@ -1,7 +1,7 @@
 """Planned file operations: a decision is a value, not a side effect.
 
 Each media command reads a file, decides what should happen to it, and does it.
-Keeping the decision separate from the doing is what lets `--dry-run` exist:
+Keeping the decision separate from the doing is what lets a preview exist:
 `decide()` takes metadata and returns a plan — a list of Action values — and
 `run()` is the only thing that touches a file. The rules are then ordinary
 functions over values, exercisable from a dict of tags with no exiftool, no
@@ -10,11 +10,15 @@ ffmpeg, and no directory to clean up afterwards.
 The vocabulary is deliberately small and domain-level. A plan says "assign
 these tags" or "move these timestamps by this much", never `-Tag=value` or
 `-=0:0:1 2:30:00`; how a backend spells that stays behind the metadata seam.
+
+`run()` reads the run mode off the context rather than taking it as an
+argument: a preview that has to be threaded down by hand is one a command can
+forget, and the forgetting is silent — the run simply happens.
 """
 
 import shutil
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -105,7 +109,25 @@ class Failed:
     quarantine: bool = True
 
 
-Action = WriteTags | ShiftTags | Rename | RemuxVideo | Lookup | Skip | Failed
+@dataclass(frozen=True)
+class Step:
+    """One move the orchestration makes itself rather than through a backend.
+
+    The other actions are decisions over metadata, spelled from a small
+    domain vocabulary; this one carries its own effect, because only the
+    workflow that assembled the plan knows what filing a track into an archive
+    or rolling a VID directory involves. `kind` and `detail` are the two
+    columns the plan prints, and both must be knowable *before* the step runs —
+    a preview cannot wait for the answer.
+    """
+
+    file: Path
+    kind: str
+    detail: str
+    effect: Callable[[], None]
+
+
+Action = WriteTags | ShiftTags | Rename | RemuxVideo | Lookup | Skip | Failed | Step
 
 
 def describe(action: Action) -> tuple[str, str]:
@@ -129,6 +151,8 @@ def describe(action: Action) -> tuple[str, str]:
             return "skip", reason
         case Failed(reason=reason):
             return "fail", reason
+        case Step(kind=kind, detail=detail):
+            return kind, detail
     raise AssertionError(f"unhandled action: {action!r}")  # pragma: no cover
 
 
@@ -147,6 +171,8 @@ def apply(action: Action) -> None:
             file.rename(file.with_name(new_name))
         case RemuxVideo():
             _remux(action)
+        case Step(effect=effect):
+            effect()
         case Skip() | Lookup():
             pass  # 无事可做：跳过是决定，查询由发起它的阶段完成
         case Failed(reason=reason, quarantine=quarantine):
@@ -179,11 +205,11 @@ def _ffmpeg(args: list[str], source: Path) -> None:
         raise FileFailure("ffmpeg failed to convert to MP4")
 
 
-def run(actions: list[Action], *, dry_run: bool = False) -> list[Action]:
-    """Carry out a plan — or, in a dry run, say what it would do and stop.
+def run(actions: list[Action]) -> list[Action]:
+    """Carry out a plan — or, in PLAN mode, say what it would do and stop.
 
     Returns the plan so the caller can report it. A `Failed` entry raises the
-    batch's FileFailure in either mode, so a dry run's exit code tells the same
+    batch's FileFailure in either mode, so a preview's exit code tells the same
     story as the run it previews instead of always looking healthy.
     """
     for action in actions:
@@ -191,7 +217,7 @@ def run(actions: list[Action], *, dry_run: bool = False) -> list[Action]:
             log.warning(action.reason, target=str(action.file))
             raise FileFailure(action.reason, quarantine=action.quarantine)
         kind, detail = describe(action)
-        if dry_run:
+        if ctx.is_plan:
             log.info(f"{kind}: {detail}", target=str(action.file))
         else:
             log.verbose(f"{kind}: {detail}", target=str(action.file))

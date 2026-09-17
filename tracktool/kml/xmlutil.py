@@ -11,6 +11,8 @@ from pathlib import Path
 
 from lxml import etree
 
+from .. import log
+from ..context import ctx
 from ..errors import UserInputError
 from ..paths import display_path
 
@@ -35,8 +37,19 @@ def parse_string(text: str) -> etree._ElementTree:
         raise UserInputError(f"Cannot parse KML: {exc}") from exc
 
 
-def save(tree: etree._ElementTree, path: Path) -> None:
+def save(tree: etree._ElementTree, path: Path) -> bool:
+    """Write the document — or, under PLAN mode, report the write it would make.
+
+    Returns whether anything was written, so a caller's own "created X" line
+    does not contradict the preview. Every KML write in the package comes
+    through here, which is what makes the run mode a property of the run
+    rather than of each command.
+    """
+    if ctx.is_plan:
+        log.info(f"Would write {display_path(path)}")
+        return False
     tree.write(str(path), encoding="UTF-8", xml_declaration=True)
+    return True
 
 
 def doc_ns(tree: etree._ElementTree) -> str:

@@ -105,8 +105,8 @@ def add_track_to_desktop_collection(path: Path, collection_path: Path) -> None:
     xmlutil.sub(track, "styleUrl", f"#{collection_path.stem}")
     ls = xmlutil.sub(track, "LineString")
     xmlutil.sub(ls, "coordinates", content.line_string)
-    xmlutil.save(tree, collection_path)
-    log.info(f"Added track to collection: {path.stem}", target=str(collection_path))
+    if xmlutil.save(tree, collection_path):
+        log.info(f"Added track to collection: {path.stem}", target=str(collection_path))
 
 
 def _find_desktop_placemark(tree: xmlutil.etree._ElementTree,
@@ -128,8 +128,8 @@ def remove_track_from_desktop_collection(track_name: str, collection_path: Path)
         log.warning(f"Track not found in collection: {track_name}", target=str(collection_path))
         return
     track.getparent().remove(track)
-    xmlutil.save(tree, collection_path)
-    log.info(f"Removed track from collection: {track_name}", target=str(collection_path))
+    if xmlutil.save(tree, collection_path):
+        log.info(f"Removed track from collection: {track_name}", target=str(collection_path))
 
 
 def add_track_to_mobile_collection(path: Path, collection_path: Path) -> None:
@@ -137,8 +137,8 @@ def add_track_to_mobile_collection(path: Path, collection_path: Path) -> None:
     if not collection_path.is_file():
         tree = xmlutil.parse_string(
             _EMPTY_MOBILE_TEMPLATE.format(kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS))
-        xmlutil.save(tree, collection_path)
-        log.info("Created new mobile collection KML file", target=str(collection_path))
+        if xmlutil.save(tree, collection_path):
+            log.info("Created new mobile collection KML file", target=str(collection_path))
 
     tree = xmlutil.parse_file(collection_path)
     multi_geom = xmlutil.find(tree, "//kml:MultiGeometry")
@@ -155,8 +155,8 @@ def add_track_to_mobile_collection(path: Path, collection_path: Path) -> None:
     ls = xmlutil.sub(multi_geom, "LineString")
     ls.set("id", track_id)
     xmlutil.sub(ls, "coordinates", line_string)
-    xmlutil.save(tree, collection_path)
-    log.info(f"Added track to mobile collection: {track_id}", target=str(collection_path))
+    if xmlutil.save(tree, collection_path):
+        log.info(f"Added track to mobile collection: {track_id}", target=str(collection_path))
 
 
 def _find_mobile_linestring(tree: xmlutil.etree._ElementTree,
@@ -178,5 +178,5 @@ def remove_track_from_mobile_collection(track_name: str, collection_path: Path) 
         log.warning(f"Track not found in mobile collection: {track_name}", target=str(collection_path))
         return
     ls.getparent().remove(ls)
-    xmlutil.save(tree, collection_path)
-    log.info(f"Removed track from mobile collection: {track_name}", target=str(collection_path))
+    if xmlutil.save(tree, collection_path):
+        log.info(f"Removed track from mobile collection: {track_name}", target=str(collection_path))

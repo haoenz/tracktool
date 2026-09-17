@@ -64,8 +64,8 @@ def set_kml_type(path: Path, type_: TrackType) -> None:
         tree, f"/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='{TRACK_TAGS}']/kml:value")
     for node in nodes:
         node.text = type_.value
-    xmlutil.save(tree, path)
-    log.info(f"Updated track tags to: {type_.value}", target=str(path))
+    if xmlutil.save(tree, path):
+        log.info(f"Updated track tags to: {type_.value}", target=str(path))
 
 
 @dataclass

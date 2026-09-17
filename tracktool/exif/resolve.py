@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .. import log, mediatime
 from ..actions import Action
+from ..context import ctx
 from ..errors import UserInputError
 from ..fileutil import BatchResult, move_to_folder
 from ..paths import display_path
@@ -34,8 +35,8 @@ def _organize_repaired(files: list[Path]) -> None:
             move_to_folder(file, REPAIRED_FOLDER)
 
 
-def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | None = None,
-                        dry_run: bool = False) -> BatchResult[list[Action]]:
+def resolve_missing_gps(path: Path, parallel: bool = False,
+                        kml_zip_path: str | None = None) -> BatchResult[list[Action]]:
     """修复缺失 GPSPosition/GPSAltitude 的媒体文件：先补海拔，再补位置；
     补好海拔的文件移入 GoogleAltOK 目录。
 
@@ -64,12 +65,9 @@ def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | 
         files = [r.file for r in missing_alt_only]
         result.merge(set_altitude_from_google(files, overwrite=True,
                                               failed_folder_name="GoogleAltFailed",
-                                              parallel=parallel, dry_run=dry_run))
-        if dry_run:
-            # 谁最终补好要真跑才知道，预演只能说明「补好的那些会被归档」
-            log.info(f"would then move the repaired file(s) to {REPAIRED_FOLDER}")
-        else:
-            _organize_repaired(files)
+                                              parallel=parallel))
+        # 预演时这步由 move_to_folder 自己拒绝执行并说明
+        _organize_repaired(files)
 
     # 缺失位置的文件
     missing_pos = [r for r in missing.succeeded if POSITION in r.missing_tags]
@@ -78,14 +76,13 @@ def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | 
         result.merge(set_position_from_kml([r.file for r in missing_pos], kml_zip_path,
                                            options=SetPositionOptions(overwrite=True,
                                                                       failed_folder_name="TrackPosFailed"),
-                                           parallel=parallel, dry_run=dry_run))
+                                           parallel=parallel))
     return result
 
 
 def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = None,
                      offset_time: str = mediatime.DEFAULT_TZ_OFFSET, parallel: bool = False,
-                     kml_zip_path: str | None = None,
-                     dry_run: bool = False) -> BatchResult[list[Action]]:
+                     kml_zip_path: str | None = None) -> BatchResult[list[Action]]:
     """VID → VID_original，转换 MP4 到新 VID，再补全 GPS。"""
     path = path.resolve()
     vid_path = path / "VID"
@@ -97,7 +94,7 @@ def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = No
     if vid_original_path.exists():
         raise UserInputError(f"{display_path(vid_original_path)} already exists; remove or rename it before re-running")
 
-    if dry_run:
+    if ctx.is_plan:
         # 预演不动目录：待处理的文件此刻还在 VID 里
         source = vid_path
         log.info(f"would rename {vid_path.name} to {vid_original_path.name} "
@@ -112,9 +109,9 @@ def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = No
     log.info(f"Processing media files from {display_path(source)}")
     result: BatchResult[list[Action]] = BatchResult()
     result.merge(convert_to_mp4(source, make=make, model=model, output_directory=vid_path,
-                                offset_time=offset_time, parallel=parallel, dry_run=dry_run))
+                                offset_time=offset_time, parallel=parallel))
 
-    if dry_run:
+    if ctx.is_plan:
         # 补 GPS 的对象要等上一步产出，预演只能说明会做这一步
         log.info(f"would then repair GPS on the videos produced in {display_path(vid_path)}")
         return result

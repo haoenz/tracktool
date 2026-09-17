@@ -29,6 +29,9 @@ from .kmlfile import TrackType
 
 def ensure_archive_directory(archive_dir: Path) -> None:
     """Create the archive directory; a location that cannot be made is user input."""
+    if ctx.is_plan:
+        log.info("Would create archive directory", target=str(archive_dir))
+        return
     try:
         archive_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -43,6 +46,9 @@ def ensure_zip_file(zip_file: Path) -> None:
     over an archive that only looks like one.
     """
     if zip_file.is_file():
+        return
+    if ctx.is_plan:
+        log.info("Would create a new ZIP archive", target=str(zip_file))
         return
     ensure_archive_directory(zip_file.parent)
     try:
@@ -62,6 +68,10 @@ def find_zip_entry(kml_name: str, zip_path: Path) -> str | None:
 
 def push_compressed_kml(kml_path: Path, zip_path: Path) -> None:
     """Add a KML to the ZIP archive if not already present."""
+    if ctx.is_plan:
+        # 提前返回还有一层理由：ZipFile 的 "a" 模式会把不存在的压缩包建出来
+        log.info(f"Would add to ZIP: {kml_path.name}", target=str(zip_path))
+        return
     with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as zf:
         names = [Path(info.filename).name for info in zf.infolist()]
         if kml_path.name in names:
@@ -87,6 +97,10 @@ def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = P
     target_path = output_directory / Path(entry_name).name
     if target_path.exists():
         raise UserInputError(f"File already exists at destination: {display_path(target_path)}")
+
+    if ctx.is_plan:
+        log.info(f"Would extract {entry_name} and remove it from the ZIP", target=str(zip_path))
+        return
 
     with zipfile.ZipFile(zip_path) as zf, zf.open(entry_name) as src, open(target_path, "wb") as dst:
         shutil.copyfileobj(src, dst)
@@ -114,12 +128,19 @@ def push_kml_archive(path: Path, zip_path: str | None = None, type_: TrackType |
         log.error("Cannot archive track with unknown type", target=str(path))
         return
 
+    if ctx.is_plan:
+        # 进档的每一步都会创建或追加：预演只说明这条轨迹会落到哪几处
+        log.info(f"Would archive as {kml_type}: {kml_type}.kml, {kml_type}.Mobile.kml"
+                 + ("" if no_archive else f", {zip_file.name}")
+                 + f", {ctx.config.kml_backup_dir_name}/", target=str(path))
+        return
+
     # 聚合文件与 ZIP 同目录，两者都按需创建，目录也一样
     ensure_archive_directory(archive_dir)
     collection_kml_path = archive_dir / f"{kml_type}.kml"
     if not collection_kml_path.is_file():
-        xmlutil.save(collections.new_empty_kml(kml_type), collection_kml_path)
-        log.info("Created new collection KML file", target=str(collection_kml_path))
+        if xmlutil.save(collections.new_empty_kml(kml_type), collection_kml_path):
+            log.info("Created new collection KML file", target=str(collection_kml_path))
     collections.add_track_to_desktop_collection(path, collection_kml_path)
 
     mobile_collection_path = archive_dir / f"{kml_type}.Mobile.kml"

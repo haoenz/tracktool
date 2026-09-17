@@ -79,7 +79,7 @@ def _location_tags(lookup: Lookup, api_key: str | None, language: str,
 def set_altitude_from_google(path: Path | list[Path], overwrite: bool = False,
                              failed_folder_name: str | None = None,
                              parallel: bool = False, api_key: str | None = None,
-                             dry_run: bool = False) -> BatchResult[list[Action]]:
+                             ) -> BatchResult[list[Action]]:
     """Fill GPSAltitude for files missing it (zero counts as missing).
 
     An explicit file list is accepted so one call covers the whole selection:
@@ -93,11 +93,10 @@ def set_altitude_from_google(path: Path | list[Path], overwrite: bool = False,
     # Step 1: 找出需要补海拔的文件（读取阶段可并行）
     def check_altitude(file: Path) -> list[Action]:
         return run(decide_altitude(MediaMetadata.of(
-            file, ctx.backend.read_tags(file, ALTITUDE_TAGS))), dry_run=dry_run)
+            file, ctx.backend.read_tags(file, ALTITUDE_TAGS))))
 
     checked = run_per_file(files, check_altitude, activity="Checking altitude data",
-                           failed_folder_name=failed_folder_name, parallel=parallel,
-                           dry_run=dry_run)
+                           failed_folder_name=failed_folder_name, parallel=parallel)
     result.merge(checked)
     queries = [action for plan in checked.succeeded for action in plan
                if isinstance(action, Lookup)]
@@ -106,7 +105,7 @@ def set_altitude_from_google(path: Path | list[Path], overwrite: bool = False,
         return result
 
     log.info(f"Found {len(queries)} file(s) requiring altitude data")
-    if dry_run:
+    if ctx.is_plan:
         return result  # 计划里已经写明会查哪些点，不为此花掉配额
 
     # Step 2: 查询 Google 高程 API（客户端按 512 点 / URL 长度分批，一次调用覆盖全部文件）
@@ -132,20 +131,17 @@ def set_altitude_from_google(path: Path | list[Path], overwrite: bool = False,
 def set_location_from_google(path: Path | list[Path], overwrite: bool = False,
                              failed_folder_name: str | None = None,
                              parallel: bool = False, api_key: str | None = None,
-                             language: str = "en",
-                             dry_run: bool = False) -> BatchResult[list[Action]]:
+                             language: str = "en") -> BatchResult[list[Action]]:
     """Reverse geocode GPS position into IPTC City/State/Country tags."""
     files = list_files(path)
 
     def process(file: Path) -> list[Action]:
         decision = decide_location(MediaMetadata.of(
             file, ctx.backend.read_tags(file, LOCATION_TAGS)))
-        if isinstance(decision, Failed):
-            return run([decision], dry_run=dry_run)
-        if dry_run:
-            return run([decision], dry_run=True)
+        # 预演到此为止：查询是要花钱的，计划里只写明会查哪个点
+        if isinstance(decision, Failed) or ctx.is_plan:
+            return run([decision])
         return run(_location_tags(decision, api_key, language, overwrite))
 
     return run_per_file(files, process, activity="Setting EXIF location from Google",
-                        failed_folder_name=failed_folder_name, parallel=parallel,
-                        dry_run=dry_run)
+                        failed_folder_name=failed_folder_name, parallel=parallel)

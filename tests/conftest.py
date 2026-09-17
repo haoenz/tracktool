@@ -4,6 +4,10 @@ from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
+
+from tracktool.context import RunMode, ctx
+
 TRACK_KML = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
 <Document>
@@ -53,3 +57,24 @@ class InMemoryBackend:
     def shift_tags(self, path: Path, tags: Sequence[str], delta: timedelta,
                    *, overwrite: bool = False) -> None:
         self.shifts.append((Path(path), tuple(tags), delta, overwrite))
+
+
+@pytest.fixture(autouse=True)
+def apply_mode(monkeypatch) -> None:
+    """Every test starts in APPLY.
+
+    The run mode is global state on the shared context, so a test that leaves
+    it in PLAN — the CLI does exactly that when it sees --dry-run — would
+    silently turn every later test into a dry run.
+    """
+    monkeypatch.setattr(ctx, "mode", RunMode.APPLY)
+
+
+@pytest.fixture
+def plan_mode(apply_mode, monkeypatch) -> None:
+    """Put the run in PLAN mode: every write reports instead of happening.
+
+    The mode is a field of the context, not a parameter, so a test flips it
+    the same way the CLI does and then calls the ordinary entry point.
+    """
+    monkeypatch.setattr(ctx, "mode", RunMode.PLAN)

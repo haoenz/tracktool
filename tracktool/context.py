@@ -27,6 +27,7 @@ object behind it.
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 
 from .config import Config
 from .exiftool import ExiftoolBackend
@@ -37,6 +38,18 @@ from .progress import rich_reporter
 Reporter = Callable[[str], Callable[[int, int], None]]
 
 
+class RunMode(StrEnum):
+    """Whether this invocation writes, or only reports what it would write.
+
+    PLAN is the whole run's setting, not a command's option: every write goes
+    through a handful of primitives that consult it, so a command cannot forget
+    to honour it and a new command gets it for free.
+    """
+
+    APPLY = "apply"
+    PLAN = "plan"
+
+
 @dataclass
 class AppContext:
     """The dependencies one command run needs, built once at the entry point."""
@@ -44,6 +57,12 @@ class AppContext:
     config: Config
     backend: MetadataBackend
     reporter: Reporter
+    mode: RunMode = RunMode.APPLY
+
+    @property
+    def is_plan(self) -> bool:
+        """Whether this run describes its work instead of doing it."""
+        return self.mode is RunMode.PLAN
 
 
 def build_context() -> AppContext:

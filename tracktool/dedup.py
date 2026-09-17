@@ -97,11 +97,17 @@ def get_directories_hash(directories: list[Path], include: str = ".*", exclude: 
         update_count += updated
 
     if hash_log_path is not None:
-        if add_count == 0 and update_count == 0:
-            log.debug("No changes to hash log", target=str(hash_log_path))
+        if ctx.is_plan:
+            # 哈希本身是只读的，只有日志落盘这一步属于预演该拦下的
+            log.info(f"Would update the hash log: {add_count} added, {update_count} updated",
+                     target=str(hash_log_path))
         else:
-            log.info(f"Hash log updated: {add_count} added, {update_count} updated", target=str(hash_log_path))
-        hash_log_path.write_text(json.dumps(hash_log, indent=2), encoding="utf-8")
+            if add_count == 0 and update_count == 0:
+                log.debug("No changes to hash log", target=str(hash_log_path))
+            else:
+                log.info(f"Hash log updated: {add_count} added, {update_count} updated",
+                         target=str(hash_log_path))
+            hash_log_path.write_text(json.dumps(hash_log, indent=2), encoding="utf-8")
 
     return [
         DirectoryHash(
@@ -178,8 +184,11 @@ def clear_hash_log(hash_log_path: Path) -> None:
     removed_count = len(hash_log) - sum(1 for keep in kept if keep)
 
     if removed_count:
-        log.info(f"Removed {removed_count} obsolete entries", target=str(hash_log_path))
         new_log = {path: hash_log[path] for path, keep in zip(list(hash_log), kept, strict=False) if keep}
+        if ctx.is_plan:
+            log.info(f"Would remove {removed_count} obsolete entries", target=str(hash_log_path))
+            return
+        log.info(f"Removed {removed_count} obsolete entries", target=str(hash_log_path))
         hash_log_path.write_text(json.dumps(new_log, indent=2), encoding="utf-8")
     else:
         log.debug("No obsolete entries", target=str(hash_log_path))

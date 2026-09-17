@@ -93,8 +93,8 @@ def split_kml(path: Path, split_points: list[str]) -> None:
         if name_node is not None:
             name_node.text = new_kml_name
         new_kml_path = path.parent / f"{new_kml_name}.kml"
-        xmlutil.save(new_tree, new_kml_path)
-        log.info("Created split track file", target=str(new_kml_path))
+        if xmlutil.save(new_tree, new_kml_path):
+            log.info("Created split track file", target=str(new_kml_path))
 
 
 def remove_bad_points(path: Path, bad_points: list[str]) -> None:
@@ -141,8 +141,8 @@ def remove_bad_points(path: Path, bad_points: list[str]) -> None:
     if name_node is not None:
         name_node.text = new_kml_name
     new_kml_path = path.parent / f"{new_kml_name}.kml"
-    xmlutil.save(tree, new_kml_path)
-    log.info("Created cleaned track file", target=str(new_kml_path))
+    if xmlutil.save(tree, new_kml_path):
+        log.info("Created cleaned track file", target=str(new_kml_path))
 
 
 def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
@@ -185,8 +185,8 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
         archive.ensure_zip_file(zip_file)
 
     output_path = output_path.resolve()
-    xmlutil.save(output_tree, output_path)
-    log.info(f"Saved merged KML to: {display_path(output_path)}")
+    if xmlutil.save(output_tree, output_path):
+        log.info(f"Saved merged KML to: {display_path(output_path)}")
 
     if zip_file is not None:
         archive_dir = zip_file.parent
@@ -221,6 +221,11 @@ def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None
 
     log.info(f"Querying Google Elevation API for {len(points)} point(s)", target=str(path))
 
+    if ctx.is_plan:
+        # 坐标已经读出来了，但查询是花钱的动作：预演到此为止，不再花配额
+        log.info(f"Would write {display_path(path)}")
+        return
+
     elevations = googleapi.get_altitudes(points, api_key=api_key)
 
     # 将高程写回，重建 coordinates 文本
@@ -233,8 +238,8 @@ def set_kml_altitude_from_google(path: Path, api_key: str | None = None) -> None
     for node, tuples in tuples_by_node.items():
         node.text = " ".join(tuples)
 
-    xmlutil.save(tree, path)
-    log.info("Saved KML with updated altitudes", target=str(path))
+    if xmlutil.save(tree, path):
+        log.info("Saved KML with updated altitudes", target=str(path))
 
 
 def convert_kml_to_multigeometry(path: Path, output_path: Path | None = None) -> None:
@@ -288,5 +293,5 @@ def convert_kml_to_multigeometry(path: Path, output_path: Path | None = None) ->
 
     if output_path is None:
         output_path = path.parent / f"{path.stem}-Merged.kml"
-    xmlutil.save(output_tree, output_path.resolve())
-    log.info(f"Saved merged KML to: {display_path(output_path)}", target=str(path))
+    if xmlutil.save(output_tree, output_path.resolve()):
+        log.info(f"Saved merged KML to: {display_path(output_path)}", target=str(path))
