@@ -13,7 +13,8 @@ clients never receive a display-format string.
 
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from typing import Any
 
 import requests
 
@@ -143,6 +144,14 @@ class Location:
     state: str = ""
     city: str = ""
     country_code_iso: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        """This value as the JSON object `google location` prints.
+
+        Built from the fields: the caller used to read the instance dict, so a
+        new field both bypassed the dataclass and silently changed the output.
+        """
+        return asdict(self)
 
 
 def _component_value(results: list[dict], types: list[str], short_name: bool = False) -> str:

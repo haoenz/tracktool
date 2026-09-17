@@ -10,7 +10,7 @@ from rich import box
 from rich.table import Table
 
 from . import __version__, coords, dedup, googleapi, log, mediatime
-from .actions import Action, describe
+from .actions import describe
 from .config import DEFAULTS, normalize
 from .context import ctx
 from .errors import EXIT_PARTIAL, EXIT_USER_ERROR, AppError, UserInputError
@@ -90,24 +90,25 @@ def _resolve_path(path: Path, must_exist: bool = True) -> Path:
     return path
 
 
-def _finish(result: BatchResult[Any] | None) -> None:
-    """Turn a batch outcome into an exit code: files left unprocessed mean 3.
+def _finish(result: BatchResult[Any], dry_run: bool = False) -> None:
+    """Report a dry run's plan, then exit 3 when files were left unprocessed.
 
-    Every batch entry point returns what it could not process, so "all files
-    failed" can no longer look like success.
+    Showing what a command would do and reporting what it could not do are one
+    call on purpose: a command that shows a plan owes the same exit code, and
+    keeping the two apart is how one of them gets dropped after an edit.
     """
-    if result is not None and result.failed:
+    if dry_run:
+        _print_plan(result)
+    if result.failed:
         raise typer.Exit(code=EXIT_PARTIAL)
 
 
-def _report_plan(result: BatchResult[list[Action]], dry_run: bool) -> None:
+def _print_plan(result: BatchResult[Any]) -> None:
     """Print the steps a dry run would take, one row per step.
 
     A file that cannot be processed has no step to show: its reason is in the
     log right above, and the exit code still reports how many files failed.
     """
-    if not dry_run:
-        return
     table = Table(box=box.SIMPLE)
     table.add_column("File")
     table.add_column("Action")
@@ -242,8 +243,7 @@ def exif_set(
     options = exif_write.SetExifOptions(position=position, altitude=altitude, make=make,
                                         model=model, tags=tag_dict, overwrite=overwrite)
     result = exif_write.set_exif(path, options, parallel, dry_run=dry_run)
-    _report_plan(result, dry_run)
-    _finish(result)
+    _finish(result, dry_run)
 
 
 @exif_app.command("info")
@@ -299,8 +299,7 @@ def exif_set_position(
         multiday=multiday, failed_folder_name=failed_folder)
     result = exif_position.set_position_from_kml(path, zip_path, options, parallel,
                                                 dry_run=dry_run)
-    _report_plan(result, dry_run)
-    _finish(result)
+    _finish(result, dry_run)
 
 
 @exif_app.command("set-altitude")
@@ -316,8 +315,7 @@ def exif_set_altitude(
     path = _resolve_path(path)
     result = exif_google.set_altitude_from_google(path, overwrite, failed_folder, parallel, api_key,
                                                  dry_run=dry_run)
-    _report_plan(result, dry_run)
-    _finish(result)
+    _finish(result, dry_run)
 
 
 @exif_app.command("set-location")
@@ -334,8 +332,7 @@ def exif_set_location(
     path = _resolve_path(path)
     result = exif_google.set_location_from_google(path, overwrite, failed_folder, parallel, api_key,
                                                  language, dry_run=dry_run)
-    _report_plan(result, dry_run)
-    _finish(result)
+    _finish(result, dry_run)
 
 
 @exif_app.command("move-time")
@@ -354,8 +351,7 @@ def exif_move_time(
         raise typer.Exit(code=EXIT_USER_ERROR)
     result = exif_media.move_exif_time(path, time_diff or "", offset_time or "", overwrite, parallel,
                                       dry_run=dry_run)
-    _report_plan(result, dry_run)
-    _finish(result)
+    _finish(result, dry_run)
 
 
 @exif_app.command("move-altitude")
@@ -369,8 +365,7 @@ def exif_move_altitude(
     """Shift GPSAltitude by a fixed offset."""
     path = _resolve_path(path)
     result = exif_media.move_altitude(path, offset, overwrite, parallel, dry_run=dry_run)
-    _report_plan(result, dry_run)
-    _finish(result)
+    _finish(result, dry_run)
 
 
 @exif_app.command("to-mp4")
@@ -388,8 +383,7 @@ def exif_to_mp4(
     output_dir = _resolve_path(output_directory) if output_directory else None
     result = exif_media.convert_to_mp4(path, make, model, output_dir, offset_time, parallel,
                                        dry_run=dry_run)
-    _report_plan(result, dry_run)
-    _finish(result)
+    _finish(result, dry_run)
 
 
 @exif_app.command("group")
@@ -411,8 +405,7 @@ def exif_resolve_missing(
     """Repair files missing GPSPosition/GPSAltitude (Google altitude, then KML position)."""
     path = _resolve_path(path)
     result = exif_resolve.resolve_missing_gps(path, parallel, zip_path, dry_run=dry_run)
-    _report_plan(result, dry_run)
-    _finish(result)
+    _finish(result, dry_run)
 
 
 @exif_app.command("resolve-vid")
@@ -429,8 +422,7 @@ def exif_resolve_vid(
     path = _resolve_path(path)
     result = exif_resolve.resolve_vid_exif(path, make, model, offset_time, parallel, zip_path,
                                            dry_run=dry_run)
-    _report_plan(result, dry_run)
-    _finish(result)
+    _finish(result, dry_run)
 
 
 # ── google ──────────────────────────────────────────────────────────────────
@@ -466,7 +458,7 @@ def google_location(
         raise UserInputError(f"Unrecognized coordinate: {coordinate}")
 
     location = googleapi.get_location(point[0], point[1], api_key, language=language)
-    print(json.dumps(location.__dict__, ensure_ascii=False, indent=2))
+    print(json.dumps(location.as_dict(), ensure_ascii=False, indent=2))
 
 
 # ── hash ────────────────────────────────────────────────────────────────────

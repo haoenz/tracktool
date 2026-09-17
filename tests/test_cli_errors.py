@@ -145,7 +145,14 @@ class TestExitCodeTable:
     def test_finished_batch_does_not_exit(self, tmp_path: Path):
         cli._finish(BatchResult(succeeded=[None]))
         cli._finish(BatchResult())  # nothing to process is still success
-        cli._finish(None)  # commands outside the batch contract
+
+    def test_dry_run_batch_reports_the_failure_and_still_exits_three(self, tmp_path: Path, caplog):
+        # 预演与退出码同属一次调用：会显示计划的命令照样要为失败的文件退 3
+        batch = BatchResult(failed=[tmp_path / "bad.jpg"])
+        with pytest.raises(typer.Exit) as exc_info:
+            cli._finish(batch, dry_run=True)
+        assert exc_info.value.exit_code == cli.EXIT_PARTIAL
+        assert "would fail" in caplog.text
 
     def test_all_files_failing_is_not_success(self, tmp_path: Path):
         batch = BatchResult(succeeded=[], failed=[tmp_path / f"{i}.jpg" for i in range(3)])
