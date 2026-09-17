@@ -107,6 +107,27 @@ class TestConfig:
         reloaded = Config(path=tmp_path / "config.json").load()
         assert reloaded["kml_backup_dir_name"] == "Old"
 
+    def test_backup_dir_name_falls_back_to_the_default(self, tmp_path: Path):
+        # 未设与空值都读作默认值：调用方不再各自决定「没有」是什么意思
+        cfg = Config(path=tmp_path / "config.json").load()
+        assert cfg.kml_backup_dir_name == "Backup"
+        cfg["kml_backup_dir_name"] = ""
+        assert cfg.kml_backup_dir_name == "Backup"
+        cfg["kml_backup_dir_name"] = "Old"
+        assert cfg.kml_backup_dir_name == "Old"
+
+    def test_output_filters_compile_once_and_follow_a_change(self, tmp_path: Path):
+        cfg = Config(path=tmp_path / "config.json").load()
+        assert cfg.output_filters == ()
+
+        cfg["output_filters"] = "ARW|JPG"
+        compiled = cfg.output_filters
+        assert [pattern.pattern for pattern in compiled] == ["ARW", "JPG"]
+        assert cfg.output_filters is compiled  # 编译一次，不是每次读取重编
+
+        cfg["output_filters"] = "TIF"
+        assert [pattern.pattern for pattern in cfg.output_filters] == ["TIF"]
+
     def test_api_key_env_priority(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("TRACKTOOL_GOOGLE_API_KEY", "env-key")
         cfg = Config(path=tmp_path / "config.json").load()

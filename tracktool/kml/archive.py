@@ -129,7 +129,7 @@ def push_kml_archive(path: Path, zip_path: str | None = None, type_: TrackType |
         ensure_zip_file(zip_file)
         push_compressed_kml(path, zip_file)
 
-    move_to_folder(path, str(ctx.config["kml_backup_dir_name"] or "Backup"), archive_dir)
+    move_to_folder(path, ctx.config.kml_backup_dir_name, archive_dir)
 
 
 @dataclass(frozen=True)

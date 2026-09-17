@@ -55,18 +55,18 @@ class ExiftoolError(ToolError):
     """Raised when exiftool is unavailable or its output contains an error."""
 
 
-def _filters(config: Config | None) -> list[re.Pattern[str]]:
-    """The config's ignorable-warning patterns, compiled.
+def _filters(config: Config | None) -> Sequence[re.Pattern[str]]:
+    """The config's ignorable-warning patterns.
 
     A caller with no config (this module used on its own) filters nothing, so
     every Error line reads as a failure — the conservative direction. The
     application always passes one: ExiftoolBackend carries the Config it serves,
     because this module sits below the container that assembles it.
     """
-    return [re.compile(pattern) for pattern in (config.output_filters if config is not None else [])]
+    return config.output_filters if config is not None else ()
 
 
-def _check_output(output: list[str], filters: list[re.Pattern[str]], cmd_desc: str) -> list[str]:
+def _check_output(output: list[str], filters: Sequence[re.Pattern[str]], cmd_desc: str) -> list[str]:
     """Apply the config's output filters, then raise on any remaining line containing Error."""
     lines = [line for line in output if line and not any(f.search(line) for f in filters)]
     errors = [line for line in lines if ERROR_PATTERN.search(line)]
@@ -196,7 +196,7 @@ class _StayOpenProcess:
         text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
         return text.splitlines()
 
-    def execute(self, args: list[str], filters: list[re.Pattern[str]]) -> list[str]:
+    def execute(self, args: list[str], filters: Sequence[re.Pattern[str]]) -> list[str]:
         """Run one command through the persistent process, return stdout lines."""
         with _StayOpenProcess._marker_lock:
             _StayOpenProcess._marker_counter += 1

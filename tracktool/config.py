@@ -7,6 +7,8 @@ parameter > config file.
 
 import json
 import os
+import re
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +79,9 @@ class Config:
 
     def __setitem__(self, key: str, value: Any) -> None:
         self._data[key] = value
+        # 派生值缓存在实例上、与配置键同名，改了来源就得作废——否则 config set
+        # 之后还在用改之前编译出来的那份
+        self.__dict__.pop(key, None)
 
     def __contains__(self, key: str) -> bool:
         return key in self._data
@@ -91,9 +96,23 @@ class Config:
         return level if level in LEVELS else "INFO"
 
     @property
-    def output_filters(self) -> list[str]:
+    def kml_backup_dir_name(self) -> str:
+        """The folder originals are moved into, defaulted when unset.
+
+        `or` handles both an empty string and a missing key, so callers get a
+        usable folder name instead of each deciding what "unset" means.
+        """
+        return str(self._data.get("kml_backup_dir_name") or DEFAULTS["kml_backup_dir_name"])
+
+    @cached_property
+    def output_filters(self) -> tuple[re.Pattern[str], ...]:
+        """The ignorable-warning patterns, compiled once per Config.
+
+        An empty value filters nothing. Compiling here rather than at each use
+        is what keeps a write from recompiling the same patterns per file.
+        """
         raw = str(self._data.get("output_filters", "") or "")
-        return [f for f in (part.strip() for part in raw.split("|")) if f]
+        return tuple(re.compile(part.strip()) for part in raw.split("|") if part.strip())
 
     # -- Google API key ------------------------------------------------------
 
