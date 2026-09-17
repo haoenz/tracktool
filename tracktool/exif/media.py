@@ -21,40 +21,25 @@ from ..discover import MEDIA_EXTENSIONS, list_files
 from ..errors import UserInputError
 from ..fileutil import BatchResult, run_per_file
 from ..metadata import MediaMetadata
+from ..tags import (
+    ALTITUDE,
+    MAKE,
+    MAKE_INSTA360,
+    MAKE_SONY,
+    MODEL,
+    OFFSET_TIME,
+    OFFSET_TIME_DIGITIZED,
+    OFFSET_TIME_ORIGINAL,
+    QUICKTIME_CREATE_DATE,
+    SHIFT_TAGS,
+    TIME_TAGS,
+    TIMESTAMP_TAG_SETS,
+    XMP_CAPTURE_TIME,
+)
 from .write import SetExifOptions, build_tags
-
-# EXIF Make 字段注册值（exiftool 原样返回，精确匹配，不做大小写归一化）
-MAKE_SONY = "SONY"
-MAKE_FUJIFILM = "FUJIFILM"
-# Insta360 在 EXIF Make 字段的注册值
-MAKE_INSTA360 = "Arashi Vision"
-
-# 各厂商时间标签集合（Move-ExifTime 原样移植）
-_SONY_PHOTO_TAGS = ["ExifIFD:DateTimeOriginal", "Sony:SonyDateTime", "IFD0:ModifyDate", "ExifIFD:CreateDate"]
-_SONY_MP4_TAGS = [
-    "XMP-exif:DateTimeOriginal", "QuickTime:CreateDate", "QuickTime:ModifyDate",
-    "Track1:TrackCreateDate", "Track1:TrackModifyDate", "Track2:MediaCreateDate", "Track2:MediaModifyDate",
-]
-_FUJIFILM_MP4_TAGS = ["XMP-exif:DateTimeOriginal", "XMP-xmp:CreateDate", "XMP-xmp:ModifyDate"]
-_INSTA360_MP4_TAGS = [
-    "XMP-exif:DateTimeOriginal", "QuickTime:CreateDate", "QuickTime:ModifyDate",
-    "Track1:TrackCreateDate", "Track1:TrackModifyDate", "Track2:MediaCreateDate", "Track2:MediaModifyDate",
-]
 
 _RELATIVE_TIME_PATTERN = re.compile(r"(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
 _INSTA360_FILENAME_PATTERN = re.compile(r"_(\d{8}_\d{6})_")
-
-# (make, ext) -> 要平移的时间标签集合；组合缺失即报错跳过该文件
-_TAG_SETS: dict[tuple[str, str], list[str]] = {
-    (MAKE_SONY, ".arw"): _SONY_PHOTO_TAGS,
-    (MAKE_SONY, ".jpg"): _SONY_PHOTO_TAGS,
-    (MAKE_SONY, ".jpeg"): _SONY_PHOTO_TAGS,
-    (MAKE_SONY, ".mp4"): _SONY_MP4_TAGS,
-    (MAKE_FUJIFILM, ".mp4"): _FUJIFILM_MP4_TAGS,
-    (MAKE_INSTA360, ".mp4"): _INSTA360_MP4_TAGS,
-}
-
-SHIFT_TAGS = ["Make", "ExifIFD:OffsetTime"]
 
 
 def _parse_time_diff(time_diff: str) -> int:
@@ -99,7 +84,7 @@ def _compute_time_shift(file: Path, time_diff: str, offset_time: str, make: str,
             return None
 
         if not current_offset:
-            log.warning(f"Current ExifIFD:OffsetTime is missing, assuming {mediatime.DEFAULT_TZ_OFFSET}",
+            log.warning(f"Current {OFFSET_TIME} is missing, assuming {mediatime.DEFAULT_TZ_OFFSET}",
                         target=str(file))
             current_offset = mediatime.DEFAULT_TZ_OFFSET
 
@@ -111,12 +96,12 @@ def _compute_time_shift(file: Path, time_diff: str, offset_time: str, make: str,
 
         diff_sec = target_sec - current_sec
         total_seconds_offset += diff_sec
-        log.verbose(f"Setting timezone tags: ExifIFD:OffsetTime from {current_offset} to {offset_time} "
+        log.verbose(f"Setting timezone tags: {OFFSET_TIME} from {current_offset} to {offset_time} "
                     f"(diff: {diff_sec:+d} seconds)", target=str(file))
         tz_tags = {
-            "ExifIFD:OffsetTime": offset_time,
-            "ExifIFD:OffsetTimeOriginal": offset_time,
-            "ExifIFD:OffsetTimeDigitized": offset_time,
+            OFFSET_TIME: offset_time,
+            OFFSET_TIME_ORIGINAL: offset_time,
+            OFFSET_TIME_DIGITIZED: offset_time,
         }
 
     return total_seconds_offset, tz_tags
@@ -137,8 +122,8 @@ def decide_time_shift(meta: MediaMetadata, time_diff: str, offset_time: str,
                       overwrite: bool) -> list[Action]:
     """The steps that shift one file's timestamps, plus the name sync that
     follows for an Insta360 clip whose name carries the same time."""
-    resolved = _compute_time_shift(meta.path, time_diff, offset_time, meta.get("Make"),
-                                   meta.get("ExifIFD:OffsetTime"))
+    resolved = _compute_time_shift(meta.path, time_diff, offset_time, meta.get(MAKE),
+                                   meta.get(OFFSET_TIME))
     if resolved is None:
         return [Failed(meta.path, "time shift not applicable to this file")]
     total_seconds_offset, tz_tags = resolved
@@ -148,8 +133,8 @@ def decide_time_shift(meta: MediaMetadata, time_diff: str, offset_time: str,
             return [Skip(meta.path, "no timezone or time-shift changes required")]
         return [WriteTags(meta.path, tz_tags, overwrite)]
 
-    make, ext = meta.get("Make"), meta.path.suffix.lower()
-    tag_set = _TAG_SETS.get((make, ext))
+    make, ext = meta.get(MAKE), meta.path.suffix.lower()
+    tag_set = TIMESTAMP_TAG_SETS.get((make, ext))
     if tag_set is None:
         return [Failed(meta.path, f"unsupported camera/extension: {make} {ext}")]
 
@@ -201,7 +186,7 @@ def move_altitude(path: Path | list[Path], offset: float, overwrite: bool = Fals
 
     def process(file: Path) -> list[Action]:
         # -n 模式读到的已是按 GPSAltitudeRef 定了符号的十进制（Below Sea Level 为负）
-        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, ["GPSAltitude"]))
+        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, (ALTITUDE,)))
         return run(decide_altitude_shift(meta, offset, overwrite), dry_run=dry_run)
 
     return run_per_file(files, process, activity=f"Shifting altitude by {offset} m",
@@ -221,15 +206,15 @@ def decide_convert(meta: MediaMetadata, output_dir: Path, offset_time: str,
     if not source_is_mp4 and output.exists():
         return [Skip(meta.path, f"output already exists: {output.name}")]
 
-    tags = {"XMP-exif:DateTimeOriginal": create_time_utc.strftime("%Y:%m:%d %H:%M:%S") + offset_time}
+    tags = {XMP_CAPTURE_TIME: create_time_utc.strftime("%Y:%m:%d %H:%M:%S") + offset_time}
     if make:
-        tags["Make"] = make
+        tags[MAKE] = make
     if model:
-        tags["Model"] = model
+        tags[MODEL] = model
     return [
         RemuxVideo(meta.path, output, create_time_utc.strftime("%Y-%m-%dT%H:%M:%S"),
                    source_is_mp4=source_is_mp4,
-                   has_quicktime_create_date=bool(meta.get("QuickTime:CreateDate"))),
+                   has_quicktime_create_date=bool(meta.get(QUICKTIME_CREATE_DATE))),
         WriteTags(output, tags, overwrite=True),
     ]
 
@@ -247,7 +232,7 @@ def convert_to_mp4(path: Path | list[Path], make: str | None = None, model: str 
 
     def process(file: Path) -> list[Action]:
         # 时间标签一次读齐；QuickTime:CreateDate 已在 TIME_TAGS 内，MP4 分支直接取用
-        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, mediatime.TIME_TAGS))
+        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, TIME_TAGS))
         return run(decide_convert(meta, output_dir, offset_time, make, model), dry_run=dry_run)
 
     return run_per_file(files, process, activity="Converting to MP4", parallel=parallel,

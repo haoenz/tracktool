@@ -19,6 +19,17 @@ from pathlib import Path
 from . import log
 from .context import ctx
 from .errors import UserInputError
+from .tags import (
+    CAPTURE_TIME,
+    H264_CAPTURE_TIME,
+    OFFSET_TIME,
+    OFFSET_TIME_DIGITIZED,
+    OFFSET_TIME_ORIGINAL,
+    QUICKTIME_CREATE_DATE,
+    TIME_TAGS,
+    TRACK_CREATE_DATE,
+    XMP_CAPTURE_TIME,
+)
 
 # 假定的相机时区：EXIF 未记录 OffsetTime 时的回退值
 DEFAULT_TZ_OFFSET = "+08:00"
@@ -41,20 +52,16 @@ class TagConfig:
     offset_tags: list[str] = field(default_factory=list)
 
 
+# 按优先级排列的候选时间标签：先试到的先用，解析不了才落到下一条。
+# 这里只管「先试谁、怎么解」，要读哪些标签归 tags.TIME_TAGS。
 _TAG_CONFIGS = [
-    TagConfig("ExifIFD:DateTimeOriginal", TZStrategy.SEPARATE,
-              ["ExifIFD:OffsetTimeOriginal", "ExifIFD:OffsetTime", "ExifIFD:OffsetTimeDigitized"]),
-    TagConfig("H264:DateTimeOriginal", TZStrategy.INCLUDE),
-    TagConfig("XMP-exif:DateTimeOriginal", TZStrategy.INCLUDE),
-    TagConfig("QuickTime:CreateDate", TZStrategy.UTC),
-    TagConfig("Track1:TrackCreateDate", TZStrategy.UTC),
+    TagConfig(CAPTURE_TIME, TZStrategy.SEPARATE,
+              [OFFSET_TIME_ORIGINAL, OFFSET_TIME, OFFSET_TIME_DIGITIZED]),
+    TagConfig(H264_CAPTURE_TIME, TZStrategy.INCLUDE),
+    TagConfig(XMP_CAPTURE_TIME, TZStrategy.INCLUDE),
+    TagConfig(QUICKTIME_CREATE_DATE, TZStrategy.UTC),
+    TagConfig(TRACK_CREATE_DATE, TZStrategy.UTC),
 ]
-
-# 全部候选时间标签，一次调用读齐；需要与其它标签合批时复用这份清单
-TIME_TAGS: tuple[str, ...] = tuple(dict.fromkeys(
-    [cfg.tag for cfg in _TAG_CONFIGS]
-    + [tag for cfg in _TAG_CONFIGS for tag in cfg.offset_tags]
-))
 
 # "yyyy:MM:dd HH:mm:ss" with optional trailing "+HH:MM" or "Z"
 _TIME_PATTERN = re.compile(r"^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:([+-]\d{2}:\d{2})|(Z))?$")

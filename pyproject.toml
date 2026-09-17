@@ -58,9 +58,10 @@ ignore_missing_imports = true
 [tool.importlinter]
 root_packages = ["tracktool"]
 
-# 一条轴，自上而下：入口 → 功能 → 编排 → 运行时容器 → 外部工具适配器 → 管线与值。
-# 容器在适配器之上（它装配适配器），适配器不反向读取容器（配置由构造函数交给它），
-# 因此本契约没有例外。
+# 一条轴，自上而下：入口 → 功能 → 编排 → 运行时容器 → 外部工具适配器 → 管线与值 →
+# 标签词表。词表只放标签名与标签组，自己不 import 任何东西，所以每个模块都可以引用
+# 它；同层之间互不 import，它因此单独占最底层。容器在适配器之上（它装配适配器），
+# 适配器不反向读取容器（配置由构造函数交给它），因此本契约没有例外。
 [[tool.importlinter.contracts]]
 name = "cli on top, features in the middle, plumbing below"
 type = "layers"
@@ -75,6 +76,7 @@ layers = [
     "tracktool.log",
     "tracktool.config",
     "tracktool.errors | tracktool.metadata | tracktool.coords | tracktool.progress | tracktool.paths",
+    "tracktool.tags",
 ]
 
 # exif 只读 kml 的轨迹模型与 XML 工具；归档编排（进 collection、搬备份）不归它管

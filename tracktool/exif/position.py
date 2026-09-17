@@ -27,10 +27,9 @@ from ..kml import xmlutil
 from ..kml.track import Track, TrackMatch
 from ..metadata import MediaMetadata
 from ..paths import display_path
+from ..tags import POSITION_TAGS
 from ..workspace import resolve_zip_path
 from .write import SetExifOptions, build_tags
-
-POSITION_TAGS = [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"]
 
 
 def _load_tracks(zip_path: Path) -> list[Track]:

@@ -10,6 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from .. import log
+from ..tags import POS_END_NAME, POS_START_NAME, TRACK_TAGS
 from . import xmlutil
 
 
@@ -44,7 +45,7 @@ TAG_TO_TYPE = {
 def get_kml_type(path: Path) -> TrackType:
     """Map the TrackTags ExtendedData value to a TrackType."""
     tree = xmlutil.parse_file(path)
-    track_tags = xmlutil.extended_data_value(tree, "TrackTags")
+    track_tags = xmlutil.extended_data_value(tree, TRACK_TAGS)
     kml_type = TAG_TO_TYPE.get(track_tags)
     if kml_type is None:
         # set_kml_type 写入的是英文名（如 "Train"），接受它使 set→get 往返成立
@@ -59,7 +60,8 @@ def get_kml_type(path: Path) -> TrackType:
 def set_kml_type(path: Path, type_: TrackType) -> None:
     """Overwrite the TrackTags ExtendedData value in place."""
     tree = xmlutil.parse_file(path)
-    nodes = xmlutil.findall(tree, "/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='TrackTags']/kml:value")
+    nodes = xmlutil.findall(
+        tree, f"/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='{TRACK_TAGS}']/kml:value")
     for node in nodes:
         node.text = type_.value
     xmlutil.save(tree, path)
@@ -103,7 +105,7 @@ def get_kml_content(path: Path) -> KmlContent:
         # 将一些以 div 标签形式记录的 Track 属性打包放进 Description
         for div in desc_node:
             description += (div.itertext() and "".join(div.itertext()) or "") + "\n"
-    for data_name in ("TrackTags", "PosStartName", "PosEndName"):
+    for data_name in (TRACK_TAGS, POS_START_NAME, POS_END_NAME):
         value = xmlutil.extended_data_value(tree, data_name)
         description += f"{data_name}:{value}\n"
     if desc_node is not None:

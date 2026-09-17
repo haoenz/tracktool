@@ -18,6 +18,7 @@ from ..actions import Action
 from ..errors import UserInputError
 from ..fileutil import BatchResult, move_to_folder
 from ..paths import display_path
+from ..tags import ALTITUDE, POSITION
 from .google import set_altitude_from_google
 from .media import convert_to_mp4
 from .position import SetPositionOptions, set_position_from_kml
@@ -44,7 +45,7 @@ def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | 
     result: BatchResult[list[Action]] = BatchResult()
 
     log.info("Finding media files missing GPSPosition and GPSAltitude")
-    missing = find_missing_tag(path, ["GPSPosition", "GPSAltitude"], parallel=parallel)
+    missing = find_missing_tag(path, [POSITION, ALTITUDE], parallel=parallel)
     # 探针给出的是「哪些文件缺标签」，不是计划；只有它的失败属于本次结果
     result.failed += missing.failed
 
@@ -57,7 +58,7 @@ def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | 
 
     # 仅缺失海拔的文件
     missing_alt_only = [r for r in missing.succeeded
-                        if "GPSAltitude" in r.missing_tags and "GPSPosition" not in r.missing_tags]
+                        if ALTITUDE in r.missing_tags and POSITION not in r.missing_tags]
     if missing_alt_only:
         log.info(f"Processing {len(missing_alt_only)} files missing only GPSAltitude")
         files = [r.file for r in missing_alt_only]
@@ -71,7 +72,7 @@ def resolve_missing_gps(path: Path, parallel: bool = False, kml_zip_path: str | 
             _organize_repaired(files)
 
     # 缺失位置的文件
-    missing_pos = [r for r in missing.succeeded if "GPSPosition" in r.missing_tags]
+    missing_pos = [r for r in missing.succeeded if POSITION in r.missing_tags]
     if missing_pos:
         log.info(f"Processing {len(missing_pos)} files missing GPSPosition")
         result.merge(set_position_from_kml([r.file for r in missing_pos], kml_zip_path,

@@ -8,18 +8,14 @@ from pathlib import Path
 
 from tracktool import actions
 from tracktool.actions import Failed, Rename, ShiftTags, Skip, WriteTags
-from tracktool.exif import media
 from tracktool.exif.media import (
-    _TAG_SETS,
-    MAKE_FUJIFILM,
-    MAKE_INSTA360,
-    MAKE_SONY,
     _compute_time_shift,
     _insta360_new_name,
     decide_altitude_shift,
     decide_time_shift,
 )
 from tracktool.metadata import MediaMetadata
+from tracktool.tags import MAKE_FUJIFILM, MAKE_INSTA360, MAKE_SONY, TIMESTAMP_TAG_SETS
 
 
 def _meta(name: str, **tags: str) -> MediaMetadata:
@@ -68,17 +64,17 @@ class TestComputeTimeShift:
 
 class TestTagSetTable:
     def test_every_make_constant_appears_exactly_as_table_keys(self):
-        makes = {make for make, _ in _TAG_SETS}
-        assert makes == {MAKE_SONY, media.MAKE_FUJIFILM, MAKE_INSTA360}
+        makes = {make for make, _ in TIMESTAMP_TAG_SETS}
+        assert makes == {MAKE_SONY, MAKE_FUJIFILM, MAKE_INSTA360}
 
     def test_lookup_matches_old_branching(self):
-        sony_photo = _TAG_SETS[(MAKE_SONY, ".arw")]
+        sony_photo = TIMESTAMP_TAG_SETS[(MAKE_SONY, ".arw")]
         for ext in (".jpg", ".jpeg"):
-            assert _TAG_SETS[(MAKE_SONY, ext)] is sony_photo
+            assert TIMESTAMP_TAG_SETS[(MAKE_SONY, ext)] is sony_photo
         for ext in (".tif", ".mov", ".raf"):
-            assert (MAKE_SONY, ext) not in _TAG_SETS
-        assert (media.MAKE_FUJIFILM, ".jpg") not in _TAG_SETS
-        assert (MAKE_INSTA360, ".mp4") in _TAG_SETS
+            assert (MAKE_SONY, ext) not in TIMESTAMP_TAG_SETS
+        assert (MAKE_FUJIFILM, ".jpg") not in TIMESTAMP_TAG_SETS
+        assert (MAKE_INSTA360, ".mp4") in TIMESTAMP_TAG_SETS
 
 
 class TestInsta360NewName:
@@ -111,7 +107,7 @@ class TestDecideTimeShift:
     def test_a_plain_shift_moves_the_sony_tag_set(self):
         actions_ = decide_time_shift(_meta("a.jpg", Make=MAKE_SONY), "+1h30m", "", False)
 
-        assert actions_ == [ShiftTags(Path("a.jpg"), _TAG_SETS[(MAKE_SONY, ".jpg")],
+        assert actions_ == [ShiftTags(Path("a.jpg"), TIMESTAMP_TAG_SETS[(MAKE_SONY, ".jpg")],
                                       timedelta(seconds=5400), False)]
 
     def test_nothing_asked_for_is_a_skip(self):
@@ -153,7 +149,7 @@ class TestDecideTimeShift:
                                    "+1h", "", False)
 
         assert result == [ShiftTags(Path("VID_20240501_120000_00.mp4"),
-                                    _TAG_SETS[(MAKE_INSTA360, ".mp4")], timedelta(hours=1), False),
+                                    TIMESTAMP_TAG_SETS[(MAKE_INSTA360, ".mp4")], timedelta(hours=1), False),
                           Rename(Path("VID_20240501_120000_00.mp4"), "VID_20240501_130000_00.mp4")]
 
     def test_an_insta360_clip_with_a_foreign_name_keeps_it(self, caplog):

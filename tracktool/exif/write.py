@@ -15,6 +15,17 @@ from ..discover import list_files
 from ..errors import UserInputError
 from ..fileutil import BatchResult, run_per_file
 from ..metadata import MediaMetadata, is_missing_altitude
+from ..tags import (
+    ALTITUDE,
+    ALTITUDE_REF,
+    LATITUDE,
+    LATITUDE_REF,
+    LONGITUDE,
+    LONGITUDE_REF,
+    MAKE,
+    MODEL,
+    POSITION_TAGS,
+)
 
 
 class SetExifError(UserInputError):
@@ -42,10 +53,10 @@ def build_position_params(position: str) -> dict[str, str]:
     if coordinate is None:
         raise SetExifError(f"Invalid GPS position: {position}")
     return {
-        "GPSLatitude": str(abs(coordinate.latitude)),
-        "GPSLatitudeRef": "N" if coordinate.latitude >= 0 else "S",
-        "GPSLongitude": str(abs(coordinate.longitude)),
-        "GPSLongitudeRef": "E" if coordinate.longitude >= 0 else "W",
+        LATITUDE: str(abs(coordinate.latitude)),
+        LATITUDE_REF: "N" if coordinate.latitude >= 0 else "S",
+        LONGITUDE: str(abs(coordinate.longitude)),
+        LONGITUDE_REF: "E" if coordinate.longitude >= 0 else "W",
     }
 
 
@@ -55,12 +66,12 @@ def build_tags(options: SetExifOptions) -> dict[str, str]:
     if options.position:
         tags.update(build_position_params(options.position))
     if options.altitude is not None:
-        tags["GPSAltitudeRef"] = "Below Sea Level" if options.altitude < 0 else "Above Sea Level"
-        tags["GPSAltitude"] = str(abs(options.altitude))
+        tags[ALTITUDE_REF] = "Below Sea Level" if options.altitude < 0 else "Above Sea Level"
+        tags[ALTITUDE] = str(abs(options.altitude))
     if options.make:
-        tags["Make"] = options.make
+        tags[MAKE] = options.make
     if options.model:
-        tags["Model"] = options.model
+        tags[MODEL] = options.model
     tags.update(options.tags)
     return tags
 
@@ -105,7 +116,7 @@ def find_missing_tag(path: Path | list[Path], tags: list[str],
             value = meta.get(tag)
             if not value:
                 missing.append(tag)
-            elif tag == "GPSAltitude" and is_missing_altitude(value):
+            elif tag == ALTITUDE and is_missing_altitude(value):
                 missing.append(tag)
             else:
                 log.debug(f"Found tag {tag}: [{value}]", target=str(file))
@@ -117,10 +128,8 @@ def find_missing_tag(path: Path | list[Path], tags: list[str],
 
 def print_media_info(path: Path) -> None:
     """Print timestamp, GPS position and altitude of a file."""
-    meta = MediaMetadata.of(
-        path, ctx.backend.read_tags(
-            path, [*mediatime.TIME_TAGS, "GPSLatitude", "GPSLongitude", "GPSAltitude"]))
+    meta = MediaMetadata.of(path, ctx.backend.read_tags(path, POSITION_TAGS))
     media_time = mediatime.parse_media_time(meta.tags, target=str(path))
     print(media_time.isoformat() if media_time else "")
-    print(" ".join(v for v in (meta.get("GPSLatitude"), meta.get("GPSLongitude")) if v))
-    print(meta.get("GPSAltitude"))
+    print(" ".join(v for v in (meta.get(LATITUDE), meta.get(LONGITUDE)) if v))
+    print(meta.get(ALTITUDE))

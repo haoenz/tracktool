@@ -10,8 +10,9 @@ anything a caller reports — a dry run should print tags, not exiftool flags.
 The other half of the seam is the value the tags are read into. `MediaMetadata`
 carries one file's tags and answers the questions the rules ask of them
 (position? altitude?), so a rule takes metadata and returns a decision instead
-of parsing tag strings at every use. Both halves are free of project imports,
-which is what makes them testable without a subprocess.
+of parsing tag strings at every use. Both halves reach no further down than the
+tag vocabulary, which itself imports nothing — nothing here starts a process,
+which is what makes them testable with no exiftool in the way.
 """
 
 from collections.abc import Mapping, Sequence
@@ -19,6 +20,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+from .tags import ALTITUDE, LATITUDE, LONGITUDE
 
 # 海拔标签在 -n 模式下的读取方式见 is_missing_altitude；两个规则（补海拔、
 # 查缺失）共用它，避免各自判断「什么算没有海拔」而再次分叉。
@@ -88,7 +91,7 @@ class MediaMetadata:
     @property
     def position(self) -> tuple[float, float] | None:
         """(latitude, longitude) in decimal degrees, or None unless both are there."""
-        latitude, longitude = self.get("GPSLatitude"), self.get("GPSLongitude")
+        latitude, longitude = self.get(LATITUDE), self.get(LONGITUDE)
         if not latitude or not longitude:
             return None
         try:
@@ -107,7 +110,7 @@ class MediaMetadata:
         Zero counts as no altitude (see is_missing_altitude), and so does a
         value that does not parse: both leave the caller free to fill one in.
         """
-        raw = self.get("GPSAltitude")
+        raw = self.get(ALTITUDE)
         if is_missing_altitude(raw):
             return None
         try:
@@ -122,4 +125,4 @@ class MediaMetadata:
         Distinct from `altitude is not None`: a non-numeric value counts as
         recorded (the historical rule) while yielding no number to shift.
         """
-        return not is_missing_altitude(self.get("GPSAltitude"))
+        return not is_missing_altitude(self.get(ALTITUDE))

@@ -14,10 +14,16 @@ from ..context import ctx
 from ..discover import list_files
 from ..fileutil import BatchResult, run_per_file
 from ..metadata import MediaMetadata
+from ..tags import (
+    ALTITUDE,
+    ALTITUDE_TAGS,
+    IPTC_CITY,
+    IPTC_COUNTRY_CODE,
+    IPTC_COUNTRY_NAME,
+    IPTC_STATE,
+    LOCATION_TAGS,
+)
 from .write import SetExifOptions, build_tags
-
-ALTITUDE_TAGS = ["GPSAltitude", "GPSLatitude", "GPSLongitude"]
-LOCATION_TAGS = ["GPSLatitude", "GPSLongitude"]
 
 ELEVATION_PROVIDER = "Google Elevation"
 GEOCODING_PROVIDER = "Google Geocoding"
@@ -26,12 +32,12 @@ GEOCODING_PROVIDER = "Google Geocoding"
 def decide_altitude(meta: MediaMetadata) -> list[Action]:
     """Whether this file needs an elevation, and what to query for it."""
     if meta.has_altitude:
-        log.debug(f"GPSAltitude already exists: {meta.get('GPSAltitude')}", target=str(meta.path))
-        return [Skip(meta.path, "GPSAltitude already exists")]
-    if meta.get("GPSAltitude"):
-        log.debug(f"GPSAltitude is zero: {meta.get('GPSAltitude')}", target=str(meta.path))
+        log.debug(f"{ALTITUDE} already exists: {meta.get(ALTITUDE)}", target=str(meta.path))
+        return [Skip(meta.path, f"{ALTITUDE} already exists")]
+    if meta.get(ALTITUDE):
+        log.debug(f"{ALTITUDE} is zero: {meta.get(ALTITUDE)}", target=str(meta.path))
     else:
-        log.debug("No GPSAltitude found", target=str(meta.path))
+        log.debug(f"No {ALTITUDE} found", target=str(meta.path))
 
     position = meta.position
     if position is None:
@@ -57,13 +63,13 @@ def _location_tags(lookup: Lookup, api_key: str | None, language: str,
 
     tags: dict[str, str] = {}
     if location.city:
-        tags["IPTC:City"] = location.city
+        tags[IPTC_CITY] = location.city
     if location.state:
-        tags["IPTC:Province-State"] = location.state
+        tags[IPTC_STATE] = location.state
     if location.country_code_iso:
-        tags["IPTC:Country-PrimaryLocationCode"] = location.country_code_iso
+        tags[IPTC_COUNTRY_CODE] = location.country_code_iso
     if location.country:
-        tags["IPTC:Country-PrimaryLocationName"] = location.country
+        tags[IPTC_COUNTRY_NAME] = location.country
 
     if not tags:
         return [Failed(lookup.file, "no location fields returned by the API")]
