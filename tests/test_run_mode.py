@@ -14,7 +14,7 @@ import pytest
 from conftest import TRACK_KML, InMemoryBackend
 from typer.testing import CliRunner
 
-from tracktool import dedup
+from tracktool import dedup, workflows
 from tracktool.cli import app
 from tracktool.config import Config
 from tracktool.context import ctx
@@ -95,7 +95,7 @@ class TestArchiveWritesAreReported:
         archive_dir = tmp_path / "archive"
         archive_dir.mkdir()
         zip_path = archive_dir / "Archive.zip"
-        archive.push_kml_archive(source, str(zip_path), type_=TrackType.DEFAULT)
+        workflows.push_tracks([source], str(zip_path), TrackType.DEFAULT)
         before = sorted(p.name for p in archive_dir.iterdir())
 
         monkeypatch.chdir(tmp_path)

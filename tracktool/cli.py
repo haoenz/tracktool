@@ -9,7 +9,7 @@ import typer
 from rich import box
 from rich.table import Table
 
-from . import __version__, coords, dedup, googleapi, log, mediatime
+from . import __version__, coords, dedup, googleapi, log, mediatime, workflows
 from .actions import describe
 from .config import DEFAULTS, normalize
 from .context import RunMode, ctx
@@ -17,7 +17,6 @@ from .errors import EXIT_PARTIAL, EXIT_USER_ERROR, AppError, UserInputError
 from .exif import google as exif_google
 from .exif import media as exif_media
 from .exif import position as exif_position
-from .exif import resolve as exif_resolve
 from .exif import write as exif_write
 from .exif.position import MAX_DISTANCE_METERS, MAX_TIME_DIFF_SECONDS
 from .fileutil import BatchResult
@@ -151,14 +150,14 @@ def kml_type(
 
 @kml_app.command("push")
 def kml_push(
-    path: Annotated[Path, typer.Argument(help="KML file to archive")],
+    paths: Annotated[list[Path], typer.Argument(help="KML file(s) to archive")],
     track_type: Annotated[TrackType | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     no_archive: Annotated[bool, typer.Option("--no-archive", help="Skip adding to ZIP")] = False,
 ) -> None:
-    """Archive a KML: add to both collections, compress into ZIP, move to backup."""
-    path = _resolve_path(path)
-    kml_archive.push_kml_archive(path, zip_path, track_type, no_archive)
+    """Archive KMLs: add to both collections, compress into ZIP, move to backup."""
+    files = [_resolve_path(path) for path in paths]
+    _finish(workflows.push_tracks(files, zip_path, track_type, no_archive))
 
 
 @kml_app.command("pop")
@@ -400,7 +399,7 @@ def exif_resolve_missing(
 ) -> None:
     """Repair files missing GPSPosition/GPSAltitude (Google altitude, then KML position)."""
     path = _resolve_path(path)
-    result = exif_resolve.resolve_missing_gps(path, parallel, zip_path)
+    result = workflows.resolve_missing_gps(path, parallel, zip_path)
     _finish(result)
 
 
@@ -415,7 +414,7 @@ def exif_resolve_vid(
 ) -> None:
     """Video pipeline: VID -> VID_original, convert to MP4, then repair GPS."""
     path = _resolve_path(path)
-    result = exif_resolve.resolve_vid_exif(path, make, model, offset_time, parallel, zip_path)
+    result = workflows.resolve_vid_exif(path, make, model, offset_time, parallel, zip_path)
     _finish(result)
 
 

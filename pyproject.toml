@@ -58,15 +58,18 @@ ignore_missing_imports = true
 [tool.importlinter]
 root_packages = ["tracktool"]
 
-# 一条轴，自上而下：入口 → 功能 → 编排 → 运行时容器 → 外部工具适配器 → 管线与值 →
+# 一条轴，自上而下：入口 → 编排 → 功能 → 运行时容器 → 外部工具适配器 → 管线与值 →
 # 标签词表。词表只放标签名与标签组，自己不 import 任何东西，所以每个模块都可以引用
 # 它；同层之间互不 import，它因此单独占最底层。容器在适配器之上（它装配适配器），
 # 适配器不反向读取容器（配置由构造函数交给它），因此本契约没有例外。
+# 编排（workflows）组合功能包之间的步骤，所以它在功能包之上、入口之下：kml 与 exif
+# 都不认识它，跨功能包的调用只发生在它这一层。
 [[tool.importlinter.contracts]]
 name = "cli on top, features in the middle, plumbing below"
 type = "layers"
 layers = [
     "tracktool.cli",
+    "tracktool.workflows",
     "tracktool.exif | tracktool.dedup",
     "tracktool.kml",
     "tracktool.actions | tracktool.workspace | tracktool.discover | tracktool.googleapi | tracktool.mediatime",

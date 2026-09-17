@@ -119,6 +119,10 @@ class Step:
     or rolling a VID directory involves. `kind` and `detail` are the two
     columns the plan prints, and both must be knowable *before* the step runs —
     a preview cannot wait for the answer.
+
+    A step is also the unit a batch happens in: `workflows.push_tracks` gives
+    one step every track it is filing into a collection, so the work of the
+    step is the loop over the batch rather than a run per track.
     """
 
     file: Path

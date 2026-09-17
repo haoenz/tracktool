@@ -25,9 +25,19 @@ tracktool exif set-position ./photos --overwrite --failed-folder TrackPosFailed
 # 一键修复缺失 GPSPosition/GPSAltitude 的媒体
 tracktool exif resolve-missing ./VID
 
-# 归档一条新轨迹
-tracktool kml push ./2024-05-01\ 徒步.kml
+# 归档新轨迹（一次可给多条：聚合与压缩包各读写一次）
+tracktool kml push ./2024-05-01\ 徒步.kml ./2024-05-02\ 徒步.kml
 ```
+
+## 预演
+
+`--dry-run` 是整次运行的模式，写在子命令**之前**，所有会改文件的命令都自动生效：
+
+```bash
+tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
+```
+
+它照常读文件、照常做判断（因此能报出哪些文件会失败），只是把写入改成打印：一条条步骤列成表，磁盘一个字节都不动。写在子命令之后会被当成用法错误退 1。
 
 ## 退出码
 
@@ -40,7 +50,7 @@ tracktool kml push ./2024-05-01\ 徒步.kml
 
 命令名、选项拼写错误、缺必填参数都退 1：typer 内部把这类用法错误记作 2，与「外部工具/API 失败」同值，入口处已把这一来源归一到 1，因此 **2 只表示外部依赖失败**。
 
-批量命令遇到单个坏文件不会中止整批：该文件计入失败清单（给了 `--failed-folder` 就移入该目录），其余文件照常处理，命令以 3 退出，日志里给出 `N file(s) failed` 汇总。修复编排（`resolve-missing`）把整个文件列表交给批量入口，因此一次 Google 高程请求可覆盖最多 512 个坐标，KML 归档也只加载解析一次。
+批量命令遇到单个坏文件不会中止整批：该文件计入失败清单（给了 `--failed-folder` 就移入该目录），其余文件照常处理，命令以 3 退出，日志里给出 `N file(s) failed` 汇总。`kml push` 与修复编排（`resolve-missing`）都把整个文件列表交给批量入口，因此一次 Google 高程请求可覆盖最多 512 个坐标，KML 归档只加载解析一次，进档 N 条轨迹也只读写一次聚合与压缩包。
 
 ## 配置
 

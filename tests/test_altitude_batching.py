@@ -11,10 +11,9 @@ from pathlib import Path
 
 from conftest import InMemoryBackend
 
-from tracktool import googleapi
+from tracktool import googleapi, workflows
 from tracktool.context import ctx
 from tracktool.exif import google as exif_google
-from tracktool.exif import resolve as exif_resolve
 from tracktool.exif.write import MissingTagResult
 from tracktool.fileutil import BatchResult
 
@@ -103,19 +102,19 @@ class TestRepairPassesTheWholeSelectionToEachStage:
                          for path in _paths(tmp_path, "a", 3)]
         position_only = [MissingTagResult(file=path, missing_tags=["GPSPosition"])
                          for path in _paths(tmp_path, "p", 2)]
-        monkeypatch.setattr(exif_resolve, "find_missing_tag",
+        monkeypatch.setattr(workflows, "find_missing_tag",
                             lambda path, tags, parallel=False: BatchResult(
                                 [*altitude_only, *position_only]))
         calls: list[tuple[str, list[Path]]] = []
         monkeypatch.setattr(
-            exif_resolve, "set_altitude_from_google",
+            workflows, "set_altitude_from_google",
             lambda files, **kwargs: calls.append(("altitude", list(files))) or BatchResult())
         monkeypatch.setattr(
-            exif_resolve, "set_position_from_kml",
+            workflows, "set_position_from_kml",
             lambda files, zip_path=None, **kwargs: calls.append(("position", list(files))) or BatchResult())
-        monkeypatch.setattr(exif_resolve, "_organize_repaired", lambda files: None)
+        monkeypatch.setattr(workflows, "_organize_repaired", lambda files: None)
 
-        exif_resolve.resolve_missing_gps(tmp_path)
+        workflows.resolve_missing_gps(tmp_path)
 
         assert calls == [
             ("altitude", [r.file for r in altitude_only]),
@@ -126,12 +125,12 @@ class TestRepairPassesTheWholeSelectionToEachStage:
         missing = BatchResult([MissingTagResult(file=tmp_path / "p.jpg",
                                                 missing_tags=["GPSPosition"])],
                               [tmp_path / "unreadable.jpg"])
-        monkeypatch.setattr(exif_resolve, "find_missing_tag",
+        monkeypatch.setattr(workflows, "find_missing_tag",
                             lambda path, tags, parallel=False: missing)
-        monkeypatch.setattr(exif_resolve, "set_position_from_kml",
+        monkeypatch.setattr(workflows, "set_position_from_kml",
                             lambda files, zip_path=None, **kwargs: BatchResult([], [files[0]]))
 
-        result = exif_resolve.resolve_missing_gps(tmp_path)
+        result = workflows.resolve_missing_gps(tmp_path)
 
         # 读标签阶段的失败与位置阶段的失败都要出现在最终结果里
         assert [p.name for p in result.failed] == ["unreadable.jpg", "p.jpg"]

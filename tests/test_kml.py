@@ -7,6 +7,7 @@ import pytest
 from conftest import TRACK_KML
 from typer.testing import CliRunner
 
+from tracktool import workflows
 from tracktool.cli import app
 from tracktool.config import Config
 from tracktool.context import ctx
@@ -25,6 +26,12 @@ def _drop_zip_entry(zip_path: Path, entry_name: str) -> None:
     with zipfile.ZipFile(zip_path, "w") as zf:
         for name, blob in remaining.items():
             zf.writestr(name, blob)
+
+
+def _push(*tracks: Path, zip_path: Path, type_: TrackType | None = TrackType.DEFAULT,
+          no_archive: bool = False) -> list[Path]:
+    """File tracks the way `kml push` does; returns the ones it could not file."""
+    return workflows.push_tracks(list(tracks), str(zip_path), type_, no_archive).failed
 
 
 @pytest.fixture
@@ -148,7 +155,7 @@ class TestArchive:
     def test_push_creates_the_archive_and_both_collections(self, track_file: Path, tmp_path: Path):
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
 
-        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT)
+        _push(track_file, zip_path=zip_path)
 
         assert track_file.name in zipfile.ZipFile(zip_path).namelist()
         assert (zip_path.parent / "Default.kml").is_file()
@@ -157,7 +164,7 @@ class TestArchive:
     def test_push_creates_the_archive_directory(self, track_file: Path, tmp_path: Path):
         zip_path = tmp_path / "archive" / "nested" / "Archive.zip"
 
-        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT)
+        _push(track_file, zip_path=zip_path)
 
         assert zip_path.is_file()
 
@@ -165,7 +172,7 @@ class TestArchive:
         """--no-archive 只跳过 ZIP：聚合照建，也不该留下一个空压缩包。"""
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
 
-        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT, no_archive=True)
+        _push(track_file, zip_path=zip_path, no_archive=True)
 
         assert not zip_path.exists()
         assert (zip_path.parent / "Default.kml").is_file()
@@ -173,11 +180,11 @@ class TestArchive:
     def test_a_second_push_appends_to_the_existing_archive(self, track_file: Path, tmp_path: Path):
         """已存在的归档不能被重建，否则第一条轨迹就没了。"""
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
-        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT)
+        _push(track_file, zip_path=zip_path)
 
         second = track_file.parent / "2024-05-02 second.kml"
         second.write_text(TRACK_KML, encoding="utf-8")
-        archive.push_kml_archive(second, str(zip_path), type_=TrackType.DEFAULT)
+        _push(second, zip_path=zip_path)
 
         assert sorted(zipfile.ZipFile(zip_path).namelist()) == [track_file.name, second.name]
 
@@ -186,7 +193,7 @@ class TestArchive:
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
 
         # push: 需要类型信息（源文件无 TrackTags）
-        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT)
+        _push(track_file, zip_path=zip_path)
 
         # ZIP 中存在
         with zipfile.ZipFile(zip_path) as zf:
@@ -232,7 +239,7 @@ class TestArchive:
 
     def test_pop_refuses_when_the_track_is_not_in_the_zip(self, track_file: Path, tmp_path: Path):
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
-        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT)
+        _push(track_file, zip_path=zip_path)
         _drop_zip_entry(zip_path, track_file.name)
 
         with pytest.raises(UserInputError, match="Track not found in ZIP"):
@@ -244,7 +251,7 @@ class TestArchive:
     def test_pop_refuses_when_the_track_is_not_in_the_collection(self, track_file: Path, tmp_path: Path):
         """ZIP 里有而聚合里没有，同样是三处记载不一致。"""
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
-        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT)
+        _push(track_file, zip_path=zip_path)
         desktop = zip_path.parent / "Default.kml"
         tree = xmlutil.parse_file(desktop)
         for placemark in xmlutil.findall(tree, "//kml:Placemark"):
@@ -258,7 +265,7 @@ class TestArchive:
 
     def test_force_turns_the_disagreement_into_a_warning(self, track_file: Path, tmp_path: Path):
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
-        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT)
+        _push(track_file, zip_path=zip_path)
         _drop_zip_entry(zip_path, track_file.name)
 
         # 轨迹只留在聚合里：跳过 ZIP 那一步，聚合照清
@@ -273,7 +280,7 @@ class TestArchive:
                                                        monkeypatch):
         monkeypatch.chdir(track_file.parent)
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
-        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT)
+        _push(track_file, zip_path=zip_path)
         track_file.write_text("occupied", encoding="utf-8")
 
         with pytest.raises(UserInputError, match="already exists at destination"):
@@ -298,7 +305,7 @@ class TestKmlPopCommand:
         archive_dir = tmp_path / "archive"
         archive_dir.mkdir()
         zip_path = archive_dir / "Archive.zip"
-        archive.push_kml_archive(track_file, str(zip_path), type_=TrackType.DEFAULT)
+        _push(track_file, zip_path=zip_path)
         _drop_zip_entry(zip_path, track_file.name)
         desktop = archive_dir / "Default.kml"
 

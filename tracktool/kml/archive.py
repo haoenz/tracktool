@@ -1,29 +1,30 @@
-"""Filing tracks into, and out of, the KML archive.
+"""The KML archive's own storage: the ZIP, and what a restore checks first.
 
-Push files a track everywhere it belongs — both collections, the ZIP archive,
-then the backup folder; pop reverses it. The ZIP itself keeps every KML
-flat-named (entry = file name) and is rewritten wholesale on removal, since
-zipfile has no entry-delete API.
+The ZIP keeps every KML flat-named (entry = file name) and is rewritten
+wholesale on removal, since zipfile has no entry-delete API. Restoring creates
+nothing and refuses to run on an archive that disagrees with itself, so half a
+track cannot be restored; `--force` turns those refusals into warnings and
+skips only the step they belong to.
 
-Filing creates what is missing (the archive directory, the archive itself, an
-empty collection) — the first track of an archive has nowhere to go otherwise.
-Restoring is the opposite: it creates nothing and refuses to run on an archive
-that disagrees with itself, so half a track cannot be restored. `--force`
-turns those refusals into warnings and skips only the step they belong to.
+Filing a track in — which collections, the ZIP, the backup folder, in what
+order — is a sequence of domain steps rather than a property of any one of
+them, and lives in workflows.push_tracks. What stays here are the pieces that
+sequence is built from: making the archive exist, appending to it, and reading
+it back.
 """
 
 import shutil
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from .. import log
 from ..context import ctx
 from ..errors import UserInputError
-from ..fileutil import move_to_folder
 from ..paths import display_path
 from ..workspace import resolve_zip_path
-from . import collections, kmlfile, xmlutil
+from . import collections
 from .kmlfile import TrackType
 
 
@@ -68,17 +69,29 @@ def find_zip_entry(kml_name: str, zip_path: Path) -> str | None:
 
 def push_compressed_kml(kml_path: Path, zip_path: Path) -> None:
     """Add a KML to the ZIP archive if not already present."""
+    push_compressed_kmls([kml_path], zip_path)
+
+
+def push_compressed_kmls(kml_paths: Sequence[Path], zip_path: Path) -> None:
+    """Add KMLs to the ZIP, opening it once for the whole batch.
+
+    One open means one index read and one write stream for N entries, where
+    looping over push_compressed_kml would reopen and re-read the archive each
+    time.
+    """
     if ctx.is_plan:
         # 提前返回还有一层理由：ZipFile 的 "a" 模式会把不存在的压缩包建出来
-        log.info(f"Would add to ZIP: {kml_path.name}", target=str(zip_path))
+        for kml_path in kml_paths:
+            log.info(f"Would add to ZIP: {kml_path.name}", target=str(zip_path))
         return
     with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as zf:
-        names = [Path(info.filename).name for info in zf.infolist()]
-        if kml_path.name in names:
-            log.warning(f"Already exists in ZIP: {kml_path.name}", target=str(zip_path))
-            return
-        zf.write(kml_path, kml_path.name)
-        log.info(f"Added to ZIP: {kml_path.name}", target=str(zip_path))
+        names = {Path(info.filename).name for info in zf.infolist()}
+        for kml_path in kml_paths:
+            if kml_path.name in names:
+                log.warning(f"Already exists in ZIP: {kml_path.name}", target=str(zip_path))
+                continue
+            zf.write(kml_path, kml_path.name)
+            log.info(f"Added to ZIP: {kml_path.name}", target=str(zip_path))
 
 
 def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = Path(".")) -> None:
@@ -114,43 +127,6 @@ def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = P
         for name, blob in remaining.items():
             zf.writestr(name, blob)
     log.debug(f"Removed from ZIP: {entry_name}", target=str(zip_path))
-
-
-def push_kml_archive(path: Path, zip_path: str | None = None, type_: TrackType | None = None,
-                     no_archive: bool = False) -> None:
-    """Archive a KML track: both collections + ZIP + move to backup folder."""
-    zip_file = resolve_zip_path(zip_path)
-    archive_dir = zip_file.parent
-
-    log.info("Archiving KML track", target=str(path))
-    kml_type = type_ if type_ is not None else kmlfile.get_kml_type(path)
-    if kml_type is TrackType.UNKNOWN:
-        log.error("Cannot archive track with unknown type", target=str(path))
-        return
-
-    if ctx.is_plan:
-        # 进档的每一步都会创建或追加：预演只说明这条轨迹会落到哪几处
-        log.info(f"Would archive as {kml_type}: {kml_type}.kml, {kml_type}.Mobile.kml"
-                 + ("" if no_archive else f", {zip_file.name}")
-                 + f", {ctx.config.kml_backup_dir_name}/", target=str(path))
-        return
-
-    # 聚合文件与 ZIP 同目录，两者都按需创建，目录也一样
-    ensure_archive_directory(archive_dir)
-    collection_kml_path = archive_dir / f"{kml_type}.kml"
-    if not collection_kml_path.is_file():
-        if xmlutil.save(collections.new_empty_kml(kml_type), collection_kml_path):
-            log.info("Created new collection KML file", target=str(collection_kml_path))
-    collections.add_track_to_desktop_collection(path, collection_kml_path)
-
-    mobile_collection_path = archive_dir / f"{kml_type}.Mobile.kml"
-    collections.add_track_to_mobile_collection(path, mobile_collection_path)
-
-    if not no_archive:
-        ensure_zip_file(zip_file)
-        push_compressed_kml(path, zip_file)
-
-    move_to_folder(path, ctx.config.kml_backup_dir_name, archive_dir)
 
 
 @dataclass(frozen=True)
@@ -203,8 +179,7 @@ def pop_kml_archive(kml_name: str, type_: TrackType = TrackType.DEFAULT, zip_pat
     """
     zip_file = resolve_zip_path(zip_path)
     archive_dir = zip_file.parent
-    desktop_collection = archive_dir / f"{type_}.kml"
-    mobile_collection = archive_dir / f"{type_}.Mobile.kml"
+    desktop_collection, mobile_collection = collections.collection_paths(type_, archive_dir)
 
     state = _inspect_archive(kml_name, zip_file, desktop_collection, mobile_collection)
     if state.problems:

@@ -6,16 +6,22 @@ name. Both live next to the ZIP archive, named after the track type, and both
 skip a track that is already in — adding twice is a warning, not a duplicate.
 Both can also be asked whether they hold a track, which is how a restore
 checks the archive before it touches anything.
+
+Filing is done through a collection held open for a whole batch: N tracks are
+one read and one write of the document, and the batch is why that is worth a
+class rather than a function taking a path. Asking and removing are one-file
+questions and read the document themselves.
 """
 
 import re
 from pathlib import Path
+from typing import Self
 
 from .. import log
 from ..errors import UserInputError
 from ..paths import display_path
-from . import kmlfile, xmlutil
-from .kmlfile import TrackType
+from . import xmlutil
+from .kmlfile import KmlContent, TrackType
 
 # Collection style per track type: (name, LineStyle color)
 COLLECTION_STYLES = {
@@ -67,46 +73,85 @@ def new_empty_kml(type_: TrackType | None = None) -> xmlutil.etree._ElementTree:
     return xmlutil.parse_string(_EMPTY_PLAIN_TEMPLATE.format(kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS))
 
 
-def add_track_to_desktop_collection(path: Path, collection_path: Path) -> None:
-    """Append the track to Folder[year] > Document[yyyymm] > Placemark."""
-    m = _DATE_NAME_PATTERN.search(path.stem)
-    if not m:
-        raise UserInputError(f"Filename does not match expected date format (yyyy-MM-dd): {path.stem}")
-    year, month = m[1], m[1] + m[2]
-    log.debug(f"Parsed date from filename: {year}/{month}", target=str(path))
+def collection_paths(type_: TrackType, archive_dir: Path) -> tuple[Path, Path]:
+    """(desktop, mobile) — both named after the track type, both beside the ZIP."""
+    return archive_dir / f"{type_}.kml", archive_dir / f"{type_}.Mobile.kml"
 
-    tree = xmlutil.parse_file(collection_path)
-    ns = xmlutil.doc_ns(tree)
-    top_folder = xmlutil.find(tree, "/kml:kml/kml:Folder")
-    if top_folder is None:
-        raise UserInputError(f"Collection KML has no top-level Folder: {display_path(collection_path)}")
 
-    year_folder = xmlutil.find(tree, f"/kml:kml/kml:Folder/kml:Folder[kml:name='{year}']")
-    if year_folder is None:
-        year_folder = xmlutil.sub(top_folder, "Folder")
-        xmlutil.sub(year_folder, "name", year)
-        log.info(f"Created year folder: {year}", target=str(collection_path))
+def desktop_date(track: Path) -> tuple[str, str]:
+    """(year, yyyymm) from the track's file name — what the collection files it under."""
+    match = _DATE_NAME_PATTERN.search(track.stem)
+    if match is None:
+        raise UserInputError(f"Filename does not match expected date format (yyyy-MM-dd): {track.stem}")
+    return match[1], match[1] + match[2]
 
-    month_doc = xmlutil.find(tree, f"//kml:Folder[kml:name='{year}']/kml:Document[kml:name='{month}']")
-    if month_doc is None:
-        month_doc = xmlutil.sub(year_folder, "Document")
-        xmlutil.sub(month_doc, "name", month)
-        log.info(f"Created month document: {month}", target=str(collection_path))
 
-    existing_names = [xmlutil.element_text(n) for n in month_doc.findall(f"{{{ns}}}Placemark/{{{ns}}}name")]
-    if path.stem in existing_names:
-        log.warning(f"Track already exists in collection: {path.stem}", target=str(collection_path))
-        return
+class TrackCollection:
+    """A collection document, held open for the tracks of one batch.
 
-    content = kmlfile.get_kml_content(path)
-    track = xmlutil.sub(month_doc, "Placemark")
-    xmlutil.sub(track, "name", path.stem)
-    xmlutil.sub(track, "description", content.description)
-    xmlutil.sub(track, "styleUrl", f"#{collection_path.stem}")
-    ls = xmlutil.sub(track, "LineString")
-    xmlutil.sub(ls, "coordinates", content.line_string)
-    if xmlutil.save(tree, collection_path):
-        log.info(f"Added track to collection: {path.stem}", target=str(collection_path))
+    Loading and saving belong to the collection rather than to each track: N
+    tracks cost one read and one write of the whole document, where filing
+    each on its own would read and write it N times. The tracks are appended
+    to the loaded document and only written by `save()`, which is what makes
+    the batch one write — the runs of `add()` in between are bookkeeping.
+    """
+
+    def __init__(self, path: Path, tree: xmlutil.etree._ElementTree) -> None:
+        self.path = path
+        self.tree = tree
+
+    def save(self) -> None:
+        """Write the document — or, under PLAN mode, report the write it would make."""
+        xmlutil.save(self.tree, self.path)
+
+
+class DesktopCollection(TrackCollection):
+    """Folder[year] > Document[yyyymm] > Placemark, one Placemark per track."""
+
+    @classmethod
+    def open(cls, path: Path, type_: TrackType) -> Self:
+        """Load the desktop collection, creating it empty when the archive is new."""
+        if path.is_file():
+            return cls(path, xmlutil.parse_file(path))
+        tree = new_empty_kml(type_)
+        if xmlutil.save(tree, path):
+            log.info("Created new collection KML file", target=str(path))
+        return cls(path, tree)
+
+    def add(self, track: Path, content: KmlContent) -> None:
+        """Append the track as Placemark under Folder[year] > Document[yyyymm]."""
+        year, month = desktop_date(track)
+        log.debug(f"Parsed date from filename: {year}/{month}", target=str(track))
+
+        ns = xmlutil.doc_ns(self.tree)
+        top_folder = xmlutil.find(self.tree, "/kml:kml/kml:Folder")
+        if top_folder is None:
+            raise UserInputError(f"Collection KML has no top-level Folder: {display_path(self.path)}")
+
+        year_folder = xmlutil.find(self.tree, f"/kml:kml/kml:Folder/kml:Folder[kml:name='{year}']")
+        if year_folder is None:
+            year_folder = xmlutil.sub(top_folder, "Folder")
+            xmlutil.sub(year_folder, "name", year)
+            log.info(f"Created year folder: {year}", target=str(self.path))
+
+        month_doc = xmlutil.find(self.tree, f"//kml:Folder[kml:name='{year}']/kml:Document[kml:name='{month}']")
+        if month_doc is None:
+            month_doc = xmlutil.sub(year_folder, "Document")
+            xmlutil.sub(month_doc, "name", month)
+            log.info(f"Created month document: {month}", target=str(self.path))
+
+        existing_names = [xmlutil.element_text(n) for n in month_doc.findall(f"{{{ns}}}Placemark/{{{ns}}}name")]
+        if track.stem in existing_names:
+            log.warning(f"Track already exists in collection: {track.stem}", target=str(self.path))
+            return
+
+        placemark = xmlutil.sub(month_doc, "Placemark")
+        xmlutil.sub(placemark, "name", track.stem)
+        xmlutil.sub(placemark, "description", content.description)
+        xmlutil.sub(placemark, "styleUrl", f"#{self.path.stem}")
+        ls = xmlutil.sub(placemark, "LineString")
+        xmlutil.sub(ls, "coordinates", content.line_string)
+        log.info(f"Added track to collection: {track.stem}", target=str(self.path))
 
 
 def _find_desktop_placemark(tree: xmlutil.etree._ElementTree,
@@ -132,31 +177,34 @@ def remove_track_from_desktop_collection(track_name: str, collection_path: Path)
         log.info(f"Removed track from collection: {track_name}", target=str(collection_path))
 
 
-def add_track_to_mobile_collection(path: Path, collection_path: Path) -> None:
-    """Append the track as LineString[@id] under the collection's MultiGeometry."""
-    if not collection_path.is_file():
-        tree = xmlutil.parse_string(
-            _EMPTY_MOBILE_TEMPLATE.format(kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS))
-        if xmlutil.save(tree, collection_path):
-            log.info("Created new mobile collection KML file", target=str(collection_path))
+class MobileCollection(TrackCollection):
+    """A flat MultiGeometry of LineStrings, one per track, keyed by track name."""
 
-    tree = xmlutil.parse_file(collection_path)
-    multi_geom = xmlutil.find(tree, "//kml:MultiGeometry")
-    if multi_geom is None:
-        raise UserInputError(f"Mobile collection KML has no MultiGeometry: {display_path(collection_path)}")
-    track_id = path.stem
+    @classmethod
+    def open(cls, path: Path) -> Self:
+        """Load the mobile collection, creating it empty when the archive is new."""
+        if path.is_file():
+            return cls(path, xmlutil.parse_file(path))
+        tree = xmlutil.parse_string(_EMPTY_MOBILE_TEMPLATE.format(kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS))
+        if xmlutil.save(tree, path):
+            log.info("Created new mobile collection KML file", target=str(path))
+        return cls(path, tree)
 
-    existing = xmlutil.find(tree, f"//kml:LineString[@id='{track_id}']")
-    if existing is not None:
-        log.warning(f"Track already exists in mobile collection: {track_id}", target=str(collection_path))
-        return
+    def add(self, track: Path, content: KmlContent) -> None:
+        """Append the track as LineString[@id] under the MultiGeometry."""
+        multi_geom = xmlutil.find(self.tree, "//kml:MultiGeometry")
+        if multi_geom is None:
+            raise UserInputError(f"Mobile collection KML has no MultiGeometry: {display_path(self.path)}")
 
-    line_string = kmlfile.get_kml_content(path).line_string
-    ls = xmlutil.sub(multi_geom, "LineString")
-    ls.set("id", track_id)
-    xmlutil.sub(ls, "coordinates", line_string)
-    if xmlutil.save(tree, collection_path):
-        log.info(f"Added track to mobile collection: {track_id}", target=str(collection_path))
+        existing = xmlutil.find(self.tree, f"//kml:LineString[@id='{track.stem}']")
+        if existing is not None:
+            log.warning(f"Track already exists in mobile collection: {track.stem}", target=str(self.path))
+            return
+
+        ls = xmlutil.sub(multi_geom, "LineString")
+        ls.set("id", track.stem)
+        xmlutil.sub(ls, "coordinates", content.line_string)
+        log.info(f"Added track to mobile collection: {track.stem}", target=str(self.path))
 
 
 def _find_mobile_linestring(tree: xmlutil.etree._ElementTree,
