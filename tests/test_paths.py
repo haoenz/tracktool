@@ -102,10 +102,10 @@ class TestPathsInOutput:
     def test_stored_paths_are_shown_verbatim(self, tmp_path: Path, monkeypatch):
         # config show 打印的就是文件里的值：忠实展示，不跟着显示规则走
         monkeypatch.setattr(ctx, "config", Config(path=tmp_path / "config.json").load())
-        stored = str(tmp_path / "archive" / "Archive.zip")
-        ctx.config["kml_zip_path"] = stored
+        stored = str(tmp_path / "archive")
+        ctx.config["archive_path"] = stored
 
         result = runner.invoke(app, ["config", "show"])
 
         assert result.exit_code == 0
-        assert json.loads(result.output)["kml_zip_path"] == stored
+        assert json.loads(result.output)["archive_path"] == stored

@@ -49,7 +49,7 @@ from .kml import archive, collections, kmlfile
 from .kml.kmlfile import KmlContent, TrackType
 from .paths import display_path
 from .tags import ALTITUDE, POSITION
-from .workspace import resolve_zip_path
+from .workspace import resolve_archive
 
 REPAIRED_FOLDER = "GoogleAltOK"
 
@@ -126,8 +126,7 @@ def push_tracks(paths: list[Path], zip_path: str | None = None, type_: TrackType
     N. A track that cannot be filed (unreadable, undated, unknown type) is
     counted as failed and the rest of the batch goes on.
     """
-    zip_file = resolve_zip_path(zip_path)
-    archive_dir = zip_file.parent
+    archive_dir, zip_file = resolve_archive(zip_path)
     result: BatchResult[list[Action]] = BatchResult()
 
     pending: list[_Track] = []

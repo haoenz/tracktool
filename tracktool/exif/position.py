@@ -28,7 +28,7 @@ from ..kml.track import Track, TrackMatch
 from ..metadata import MediaMetadata
 from ..paths import display_path
 from ..tags import POSITION_TAGS
-from ..workspace import resolve_zip_path
+from ..workspace import resolve_archive
 from .write import SetExifOptions, build_tags
 
 
@@ -161,7 +161,7 @@ def geotag_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
     """
     options = options or GeotagOptions()
 
-    zip_path = resolve_zip_path(kml_zip_path)
+    archive_dir, zip_path = resolve_archive(kml_zip_path)
 
     try:
         tracks = _load_tracks(zip_path)

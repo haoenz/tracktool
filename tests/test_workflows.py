@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from conftest import TRACK_KML
+from conftest import TRACK_KML, make_archive
 from typer.testing import CliRunner
 
 from tracktool import workflows
@@ -46,9 +46,7 @@ def _track(directory: Path, name: str, content: str = TRACK_KML) -> Path:
 
 def _archive(tmp_path: Path) -> Path:
     """An empty archive directory, and the ZIP path an archive would have in it."""
-    directory = tmp_path / "archive"
-    directory.mkdir()
-    return directory / "Archive.zip"
+    return make_archive(tmp_path / "archive")
 
 
 def _kinds(result) -> list[str]:
@@ -109,7 +107,7 @@ class TestPushBatch:
 
         workflows.push_tracks([track], str(zip_path), TrackType.DEFAULT, no_archive=True)
 
-        assert not zip_path.exists()
+        assert zipfile.ZipFile(zip_path).namelist() == []  # ZIP 保持着建档时的空壳
         assert (zip_path.parent / "Default.kml").is_file()
         assert (zip_path.parent / "Default.Mobile.kml").is_file()
         assert (zip_path.parent / "Backup" / track.name).is_file()
@@ -121,7 +119,8 @@ class TestPushBatch:
 
         assert _kinds(result) == ["add to collection", "add to mobile collection",
                                   "append to ZIP", "move to backup folder"]
-        assert list(zip_path.parent.iterdir()) == []  # 计划只是计划
+        # 计划只是计划：除了建档时的身份与空 ZIP，什么都没写
+        assert sorted(p.name for p in zip_path.parent.iterdir()) == ["Archive.zip", "archive.json"]
 
 
 class TestATrackThatCannotBeFiled:
@@ -145,7 +144,8 @@ class TestATrackThatCannotBeFiled:
 
         assert result.failed == [track]
         assert track.is_file()
-        assert list(zip_path.parent.iterdir()) == []  # 一条轨迹都没进档，就什么都不该建
+        # 一条轨迹都没进档，就什么都不该建：除了建档时的身份与空 ZIP
+        assert sorted(p.name for p in zip_path.parent.iterdir()) == ["Archive.zip", "archive.json"]
 
     def test_a_file_that_is_not_kml_is_a_failure(self, tmp_path: Path):
         zip_path = _archive(tmp_path)
@@ -181,7 +181,7 @@ class TestTheCommand:
         assert result.exit_code == 0, result.output
         assert "add to collection" in result.output
         assert "2024-05-01 t1" in result.output and "2024-05-02 t2" in result.output
-        assert list(zip_path.parent.iterdir()) == []
+        assert sorted(p.name for p in zip_path.parent.iterdir()) == ["Archive.zip", "archive.json"]
 
 
 class TestResolveVid:

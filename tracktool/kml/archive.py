@@ -13,6 +13,7 @@ sequence is built from: making the archive exist, appending to it, and reading
 it back.
 """
 
+import json
 import shutil
 import zipfile
 from collections.abc import Sequence
@@ -23,9 +24,35 @@ from .. import log
 from ..context import ctx
 from ..errors import UserInputError
 from ..paths import display_path
-from ..workspace import resolve_zip_path
+from ..workspace import DEFAULT_ZIP_NAME, manifest_path, resolve_archive
 from . import collections
 from .kmlfile import TrackType
+
+
+def init_archive(directory: Path, zip_name: str = DEFAULT_ZIP_NAME) -> None:
+    """Declare a directory as the track archive; the only thing that creates one.
+
+    The manifest is the archive's identity — a directory without one is not an
+    archive, and every other command refuses it. The ZIP is created only when
+    missing, so running init on a directory that already holds an archive's
+    files adopts them instead of starting a second archive beside them.
+    """
+    directory = directory.expanduser().resolve()
+    if manifest_path(directory).is_file():
+        raise UserInputError(f"Already a tracktool archive: {display_path(directory)}")
+    ensure_archive_directory(directory)
+    if ctx.is_plan:
+        log.info("Would write archive manifest", target=str(manifest_path(directory)))
+        return
+    manifest = {"version": 1, "zip": zip_name}
+    try:
+        manifest_path(directory).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise UserInputError(f"Cannot write archive manifest {display_path(manifest_path(directory))}: {exc}") from exc
+    log.info("Created archive manifest", target=str(manifest_path(directory)))
+    zip_file = directory / zip_name
+    if not zip_file.is_file():
+        ensure_zip_file(zip_file)
 
 
 def ensure_archive_directory(archive_dir: Path) -> None:
@@ -177,7 +204,7 @@ def pop_kml_archive(kml_name: str, type_: TrackType = TrackType.DEFAULT, zip_pat
     --force warns about each disagreement instead of stopping, and skips only
     the step whose record is missing.
     """
-    zip_file = resolve_zip_path(zip_path)
+    zip_file = resolve_archive(zip_path)[1]
     archive_dir = zip_file.parent
     desktop_collection, mobile_collection = collections.collection_paths(type_, archive_dir)
 

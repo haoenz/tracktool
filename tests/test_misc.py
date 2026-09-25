@@ -139,15 +139,50 @@ class TestConfig:
         assert cfg.google_api_key("param-key") == "param-key"
 
 
+class TestLegacyKeyMigration:
+    """kml_zip_path（ZIP 文件）-> archive_path（归档目录）在 load 时平移一次。"""
+
+    def _load(self, tmp_path: Path, content: dict) -> tuple[Config, Path]:
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(content), encoding="utf-8")
+        cfg = Config(path=path).load()
+        return cfg, path
+
+    def test_old_key_is_moved_to_the_parent_directory(self, tmp_path: Path):
+        cfg, path = self._load(tmp_path, {"kml_zip_path": str(tmp_path / "arch" / "Archive.zip")})
+
+        assert cfg["archive_path"] == str(tmp_path / "arch")
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        assert "kml_zip_path" not in stored
+        assert stored["archive_path"] == str(tmp_path / "arch")
+
+    def test_an_old_key_that_is_there_twice_keeps_the_new_value(self, tmp_path: Path):
+        cfg, path = self._load(tmp_path, {"kml_zip_path": str(tmp_path / "a.zip"),
+                                          "archive_path": str(tmp_path / "b")})
+
+        assert cfg["archive_path"] == str(tmp_path / "b")
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        assert "kml_zip_path" not in stored
+
+    def test_an_empty_old_key_migrates_to_an_empty_new_one(self, tmp_path: Path):
+        cfg, _ = self._load(tmp_path, {"kml_zip_path": ""})
+        assert cfg["archive_path"] == ""
+
+    def test_a_file_without_the_old_key_is_left_alone(self, tmp_path: Path):
+        cfg, _ = self._load(tmp_path, {"log_level": "DEBUG"})
+        assert cfg["archive_path"] == ""
+        assert cfg["log_level"] == "DEBUG"
+
+
 class TestNormalize:
     def test_log_level_is_uppercased_and_validated(self):
         assert normalize("log_level", "debug") == "DEBUG"
         with pytest.raises(UserInputError, match="Unknown log level"):
             normalize("log_level", "LOUD")
 
-    def test_kml_zip_path_becomes_absolute(self, tmp_path: Path):
-        assert normalize("kml_zip_path", str(tmp_path / "x.zip")) == str(tmp_path / "x.zip")
-        assert Path(normalize("kml_zip_path", "~/x.zip")).is_absolute()
+    def test_archive_path_becomes_absolute(self, tmp_path: Path):
+        assert normalize("archive_path", str(tmp_path / "x")) == str(tmp_path / "x")
+        assert Path(normalize("archive_path", "~/tracks")).is_absolute()
 
     def test_other_keys_pass_through(self):
         assert normalize("kml_backup_dir_name", "Old") == "Old"
@@ -171,12 +206,12 @@ class TestConfigSetCommand:
         stored = json.loads(path.read_text(encoding="utf-8"))
         assert stored["log_level"] == "DEBUG"
 
-    def test_set_zip_path_stores_absolute(self, tmp_path: Path, monkeypatch):
+    def test_set_archive_path_stores_absolute(self, tmp_path: Path, monkeypatch):
         path = self._install(tmp_path, monkeypatch)
-        result = runner.invoke(app, ["config", "set", "kml_zip_path", "~/tracks.zip"])
+        result = runner.invoke(app, ["config", "set", "archive_path", "~/tracks"])
         assert result.exit_code == 0
         stored = json.loads(path.read_text(encoding="utf-8"))
-        assert Path(stored["kml_zip_path"]).is_absolute()
+        assert Path(stored["archive_path"]).is_absolute()
 
     def test_invalid_log_level_exits_one_without_writing(self, tmp_path: Path, monkeypatch):
         path = self._install(tmp_path, monkeypatch)

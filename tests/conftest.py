@@ -19,6 +19,25 @@ requires_media_tools = [
                        reason="requires " + " and ".join(_MEDIA_TOOLS)),
 ]
 
+def make_archive(directory: Path) -> Path:
+    """Declare a test archive directory the way `archive init` does; return the ZIP path.
+
+    Since E1 an archive exists only when its directory holds archive.json, so
+    any test that files tracks into one starts here instead of hand-writing
+    the manifest. Fixture setup, not a run under test: it forces APPLY so a
+    plan-mode test still gets its archive.
+    """
+    from tracktool.kml.archive import init_archive
+
+    mode = ctx.mode
+    ctx.mode = RunMode.APPLY
+    try:
+        init_archive(directory)
+    finally:
+        ctx.mode = mode
+    return directory / "Archive.zip"
+
+
 TRACK_KML = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
 <Document>

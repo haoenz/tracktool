@@ -15,7 +15,7 @@ from ..errors import UserInputError
 from ..fileutil import move_to_folder
 from ..metadata import is_missing_altitude
 from ..paths import display_path
-from ..workspace import resolve_zip_path
+from ..workspace import resolve_archive
 from . import archive, kmlfile, xmlutil
 from .collections import new_empty_kml
 
@@ -182,7 +182,7 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
     if no_archive:
         zip_file = None
     else:
-        zip_file = resolve_zip_path(None)
+        archive_dir, zip_file = resolve_archive(None)
         archive.ensure_zip_file(zip_file)
 
     output_path = output_path.resolve()
@@ -190,7 +190,6 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
         log.info(f"Saved merged KML to: {display_path(output_path)}")
 
     if zip_file is not None:
-        archive_dir = zip_file.parent
         for path in paths:
             archive.push_compressed_kml(path, zip_file)
             move_to_folder(path, ctx.config.kml_backup_dir_name, archive_dir)

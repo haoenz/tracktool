@@ -24,7 +24,7 @@ ENV_API_KEY = "TRACKTOOL_GOOGLE_API_KEY"
 
 DEFAULTS: dict[str, Any] = {
     "log_level": "INFO",
-    "kml_zip_path": "",
+    "archive_path": "",
     "kml_backup_dir_name": "Backup",
     "output_filters": "",
     "google_api_key": "",
@@ -38,14 +38,14 @@ def normalize(key: str, value: str) -> str:
     """Validate and canonicalize a value for `config set <key> <value>`.
 
     Per-key rules: log_level is uppercased and must be one of LEVELS;
-    kml_zip_path is expanded to an absolute path. Other keys pass through.
+    archive_path is expanded to an absolute path. Other keys pass through.
     """
     if key == "log_level":
         level = value.upper()
         if level not in LEVELS:
             raise UserInputError(f"Unknown log level: {value} (one of {', '.join(LEVELS)})")
         return level
-    if key == "kml_zip_path":
+    if key == "archive_path":
         return str(Path(value).expanduser().resolve())
     return value
 
@@ -65,8 +65,26 @@ class Config:
                 raise ConfigError(f"Failed to read config {display_path(self.path)}: {exc}") from exc
             if not isinstance(loaded, dict):
                 raise ConfigError(f"Config {display_path(self.path)} is not a JSON object")
+            migrated = self._migrate_legacy_keys(loaded)
             self._data.update(loaded)
+            if migrated:
+                # config 在层序最底、够不着 log，所以平移不发声；效果用 config show 看
+                self.save()
         return self
+
+    def _migrate_legacy_keys(self, loaded: dict[str, Any]) -> bool:
+        """kml_zip_path（ZIP 文件）-> archive_path（归档目录），读盘时平移一次。
+
+        只在文件里真有旧键、且没有新键时动手：平移值取旧 ZIP 的父目录。返回
+        是否改了内存数据，由调用方决定要不要回写。
+        """
+        if "kml_zip_path" not in loaded:
+            return False
+        if "archive_path" not in loaded:
+            old = str(loaded["kml_zip_path"] or "")
+            loaded["archive_path"] = str(Path(old).expanduser().resolve().parent) if old else ""
+        del loaded["kml_zip_path"]
+        return True
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

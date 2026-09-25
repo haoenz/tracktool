@@ -39,6 +39,8 @@ def scene(tmp_path: Path) -> Scene:
     archive = tmp_path / "Archive.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("2024-05-01 test.kml", TRACK_KML)
+    (tmp_path / "archive.json").write_text(
+        '{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
     return Scene(media=media, archive=archive)
 
 

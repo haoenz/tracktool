@@ -1,10 +1,11 @@
 """Tests for KML editing: split, bad-point removal, archive push/pop."""
 
+import json
 import zipfile
 from pathlib import Path
 
 import pytest
-from conftest import TRACK_KML
+from conftest import TRACK_KML, make_archive
 from typer.testing import CliRunner
 
 from tracktool import workflows
@@ -206,12 +207,12 @@ class TestAltitudeFromGoogle:
 
 
 class TestArchive:
-    """进档按需创建（目录、压缩包、空聚合），出档先核对再动手。"""
+    """进档先看归档身份（archive.json），出档先核对再动手。"""
 
     @staticmethod
     def _archive_dir(tmp_path: Path) -> Path:
         directory = tmp_path / "archive"
-        directory.mkdir()
+        make_archive(directory)
         return directory
 
     def test_push_creates_the_archive_and_both_collections(self, track_file: Path, tmp_path: Path):
@@ -223,20 +224,22 @@ class TestArchive:
         assert (zip_path.parent / "Default.kml").is_file()
         assert (zip_path.parent / "Default.Mobile.kml").is_file()
 
-    def test_push_creates_the_archive_directory(self, track_file: Path, tmp_path: Path):
-        zip_path = tmp_path / "archive" / "nested" / "Archive.zip"
+    def test_push_refuses_an_undeclared_directory(self, track_file: Path, tmp_path: Path):
+        """E1：路径打错时当场报错，而不是静默新建第二份归档。"""
+        undeclared = tmp_path / "typo"
 
-        _push(track_file, zip_path=zip_path)
+        with pytest.raises(UserInputError, match="not a tracktool archive"):
+            _push(track_file, zip_path=undeclared / "Archive.zip")
 
-        assert zip_path.is_file()
+        assert not undeclared.exists()
 
     def test_no_archive_creates_no_zip(self, track_file: Path, tmp_path: Path):
-        """--no-archive 只跳过 ZIP：聚合照建，也不该留下一个空压缩包。"""
+        """--no-archive 只跳过 ZIP：聚合照建，ZIP 保持为空。"""
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
 
         _push(track_file, zip_path=zip_path, no_archive=True)
 
-        assert not zip_path.exists()
+        assert not zip_path.exists() or not zipfile.ZipFile(zip_path).namelist()
         assert (zip_path.parent / "Default.kml").is_file()
 
     def test_a_second_push_appends_to_the_existing_archive(self, track_file: Path, tmp_path: Path):
@@ -282,6 +285,7 @@ class TestArchive:
 
     def test_pop_refuses_when_the_archive_is_missing(self, tmp_path: Path):
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
+        zip_path.unlink()  # 目录已声明，但 ZIP 被删了：照样拒绝
 
         with pytest.raises(UserInputError, match="KML compressed file does not exist"):
             archive.pop_kml_archive("2024-05-01 test", TrackType.DEFAULT, str(zip_path))
@@ -290,7 +294,7 @@ class TestArchive:
 
     def test_pop_refuses_when_the_collection_is_missing(self, tmp_path: Path):
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
-        with zipfile.ZipFile(zip_path, "w") as zf:
+        with zipfile.ZipFile(zip_path, "a") as zf:
             zf.writestr("2024-05-01 test.kml", TRACK_KML)
 
         with pytest.raises(UserInputError, match="Collection KML file does not exist"):
@@ -352,21 +356,69 @@ class TestArchive:
         assert track_file.name in zipfile.ZipFile(zip_path).namelist()
 
 
+class TestArchiveInit:
+    """`archive init` 是归档唯一的创建入口。"""
+
+    def test_init_declares_the_directory(self, tmp_path: Path):
+        directory = tmp_path / "archive"
+
+        result = runner.invoke(app, ["archive", "init", str(directory)])
+
+        assert result.exit_code == 0
+        manifest = directory / "archive.json"
+        assert manifest.is_file()
+        assert json.loads(manifest.read_text(encoding="utf-8"))["zip"] == "Archive.zip"
+        # 空 ZIP 是真 ZIP，不是 0 字节占位
+        assert zipfile.ZipFile(directory / "Archive.zip").testzip() is None
+
+    def test_init_refuses_an_already_declared_archive(self, tmp_path: Path):
+        directory = tmp_path / "archive"
+        make_archive(directory)
+
+        result = runner.invoke(app, ["archive", "init", str(directory)])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, UserInputError)
+
+    def test_init_adopts_existing_files(self, tmp_path: Path, track_file: Path):
+        """对已有归档文件的目录补办身份：ZIP 不被重建，轨迹一条不丢。"""
+        directory = tmp_path / "archive"
+        directory.mkdir()
+        zip_path = directory / "Archive.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.write(track_file, track_file.name)
+
+        result = runner.invoke(app, ["archive", "init", str(directory)])
+
+        assert result.exit_code == 0
+        assert track_file.name in zipfile.ZipFile(zip_path).namelist()
+
+    def test_init_in_plan_mode_writes_nothing(self, tmp_path: Path, monkeypatch):
+        from tracktool.context import RunMode
+
+        monkeypatch.setattr(ctx, "mode", RunMode.PLAN)
+        directory = tmp_path / "archive"
+
+        result = runner.invoke(app, ["--dry-run", "archive", "init", str(directory)])
+
+        assert result.exit_code == 0
+        assert not directory.exists()
+
+
 class TestKmlPopCommand:
     """--force 必须真的接到归档层，而不是只写在 help 里。"""
 
     @staticmethod
     def _invoke(zip_path: Path, tmp_path: Path, monkeypatch, args: list[str]):
         cfg = Config(path=tmp_path / "config.json").load()
-        cfg["kml_zip_path"] = str(zip_path)
+        cfg["archive_path"] = str(zip_path.parent)
         monkeypatch.setattr(ctx, "config", cfg)
         monkeypatch.chdir(tmp_path)  # pop 落在当前目录
         return runner.invoke(app, ["kml", "pop", *args])
 
     def test_archive_disagreement_needs_force(self, track_file: Path, tmp_path: Path, monkeypatch):
         archive_dir = tmp_path / "archive"
-        archive_dir.mkdir()
-        zip_path = archive_dir / "Archive.zip"
+        zip_path = make_archive(archive_dir)
         _push(track_file, zip_path=zip_path)
         _drop_zip_entry(zip_path, track_file.name)
         desktop = archive_dir / "Default.kml"

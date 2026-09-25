@@ -39,6 +39,8 @@ def _write_kml_zip(tmp_path: Path) -> Path:
     zip_path = tmp_path / "Archive.zip"
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr("2024-05-01 test.kml", TRACK_KML)
+    (tmp_path / "archive.json").write_text(
+        '{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
     return zip_path
 
 
@@ -47,7 +49,8 @@ def media_dir(tmp_path: Path, monkeypatch) -> tuple[Path, Config]:
     """Media directory plus a test Config installed as the context's config, so
     the batch entry points resolve the test ZIP without being handed one."""
     cfg = Config(path=tmp_path / "config.json").load()
-    cfg["kml_zip_path"] = str(_write_kml_zip(tmp_path))
+    _write_kml_zip(tmp_path)
+    cfg["archive_path"] = str(tmp_path)
     monkeypatch.setattr(ctx, "config", cfg)
     directory = tmp_path / "media"
     directory.mkdir()
@@ -133,7 +136,7 @@ class TestCliExitCodeReflectsBatch:
         _make_geotaggable_jpeg(good)
         (media_dir / "no-time.jpg").write_bytes(b"\x00")
 
-        result = self._invoke(media_dir, cfg["kml_zip_path"])
+        result = self._invoke(media_dir, str(Path(cfg["archive_path"]) / "Archive.zip"))
 
         assert result.exit_code == cli.EXIT_PARTIAL
         assert (media_dir / "Failed" / "no-time.jpg").is_file()
@@ -143,6 +146,6 @@ class TestCliExitCodeReflectsBatch:
         media_dir, cfg = media_dir
         (media_dir / "no-time.jpg").write_bytes(b"\x00")
 
-        result = self._invoke(media_dir, cfg["kml_zip_path"])
+        result = self._invoke(media_dir, str(Path(cfg["archive_path"]) / "Archive.zip"))
 
         assert result.exit_code == cli.EXIT_PARTIAL

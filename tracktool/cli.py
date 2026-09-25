@@ -40,11 +40,13 @@ app = typer.Typer(
     add_completion=False,
 )
 kml_app = typer.Typer(help="KML track management", no_args_is_help=True)
+archive_app = typer.Typer(help="Track archive: declare and inspect the archive directory", no_args_is_help=True)
 exif_app = typer.Typer(help="EXIF geotagging and media repair", no_args_is_help=True)
 google_app = typer.Typer(help="Google Maps API queries", no_args_is_help=True)
 hash_app = typer.Typer(help="MD5 hash log, duplicates, directory comparison", no_args_is_help=True)
 config_app = typer.Typer(help="Configuration", no_args_is_help=True)
 app.add_typer(kml_app, name="kml")
+app.add_typer(archive_app, name="archive")
 app.add_typer(exif_app, name="exif")
 app.add_typer(google_app, name="google")
 app.add_typer(hash_app, name="hash")
@@ -133,6 +135,25 @@ def _print_plan(result: BatchResult[Any]) -> None:
 
 
 # ── kml ─────────────────────────────────────────────────────────────────────
+
+
+@archive_app.command("init")
+def archive_init(
+    directory: Annotated[Path | None, typer.Argument(
+        help="Archive directory (default: the configured archive_path)")] = None,
+) -> None:
+    """Declare a directory as the track archive (manifest + ZIP).
+
+    The only command that creates an archive; everything else refuses an
+    undeclared directory instead of silently starting a second one.
+    """
+    if directory is None:
+        configured = str(ctx.config["archive_path"] or "")
+        if not configured:
+            raise UserInputError(
+                "No directory given and archive_path is not configured (set archive_path first)")
+        directory = Path(configured)
+    kml_archive.init_archive(directory)
 
 
 @kml_app.command("type")
@@ -535,7 +556,7 @@ def config_set(
     key: Annotated[str | None, typer.Argument(help="Config key")] = None,
     value: Annotated[str | None, typer.Argument(help="Config value")] = None,
 ) -> None:
-    """Set a configuration value (e.g. google_api_key, kml_zip_path, log_level)."""
+    """Set a configuration value (e.g. google_api_key, archive_path, log_level)."""
     available = ", ".join(sorted(DEFAULTS))
     if key is None:
         raise UserInputError(f"Usage: tracktool config set <key> <value>. Available keys: {available}")

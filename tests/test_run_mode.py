@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from conftest import TRACK_KML, InMemoryBackend
+from conftest import TRACK_KML, InMemoryBackend, make_archive
 from typer.testing import CliRunner
 
 from tracktool import dedup, workflows
@@ -79,31 +79,30 @@ class TestKmlWritesAreReported:
 
 
 class TestArchiveWritesAreReported:
-    def test_pushing_a_track_creates_nothing(self, tmp_path: Path, plan_mode):
+    def test_pushing_an_undeclared_archive_creates_nothing(self, tmp_path: Path, plan_mode):
+        """预演也不越过归档身份：未声明的目录直接报错，什么都不建。"""
         source = _kml(tmp_path)
         archive_dir = tmp_path / "archive"
-        archive_dir.mkdir()
-        zip_path = archive_dir / "Archive.zip"
 
-        runner.invoke(app, ["--dry-run", "kml", "push", str(source), "--zip", str(zip_path)])
+        result = runner.invoke(app, ["--dry-run", "kml", "push", str(source),
+                                     "--zip", str(archive_dir / "Archive.zip")])
 
-        assert list(archive_dir.iterdir()) == []      # 聚合、压缩包、Backup 一个都没建
-        assert source.is_file()                       # 也没被搬走
+        assert result.exit_code == 1
+        assert not archive_dir.exists()             # 目录没建
+        assert source.is_file()                     # 也没被搬走
 
     def test_popping_a_track_creates_nothing(self, tmp_path: Path, monkeypatch):
         source = _kml(tmp_path)
-        archive_dir = tmp_path / "archive"
-        archive_dir.mkdir()
-        zip_path = archive_dir / "Archive.zip"
+        zip_path = make_archive(tmp_path / "archive")
         workflows.push_tracks([source], str(zip_path), TrackType.DEFAULT)
-        before = sorted(p.name for p in archive_dir.iterdir())
+        before = sorted(p.name for p in zip_path.parent.iterdir())
 
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(app, ["--dry-run", "kml", "pop", source.stem, "--zip", str(zip_path)])
 
         assert result.exit_code == 0, result.output
         assert not (tmp_path / source.name).exists()
-        assert sorted(p.name for p in archive_dir.iterdir()) == before
+        assert sorted(p.name for p in zip_path.parent.iterdir()) == before
 
     def test_the_directory_and_the_zip_are_not_created(self, tmp_path: Path, plan_mode):
         zip_path = tmp_path / "archive" / "Archive.zip"

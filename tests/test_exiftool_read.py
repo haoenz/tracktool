@@ -182,8 +182,10 @@ class TestPositionReadsEachFileOnce:
         zip_path = tmp_path / "Archive.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("2024-05-01 test.kml", TRACK_KML)
+        (tmp_path / "archive.json").write_text(
+            '{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
         cfg = Config(path=tmp_path / "config.json").load()
-        cfg["kml_zip_path"] = str(zip_path)
+        cfg["archive_path"] = str(tmp_path)
         monkeypatch.setattr(ctx, "config", cfg)
 
         reads: list[tuple[str, ...]] = []
