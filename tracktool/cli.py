@@ -23,7 +23,7 @@ from .fileutil import BatchResult
 from .kml import archive as kml_archive
 from .kml import edit as kml_edit
 from .kml import kmlfile
-from .kml.kmlfile import TrackType
+from .kml.kmlfile import TrackKind
 from .paths import display_path
 from .progress import DEFAULT_WORKERS
 
@@ -162,13 +162,14 @@ def kml_type(
 ) -> None:
     """Print the track type (TrackTags)."""
     path = _resolve_path(path)
-    print(kmlfile.get_kml_type(path))
+    kind = kmlfile.get_kml_type(path)
+    print(kind if kind is not None else "Unknown")
 
 
 @kml_app.command("set-type")
 def kml_set_type(
     path: Annotated[Path, typer.Argument(help="KML file")],
-    track_type: Annotated[TrackType, typer.Argument(help="Track type (Default/Train/Flight)")],
+    track_type: Annotated[TrackKind, typer.Argument(help="Track type (Default/Train/Flight)")],
 ) -> None:
     """Set the track type (TrackTags) of a KML."""
     path = _resolve_path(path)
@@ -178,7 +179,7 @@ def kml_set_type(
 @kml_app.command("push")
 def kml_push(
     paths: Annotated[list[Path], typer.Argument(help="KML file(s) to archive")],
-    track_type: Annotated[TrackType | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
+    track_type: Annotated[TrackKind | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     no_archive: Annotated[bool, typer.Option("--no-archive", help="Skip adding to ZIP")] = False,
 ) -> None:
@@ -190,7 +191,7 @@ def kml_push(
 @kml_app.command("pop")
 def kml_pop(
     kml_name: Annotated[str, typer.Argument(help="Track name to restore")],
-    track_type: Annotated[TrackType, typer.Option("--type", help="Track type")] = TrackType.DEFAULT,
+    track_type: Annotated[TrackKind, typer.Option("--type", help="Track type")] = TrackKind.DEFAULT,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     force: Annotated[bool, typer.Option(
         "--force", help="Warn instead of stopping when the archive disagrees")] = False,

@@ -26,7 +26,7 @@ from ..errors import UserInputError
 from ..paths import display_path
 from ..workspace import DEFAULT_ZIP_NAME, manifest_path, resolve_archive
 from . import collections
-from .kmlfile import TrackType
+from .kmlfile import TrackKind
 
 
 def init_archive(directory: Path, zip_name: str = DEFAULT_ZIP_NAME) -> None:
@@ -195,7 +195,7 @@ def _inspect_archive(kml_name: str, zip_file: Path, desktop_collection: Path,
     return _ArchiveState(zip_entry, in_desktop, in_mobile, problems)
 
 
-def pop_kml_archive(kml_name: str, type_: TrackType = TrackType.DEFAULT, zip_path: str | None = None,
+def pop_kml_archive(kml_name: str, type_: TrackKind = TrackKind.DEFAULT, zip_path: str | None = None,
                     force: bool = False) -> None:
     """Restore a KML track: extract from ZIP and remove from both collections.
 

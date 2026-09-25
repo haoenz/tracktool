@@ -14,58 +14,62 @@ from ..tags import POS_END_NAME, POS_START_NAME, TRACK_TAGS
 from . import xmlutil
 
 
-class TrackType(StrEnum):
-    """Track category shared by kmlfile/archive/cli; value doubles as collection filename."""
+class TrackKind(StrEnum):
+    """Track category: doubles as the collection file name and the --type domain.
+
+    Recognition results are not a kind: `get_kml_type` returns None when it
+    cannot recognize a file, instead of an UNKNOWN member that could be filed
+    into an `Unknown.kml` collection.
+    """
 
     DEFAULT = "Default"
     TRAIN = "Train"
     FLIGHT = "Flight"
-    UNKNOWN = "Unknown"
 
 
 # 2bulu TrackTags (Chinese activity names) -> category
-TAG_TO_TYPE = {
-    "默认": TrackType.DEFAULT,
-    "徒步": TrackType.DEFAULT,
-    "爬山": TrackType.DEFAULT,
-    "骑行": TrackType.DEFAULT,
-    "驾车": TrackType.DEFAULT,
-    "摩托": TrackType.DEFAULT,
-    "轮船": TrackType.DEFAULT,
-    "散步": TrackType.DEFAULT,
-    "飞机": TrackType.FLIGHT,
-    "滑翔": TrackType.FLIGHT,
-    "轨交": TrackType.TRAIN,
-    "缆车": TrackType.TRAIN,
-    "地铁": TrackType.TRAIN,
-    "火车": TrackType.TRAIN,
+TAG_TO_KIND = {
+    "默认": TrackKind.DEFAULT,
+    "徒步": TrackKind.DEFAULT,
+    "爬山": TrackKind.DEFAULT,
+    "骑行": TrackKind.DEFAULT,
+    "驾车": TrackKind.DEFAULT,
+    "摩托": TrackKind.DEFAULT,
+    "轮船": TrackKind.DEFAULT,
+    "散步": TrackKind.DEFAULT,
+    "飞机": TrackKind.FLIGHT,
+    "滑翔": TrackKind.FLIGHT,
+    "轨交": TrackKind.TRAIN,
+    "缆车": TrackKind.TRAIN,
+    "地铁": TrackKind.TRAIN,
+    "火车": TrackKind.TRAIN,
 }
 
 
-def get_kml_type(path: Path) -> TrackType:
-    """Map the TrackTags ExtendedData value to a TrackType."""
+def get_kml_type(path: Path) -> TrackKind | None:
+    """Map the TrackTags ExtendedData value to a TrackKind; None when unrecognized."""
     tree = xmlutil.parse_file(path)
     track_tags = xmlutil.extended_data_value(tree, TRACK_TAGS)
-    kml_type = TAG_TO_TYPE.get(track_tags)
-    if kml_type is None:
+    kind = TAG_TO_KIND.get(track_tags)
+    if kind is None:
         # set_kml_type 写入的是英文名（如 "Train"），接受它使 set→get 往返成立
         try:
-            kml_type = TrackType(track_tags)
+            kind = TrackKind(track_tags)
         except ValueError:
-            kml_type = TrackType.UNKNOWN
-    log.debug(f"Detected track type: {kml_type} (tag: {track_tags})", target=str(path))
-    return kml_type
+            kind = None
+    log.debug(f"Detected track type: {kind} (tag: {track_tags})", target=str(path))
+    return kind
 
 
-def set_kml_type(path: Path, type_: TrackType) -> None:
+def set_kml_type(path: Path, kind: TrackKind) -> None:
     """Overwrite the TrackTags ExtendedData value in place."""
     tree = xmlutil.parse_file(path)
     nodes = xmlutil.findall(
         tree, f"/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='{TRACK_TAGS}']/kml:value")
     for node in nodes:
-        node.text = type_.value
+        node.text = kind.value
     if xmlutil.save(tree, path):
-        log.info(f"Updated track tags to: {type_.value}", target=str(path))
+        log.info(f"Updated track tags to: {kind.value}", target=str(path))
 
 
 @dataclass

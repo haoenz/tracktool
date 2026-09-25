@@ -46,7 +46,7 @@ from .exif.position import GeotagOptions, geotag_from_kml
 from .exif.write import find_missing_tag
 from .fileutil import BatchResult, move_to_folder
 from .kml import archive, collections, kmlfile
-from .kml.kmlfile import KmlContent, TrackType
+from .kml.kmlfile import KmlContent, TrackKind
 from .paths import display_path
 from .tags import ALTITUDE, POSITION
 from .workspace import resolve_archive
@@ -59,11 +59,11 @@ class _Track:
     """A track on its way into the archive: read once, filed once."""
 
     path: Path
-    type_: TrackType
+    type_: TrackKind
     content: KmlContent
 
 
-def _read_track(path: Path, type_: TrackType | None) -> _Track | None:
+def _read_track(path: Path, type_: TrackKind | None) -> _Track | None:
     """Read what the archive needs from a track; None — logged — when it cannot be filed.
 
     Reading happens while the plan is built, so a track that cannot be filed
@@ -77,8 +77,10 @@ def _read_track(path: Path, type_: TrackType | None) -> _Track | None:
     except UserInputError as exc:
         log.error(str(exc), target=str(path))
         return None
-    if kind is TrackType.UNKNOWN:
-        log.error("Cannot archive track with unknown type", target=str(path))
+    if kind is None:
+        # 识别不出不是一种类型：报错让人指定，而不是归进一个 Unknown 类目
+        log.error("Cannot recognize the track type (set one with `kml set-type` or pass --type)",
+                  target=str(path))
         return None
     return _Track(path=path, type_=kind, content=content)
 
@@ -87,7 +89,7 @@ def _names(tracks: list[_Track]) -> str:
     return ", ".join(track.path.stem for track in tracks)
 
 
-def _file_desktop(collection_path: Path, type_: TrackType, tracks: list[_Track]) -> None:
+def _file_desktop(collection_path: Path, type_: TrackKind, tracks: list[_Track]) -> None:
     """File the batch's tracks of one type into their desktop collection."""
     archive.ensure_archive_directory(collection_path.parent)
     collection = collections.DesktopCollection.open(collection_path, type_)
@@ -116,7 +118,7 @@ def _move_to_backup(tracks: list[_Track], archive_dir: Path) -> None:
         move_to_folder(track.path, ctx.config.kml_backup_dir_name, archive_dir)
 
 
-def push_tracks(paths: list[Path], zip_path: str | None = None, type_: TrackType | None = None,
+def push_tracks(paths: list[Path], zip_path: str | None = None, type_: TrackKind | None = None,
                 no_archive: bool = False) -> BatchResult[list[Action]]:
     """File tracks into the archive: both collections, the ZIP, the backup folder.
 
@@ -137,7 +139,7 @@ def push_tracks(paths: list[Path], zip_path: str | None = None, type_: TrackType
         else:
             pending.append(track)
 
-    by_type: dict[TrackType, list[_Track]] = defaultdict(list)
+    by_type: dict[TrackKind, list[_Track]] = defaultdict(list)
     for track in pending:
         by_type[track.type_].append(track)
 

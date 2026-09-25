@@ -21,13 +21,13 @@ from .. import log
 from ..errors import UserInputError
 from ..paths import display_path
 from . import xmlutil
-from .kmlfile import KmlContent, TrackType
+from .kmlfile import KmlContent, TrackKind
 
 # Collection style per track type: (name, LineStyle color)
 COLLECTION_STYLES = {
-    TrackType.DEFAULT: ("普通行程", "ff2257ff"),
-    TrackType.TRAIN: ("火车行程", "ff413830"),
-    TrackType.FLIGHT: ("飞机行程", "1ab5ad00"),
+    TrackKind.DEFAULT: ("普通行程", "ff2257ff"),
+    TrackKind.TRAIN: ("火车行程", "ff413830"),
+    TrackKind.FLIGHT: ("飞机行程", "1ab5ad00"),
 }
 
 _DATE_NAME_PATTERN = re.compile(r"(\d{4})-(\d{2})-\d{2}")
@@ -64,7 +64,7 @@ _EMPTY_MOBILE_TEMPLATE = """<?xml version='1.0' encoding='UTF-8'?>
 </kml>"""
 
 
-def new_empty_kml(type_: TrackType | None = None) -> xmlutil.etree._ElementTree:
+def new_empty_kml(type_: TrackKind | None = None) -> xmlutil.etree._ElementTree:
     """An empty collection document, styled for the track type when given."""
     if type_ is not None:
         name, color = COLLECTION_STYLES[type_]
@@ -73,7 +73,7 @@ def new_empty_kml(type_: TrackType | None = None) -> xmlutil.etree._ElementTree:
     return xmlutil.parse_string(_EMPTY_PLAIN_TEMPLATE.format(kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS))
 
 
-def collection_paths(type_: TrackType, archive_dir: Path) -> tuple[Path, Path]:
+def collection_paths(type_: TrackKind, archive_dir: Path) -> tuple[Path, Path]:
     """(desktop, mobile) — both named after the track type, both beside the ZIP."""
     return archive_dir / f"{type_}.kml", archive_dir / f"{type_}.Mobile.kml"
 
@@ -109,7 +109,7 @@ class DesktopCollection(TrackCollection):
     """Folder[year] > Document[yyyymm] > Placemark, one Placemark per track."""
 
     @classmethod
-    def open(cls, path: Path, type_: TrackType) -> Self:
+    def open(cls, path: Path, type_: TrackKind) -> Self:
         """Load the desktop collection, creating it empty when the archive is new."""
         if path.is_file():
             return cls(path, xmlutil.parse_file(path))

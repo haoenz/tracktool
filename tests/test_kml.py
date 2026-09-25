@@ -14,7 +14,7 @@ from tracktool.config import Config
 from tracktool.context import ctx
 from tracktool.errors import UserInputError
 from tracktool.kml import archive, edit, kmlfile, xmlutil
-from tracktool.kml.kmlfile import TrackType
+from tracktool.kml.kmlfile import TrackKind
 
 runner = CliRunner()
 
@@ -29,7 +29,7 @@ def _drop_zip_entry(zip_path: Path, entry_name: str) -> None:
             zf.writestr(name, blob)
 
 
-def _push(*tracks: Path, zip_path: Path, type_: TrackType | None = TrackType.DEFAULT,
+def _push(*tracks: Path, zip_path: Path, type_: TrackKind | None = TrackKind.DEFAULT,
           no_archive: bool = False) -> list[Path]:
     """File tracks the way `kml push` does; returns the ones it could not file."""
     return workflows.push_tracks(list(tracks), str(zip_path), type_, no_archive).failed
@@ -275,7 +275,7 @@ class TestArchive:
         assert len(xmlutil.findall(xmlutil.parse_file(mobile), "//kml:LineString")) == 1
 
         # pop: 取回并从两个汇总移除
-        archive.pop_kml_archive(track_file.stem, TrackType.DEFAULT, str(zip_path))
+        archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path))
 
         with zipfile.ZipFile(zip_path) as zf:
             assert track_file.name not in zf.namelist()
@@ -288,7 +288,7 @@ class TestArchive:
         zip_path.unlink()  # 目录已声明，但 ZIP 被删了：照样拒绝
 
         with pytest.raises(UserInputError, match="KML compressed file does not exist"):
-            archive.pop_kml_archive("2024-05-01 test", TrackType.DEFAULT, str(zip_path))
+            archive.pop_kml_archive("2024-05-01 test", TrackKind.DEFAULT, str(zip_path))
 
         assert not zip_path.exists()  # 出档不创建任何东西
 
@@ -298,7 +298,7 @@ class TestArchive:
             zf.writestr("2024-05-01 test.kml", TRACK_KML)
 
         with pytest.raises(UserInputError, match="Collection KML file does not exist"):
-            archive.pop_kml_archive("2024-05-01 test", TrackType.DEFAULT, str(zip_path))
+            archive.pop_kml_archive("2024-05-01 test", TrackKind.DEFAULT, str(zip_path))
 
         # 核对发生在动手之前：归档没被取走
         assert "2024-05-01 test.kml" in zipfile.ZipFile(zip_path).namelist()
@@ -309,7 +309,7 @@ class TestArchive:
         _drop_zip_entry(zip_path, track_file.name)
 
         with pytest.raises(UserInputError, match="Track not found in ZIP"):
-            archive.pop_kml_archive(track_file.stem, TrackType.DEFAULT, str(zip_path))
+            archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path))
 
         desktop_tree = xmlutil.parse_file(zip_path.parent / "Default.kml")
         assert len(xmlutil.findall(desktop_tree, "//kml:Placemark")) == 1  # 聚合未被清
@@ -325,7 +325,7 @@ class TestArchive:
         xmlutil.save(tree, desktop)
 
         with pytest.raises(UserInputError, match="Track not found in collection"):
-            archive.pop_kml_archive(track_file.stem, TrackType.DEFAULT, str(zip_path))
+            archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path))
 
         assert track_file.name in zipfile.ZipFile(zip_path).namelist()
 
@@ -335,7 +335,7 @@ class TestArchive:
         _drop_zip_entry(zip_path, track_file.name)
 
         # 轨迹只留在聚合里：跳过 ZIP 那一步，聚合照清
-        archive.pop_kml_archive(track_file.stem, TrackType.DEFAULT, str(zip_path), force=True)
+        archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path), force=True)
 
         desktop = zip_path.parent / "Default.kml"
         mobile = zip_path.parent / "Default.Mobile.kml"
@@ -350,7 +350,7 @@ class TestArchive:
         track_file.write_text("occupied", encoding="utf-8")
 
         with pytest.raises(UserInputError, match="already exists at destination"):
-            archive.pop_kml_archive(track_file.stem, TrackType.DEFAULT, str(zip_path))
+            archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path))
 
         # 没落到磁盘就不删档：轨迹还在压缩包里
         assert track_file.name in zipfile.ZipFile(zip_path).namelist()
@@ -432,8 +432,8 @@ class TestKmlPopCommand:
         assert len(xmlutil.findall(xmlutil.parse_file(desktop), "//kml:Placemark")) == 0
 
 
-class TestTrackType:
-    """Issue #7: TrackType StrEnum + set→get roundtrip."""
+class TestTrackKind:
+    """Issue #7: TrackKind StrEnum + set→get roundtrip."""
 
     @staticmethod
     def _kml_with_track_tags(tmp_path: Path, tag: str = "火车") -> Path:
@@ -451,12 +451,12 @@ class TestTrackType:
     def test_set_get_roundtrip(self, tmp_path: Path):
         # kml set-type 写入的是英文名（如 "Train"），get 必须能读回，不再落 Unknown
         kml = self._kml_with_track_tags(tmp_path, "火车")
-        kmlfile.set_kml_type(kml, TrackType.TRAIN)
-        assert kmlfile.get_kml_type(kml) is TrackType.TRAIN
+        kmlfile.set_kml_type(kml, TrackKind.TRAIN)
+        assert kmlfile.get_kml_type(kml) is TrackKind.TRAIN
 
     def test_written_value_is_plain_string(self, tmp_path: Path):
         kml = self._kml_with_track_tags(tmp_path, "火车")
-        kmlfile.set_kml_type(kml, TrackType.FLIGHT)
+        kmlfile.set_kml_type(kml, TrackKind.FLIGHT)
         tree = xmlutil.parse_file(kml)
         node = xmlutil.find(tree, "/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='TrackTags']/kml:value")
         assert (node.text or "") == "Flight"
@@ -483,3 +483,16 @@ class TestTrackType:
         kml.write_text(TRACK_KML, encoding="utf-8")
         result = runner.invoke(app, ["kml", "push", str(kml), "--type", "default"])
         assert result.exit_code != 0
+
+    def test_unknown_is_not_a_type_anymore(self, tmp_path: Path):
+        """E4：识别不出不是一种类型——Unknown 退出命令行取值域。"""
+        kml = tmp_path / "2024-05-01 test.kml"
+        kml.write_text(TRACK_KML, encoding="utf-8")
+
+        result = runner.invoke(app, ["kml", "pop", "whatever", "--type", "Unknown"])
+        # CliRunner 直接拿 typer 的保留码 2；经 cli_main 入口会归一成 1
+        assert result.exit_code == 2
+
+        result = runner.invoke(app, ["kml", "type", str(kml)])
+        assert result.exit_code == 0
+        assert result.output.strip() == "Unknown"  # 只是识别结果的如实呈现

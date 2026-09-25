@@ -21,7 +21,7 @@ from tracktool.context import ctx
 from tracktool.errors import UserInputError
 from tracktool.fileutil import move_to_folder
 from tracktool.kml import archive, xmlutil
-from tracktool.kml.kmlfile import TrackType
+from tracktool.kml.kmlfile import TrackKind
 
 runner = CliRunner()
 
@@ -94,7 +94,7 @@ class TestArchiveWritesAreReported:
     def test_popping_a_track_creates_nothing(self, tmp_path: Path, monkeypatch):
         source = _kml(tmp_path)
         zip_path = make_archive(tmp_path / "archive")
-        workflows.push_tracks([source], str(zip_path), TrackType.DEFAULT)
+        workflows.push_tracks([source], str(zip_path), TrackKind.DEFAULT)
         before = sorted(p.name for p in zip_path.parent.iterdir())
 
         monkeypatch.chdir(tmp_path)

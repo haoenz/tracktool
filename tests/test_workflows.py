@@ -22,7 +22,7 @@ from tracktool.context import ctx
 from tracktool.errors import UserInputError
 from tracktool.fileutil import BatchResult
 from tracktool.kml import xmlutil
-from tracktool.kml.kmlfile import TrackType
+from tracktool.kml.kmlfile import TrackKind
 
 runner = CliRunner()
 
@@ -58,7 +58,7 @@ class TestPushBatch:
         zip_path = _archive(tmp_path)
         tracks = [_track(tmp_path, f"2024-05-0{i} t{i}.kml") for i in (1, 2, 3)]
 
-        result = workflows.push_tracks(tracks, str(zip_path), TrackType.DEFAULT)
+        result = workflows.push_tracks(tracks, str(zip_path), TrackKind.DEFAULT)
 
         assert result.ok
         assert sorted(zipfile.ZipFile(zip_path).namelist()) == sorted(t.name for t in tracks)
@@ -72,7 +72,7 @@ class TestPushBatch:
 
     def test_the_collection_is_read_and_written_once_for_the_whole_batch(self, tmp_path: Path, monkeypatch):
         zip_path = _archive(tmp_path)
-        workflows.push_tracks([_track(tmp_path, "2024-05-01 first.kml")], str(zip_path), TrackType.DEFAULT)
+        workflows.push_tracks([_track(tmp_path, "2024-05-01 first.kml")], str(zip_path), TrackKind.DEFAULT)
         tracks = [_track(tmp_path, f"2024-05-0{i} t{i}.kml") for i in (2, 3, 4)]
         desktop_path = zip_path.parent / "Default.kml"
 
@@ -82,7 +82,7 @@ class TestPushBatch:
         monkeypatch.setattr(xmlutil, "parse_file", lambda path: (reads.append(Path(path)), real_parse(path))[1])
         monkeypatch.setattr(xmlutil, "save", lambda tree, path: (writes.append(Path(path)), real_save(tree, path))[1])
 
-        workflows.push_tracks(tracks, str(zip_path), TrackType.DEFAULT)
+        workflows.push_tracks(tracks, str(zip_path), TrackKind.DEFAULT)
 
         # 三条轨迹：聚合读一次、写一次（逐条进档会是各三次）
         assert reads.count(desktop_path) == 1
@@ -105,7 +105,7 @@ class TestPushBatch:
         zip_path = _archive(tmp_path)
         track = _track(tmp_path, "2024-05-01 a.kml")
 
-        workflows.push_tracks([track], str(zip_path), TrackType.DEFAULT, no_archive=True)
+        workflows.push_tracks([track], str(zip_path), TrackKind.DEFAULT, no_archive=True)
 
         assert zipfile.ZipFile(zip_path).namelist() == []  # ZIP 保持着建档时的空壳
         assert (zip_path.parent / "Default.kml").is_file()
@@ -115,7 +115,7 @@ class TestPushBatch:
     def test_the_plan_names_the_steps_in_order(self, tmp_path: Path, plan_mode):
         zip_path = _archive(tmp_path)
 
-        result = workflows.push_tracks([_track(tmp_path, "2024-05-01 a.kml")], str(zip_path), TrackType.DEFAULT)
+        result = workflows.push_tracks([_track(tmp_path, "2024-05-01 a.kml")], str(zip_path), TrackKind.DEFAULT)
 
         assert _kinds(result) == ["add to collection", "add to mobile collection",
                                   "append to ZIP", "move to backup folder"]
@@ -140,7 +140,7 @@ class TestATrackThatCannotBeFiled:
         zip_path = _archive(tmp_path)
         track = _track(tmp_path, "no date here.kml")
 
-        result = workflows.push_tracks([track], str(zip_path), TrackType.DEFAULT)
+        result = workflows.push_tracks([track], str(zip_path), TrackKind.DEFAULT)
 
         assert result.failed == [track]
         assert track.is_file()
@@ -151,7 +151,7 @@ class TestATrackThatCannotBeFiled:
         zip_path = _archive(tmp_path)
         broken = _track(tmp_path, "2024-05-01 broken.kml", "<not-kml")
 
-        result = workflows.push_tracks([broken], str(zip_path), TrackType.DEFAULT)
+        result = workflows.push_tracks([broken], str(zip_path), TrackKind.DEFAULT)
 
         assert result.failed == [broken]
         assert broken.is_file()
