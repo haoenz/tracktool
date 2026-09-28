@@ -1,5 +1,6 @@
 """Tests for media time parsing and KML timestamp/point matching logic."""
 
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,7 +11,9 @@ from tracktool import mediatime
 from tracktool.actions import Failed, Skip, WriteTags
 from tracktool.exif.position import (
     GeotagOptions,
+    _candidate_dates,
     _find_best_track,
+    _TrackLibrary,
     _verify_or_skip,
     decide_position,
 )
@@ -139,6 +142,81 @@ class TestFindBestTrack:
                              "2024-05-01 empty.kml")]
         assert _find_best_track(tracks, datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC),
                                 multiday=False) is None
+
+
+class TestCandidateDates:
+    def test_single_day(self):
+        assert _candidate_dates(datetime(2024, 5, 1, 12, 0), multiday=False) == ["2024-05-01"]
+
+    def test_multiday_reaches_into_neighbor_months(self):
+        dates = _candidate_dates(datetime(2024, 5, 1, 0, 30), multiday=True)
+        assert dates == ["2024-05-01", "2024-04-30", "2024-05-02"]
+
+
+class TestTrackLibrary:
+    """The layered ZIP read per month, not whole; flat entries stay findable."""
+
+    @staticmethod
+    def _zip(tmp_path: Path, entries: dict[str, str]) -> Path:
+        zip_path = tmp_path / "Archive.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for name, text in entries.items():
+                zf.writestr(name, text)
+        return zip_path
+
+    def test_layered_entries_load_by_month(self, tmp_path):
+        zip_path = self._zip(tmp_path, {
+            "Default/2024-05/2024-05-01 a.kml": TRACK_KML,
+            "Default/2024-06/2024-06-01 b.kml": TRACK_KML,
+        })
+        library = _TrackLibrary(zip_path)
+
+        assert [t.name for t in library.tracks_for(["2024-05-01"])] == ["2024-05-01 a.kml"]
+
+    def test_unlayered_entries_are_always_available(self, tmp_path):
+        zip_path = self._zip(tmp_path, {"2024-05-01 flat.kml": TRACK_KML})
+        library = _TrackLibrary(zip_path)
+
+        assert [t.name for t in library.tracks_for(["2023-01-01"])] == ["2024-05-01 flat.kml"]
+
+    def test_multiday_window_spans_months(self, tmp_path):
+        zip_path = self._zip(tmp_path, {
+            "Train/2024-04/2024-04-30 t.kml": TRACK_KML,
+            "Train/2024-05/2024-05-02 t.kml": TRACK_KML,
+        })
+        library = _TrackLibrary(zip_path)
+
+        names = {t.name for t in library.tracks_for(
+            _candidate_dates(datetime(2024, 5, 1, 0, 0), multiday=True))}
+        assert names == {"2024-04-30 t.kml", "2024-05-02 t.kml"}
+
+    def test_a_month_parses_once_and_is_cached(self, tmp_path):
+        zip_path = self._zip(tmp_path, {"Default/2024-05/2024-05-01 a.kml": TRACK_KML})
+        library = _TrackLibrary(zip_path)
+
+        first = library.tracks_for(["2024-05-01"])
+        second = library.tracks_for(["2024-05-20"])
+
+        assert second == first  # 同一月份只解析一次：两次查询拿到同一批 Track 对象
+
+    def test_broken_kml_is_skipped_not_fatal(self, tmp_path):
+        broken = TRACK_KML.replace("<when>2024-05-01T00:02:00Z</when>", "")
+        zip_path = self._zip(tmp_path, {
+            "Default/2024-05/2024-05-01 bad.kml": broken,
+            "Default/2024-05/2024-05-01 good.kml": TRACK_KML,
+        })
+        library = _TrackLibrary(zip_path)
+
+        assert [t.name for t in library.tracks_for(["2024-05-01"])] == ["2024-05-01 good.kml"]
+
+    def test_non_kml_entries_are_ignored(self, tmp_path):
+        zip_path = self._zip(tmp_path, {
+            "Default/2024-05/2024-05-01 a.kml": TRACK_KML,
+            "Default/2024-05/notes.txt": "not a track",
+        })
+        library = _TrackLibrary(zip_path)
+
+        assert [t.name for t in library.tracks_for(["2024-05-01"])] == ["2024-05-01 a.kml"]
 
 
 class TestVerifyOrSkip:

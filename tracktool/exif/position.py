@@ -1,15 +1,19 @@
 """Geotag media from KML tracks by timestamp matching.
 
-Every KML in the archive is loaded into a Track once for the batch; each
-media file's timestamp is matched against the tracks whose name carries the
-date (±1 day with -Multiday). A match strictly inside a track's duration
-wins immediately, otherwise the smallest outside-diff is used when it is
-within MaxTimeDiffSeconds (default 60s).
+The archive's tracks are read and parsed per month on first demand — layered
+entries carry their month in the entry path, so a batch whose media spans two
+weeks touches two months' entries instead of decompressing the whole ZIP —
+and each media file's timestamp is matched against the tracks whose name
+carries the date (±1 day with -Multiday). A match strictly inside a track's
+duration wins immediately, otherwise the smallest outside-diff is used when
+it is within MaxTimeDiffSeconds (default 60s).
 
 `decide_position` holds that whole rule as a function of one file's metadata
 and a track lookup, returning the steps to take; the batch only replays them.
 """
 
+import re
+import threading
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -32,21 +36,81 @@ from ..workspace import resolve_archive
 from .write import SetExifOptions, build_tags
 
 
-def _load_tracks(zip_path: Path) -> list[Track]:
-    """Every KML in the archive as a Track; a broken one is skipped, not fatal."""
-    tracks: list[Track] = []
-    with zipfile.ZipFile(zip_path) as zf:
-        for info in zf.infolist():
+class _TrackLibrary:
+    """The archive's tracks, read and parsed per month on first demand.
+
+    Layered entries carry their month in the path (`<Kind>/<YYYY-MM>/<name>`),
+    so a batch whose media spans two weeks touches two months' entries instead
+    of decompressing the whole ZIP. Entries without a month segment — legacy
+    flat names, merge outputs with odd names — belong to no month and stay
+    available to every lookup. A month is parsed once per batch; a broken KML
+    is skipped with a warning, not fatal.
+    """
+
+    _MONTH = re.compile(r"^\d{4}-\d{2}$")
+
+    def __init__(self, zip_path: Path) -> None:
+        self._zip_path = zip_path
+        self._zf = zipfile.ZipFile(zip_path)
+        self._by_month: dict[str, list[zipfile.ZipInfo]] = {}
+        self._unlayered: list[zipfile.ZipInfo] = []
+        total = 0
+        for info in self._zf.infolist():
             if not info.filename.lower().endswith(".kml"):
                 continue
-            name = Path(info.filename).name
-            text = zf.read(info.filename).decode("utf-8")
-            try:
-                tracks.append(Track.from_kml(xmlutil.parse_string(text), name))
-            except UserInputError as exc:
-                log.warning(f"Skipping broken KML track: {exc}")
-    log.info(f"Loaded {len(tracks)} KML files into memory from ZIP: {display_path(zip_path)}")
-    return tracks
+            total += 1
+            parts = info.filename.split("/")
+            month = parts[1] if len(parts) >= 3 and self._MONTH.match(parts[1]) else None
+            if month is None:
+                self._unlayered.append(info)
+            else:
+                self._by_month.setdefault(month, []).append(info)
+        self._cache: dict[str, list[Track]] = {}
+        self._unlayered_tracks: list[Track] | None = None
+        self._lock = threading.Lock()
+        log.info(f"Archive holds {total} KML entries in {len(self._by_month)} months: "
+                 f"{display_path(zip_path)}")
+
+    def tracks_for(self, dates: list[str]) -> list[Track]:
+        """Every track the candidate dates could match, parsed once per month."""
+        tracks: list[Track] = []
+        for month in sorted({date[:7] for date in dates}):
+            tracks.extend(self._month_tracks(month))
+        if self._unlayered:
+            tracks.extend(self._always_tracks())
+        return tracks
+
+    def _month_tracks(self, month: str) -> list[Track]:
+        cached = self._cache.get(month)
+        if cached is not None:
+            return cached
+        with self._lock:
+            cached = self._cache.get(month)
+            if cached is None:
+                infos = self._by_month.get(month, [])
+                cached = [track for info in infos if (track := self._parse(info)) is not None]
+                self._cache[month] = cached
+                log.debug(f"Loaded {len(cached)} tracks for {month} from ZIP: "
+                          f"{display_path(self._zip_path)}")
+        return cached
+
+    def _always_tracks(self) -> list[Track]:
+        with self._lock:
+            if self._unlayered_tracks is None:
+                self._unlayered_tracks = [track for info in self._unlayered
+                                          if (track := self._parse(info)) is not None]
+            return self._unlayered_tracks
+
+    def _parse(self, info: zipfile.ZipInfo) -> Track | None:
+        """Read and parse one entry; the caller holds the lock, since zipfile's
+        one shared file object does not take kindly to concurrent reads."""
+        name = Path(info.filename).name
+        try:
+            text = self._zf.read(info.filename).decode("utf-8")
+            return Track.from_kml(xmlutil.parse_string(text), name)
+        except (UserInputError, BadZipFile, UnicodeDecodeError) as exc:
+            log.warning(f"Skipping broken KML track: {exc}")
+            return None
 
 
 MAX_TIME_DIFF_SECONDS = 60
@@ -67,15 +131,21 @@ class GeotagOptions:
 FindBestTrack = Callable[[datetime], "TrackMatch | None"]
 
 
+def _candidate_dates(media_time: datetime, multiday: bool) -> list[str]:
+    """The track-name dates one media time can match: its own, ±1 day with multiday."""
+    dates = [media_time.strftime("%Y-%m-%d")]
+    if multiday:
+        dates.append((media_time - timedelta(days=1)).strftime("%Y-%m-%d"))
+        dates.append((media_time + timedelta(days=1)).strftime("%Y-%m-%d"))
+    return dates
+
+
 def _find_best_track(tracks: list[Track], media_time: datetime, multiday: bool,
                      target_file: str | None = None) -> TrackMatch | None:
     """Nearest point among KMLs whose name contains the media date (±1 day
     with multiday): an in-duration match wins immediately, otherwise the
     closest out-of-duration point is kept."""
-    dates = [media_time.strftime("%Y-%m-%d")]
-    if multiday:
-        dates.append((media_time - timedelta(days=1)).strftime("%Y-%m-%d"))
-        dates.append((media_time + timedelta(days=1)).strftime("%Y-%m-%d"))
+    dates = _candidate_dates(media_time, multiday)
 
     best: TrackMatch | None = None
     for candidate in tracks:
@@ -156,15 +226,16 @@ def geotag_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
                           parallel: bool = False) -> BatchResult[list[Action]]:
     """Set GPS position/altitude on media files from the KML ZIP archive.
 
-    A file list is accepted so one call can cover a whole selection: the archive
-    is read and parsed once for the batch, not once per file.
+    A file list is accepted so one call can cover a whole selection: the
+    archive's relevant months are read and parsed once for the batch, not
+    once per file.
     """
     options = options or GeotagOptions()
 
     archive_dir, zip_path = resolve_archive(kml_zip_path)
 
     try:
-        tracks = _load_tracks(zip_path)
+        library = _TrackLibrary(zip_path)
     except (OSError, BadZipFile) as exc:
         raise UserInputError(f"Failed to read KML archive file: {display_path(zip_path)}") from exc
 
@@ -175,7 +246,8 @@ def geotag_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
         meta = MediaMetadata.of(file, ctx.backend.read_tags(file, POSITION_TAGS))
         return run(decide_position(
             meta, lambda media_time: _find_best_track(
-                tracks, media_time, options.multiday, str(file)),
+                library.tracks_for(_candidate_dates(media_time, options.multiday)),
+                media_time, options.multiday, str(file)),
             options))
 
     return run_per_file(files, process, activity="Setting GPS info from KML",
