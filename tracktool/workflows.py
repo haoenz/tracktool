@@ -109,7 +109,14 @@ def _file_mobile(collection_path: Path, tracks: list[_Track]) -> None:
 
 def _append_to_zip(tracks: list[_Track], zip_file: Path) -> None:
     archive.ensure_zip_file(zip_file)
-    archive.push_compressed_kmls([track.path for track in tracks], zip_file)
+    before = archive.archive_fingerprint(zip_file)
+    stored = archive.read_views_fingerprint(zip_file)
+    archive.push_compressed_kmls([(track.path, track.type_.value) for track in tracks], zip_file)
+    # 视图指纹只在「推之前视图与真值一致」时前移。全新归档两边皆空，也算一致；
+    # 本来就落后的视图不能因为补了一条就谎报同步——那要 rebuild 来认账。
+    in_sync_before = stored == before or (stored is None and before == archive.EMPTY_ZIP_FINGERPRINT)
+    if in_sync_before:
+        archive.record_views_fingerprint(zip_file, archive.archive_fingerprint(zip_file))
 
 
 def _move_to_backup(tracks: list[_Track], archive_dir: Path) -> None:

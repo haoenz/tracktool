@@ -156,6 +156,22 @@ def archive_init(
     kml_archive.init_archive(directory)
 
 
+@archive_app.command("status")
+def archive_status(
+    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+) -> None:
+    """Report whether the collections match the ZIP (the archive's truth)."""
+    kml_archive.status(zip_path)
+
+
+@archive_app.command("rebuild")
+def archive_rebuild(
+    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+) -> None:
+    """Regenerate the desktop and mobile collections from the ZIP."""
+    kml_archive.rebuild(zip_path)
+
+
 @kml_app.command("type")
 def kml_type(
     path: Annotated[Path, typer.Argument(help="KML file")],

@@ -4,7 +4,7 @@
 
 ## 功能
 
-- **KML 轨迹管理**：归档（桌面/手机双汇总 + ZIP + 备份）、拆分、删坏点、合并、Google 高程回填（只认整轨没有高程的手绘轨迹）
+- **KML 轨迹管理**：归档（ZIP 真值分层存储 + 桌面/手机双汇总视图 + 备份）、视图状态检查与重建、拆分、删坏点、合并、Google 高程回填（只认整轨没有高程的手绘轨迹）
 - **EXIF 地理标记**：按拍摄时间与 KML 轨迹二分匹配写入 GPS、Google 高程/逆地理编码补全、时间平移、海拔偏移、MP4 转封装、媒体分类、缺失修复编排
 - **文件去重**：MD5 哈希日志、重复文件查找、目录对比
 
@@ -58,6 +58,13 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 ## 配置
 
 配置文件是项目根目录的 `config.json`，字段：`log_level`、`archive_path`、`kml_backup_dir_name`、`output_filters`、`google_api_key`。`archive_path` 指向**归档目录**；归档是声明出来的——目录里要有 `archive.json` 身份文件，只有 `tracktool archive init` 能创建它（对已有归档文件的目录补办身份即可收编），其余命令碰到没有身份文件的目录一律报错，路径打错不会静默多出第二份归档。配置里读到旧键 `kml_zip_path` 时会在加载时自动平移为所在目录的 `archive_path` 并回写。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
+
+## 归档：真值与视图
+
+ZIP 压缩包是归档的**真值**，条目按 `<类型>/<yyyy-MM>/<文件名>` 分层存放（认不出类型的进 `_unclassified/`，不猜）。桌面 `<类型>.kml` 与手机 `<类型>.Mobile.kml` 是由真值派生的**视图**：
+
+- `tracktool archive status` 报告视图与真值是否一致。`archive.json`（version 2）记着上次视图与真值同步时 ZIP 的指纹，真值一动指纹就对不上；`kml push` 在视图本来就同步的前提下会顺带前移指纹，本来落后就如实报落后。
+- `tracktool archive rebuild` 从真值全量再生两个视图并刷新指纹——视图坏了、落后了都能修，不需要从备份倒腾。
 
 ## 实现说明
 

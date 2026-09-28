@@ -1,10 +1,16 @@
 """The KML archive's own storage: the ZIP, and what a restore checks first.
 
-The ZIP keeps every KML flat-named (entry = file name) and is rewritten
-wholesale on removal, since zipfile has no entry-delete API. Restoring creates
-nothing and refuses to run on an archive that disagrees with itself, so half a
-track cannot be restored; `--force` turns those refusals into warnings and
-skips only the step they belong to.
+The ZIP is the archive's truth, and its entries are layered —
+`<Kind>/<YYYY-MM>/<name>.kml`, with anything unrecognizable under
+`_unclassified/` — so a reader can take one month or one kind without
+touching the rest, and two kinds sharing a file name are two entries instead
+of one hiding the other. It is rewritten wholesale on removal, since zipfile
+has no entry-delete API. Restoring creates nothing and refuses to run on an
+archive that disagrees with itself, so half a track cannot be restored;
+`--force` turns those refusals into warnings and skips only the step they
+belong to. The desktop and mobile collections next to the ZIP are views:
+derived from the truth, checked against it by fingerprint, regenerable with
+`archive rebuild`.
 
 Filing a track in — which collections, the ZIP, the backup folder, in what
 order — is a sequence of domain steps rather than a property of any one of
@@ -13,6 +19,7 @@ sequence is built from: making the archive exist, appending to it, and reading
 it back.
 """
 
+import hashlib
 import json
 import shutil
 import zipfile
@@ -25,8 +32,15 @@ from ..context import ctx
 from ..errors import UserInputError
 from ..paths import display_path
 from ..workspace import DEFAULT_ZIP_NAME, manifest_path, resolve_archive
-from . import collections
-from .kmlfile import TrackKind
+from . import collections, kmlfile, xmlutil
+from .kmlfile import KmlContent, TrackKind
+
+# Entries no view holds: their TrackTags say nothing, so there is no kind to file them under.
+UNCLASSIFIED = "_unclassified"
+
+# What archive_fingerprint returns for a ZIP with no entries: the identity that
+# makes a virgin archive (empty ZIP, no views yet) count as already in sync.
+EMPTY_ZIP_FINGERPRINT = hashlib.sha256().hexdigest()
 
 
 def init_archive(directory: Path, zip_name: str = DEFAULT_ZIP_NAME) -> None:
@@ -44,7 +58,7 @@ def init_archive(directory: Path, zip_name: str = DEFAULT_ZIP_NAME) -> None:
     if ctx.is_plan:
         log.info("Would write archive manifest", target=str(manifest_path(directory)))
         return
-    manifest = {"version": 1, "zip": zip_name}
+    manifest = {"version": 2, "zip": zip_name, "views": None}
     try:
         manifest_path(directory).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     except OSError as exc:
@@ -94,31 +108,88 @@ def find_zip_entry(kml_name: str, zip_path: Path) -> str | None:
                      if kml_name in Path(info.filename).name), None)
 
 
+def zip_entry_name(kml_path: Path, kind: str) -> str:
+    """The layered entry path a KML files under: `<Kind>/<YYYY-MM>/<name>`.
+
+    The month comes from the file name — the same date the desktop collection
+    files the track under. A name without a date falls back to the kind root,
+    which is where merge outputs with odd names land.
+    """
+    try:
+        _, yyyymm = collections.desktop_date(kml_path)
+    except UserInputError:
+        return f"{kind}/{kml_path.name}"
+    return f"{kind}/{yyyymm[:4]}-{yyyymm[4:]}/{kml_path.name}"
+
+
 def push_compressed_kml(kml_path: Path, zip_path: Path) -> None:
-    """Add a KML to the ZIP archive if not already present."""
-    push_compressed_kmls([kml_path], zip_path)
+    """Add a KML to the ZIP archive if not already present.
+
+    Single-file callers have not recognized the track; its kind comes from the
+    file's own TrackTags, defaulting to _unclassified rather than guessed.
+    """
+    kind = kmlfile.get_kml_type(kml_path)
+    push_compressed_kmls([(kml_path, kind.value if kind else UNCLASSIFIED)], zip_path)
 
 
-def push_compressed_kmls(kml_paths: Sequence[Path], zip_path: Path) -> None:
-    """Add KMLs to the ZIP, opening it once for the whole batch.
+def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) -> None:
+    """Add (path, kind) pairs to the ZIP, opening it once for the whole batch.
 
-    One open means one index read and one write stream for N entries, where
-    looping over push_compressed_kml would reopen and re-read the archive each
-    time.
+    The caller recognizes the tracks and hands in each kind, so nothing is
+    parsed twice. Dedup is per entry path, not per file name: the same name
+    under two kinds are two tracks, and one of them filing over the other was
+    exactly the silent skip this layering exists to prevent.
     """
     if ctx.is_plan:
         # 提前返回还有一层理由：ZipFile 的 "a" 模式会把不存在的压缩包建出来
-        for kml_path in kml_paths:
+        for kml_path, _ in entries:
             log.info(f"Would add to ZIP: {kml_path.name}", target=str(zip_path))
         return
     with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as zf:
-        names = {Path(info.filename).name for info in zf.infolist()}
-        for kml_path in kml_paths:
-            if kml_path.name in names:
-                log.warning(f"Already exists in ZIP: {kml_path.name}", target=str(zip_path))
+        names = {info.filename for info in zf.infolist()}
+        for kml_path, kind in entries:
+            entry = zip_entry_name(kml_path, kind)
+            if entry in names:
+                log.warning(f"Already exists in ZIP: {entry}", target=str(zip_path))
                 continue
-            zf.write(kml_path, kml_path.name)
-            log.info(f"Added to ZIP: {kml_path.name}", target=str(zip_path))
+            zf.write(kml_path, entry)
+            names.add(entry)
+            log.info(f"Added to ZIP: {entry}", target=str(zip_path))
+
+
+def archive_fingerprint(zip_file: Path) -> str:
+    """A digest of what the ZIP holds: every entry's path, size and CRC, sorted.
+
+    Metadata only, no decompression. Equal fingerprints mean equal entries —
+    the one fact "do the views match the truth" compares.
+    """
+    with zipfile.ZipFile(zip_file) as zf:
+        digest = hashlib.sha256()
+        for info in sorted(zf.infolist(), key=lambda i: i.filename):
+            digest.update(f"{info.filename}|{info.file_size}|{info.CRC}\n".encode())
+        return digest.hexdigest()
+
+
+def read_views_fingerprint(zip_file: Path) -> str | None:
+    """The fingerprint the views last matched, None when never recorded."""
+    try:
+        data = json.loads(manifest_path(zip_file.parent).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data.get("views")
+
+
+def record_views_fingerprint(zip_file: Path, fingerprint: str | None) -> None:
+    """Write the views fingerprint into the manifest, bumping it to version 2."""
+    manifest = manifest_path(zip_file.parent)
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["version"] = 2
+        data["views"] = fingerprint
+        manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    except (OSError, json.JSONDecodeError) as exc:
+        raise UserInputError(
+            f"Cannot write archive manifest {display_path(manifest)}: {exc}") from exc
 
 
 def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = Path(".")) -> None:
@@ -133,7 +204,16 @@ def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = P
         log.warning(f"Entry not found in ZIP: {kml_name}", target=str(zip_path))
         return
     log.debug(f"Found entry in ZIP: {entry_name}", target=str(zip_path))
+    pop_zip_entry(entry_name, zip_path, output_directory)
 
+
+def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path(".")) -> None:
+    """Extract one exact entry and remove it — what a restore's found entry feeds.
+
+    Matching and removal stay two functions on purpose: a restore looks the
+    track up once (by file name, in _inspect_archive) and acts on that exact
+    entry, so search and delete can never disagree about what was found.
+    """
     target_path = output_directory / Path(entry_name).name
     if target_path.exists():
         raise UserInputError(f"File already exists at destination: {display_path(target_path)}")
@@ -154,6 +234,100 @@ def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = P
         for name, blob in remaining.items():
             zf.writestr(name, blob)
     log.debug(f"Removed from ZIP: {entry_name}", target=str(zip_path))
+
+
+def status(zip_path: str | None) -> None:
+    """Report whether the desktop and mobile views match the ZIP, the truth.
+
+    One comparison answers it: the manifest records the ZIP's fingerprint as of
+    the last time the views were regenerated, and status holds it against the
+    ZIP's fingerprint now. Missing view files are reported per kind, and
+    _unclassified entries are counted because no view will ever hold them.
+    """
+    archive_dir, zip_file = resolve_archive(zip_path)
+
+    counts: dict[str, int] = {}
+    with zipfile.ZipFile(zip_file) as zf:
+        for info in zf.infolist():
+            kind = info.filename.split("/", 1)[0] if "/" in info.filename else "(unlayered)"
+            counts[kind] = counts.get(kind, 0) + 1
+    summary = ", ".join(f"{kind} {count}" for kind, count in sorted(counts.items()))
+    log.info(f"ZIP holds {sum(counts.values())} entries ({summary})", target=str(archive_dir))
+
+    # 只对真值里有条目的类型要求视图文件：没有条目的类型从来没有过视图
+    missing = [path.name
+               for kind in TrackKind if counts.get(kind.value, 0)
+               for path in collections.collection_paths(kind, archive_dir)
+               if not path.is_file()]
+    if missing:
+        log.warning(f"Missing view files: {', '.join(missing)}", target=str(archive_dir))
+
+    current, stored = archive_fingerprint(zip_file), read_views_fingerprint(zip_file)
+    if stored == current:
+        log.info("Views are in sync with the ZIP", target=str(archive_dir))
+    elif stored is None:
+        log.warning("Views have never been synced with this ZIP "
+                    "(run `tracktool archive rebuild`)", target=str(archive_dir))
+    else:
+        log.warning("Views are out of date with the ZIP "
+                    "(run `tracktool archive rebuild`)", target=str(archive_dir))
+
+
+def rebuild(zip_path: str | None) -> None:
+    """Regenerate the desktop and mobile collections from the ZIP, the truth.
+
+    Every view is built the way a push builds it — an empty collection plus the
+    same add() per track — replayed over the ZIP's entries in name order, so a
+    rebuild and incremental pushes land in the same shape. What the manifest's
+    old views fingerprint said is irrelevant: the ZIP wins, and the fingerprint
+    is refreshed to the ZIP as rebuilt.
+    """
+    archive_dir, zip_file = resolve_archive(zip_path)
+    if ctx.is_plan:
+        log.info("Would rebuild both collections from the ZIP", target=str(zip_file))
+        return
+
+    filed: dict[TrackKind, list[tuple[Path, KmlContent]]] = {}
+    skipped = 0
+    with zipfile.ZipFile(zip_file) as zf:
+        for info in sorted(zf.infolist(), key=lambda i: i.filename):
+            tree = xmlutil.parse_string(zf.read(info.filename).decode("utf-8"))
+            kind = _entry_kind(info.filename, tree)
+            if kind is None:
+                skipped += 1
+                continue
+            content = kmlfile.content_from_tree(tree, info.filename)
+            filed.setdefault(kind, []).append((Path(info.filename), content))
+
+    for kind, tracks in filed.items():
+        desktop_path, mobile_path = collections.collection_paths(kind, archive_dir)
+        desktop = collections.DesktopCollection(desktop_path, collections.new_empty_kml(kind))
+        mobile = collections.MobileCollection(mobile_path, collections.new_empty_mobile_kml())
+        for entry, content in tracks:
+            desktop.add(entry, content)
+            mobile.add(entry, content)
+        desktop.save()
+        mobile.save()
+        log.info(f"Rebuilt collections with {len(tracks)} tracks", target=str(desktop_path))
+    if skipped:
+        log.info(f"Left out of the views: {skipped} {UNCLASSIFIED} entries", target=str(archive_dir))
+
+    record_views_fingerprint(zip_file, archive_fingerprint(zip_file))
+    log.info("Views are in sync with the ZIP", target=str(archive_dir))
+
+
+def _entry_kind(entry_name: str, tree: xmlutil.etree._ElementTree) -> TrackKind | None:
+    """The kind an entry belongs to: its folder when layered, its TrackTags when flat.
+
+    None — never guessed — for _unclassified entries and for anything a legacy
+    flat name carries no recognizable tags for; they stay out of every view.
+    """
+    if "/" in entry_name:
+        try:
+            return TrackKind(entry_name.split("/", 1)[0])
+        except ValueError:
+            return None
+    return kmlfile.kind_from_tree(tree)
 
 
 @dataclass(frozen=True)
@@ -216,7 +390,7 @@ def pop_kml_archive(kml_name: str, type_: TrackKind = TrackKind.DEFAULT, zip_pat
             log.warning(f"{problem} (forced)", target=str(archive_dir))
 
     if state.zip_entry is not None:
-        pop_compressed_kml(state.zip_entry, zip_file)
+        pop_zip_entry(state.zip_entry, zip_file)
     if state.in_desktop:
         collections.remove_track_from_desktop_collection(kml_name, desktop_collection)
     if state.in_mobile:

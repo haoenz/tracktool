@@ -10,6 +10,7 @@ from conftest import TRACK_KML, make_archive
 from tracktool.config import Config
 from tracktool.context import ctx
 from tracktool.errors import UserInputError
+from tracktool.kml.archive import UNCLASSIFIED, zip_entry_name
 from tracktool.metadata import is_missing_altitude
 from tracktool.workspace import resolve_archive
 
@@ -141,5 +142,6 @@ class TestResolveArchive:
 
         merge_kml([src], tmp_path / "merged.kml", no_archive=False)
 
-        assert "2024-05-01 test.kml" in zipfile.ZipFile(zip_path).namelist()
+        # merge 产物没有类型信息，落在 _unclassified 而不是被猜一个类型
+        assert zip_entry_name(src, UNCLASSIFIED) in zipfile.ZipFile(zip_path).namelist()
         assert (zip_path.parent / "Backup" / src.name).is_file()

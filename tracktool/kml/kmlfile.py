@@ -48,7 +48,11 @@ TAG_TO_KIND = {
 
 def get_kml_type(path: Path) -> TrackKind | None:
     """Map the TrackTags ExtendedData value to a TrackKind; None when unrecognized."""
-    tree = xmlutil.parse_file(path)
+    return kind_from_tree(xmlutil.parse_file(path), str(path))
+
+
+def kind_from_tree(tree: xmlutil.etree._ElementTree, target: str = "") -> TrackKind | None:
+    """The same mapping for an already-parsed document — what rebuild reads from the ZIP."""
     track_tags = xmlutil.extended_data_value(tree, TRACK_TAGS)
     kind = TAG_TO_KIND.get(track_tags)
     if kind is None:
@@ -57,7 +61,7 @@ def get_kml_type(path: Path) -> TrackKind | None:
             kind = TrackKind(track_tags)
         except ValueError:
             kind = None
-    log.debug(f"Detected track type: {kind} (tag: {track_tags})", target=str(path))
+    log.debug(f"Detected track type: {kind} (tag: {track_tags})", target=target or None)
     return kind
 
 
@@ -79,15 +83,18 @@ class KmlContent:
 
 
 def get_kml_content(path: Path) -> KmlContent:
-    """Extract LineString coordinates and the stitched description.
+    """Extract LineString coordinates and the stitched description from a KML file.
 
     gx:Track coordinates are converted to LineString tuples ("lon lat alt"
     joined by commas). The description combines the source Placemark's
     description (as plain text), TrackTags/PosStartName/PosEndName, and the
     Placemark description again, separated by line breaks.
     """
-    tree = xmlutil.parse_file(path)
+    return content_from_tree(xmlutil.parse_file(path), str(path))
 
+
+def content_from_tree(tree: xmlutil.etree._ElementTree, target: str = "") -> KmlContent:
+    """The same extraction for an already-parsed document — what rebuild reads from the ZIP."""
     line_string = ""
     for placemark in xmlutil.findall(tree, "//kml:Placemark"):
         # coordinates directly under this Placemark's LineString
@@ -101,7 +108,7 @@ def get_kml_content(path: Path) -> KmlContent:
                     line_string = " ".join(
                         part for part in (line_string, (coord.text or "").strip().replace(" ", ",")) if part
                     )
-    log.debug("Extracted LineString coordinates", target=str(path))
+    log.debug("Extracted LineString coordinates", target=target or None)
 
     description = ""
     desc_node = xmlutil.find(tree, "/kml:kml/kml:Document/kml:Folder/kml:Placemark/kml:description")
@@ -114,6 +121,6 @@ def get_kml_content(path: Path) -> KmlContent:
         description += f"{data_name}:{value}\n"
     if desc_node is not None:
         description += ("".join(desc_node.itertext()) or "") + "\n"
-    log.debug("Extracted track description and metadata", target=str(path))
+    log.debug("Extracted track description and metadata", target=target or None)
 
     return KmlContent(line_string=line_string, description=description)

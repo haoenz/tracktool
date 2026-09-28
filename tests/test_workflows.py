@@ -22,6 +22,7 @@ from tracktool.context import ctx
 from tracktool.errors import UserInputError
 from tracktool.fileutil import BatchResult
 from tracktool.kml import xmlutil
+from tracktool.kml.archive import zip_entry_name
 from tracktool.kml.kmlfile import TrackKind
 
 runner = CliRunner()
@@ -61,7 +62,8 @@ class TestPushBatch:
         result = workflows.push_tracks(tracks, str(zip_path), TrackKind.DEFAULT)
 
         assert result.ok
-        assert sorted(zipfile.ZipFile(zip_path).namelist()) == sorted(t.name for t in tracks)
+        assert sorted(zipfile.ZipFile(zip_path).namelist()) == sorted(
+            zip_entry_name(t, "Default") for t in tracks)
         desktop = xmlutil.parse_file(zip_path.parent / "Default.kml")
         assert len(xmlutil.findall(desktop, "//kml:Placemark")) == 3
         mobile = xmlutil.parse_file(zip_path.parent / "Default.Mobile.kml")
@@ -132,7 +134,7 @@ class TestATrackThatCannotBeFiled:
         result = workflows.push_tracks([good, untagged], str(zip_path))
 
         assert [p.name for p in result.failed] == [untagged.name]
-        assert zipfile.ZipFile(zip_path).namelist() == [good.name]
+        assert zipfile.ZipFile(zip_path).namelist() == [zip_entry_name(good, "Default")]
         assert (zip_path.parent / "Backup" / good.name).is_file()
         assert untagged.is_file()  # 没被搬走，也没被塞进聚合
 
@@ -168,7 +170,7 @@ class TestTheCommand:
                                      "--zip", str(zip_path), "--type", "Default"])
 
         assert result.exit_code == 3, result.output
-        assert zipfile.ZipFile(zip_path).namelist() == [good.name]
+        assert zipfile.ZipFile(zip_path).namelist() == [zip_entry_name(good, "Default")]
         assert bad.is_file()
 
     def test_a_preview_names_the_steps_and_the_tracks(self, tmp_path: Path, plan_mode):

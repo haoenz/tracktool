@@ -35,6 +35,11 @@ def _push(*tracks: Path, zip_path: Path, type_: TrackKind | None = TrackKind.DEF
     return workflows.push_tracks(list(tracks), str(zip_path), type_, no_archive).failed
 
 
+def _zip_entry(track: Path) -> str:
+    """分层后轨迹在 ZIP 里的 entry 路径（E2 契约：<Kind>/<YYYY-MM>/<name>）。"""
+    return archive.zip_entry_name(track, "Default")
+
+
 @pytest.fixture
 def track_file(tmp_path: Path) -> Path:
     path = tmp_path / "2024-05-01 test.kml"
@@ -220,7 +225,7 @@ class TestArchive:
 
         _push(track_file, zip_path=zip_path)
 
-        assert track_file.name in zipfile.ZipFile(zip_path).namelist()
+        assert _zip_entry(track_file) in zipfile.ZipFile(zip_path).namelist()
         assert (zip_path.parent / "Default.kml").is_file()
         assert (zip_path.parent / "Default.Mobile.kml").is_file()
 
@@ -251,7 +256,8 @@ class TestArchive:
         second.write_text(TRACK_KML, encoding="utf-8")
         _push(second, zip_path=zip_path)
 
-        assert sorted(zipfile.ZipFile(zip_path).namelist()) == [track_file.name, second.name]
+        assert sorted(zipfile.ZipFile(zip_path).namelist()) == sorted(
+            [_zip_entry(track_file), _zip_entry(second)])
 
     def test_push_pop_roundtrip(self, track_file: Path, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(track_file.parent)  # pop 落在当前目录，这里就是源文件所在目录
@@ -262,7 +268,7 @@ class TestArchive:
 
         # ZIP 中存在
         with zipfile.ZipFile(zip_path) as zf:
-            assert track_file.name in zf.namelist()
+            assert _zip_entry(track_file) in zf.namelist()
 
         # 原件移入 Backup
         assert (zip_path.parent / "Backup" / track_file.name).is_file()
@@ -278,7 +284,7 @@ class TestArchive:
         archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path))
 
         with zipfile.ZipFile(zip_path) as zf:
-            assert track_file.name not in zf.namelist()
+            assert _zip_entry(track_file) not in zf.namelist()
         assert track_file.is_file()
         assert len(xmlutil.findall(xmlutil.parse_file(desktop), "//kml:Placemark")) == 0
         assert len(xmlutil.findall(xmlutil.parse_file(mobile), "//kml:LineString")) == 0
@@ -306,7 +312,7 @@ class TestArchive:
     def test_pop_refuses_when_the_track_is_not_in_the_zip(self, track_file: Path, tmp_path: Path):
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
         _push(track_file, zip_path=zip_path)
-        _drop_zip_entry(zip_path, track_file.name)
+        _drop_zip_entry(zip_path, _zip_entry(track_file))
 
         with pytest.raises(UserInputError, match="Track not found in ZIP"):
             archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path))
@@ -327,12 +333,12 @@ class TestArchive:
         with pytest.raises(UserInputError, match="Track not found in collection"):
             archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path))
 
-        assert track_file.name in zipfile.ZipFile(zip_path).namelist()
+        assert _zip_entry(track_file) in zipfile.ZipFile(zip_path).namelist()
 
     def test_force_turns_the_disagreement_into_a_warning(self, track_file: Path, tmp_path: Path):
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
         _push(track_file, zip_path=zip_path)
-        _drop_zip_entry(zip_path, track_file.name)
+        _drop_zip_entry(zip_path, _zip_entry(track_file))
 
         # 轨迹只留在聚合里：跳过 ZIP 那一步，聚合照清
         archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path), force=True)
@@ -353,7 +359,7 @@ class TestArchive:
             archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path))
 
         # 没落到磁盘就不删档：轨迹还在压缩包里
-        assert track_file.name in zipfile.ZipFile(zip_path).namelist()
+        assert _zip_entry(track_file) in zipfile.ZipFile(zip_path).namelist()
 
 
 class TestArchiveInit:
@@ -391,6 +397,7 @@ class TestArchiveInit:
         result = runner.invoke(app, ["archive", "init", str(directory)])
 
         assert result.exit_code == 0
+        # 收编不改数据：写入时的平铺条目原样保留（分层留给显式迁移）
         assert track_file.name in zipfile.ZipFile(zip_path).namelist()
 
     def test_init_in_plan_mode_writes_nothing(self, tmp_path: Path, monkeypatch):
@@ -420,7 +427,7 @@ class TestKmlPopCommand:
         archive_dir = tmp_path / "archive"
         zip_path = make_archive(archive_dir)
         _push(track_file, zip_path=zip_path)
-        _drop_zip_entry(zip_path, track_file.name)
+        _drop_zip_entry(zip_path, _zip_entry(track_file))
         desktop = archive_dir / "Default.kml"
 
         refused = self._invoke(zip_path, tmp_path, monkeypatch, [track_file.stem])
@@ -496,3 +503,123 @@ class TestTrackKind:
         result = runner.invoke(app, ["kml", "type", str(kml)])
         assert result.exit_code == 0
         assert result.output.strip() == "Unknown"  # 只是识别结果的如实呈现
+
+def _kml_with_tag(tag: str) -> str:
+    """带 TrackTags 的轨迹，类型由文件自己说明。"""
+    return TRACK_KML.replace(
+        "<Document>",
+        f"<Document><ExtendedData><Data name='TrackTags'><value>{tag}</value></Data></ExtendedData>")
+
+
+class TestArchiveLayering:
+    """E2：ZIP 条目按 <Kind>/<YYYY-MM>/<name> 分层。"""
+
+    def test_two_kinds_sharing_a_file_name_are_two_entries(self, tmp_path: Path):
+        """同名轨迹按类型各归各的 entry，不再互相遮挡静默跳过。"""
+        zip_path = make_archive(tmp_path / "archive")
+        plain = tmp_path / "2024-05-01 same.kml"
+        plain.write_text(_kml_with_tag("徒步"), encoding="utf-8")
+        other = tmp_path / "other"
+        other.mkdir()
+        train = other / "2024-05-01 same.kml"
+        train.write_text(_kml_with_tag("火车"), encoding="utf-8")
+
+        assert _push(plain, zip_path=zip_path, type_=None) == []
+        assert _push(train, zip_path=zip_path, type_=None) == []
+
+        names = zipfile.ZipFile(zip_path).namelist()
+        assert "Default/2024-05/2024-05-01 same.kml" in names
+        assert "Train/2024-05/2024-05-01 same.kml" in names
+
+    def test_the_entry_month_comes_from_the_file_name(self, track_file: Path, tmp_path: Path):
+        zip_path = make_archive(tmp_path / "archive")
+
+        _push(track_file, zip_path=zip_path)
+
+        assert "Default/2024-05/2024-05-01 test.kml" in zipfile.ZipFile(zip_path).namelist()
+
+
+class TestArchiveStatusAndRebuild:
+    """E2：视图是派生的——指纹回答「落后没有」，rebuild 从真值再生。"""
+
+    def test_a_push_that_syncs_the_views_records_the_fingerprint(
+            self, track_file: Path, tmp_path: Path):
+        zip_path = make_archive(tmp_path / "archive")
+
+        _push(track_file, zip_path=zip_path)
+
+        assert archive.read_views_fingerprint(zip_path) == archive.archive_fingerprint(zip_path)
+        result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
+        assert result.exit_code == 0
+        assert "in sync" in result.output
+
+    def test_status_reports_never_synced_when_the_manifest_has_no_fingerprint(
+            self, track_file: Path, tmp_path: Path):
+        """迁移后的老归档：manifest 从没记过指纹，status 如实说「从未同步」。"""
+        zip_path = make_archive(tmp_path / "archive")
+        _push(track_file, zip_path=zip_path)
+        manifest = zip_path.parent / "archive.json"
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        del data["views"]
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+
+        result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
+
+        assert result.exit_code == 0
+        assert "never been synced" in result.output
+
+    def test_status_reports_stale_when_the_zip_moves_behind_the_views(
+            self, track_file: Path, tmp_path: Path):
+        """真值动了而视图没跟上：指纹对不上，status 报「落后」。"""
+        zip_path = make_archive(tmp_path / "archive")
+        _push(track_file, zip_path=zip_path)
+        with zipfile.ZipFile(zip_path, "a") as zf:
+            zf.writestr("Default/2024-06/2024-06-01 late.kml", TRACK_KML)
+
+        result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
+
+        assert result.exit_code == 0
+        assert "out of date" in result.output
+
+    def test_rebuild_regenerates_the_views_from_the_zip(self, track_file: Path, tmp_path: Path):
+        zip_path = make_archive(tmp_path / "archive")
+        _push(track_file, zip_path=zip_path)
+        (zip_path.parent / "Default.kml").unlink()
+        (zip_path.parent / "Default.Mobile.kml").unlink()
+
+        result = runner.invoke(app, ["archive", "rebuild", "--zip", str(zip_path)])
+
+        assert result.exit_code == 0, result.output
+        desktop = xmlutil.parse_file(zip_path.parent / "Default.kml")
+        assert len(xmlutil.findall(desktop, "//kml:Placemark")) == 1
+        mobile = xmlutil.parse_file(zip_path.parent / "Default.Mobile.kml")
+        assert len(xmlutil.findall(mobile, "//kml:LineString")) == 1
+        assert archive.read_views_fingerprint(zip_path) == archive.archive_fingerprint(zip_path)
+
+    def test_rebuild_leaves_unclassified_entries_out_of_the_views(self, tmp_path: Path):
+        """_unclassified 条目没有类型，任何视图都不收，rebuild 也不猜。"""
+        zip_path = make_archive(tmp_path / "archive")
+        untagged = tmp_path / "2024-05-01 raw.kml"
+        untagged.write_text(TRACK_KML, encoding="utf-8")  # 没有 TrackTags
+        archive.push_compressed_kml(untagged, zip_path)
+
+        result = runner.invoke(app, ["archive", "rebuild", "--zip", str(zip_path)])
+
+        assert result.exit_code == 0, result.output
+        # 没有一个可归类的条目，就一个视图文件都不造（与 push 一致），status 也不喊缺文件
+        assert not (zip_path.parent / "Default.kml").exists()
+        result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
+        assert result.exit_code == 0
+        assert "Missing view files" not in result.output
+        assert "in sync" in result.output
+
+    def test_rebuild_in_plan_mode_writes_nothing(self, track_file: Path, tmp_path: Path):
+        zip_path = make_archive(tmp_path / "archive")
+        _push(track_file, zip_path=zip_path)
+        desktop = zip_path.parent / "Default.kml"
+        before = desktop.read_text(encoding="utf-8")
+
+        result = runner.invoke(app, ["--dry-run", "archive", "rebuild", "--zip", str(zip_path)])
+
+        assert result.exit_code == 0
+        assert desktop.read_text(encoding="utf-8") == before

@@ -73,6 +73,11 @@ def new_empty_kml(type_: TrackKind | None = None) -> xmlutil.etree._ElementTree:
     return xmlutil.parse_string(_EMPTY_PLAIN_TEMPLATE.format(kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS))
 
 
+def new_empty_mobile_kml() -> xmlutil.etree._ElementTree:
+    """An empty mobile collection document — what a rebuild starts every kind from."""
+    return xmlutil.parse_string(_EMPTY_MOBILE_TEMPLATE.format(kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS))
+
+
 def collection_paths(type_: TrackKind, archive_dir: Path) -> tuple[Path, Path]:
     """(desktop, mobile) — both named after the track type, both beside the ZIP."""
     return archive_dir / f"{type_}.kml", archive_dir / f"{type_}.Mobile.kml"
@@ -132,13 +137,13 @@ class DesktopCollection(TrackCollection):
         if year_folder is None:
             year_folder = xmlutil.sub(top_folder, "Folder")
             xmlutil.sub(year_folder, "name", year)
-            log.info(f"Created year folder: {year}", target=str(self.path))
+            log.verbose(f"Created year folder: {year}", target=str(self.path))
 
         month_doc = xmlutil.find(self.tree, f"//kml:Folder[kml:name='{year}']/kml:Document[kml:name='{month}']")
         if month_doc is None:
             month_doc = xmlutil.sub(year_folder, "Document")
             xmlutil.sub(month_doc, "name", month)
-            log.info(f"Created month document: {month}", target=str(self.path))
+            log.verbose(f"Created month document: {month}", target=str(self.path))
 
         existing_names = [xmlutil.element_text(n) for n in month_doc.findall(f"{{{ns}}}Placemark/{{{ns}}}name")]
         if track.stem in existing_names:
@@ -151,7 +156,7 @@ class DesktopCollection(TrackCollection):
         xmlutil.sub(placemark, "styleUrl", f"#{self.path.stem}")
         ls = xmlutil.sub(placemark, "LineString")
         xmlutil.sub(ls, "coordinates", content.line_string)
-        log.info(f"Added track to collection: {track.stem}", target=str(self.path))
+        log.verbose(f"Added track to collection: {track.stem}", target=str(self.path))
 
 
 def _find_desktop_placemark(tree: xmlutil.etree._ElementTree,
@@ -185,7 +190,7 @@ class MobileCollection(TrackCollection):
         """Load the mobile collection, creating it empty when the archive is new."""
         if path.is_file():
             return cls(path, xmlutil.parse_file(path))
-        tree = xmlutil.parse_string(_EMPTY_MOBILE_TEMPLATE.format(kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS))
+        tree = new_empty_mobile_kml()
         if xmlutil.save(tree, path):
             log.info("Created new mobile collection KML file", target=str(path))
         return cls(path, tree)
@@ -204,7 +209,7 @@ class MobileCollection(TrackCollection):
         ls = xmlutil.sub(multi_geom, "LineString")
         ls.set("id", track.stem)
         xmlutil.sub(ls, "coordinates", content.line_string)
-        log.info(f"Added track to mobile collection: {track.stem}", target=str(self.path))
+        log.verbose(f"Added track to mobile collection: {track.stem}", target=str(self.path))
 
 
 def _find_mobile_linestring(tree: xmlutil.etree._ElementTree,
