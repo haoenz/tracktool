@@ -28,8 +28,11 @@ tracktool exif geotag ./photos --overwrite --failed-folder TrackPosFailed
 # 一键修复缺失 GPSPosition/GPSAltitude 的媒体
 tracktool exif repair ./VID
 
-# 归档新轨迹（一次可给多条：聚合与压缩包各读写一次）
+# 归档新轨迹（一次可给多条：聚合与压缩包各读写一次；默认不动源文件）
 tracktool kml push ./2024-05-01\ 徒步.kml ./2024-05-02\ 徒步.kml
+
+# --move 在归档之外把源文件收进归档的 Backup/（归档里已有的轨迹按名判重跳过，也一并搬走）
+tracktool kml push ./2024-05-03\ 徒步.kml --move
 ```
 
 ## 预演

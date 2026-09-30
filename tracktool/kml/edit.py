@@ -147,8 +147,15 @@ def prune_points(path: Path, bad_points: list[str]) -> None:
 
 
 def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
-              no_archive: bool = False) -> None:
-    """Merge multiple KMLs into one LineString (-Connected) or MultiGeometry."""
+              move: bool = False) -> None:
+    """Merge multiple KMLs into one LineString (-Connected) or MultiGeometry.
+
+    The merged output stays where --output puts it; the source files are
+    filed into the ZIP — the archive's truth — and stay put unless `move`
+    collects them into the backup folder. A source listed twice is filed
+    once and moved once: the ZIP skips the duplicate by entry path, and the
+    dedup below keeps the move from chasing a file already carried away.
+    """
     all_line_strings: list[str] = []
     first_description = ""
     for i, path in enumerate(paths):
@@ -179,19 +186,16 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
         log.info(f"Merged {len(all_line_strings)} track(s) into MultiGeometry")
 
     # 归档位置与压缩包先备好，再写合并结果：归档这一步失败不该留下一个半成品
-    if no_archive:
-        zip_file = None
-    else:
-        archive_dir, zip_file = resolve_archive(None)
-        archive.ensure_zip_file(zip_file)
+    archive_dir, zip_file = resolve_archive(None)
+    archive.ensure_zip_file(zip_file)
 
     output_path = output_path.resolve()
     if xmlutil.save(output_tree, output_path):
         log.info(f"Saved merged KML to: {display_path(output_path)}")
 
-    if zip_file is not None:
-        for path in paths:
-            archive.push_compressed_kml(path, zip_file)
+    for path in dict.fromkeys(paths):
+        archive.push_compressed_kml(path, zip_file)
+        if move:
             move_to_folder(path, ctx.config.kml_backup_dir_name, archive_dir)
 
 

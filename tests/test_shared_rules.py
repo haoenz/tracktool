@@ -105,7 +105,7 @@ class TestResolveArchive:
         src.write_text(TRACK_KML, encoding="utf-8")
 
         with pytest.raises(UserInputError, match="not a tracktool archive"):
-            merge_kml([src], tmp_path / "merged.kml", no_archive=False)
+            merge_kml([src], tmp_path / "merged.kml")
 
         assert not (tmp_path / "merged.kml").exists()
         assert src.is_file()
@@ -124,7 +124,7 @@ class TestResolveArchive:
         src.write_text(TRACK_KML, encoding="utf-8")
 
         with pytest.raises(UserInputError):
-            merge_kml([src], tmp_path / "merged.kml", no_archive=False)
+            merge_kml([src], tmp_path / "merged.kml")
 
         assert not (tmp_path / "merged.kml").exists()
         assert src.is_file()
@@ -140,7 +140,7 @@ class TestResolveArchive:
         src = tmp_path / "2024-05-01 test.kml"
         src.write_text(TRACK_KML, encoding="utf-8")
 
-        merge_kml([src], tmp_path / "merged.kml", no_archive=False)
+        merge_kml([src], tmp_path / "merged.kml", move=True)
 
         # merge 产物没有类型信息，落在 _unclassified 而不是被猜一个类型
         assert zip_entry_name(src, UNCLASSIFIED) in zipfile.ZipFile(zip_path).namelist()

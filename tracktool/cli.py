@@ -197,11 +197,11 @@ def kml_push(
     paths: Annotated[list[Path], typer.Argument(help="KML file(s) to archive")],
     track_type: Annotated[TrackKind | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
-    no_archive: Annotated[bool, typer.Option("--no-archive", help="Skip adding to ZIP")] = False,
+    move: Annotated[bool, typer.Option("--move", help="Also move the source files into the backup folder")] = False,
 ) -> None:
-    """Archive KMLs: add to both collections, compress into ZIP, move to backup."""
+    """Archive KMLs: add to both collections, compress into ZIP; sources stay put unless --move."""
     files = [_resolve_path(path) for path in paths]
-    _finish(workflows.push_tracks(files, zip_path, track_type, no_archive))
+    _finish(workflows.push_tracks(files, zip_path, track_type, move))
 
 
 @kml_app.command("pop")
@@ -241,11 +241,11 @@ def kml_merge(
     paths: Annotated[list[Path], typer.Argument(help="KML files to merge")],
     output_path: Annotated[Path, typer.Option("--output", "-o", help="Output KML path")],
     connected: Annotated[bool, typer.Option("--connected", help="Concatenate into one LineString")] = False,
-    no_archive: Annotated[bool, typer.Option("--no-archive", help="Skip archiving source files")] = False,
+    move: Annotated[bool, typer.Option("--move", help="Also move the source files into the backup folder")] = False,
 ) -> None:
     """Merge multiple KMLs into one file."""
     paths = [_resolve_path(p) for p in paths]
-    kml_edit.merge_kml(paths, output_path.expanduser().resolve(), connected, no_archive)
+    kml_edit.merge_kml(paths, output_path.expanduser().resolve(), connected, move)
 
 
 @kml_app.command("to-multigeom")

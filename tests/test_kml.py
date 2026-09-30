@@ -30,9 +30,9 @@ def _drop_zip_entry(zip_path: Path, entry_name: str) -> None:
 
 
 def _push(*tracks: Path, zip_path: Path, type_: TrackKind | None = TrackKind.DEFAULT,
-          no_archive: bool = False) -> list[Path]:
+          move: bool = False) -> list[Path]:
     """File tracks the way `kml push` does; returns the ones it could not file."""
-    return workflows.push_tracks(list(tracks), str(zip_path), type_, no_archive).failed
+    return workflows.push_tracks(list(tracks), str(zip_path), type_, move).failed
 
 
 def _zip_entry(track: Path) -> str:
@@ -87,21 +87,44 @@ class TestRemoveBadPoints:
 
 
 class TestMergeKml:
-    def test_merge_multigeometry(self, track_file: Path, tmp_path: Path):
+    @staticmethod
+    def _archive(tmp_path: Path, monkeypatch) -> Path:
+        """merge 总是走共享的 resolve_archive：装一个已声明的归档到 ctx.config。"""
+        zip_path = make_archive(tmp_path / "archive")
+        cfg = Config(path=tmp_path / "config.json").load()
+        cfg["archive_path"] = str(zip_path.parent)
+        monkeypatch.setattr(ctx, "config", cfg)
+        return zip_path
+
+    def test_merge_multigeometry(self, track_file: Path, tmp_path: Path, monkeypatch):
+        self._archive(tmp_path, monkeypatch)
         output = tmp_path / "merged.kml"
-        edit.merge_kml([track_file, track_file], output, connected=False, no_archive=True)
+        edit.merge_kml([track_file, track_file], output, connected=False)
         tree = xmlutil.parse_file(output)
         assert len(xmlutil.findall(tree, "//kml:LineString")) == 2
 
-    def test_merge_connected(self, track_file: Path, tmp_path: Path):
+    def test_merge_connected(self, track_file: Path, tmp_path: Path, monkeypatch):
+        self._archive(tmp_path, monkeypatch)
         output = tmp_path / "merged.kml"
-        edit.merge_kml([track_file, track_file], output, connected=True, no_archive=True)
+        edit.merge_kml([track_file, track_file], output, connected=True)
         tree = xmlutil.parse_file(output)
         lss = xmlutil.findall(tree, "//kml:LineString")
         assert len(lss) == 1
         coords_node = xmlutil.find(tree, "//kml:LineString/kml:coordinates")
         tuples = (coords_node.text or "").split()
         assert len(tuples) == 8  # 4 + 4 coords
+
+    def test_merge_leaves_the_sources_alone_until_moved(self, track_file: Path, tmp_path: Path, monkeypatch):
+        """E5：merge 默认把源文件归档进 ZIP 但不搬；--move 才收进 Backup。
+        同一源文件列两次只归档一次、只搬一次。"""
+        zip_path = self._archive(tmp_path, monkeypatch)
+        output = tmp_path / "merged.kml"
+
+        edit.merge_kml([track_file, track_file], output, connected=False, move=True)
+
+        assert not track_file.is_file()  # move=True：源文件进了 Backup
+        assert (zip_path.parent / "Backup" / track_file.name).is_file()
+        assert output.is_file()  # 合并结果留在 --output 指的位置
 
 
 class TestKmlContent:
@@ -238,14 +261,14 @@ class TestArchive:
 
         assert not undeclared.exists()
 
-    def test_no_archive_creates_no_zip(self, track_file: Path, tmp_path: Path):
-        """--no-archive 只跳过 ZIP：聚合照建，ZIP 保持为空。"""
+    def test_push_leaves_the_source_alone(self, track_file: Path, tmp_path: Path):
+        """E5：push 只进档不搬文件——源文件留在原地，Backup 不会被建出来。"""
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
 
-        _push(track_file, zip_path=zip_path, no_archive=True)
+        _push(track_file, zip_path=zip_path)
 
-        assert not zip_path.exists() or not zipfile.ZipFile(zip_path).namelist()
-        assert (zip_path.parent / "Default.kml").is_file()
+        assert track_file.is_file()
+        assert not (zip_path.parent / "Backup").exists()
 
     def test_a_second_push_appends_to_the_existing_archive(self, track_file: Path, tmp_path: Path):
         """已存在的归档不能被重建，否则第一条轨迹就没了。"""
@@ -263,8 +286,8 @@ class TestArchive:
         monkeypatch.chdir(track_file.parent)  # pop 落在当前目录，这里就是源文件所在目录
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
 
-        # push: 需要类型信息（源文件无 TrackTags）
-        _push(track_file, zip_path=zip_path)
+        # push: 需要类型信息（源文件无 TrackTags）；--move 把原件收进 Backup
+        _push(track_file, zip_path=zip_path, move=True)
 
         # ZIP 中存在
         with zipfile.ZipFile(zip_path) as zf:

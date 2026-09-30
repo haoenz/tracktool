@@ -126,14 +126,19 @@ def _move_to_backup(tracks: list[_Track], archive_dir: Path) -> None:
 
 
 def push_tracks(paths: list[Path], zip_path: str | None = None, type_: TrackKind | None = None,
-                no_archive: bool = False) -> BatchResult[list[Action]]:
-    """File tracks into the archive: both collections, the ZIP, the backup folder.
+                move: bool = False) -> BatchResult[list[Action]]:
+    """File tracks into the archive: both collections, then the ZIP.
 
     The steps are where the batch happens: each collection is opened once for
     every track of the batch that belongs in it, and the archive once for all
     of them, so N tracks are one read and one write of the archive rather than
     N. A track that cannot be filed (unreadable, undated, unknown type) is
-    counted as failed and the rest of the batch goes on.
+    counted as failed and the rest of the batch goes on. Source files stay
+    where they are unless `move` is set — then every track the batch filed is
+    moved into the backup folder, the ones the archive already held included:
+    all three stores skip a duplicate by name, so a second filing of a track
+    touches nothing, and --move turns the same run into a sweep that also
+    collects the stray copy.
     """
     archive_dir, zip_file = resolve_archive(zip_path)
     result: BatchResult[list[Action]] = BatchResult()
@@ -157,10 +162,10 @@ def push_tracks(paths: list[Path], zip_path: str | None = None, type_: TrackKind
                           effect=partial(_file_desktop, desktop_path, type_, tracks)))
         steps.append(Step(file=mobile_path, kind="add to mobile collection", detail=_names(tracks),
                           effect=partial(_file_mobile, mobile_path, tracks)))
-    if pending and not no_archive:
+    if pending:
         steps.append(Step(file=zip_file, kind="append to ZIP", detail=_names(pending),
                           effect=partial(_append_to_zip, pending, zip_file)))
-    if pending:
+    if pending and move:
         steps.append(Step(file=archive_dir / ctx.config.kml_backup_dir_name,
                           kind="move to backup folder", detail=_names(pending),
                           effect=partial(_move_to_backup, pending, archive_dir)))
