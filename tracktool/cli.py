@@ -95,6 +95,32 @@ def _resolve_path(path: Path, must_exist: bool = True) -> Path:
     return path
 
 
+GLOB_CHARS = "*?["
+
+
+def _expand_paths(paths: list[Path]) -> list[Path]:
+    """Expand a wildcard in the last path segment into the matching files, sorted.
+
+    Windows forbids `*?[` in file names, so a name carrying one can only be a
+    pattern and never a literal. Expansion happens here — before the whole
+    list is handed to the batch entries — so the batch still sees every file
+    at once, `--dry-run` previews the expanded set, and the sorted order makes
+    the archive's shape reproducible (rebuild replays in name order too).
+    """
+    expanded: list[Path] = []
+    for path in paths:
+        pattern = path.expanduser()
+        if not any(c in pattern.name for c in GLOB_CHARS):
+            expanded.append(_resolve_path(path))
+            continue
+        matches = sorted(p.resolve() for p in pattern.parent.glob(pattern.name) if p.is_file())
+        if not matches:
+            log.error(f"No files match pattern: {display_path(path)}")
+            raise typer.Exit(code=EXIT_USER_ERROR)
+        expanded.extend(matches)
+    return expanded
+
+
 def _finish(result: BatchResult[Any]) -> None:
     """Report a dry run's plan, then exit 3 when files were left unprocessed.
 
@@ -194,13 +220,13 @@ def kml_set_type(
 
 @kml_app.command("push")
 def kml_push(
-    paths: Annotated[list[Path], typer.Argument(help="KML file(s) to archive")],
+    paths: Annotated[list[Path], typer.Argument(help="KML file(s) to archive, wildcards allowed")],
     track_type: Annotated[TrackKind | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     move: Annotated[bool, typer.Option("--move", help="Also move the source files into the backup folder")] = False,
 ) -> None:
     """Archive KMLs: add to both collections, compress into ZIP; sources stay put unless --move."""
-    files = [_resolve_path(path) for path in paths]
+    files = _expand_paths(paths)
     _finish(workflows.push_tracks(files, zip_path, track_type, move))
 
 
@@ -263,13 +289,13 @@ def kml_prune(
 
 @kml_app.command("merge")
 def kml_merge(
-    paths: Annotated[list[Path], typer.Argument(help="KML files to merge")],
+    paths: Annotated[list[Path], typer.Argument(help="KML files to merge, wildcards allowed")],
     output_path: Annotated[Path, typer.Option("--output", "-o", help="Output KML path")],
     connected: Annotated[bool, typer.Option("--connected", help="Concatenate into one LineString")] = False,
     move: Annotated[bool, typer.Option("--move", help="Also move the source files into the backup folder")] = False,
 ) -> None:
     """Merge multiple KMLs into one file."""
-    paths = [_resolve_path(p) for p in paths]
+    paths = _expand_paths(paths)
     kml_edit.merge_kml(paths, output_path.expanduser().resolve(), connected, move)
 
 

@@ -842,3 +842,65 @@ class TestArchiveStatusAndRebuild:
 
         assert result.exit_code == 0
         assert desktop.read_text(encoding="utf-8") == before
+
+
+class TestGlobExpansion:
+    """多文件入口（push / merge）的参数通配符：进程内展开，批内按路径排序。"""
+
+    @staticmethod
+    def _staging(tmp_path: Path) -> tuple[Path, Path, Path]:
+        """两个轨迹文件，创建顺序与名字序相反，好让排序可断言。"""
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        early = staging / "2024-05-01 early.kml"
+        late = staging / "2024-05-02 late.kml"
+        early.write_text(TRACK_KML, encoding="utf-8")
+        late.write_text(TRACK_KML, encoding="utf-8")
+        return staging, early, late
+
+    def test_push_expands_a_wildcard_in_sorted_order(self, tmp_path: Path):
+        """pwsh 不展开通配符：工具自己展开，ZIP 追加序 = 路径序（与 rebuild 回放同名序）。"""
+        staging, early, late = self._staging(tmp_path)
+        zip_path = make_archive(tmp_path / "archive")
+
+        result = runner.invoke(app, ["kml", "push", str(staging / "*.kml"),
+                                     "--type", "Default", "--zip", str(zip_path)])
+
+        assert result.exit_code == 0
+        with zipfile.ZipFile(zip_path) as zf:
+            assert zf.namelist() == [_zip_entry(early), _zip_entry(late)]
+
+    def test_push_wildcard_without_matches_is_a_user_error(self, tmp_path: Path):
+        staging, _, _ = self._staging(tmp_path)
+        zip_path = make_archive(tmp_path / "archive")
+
+        result = runner.invoke(app, ["kml", "push", str(staging / "2020-*.kml"),
+                                     "--type", "Default", "--zip", str(zip_path)])
+
+        assert result.exit_code == 1
+        assert zipfile.ZipFile(zip_path).namelist() == []
+
+    def test_push_literal_paths_keep_the_exact_semantics(self, tmp_path: Path):
+        """字面量参数不吃 glob 语义：不存在的路径照旧退 1，不静默展开成空。"""
+        staging, early, _ = self._staging(tmp_path)
+        zip_path = make_archive(tmp_path / "archive")
+
+        result = runner.invoke(app, ["kml", "push", str(early), str(staging / "missing.kml"),
+                                     "--type", "Default", "--zip", str(zip_path)])
+
+        assert result.exit_code == 1
+        assert zipfile.ZipFile(zip_path).namelist() == []
+
+    def test_merge_expands_a_wildcard(self, tmp_path: Path, monkeypatch):
+        staging, _, _ = self._staging(tmp_path)
+        zip_path = make_archive(tmp_path / "archive")
+        cfg = Config(path=tmp_path / "config.json").load()
+        cfg["archive_path"] = str(zip_path.parent)
+        monkeypatch.setattr(ctx, "config", cfg)
+        output = tmp_path / "merged.kml"
+
+        result = runner.invoke(app, ["kml", "merge", str(staging / "*.kml"), "-o", str(output)])
+
+        assert result.exit_code == 0
+        assert output.is_file()
+        assert len(zipfile.ZipFile(zip_path).namelist()) == 2  # merge 也归档输入
