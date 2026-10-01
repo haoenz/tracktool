@@ -1,0 +1,7 @@
+#!/bin/sh
+# 提交前统一格式检查。启用: git config core.hooksPath .githooks
+# 临时跳过某次提交: git commit --no-verify（不建议）
+uv run ruff format --check . || {
+    echo "hint: run 'uv run ruff format .' then re-stage" >&2
+    exit 1
+}
