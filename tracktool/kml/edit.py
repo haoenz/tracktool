@@ -7,12 +7,12 @@ sources into the archive afterwards.
 """
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .. import googleapi, log
-from ..coords import geo_distance
 from ..context import ctx
+from ..coords import geo_distance
 from ..errors import UserInputError
 from ..fileutil import move_to_folder
 from ..metadata import is_missing_altitude
@@ -64,7 +64,7 @@ def _track_series(track: xmlutil.etree._Element) -> tuple[list[str], list[str], 
         times = []
         for w in whens:
             t = datetime.fromisoformat(w.strip().replace("Z", "+00:00"))
-            times.append(t if t.tzinfo else t.replace(tzinfo=timezone.utc))
+            times.append(t if t.tzinfo else t.replace(tzinfo=UTC))
     except ValueError as exc:
         raise UserInputError(f"Unparseable track timestamp: {exc}") from exc
     return coords, whens, times

@@ -245,8 +245,10 @@ def kml_pop(
 @kml_app.command("split")
 def kml_split(
     path: Annotated[Path, typer.Argument(help="KML file to split")],
-    split_points: Annotated[list[str] | None, typer.Argument(help="Timestamps or coordinates to split at (omit with --auto)")] = None,
-    auto: Annotated[bool, typer.Option("--auto", help="Split at detected recording gaps instead of given points")] = False,
+    split_points: Annotated[list[str] | None, typer.Argument(
+        help="Timestamps or coordinates to split at (omit with --auto)")] = None,
+    auto: Annotated[bool, typer.Option(
+        "--auto", help="Split at detected recording gaps instead of given points")] = False,
     gap_seconds: Annotated[float, typer.Option(min=0, help="--auto: minimum time jump (seconds)")] = 300.0,
     gap_meters: Annotated[float, typer.Option(min=0, help="--auto: minimum distance jump (meters)")] = 500.0,
 ) -> None:
@@ -261,18 +263,26 @@ def kml_split(
         if not split_points:
             log.info("No recording gap detected, nothing to split", target=str(path))
             return
+    else:
+        assert split_points is not None  # 守卫已保证非 auto 时必带切分点，mypy 需要显式收窄
     kml_edit.split_kml(path, split_points)
 
 
 @kml_app.command("prune")
 def kml_prune(
     path: Annotated[Path, typer.Argument(help="KML file")],
-    bad_points: Annotated[list[str] | None, typer.Argument(help="One point, or two points as a range (max 2; omit with --auto)")] = None,
-    auto: Annotated[bool, typer.Option("--auto", help="Remove detected drift bursts instead of given points")] = False,
-    speed_mps: Annotated[float, typer.Option(min=0, help="--auto: implausible speed that triggers a burst (m/s)")] = 30.0,
-    jump_meters: Annotated[float, typer.Option(min=0, help="--auto: implausible single-step distance (meters)")] = 100.0,
-    return_meters: Annotated[float, typer.Option(min=0, help="--auto: coming back this close to the anchor ends a burst")] = 30.0,
-    max_seconds: Annotated[float, typer.Option(min=0, help="--auto: a burst must return within this window (seconds)")] = 120.0,
+    bad_points: Annotated[list[str] | None, typer.Argument(
+        help="One point, or two points as a range (max 2; omit with --auto)")] = None,
+    auto: Annotated[bool, typer.Option(
+        "--auto", help="Remove detected drift bursts instead of given points")] = False,
+    speed_mps: Annotated[float, typer.Option(
+        min=0, help="--auto: implausible speed that triggers a burst (m/s)")] = 30.0,
+    jump_meters: Annotated[float, typer.Option(
+        min=0, help="--auto: implausible single-step distance (meters)")] = 100.0,
+    return_meters: Annotated[float, typer.Option(
+        min=0, help="--auto: coming back this close to the anchor ends a burst")] = 30.0,
+    max_seconds: Annotated[float, typer.Option(
+        min=0, help="--auto: a burst must return within this window (seconds)")] = 120.0,
 ) -> None:
     """Remove bad points (or the range between two), or drift bursts with --auto."""
     path = _resolve_path(path)
@@ -284,6 +294,7 @@ def kml_prune(
         if not kml_edit.prune_drift_points(path, speed_mps, jump_meters, return_meters, max_seconds):
             log.info("No drift burst detected, nothing to prune", target=str(path))
         return
+    assert bad_points is not None  # 守卫已保证非 auto 时必带点位，mypy 需要显式收窄
     kml_edit.prune_points(path, bad_points)
 
 
