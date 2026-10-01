@@ -37,7 +37,6 @@ app = typer.Typer(
     name="tracktool",
     help="Travel media geodata toolkit: KML track management and photo/video EXIF geotagging.",
     no_args_is_help=True,
-    add_completion=False,
 )
 kml_app = typer.Typer(help="KML track management", no_args_is_help=True)
 archive_app = typer.Typer(help="Track archive: declare and inspect the archive directory", no_args_is_help=True)
