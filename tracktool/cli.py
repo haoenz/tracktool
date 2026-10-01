@@ -65,12 +65,14 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def main(
-    version: Annotated[bool | None, typer.Option("--version", callback=_version_callback,
-                                                    is_eager=True, help="Show version and exit")] = None,
+    version: Annotated[
+        bool | None, typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version and exit")
+    ] = None,
     verbose: Annotated[int, typer.Option("--verbose", "-v", count=True, help="-v VERBOSE, -vv DEBUG")] = 0,
     quiet: QuietOpt = False,
-    dry_run: Annotated[bool, typer.Option(
-        "--dry-run", help="Show what would be done without writing any file")] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Show what would be done without writing any file")
+    ] = False,
 ) -> None:
     # --dry-run 是整次运行的模式，不是某个命令的开关：声明一次，所有写命令自动
     # 生效（写入集中在少数几个原语上，见 context.RunMode）。代价是它必须写在
@@ -165,8 +167,9 @@ def _print_plan(result: BatchResult[Any]) -> None:
 
 @archive_app.command("init")
 def archive_init(
-    directory: Annotated[Path | None, typer.Argument(
-        help="Archive directory (default: the configured archive_path)")] = None,
+    directory: Annotated[
+        Path | None, typer.Argument(help="Archive directory (default: the configured archive_path)")
+    ] = None,
 ) -> None:
     """Declare a directory as the track archive (manifest + ZIP).
 
@@ -176,8 +179,7 @@ def archive_init(
     if directory is None:
         configured = str(ctx.config["archive_path"] or "")
         if not configured:
-            raise UserInputError(
-                "No directory given and archive_path is not configured (set archive_path first)")
+            raise UserInputError("No directory given and archive_path is not configured (set archive_path first)")
         directory = Path(configured)
     kml_archive.init_archive(directory)
 
@@ -235,8 +237,7 @@ def kml_pop(
     kml_name: Annotated[str, typer.Argument(help="Track name to restore")],
     track_type: Annotated[TrackKind, typer.Option("--type", help="Track type")] = TrackKind.DEFAULT,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
-    force: Annotated[bool, typer.Option(
-        "--force", help="Warn instead of stopping when the archive disagrees")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Warn instead of stopping when the archive disagrees")] = False,
 ) -> None:
     """Restore a KML from the archive: extract into the current directory, remove from collections."""
     kml_archive.pop_kml_archive(kml_name, track_type, zip_path, force)
@@ -245,10 +246,12 @@ def kml_pop(
 @kml_app.command("split")
 def kml_split(
     path: Annotated[Path, typer.Argument(help="KML file to split")],
-    split_points: Annotated[list[str] | None, typer.Argument(
-        help="Timestamps or coordinates to split at (omit with --auto)")] = None,
-    auto: Annotated[bool, typer.Option(
-        "--auto", help="Split at detected recording gaps instead of given points")] = False,
+    split_points: Annotated[
+        list[str] | None, typer.Argument(help="Timestamps or coordinates to split at (omit with --auto)")
+    ] = None,
+    auto: Annotated[
+        bool, typer.Option("--auto", help="Split at detected recording gaps instead of given points")
+    ] = False,
     gap_seconds: Annotated[float, typer.Option(min=0, help="--auto: minimum time jump (seconds)")] = 300.0,
     gap_meters: Annotated[float, typer.Option(min=0, help="--auto: minimum distance jump (meters)")] = 500.0,
 ) -> None:
@@ -271,18 +274,22 @@ def kml_split(
 @kml_app.command("prune")
 def kml_prune(
     path: Annotated[Path, typer.Argument(help="KML file")],
-    bad_points: Annotated[list[str] | None, typer.Argument(
-        help="One point, or two points as a range (max 2; omit with --auto)")] = None,
-    auto: Annotated[bool, typer.Option(
-        "--auto", help="Remove detected drift bursts instead of given points")] = False,
-    speed_mps: Annotated[float, typer.Option(
-        min=0, help="--auto: implausible speed that triggers a burst (m/s)")] = 30.0,
-    jump_meters: Annotated[float, typer.Option(
-        min=0, help="--auto: implausible single-step distance (meters)")] = 100.0,
-    return_meters: Annotated[float, typer.Option(
-        min=0, help="--auto: coming back this close to the anchor ends a burst")] = 30.0,
-    max_seconds: Annotated[float, typer.Option(
-        min=0, help="--auto: a burst must return within this window (seconds)")] = 120.0,
+    bad_points: Annotated[
+        list[str] | None, typer.Argument(help="One point, or two points as a range (max 2; omit with --auto)")
+    ] = None,
+    auto: Annotated[bool, typer.Option("--auto", help="Remove detected drift bursts instead of given points")] = False,
+    speed_mps: Annotated[
+        float, typer.Option(min=0, help="--auto: implausible speed that triggers a burst (m/s)")
+    ] = 30.0,
+    jump_meters: Annotated[
+        float, typer.Option(min=0, help="--auto: implausible single-step distance (meters)")
+    ] = 100.0,
+    return_meters: Annotated[
+        float, typer.Option(min=0, help="--auto: coming back this close to the anchor ends a burst")
+    ] = 30.0,
+    max_seconds: Annotated[
+        float, typer.Option(min=0, help="--auto: a burst must return within this window (seconds)")
+    ] = 120.0,
 ) -> None:
     """Remove bad points (or the range between two), or drift bursts with --auto."""
     path = _resolve_path(path)
@@ -347,13 +354,14 @@ def exif_set(
     """Write EXIF tags (GPS position/altitude, Make/Model, arbitrary tags)."""
     path = _resolve_path(path)
     tag_dict: dict[str, str] = {}
-    for tag in (tags or []):
+    for tag in tags or []:
         if "=" not in tag:
             raise UserInputError(f"Invalid tag format (expected NAME=VALUE): {tag}")
         name, value = tag.split("=", 1)
         tag_dict[name] = value
-    options = exif_write.SetExifOptions(position=position, altitude=altitude, make=make,
-                                        model=model, tags=tag_dict, overwrite=overwrite)
+    options = exif_write.SetExifOptions(
+        position=position, altitude=altitude, make=make, model=model, tags=tag_dict, overwrite=overwrite
+    )
     result = exif_write.set_exif(path, options, parallel)
     _finish(result)
 
@@ -391,13 +399,15 @@ def exif_show_missing(
 def exif_geotag(
     path: Annotated[Path, typer.Argument(help="File or directory")],
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
-    max_time_diff: Annotated[int, typer.Option(
-        "--max-time-diff", help="Max seconds outside track duration")] = MAX_TIME_DIFF_SECONDS,
+    max_time_diff: Annotated[
+        int, typer.Option("--max-time-diff", help="Max seconds outside track duration")
+    ] = MAX_TIME_DIFF_SECONDS,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     force: Annotated[bool, typer.Option("--force", help="Update even when GPS exists")] = False,
     verify: Annotated[bool, typer.Option("--verify", help="Verify existing GPS against KML")] = False,
-    max_distance: Annotated[int, typer.Option(
-        "--max-distance", help="Verification threshold in meters")] = MAX_DISTANCE_METERS,
+    max_distance: Annotated[
+        int, typer.Option("--max-distance", help="Verification threshold in meters")
+    ] = MAX_DISTANCE_METERS,
     multiday: Annotated[bool, typer.Option("--multiday", help="Also check ±1 day tracks")] = False,
     failed_folder: Annotated[str | None, typer.Option("--failed-folder", help="Move failures here")] = None,
     parallel: ParallelOpt = False,
@@ -405,9 +415,14 @@ def exif_geotag(
     """Geotag media from the KML archive by timestamp matching."""
     path = _resolve_path(path)
     options = exif_position.GeotagOptions(
-        max_time_diff_seconds=max_time_diff, overwrite=overwrite, force=force,
-        verify_existing_gps=verify, max_distance_meters=max_distance,
-        multiday=multiday, failed_folder_name=failed_folder)
+        max_time_diff_seconds=max_time_diff,
+        overwrite=overwrite,
+        force=force,
+        verify_existing_gps=verify,
+        max_distance_meters=max_distance,
+        multiday=multiday,
+        failed_folder_name=failed_folder,
+    )
     result = exif_position.geotag_from_kml(path, zip_path, options, parallel)
     _finish(result)
 
@@ -437,8 +452,7 @@ def exif_set_location(
 ) -> None:
     """Reverse geocode GPSPosition into IPTC City/State/Country tags."""
     path = _resolve_path(path)
-    result = exif_google.set_location_from_google(path, overwrite, failed_folder, parallel, api_key,
-                                                 language)
+    result = exif_google.set_location_from_google(path, overwrite, failed_folder, parallel, api_key, language)
     _finish(result)
 
 

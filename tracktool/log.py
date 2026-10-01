@@ -44,8 +44,7 @@ _LEVEL_NUMBERS: dict[str, int] = {name: logging.getLevelName(name) for name in L
 
 _logger = logging.getLogger("tracktool")
 _logger.propagate = False
-_handler = RichHandler(console=_console, show_path=False, markup=False,
-                       highlighter=None, rich_tracebacks=True)
+_handler = RichHandler(console=_console, show_path=False, markup=False, highlighter=None, rich_tracebacks=True)
 _handler.setFormatter(logging.Formatter("%(message)s"))
 _logger.addHandler(_handler)
 _logger.setLevel(logging.INFO)

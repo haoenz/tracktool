@@ -11,8 +11,9 @@ class TestRunParallel:
     def test_every_completion_is_reported_in_order(self):
         seen: list[tuple[int, int]] = []
 
-        result = progress.run_parallel(list("abc"), str.upper,
-                                       on_progress=lambda done, total: seen.append((done, total)))
+        result = progress.run_parallel(
+            list("abc"), str.upper, on_progress=lambda done, total: seen.append((done, total))
+        )
 
         assert result == ["A", "B", "C"]
         assert seen == [(1, 3), (2, 3), (3, 3)]
@@ -29,8 +30,9 @@ class TestRunParallel:
         assert seen == []
 
     def test_parallel_results_keep_input_order(self):
-        result = progress.run_parallel([3, 1, 4, 1, 5], lambda n: n * 2, parallel=True,
-                                       on_progress=lambda done, total: None)
+        result = progress.run_parallel(
+            [3, 1, 4, 1, 5], lambda n: n * 2, parallel=True, on_progress=lambda done, total: None
+        )
 
         assert result == [6, 2, 8, 2, 10]
 

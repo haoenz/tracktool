@@ -104,8 +104,7 @@ def ensure_zip_file(zip_file: Path) -> None:
 def find_zip_entry(kml_name: str, zip_path: Path) -> str | None:
     """The entry whose file name contains kml_name, None when there is none."""
     with zipfile.ZipFile(zip_path) as zf:
-        return next((info.filename for info in zf.infolist()
-                     if kml_name in Path(info.filename).name), None)
+        return next((info.filename for info in zf.infolist() if kml_name in Path(info.filename).name), None)
 
 
 def zip_entry_name(kml_path: Path, kind: str) -> str:
@@ -174,7 +173,7 @@ def read_views_fingerprint(zip_file: Path) -> str | None:
     """The fingerprint the views last matched, None when never recorded."""
     try:
         data = json.loads(manifest_path(zip_file.parent).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return None
     return data.get("views")
 
@@ -188,8 +187,7 @@ def record_views_fingerprint(zip_file: Path, fingerprint: str | None) -> None:
         data["views"] = fingerprint
         manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except (OSError, json.JSONDecodeError) as exc:
-        raise UserInputError(
-            f"Cannot write archive manifest {display_path(manifest)}: {exc}") from exc
+        raise UserInputError(f"Cannot write archive manifest {display_path(manifest)}: {exc}") from exc
 
 
 def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = Path(".")) -> None:
@@ -228,8 +226,7 @@ def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path
 
     # zipfile has no entry-delete API: rewrite the archive without the entry
     with zipfile.ZipFile(zip_path) as zf:
-        remaining = {info.filename: zf.read(info.filename)
-                     for info in zf.infolist() if info.filename != entry_name}
+        remaining = {info.filename: zf.read(info.filename) for info in zf.infolist() if info.filename != entry_name}
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, blob in remaining.items():
             zf.writestr(name, blob)
@@ -255,10 +252,13 @@ def status(zip_path: str | None) -> None:
     log.info(f"ZIP holds {sum(counts.values())} entries ({summary})", target=str(archive_dir))
 
     # 只对真值里有条目的类型要求视图文件：没有条目的类型从来没有过视图
-    missing = [path.name
-               for kind in TrackKind if counts.get(kind.value, 0)
-               for path in collections.collection_paths(kind, archive_dir)
-               if not path.is_file()]
+    missing = [
+        path.name
+        for kind in TrackKind
+        if counts.get(kind.value, 0)
+        for path in collections.collection_paths(kind, archive_dir)
+        if not path.is_file()
+    ]
     if missing:
         log.warning(f"Missing view files: {', '.join(missing)}", target=str(archive_dir))
 
@@ -266,11 +266,11 @@ def status(zip_path: str | None) -> None:
     if stored == current:
         log.info("Views are in sync with the ZIP", target=str(archive_dir))
     elif stored is None:
-        log.warning("Views have never been synced with this ZIP "
-                    "(run `tracktool archive rebuild`)", target=str(archive_dir))
+        log.warning(
+            "Views have never been synced with this ZIP (run `tracktool archive rebuild`)", target=str(archive_dir)
+        )
     else:
-        log.warning("Views are out of date with the ZIP "
-                    "(run `tracktool archive rebuild`)", target=str(archive_dir))
+        log.warning("Views are out of date with the ZIP (run `tracktool archive rebuild`)", target=str(archive_dir))
 
 
 def rebuild(zip_path: str | None) -> None:
@@ -340,8 +340,7 @@ class _ArchiveState:
     problems: list[str]
 
 
-def _inspect_archive(kml_name: str, zip_file: Path, desktop_collection: Path,
-                     mobile_collection: Path) -> _ArchiveState:
+def _inspect_archive(kml_name: str, zip_file: Path, desktop_collection: Path, mobile_collection: Path) -> _ArchiveState:
     """Look the track up in the archive's three records, collecting disagreements.
 
     Listed as a restore consumes them: the ZIP, then the desktop collection
@@ -369,8 +368,9 @@ def _inspect_archive(kml_name: str, zip_file: Path, desktop_collection: Path,
     return _ArchiveState(zip_entry, in_desktop, in_mobile, problems)
 
 
-def pop_kml_archive(kml_name: str, type_: TrackKind = TrackKind.DEFAULT, zip_path: str | None = None,
-                    force: bool = False) -> None:
+def pop_kml_archive(
+    kml_name: str, type_: TrackKind = TrackKind.DEFAULT, zip_path: str | None = None, force: bool = False
+) -> None:
     """Restore a KML track: extract from ZIP and remove from both collections.
 
     Nothing is touched before the archive agrees with itself on this track, so

@@ -15,9 +15,11 @@ _MEDIA_TOOLS = ("exiftool", "ffmpeg")
 # 运行，而工具缺席时这些用例是跳过而不是失败（skipif 管跳过，标记管筛选）。
 requires_media_tools = [
     pytest.mark.integration,
-    pytest.mark.skipif(not all(shutil.which(tool) for tool in _MEDIA_TOOLS),
-                       reason="requires " + " and ".join(_MEDIA_TOOLS)),
+    pytest.mark.skipif(
+        not all(shutil.which(tool) for tool in _MEDIA_TOOLS), reason="requires " + " and ".join(_MEDIA_TOOLS)
+    ),
 ]
+
 
 def make_archive(directory: Path) -> Path:
     """Declare a test archive directory the way `archive init` does; return the ZIP path.
@@ -103,8 +105,7 @@ class InMemoryBackend:
         self.writes.append((Path(path), dict(tags), overwrite))
         self.tags.setdefault(Path(path), {}).update(tags)
 
-    def shift_tags(self, path: Path, tags: Sequence[str], delta: timedelta,
-                   *, overwrite: bool = False) -> None:
+    def shift_tags(self, path: Path, tags: Sequence[str], delta: timedelta, *, overwrite: bool = False) -> None:
         """The shift lands on the double's own tags, not just on the record.
 
         Recording alone would let a rule that reads a time back after shifting

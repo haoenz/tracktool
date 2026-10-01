@@ -16,9 +16,14 @@ from .paths import display_path
 
 # 扩展名 -> 媒体类别（group_media_files 的子目录名与发现过滤共用这一份）
 MEDIA_EXTENSIONS: dict[str, str] = {
-    ".mp4": "VID", ".mov": "VID", ".avi": "VID",
-    ".arw": "RAW", ".raf": "RAW", ".dng": "RAW",
-    ".jpg": "IMG", ".jpeg": "IMG",
+    ".mp4": "VID",
+    ".mov": "VID",
+    ".avi": "VID",
+    ".arw": "RAW",
+    ".raf": "RAW",
+    ".dng": "RAW",
+    ".jpg": "IMG",
+    ".jpeg": "IMG",
 }
 
 
@@ -48,5 +53,8 @@ def leaf_files(path: Path, include: str = ".*", exclude: str = "^$") -> list[Pat
     include_re = re.compile(include, re.IGNORECASE)
     exclude_re = re.compile(exclude, re.IGNORECASE)
     log.debug("Scanning directory for files", target=str(path))
-    return [f for f in sorted(path.rglob("*"))
-            if f.is_file() and include_re.search(str(f)) and not exclude_re.search(str(f))]
+    return [
+        f
+        for f in sorted(path.rglob("*"))
+        if f.is_file() and include_re.search(str(f)) and not exclude_re.search(str(f))
+    ]

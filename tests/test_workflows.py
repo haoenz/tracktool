@@ -31,8 +31,8 @@ runner = CliRunner()
 def _tagged(value: str) -> str:
     """The fixture track with a TrackTags value, so its type comes from the file."""
     return TRACK_KML.replace(
-        "<Document>",
-        f"<Document><ExtendedData><Data name='TrackTags'><value>{value}</value></Data></ExtendedData>")
+        "<Document>", f"<Document><ExtendedData><Data name='TrackTags'><value>{value}</value></Data></ExtendedData>"
+    )
 
 
 PLAIN_KML = _tagged("徒步")  # -> Default
@@ -62,13 +62,15 @@ class TestPushBatch:
         result = workflows.push_tracks(tracks, str(zip_path), TrackKind.DEFAULT)
 
         assert result.ok
-        assert sorted(zipfile.ZipFile(zip_path).namelist()) == sorted(
-            zip_entry_name(t, "Default") for t in tracks)
+        assert sorted(zipfile.ZipFile(zip_path).namelist()) == sorted(zip_entry_name(t, "Default") for t in tracks)
         desktop = xmlutil.parse_file(zip_path.parent / "Default.kml")
         assert len(xmlutil.findall(desktop, "//kml:Placemark")) == 3
         mobile = xmlutil.parse_file(zip_path.parent / "Default.Mobile.kml")
         assert sorted(n.get("id") for n in xmlutil.findall(mobile, "//kml:LineString")) == [
-            "2024-05-01 t1", "2024-05-02 t2", "2024-05-03 t3"]
+            "2024-05-01 t1",
+            "2024-05-02 t2",
+            "2024-05-03 t3",
+        ]
         # 默认不动源文件；--move 的搬移见 TestMoveFiling
         assert all(track.exists() for track in tracks)
 
@@ -145,11 +147,16 @@ class TestPushBatch:
 
         assert _kinds(result) == ["add to collection", "add to mobile collection", "append to ZIP"]
 
-        result = workflows.push_tracks([_track(tmp_path, "2024-05-02 b.kml")],
-                                       str(zip_path), TrackKind.DEFAULT, move=True)
+        result = workflows.push_tracks(
+            [_track(tmp_path, "2024-05-02 b.kml")], str(zip_path), TrackKind.DEFAULT, move=True
+        )
 
-        assert _kinds(result) == ["add to collection", "add to mobile collection",
-                                  "append to ZIP", "move to backup folder"]
+        assert _kinds(result) == [
+            "add to collection",
+            "add to mobile collection",
+            "append to ZIP",
+            "move to backup folder",
+        ]
         # 计划只是计划：除了建档时的身份与空 ZIP，什么都没写
         assert sorted(p.name for p in zip_path.parent.iterdir()) == ["Archive.zip", "archive.json"]
 
@@ -195,8 +202,7 @@ class TestTheCommand:
         bad = _track(tmp_path, "undated.kml")
         monkeypatch.setattr(ctx, "config", Config(path=tmp_path / "config.json").load())
 
-        result = runner.invoke(app, ["kml", "push", str(good), str(bad),
-                                     "--zip", str(zip_path), "--type", "Default"])
+        result = runner.invoke(app, ["kml", "push", str(good), str(bad), "--zip", str(zip_path), "--type", "Default"])
 
         assert result.exit_code == 3, result.output
         assert zipfile.ZipFile(zip_path).namelist() == [zip_entry_name(good, "Default")]
@@ -206,8 +212,9 @@ class TestTheCommand:
         zip_path = _archive(tmp_path)
         tracks = [_track(tmp_path, f"2024-05-0{i} t{i}.kml") for i in (1, 2)]
 
-        result = runner.invoke(app, ["--dry-run", "kml", "push", *[str(t) for t in tracks],
-                                     "--zip", str(zip_path), "--type", "Default"])
+        result = runner.invoke(
+            app, ["--dry-run", "kml", "push", *[str(t) for t in tracks], "--zip", str(zip_path), "--type", "Default"]
+        )
 
         assert result.exit_code == 0, result.output
         assert "add to collection" in result.output

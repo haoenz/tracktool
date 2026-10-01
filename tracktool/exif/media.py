@@ -60,8 +60,9 @@ def _parse_tz_offset(offset: str) -> int | None:
         return None
 
 
-def _compute_time_shift(file: Path, time_diff: str, offset_time: str, make: str,
-                        current_offset: str) -> tuple[int, dict[str, str]] | None:
+def _compute_time_shift(
+    file: Path, time_diff: str, offset_time: str, make: str, current_offset: str
+) -> tuple[int, dict[str, str]] | None:
     """Resolve the requested time_diff + timezone offset into a signed second
     total plus the EXIF offset-time params to write.
 
@@ -78,13 +79,11 @@ def _compute_time_shift(file: Path, time_diff: str, offset_time: str, make: str,
 
     if offset_time.strip():
         if make != MAKE_SONY:
-            log.error(f"OffsetTime is currently only supported for SONY. Current make: {make}",
-                      target=str(file))
+            log.error(f"OffsetTime is currently only supported for SONY. Current make: {make}", target=str(file))
             return None
 
         if not current_offset:
-            log.warning(f"Current {OFFSET_TIME} is missing, assuming {mediatime.DEFAULT_TZ_OFFSET}",
-                        target=str(file))
+            log.warning(f"Current {OFFSET_TIME} is missing, assuming {mediatime.DEFAULT_TZ_OFFSET}", target=str(file))
             current_offset = mediatime.DEFAULT_TZ_OFFSET
 
         target_sec = _parse_tz_offset(offset_time)
@@ -95,8 +94,11 @@ def _compute_time_shift(file: Path, time_diff: str, offset_time: str, make: str,
 
         diff_sec = target_sec - current_sec
         total_seconds_offset += diff_sec
-        log.verbose(f"Setting timezone tags: {OFFSET_TIME} from {current_offset} to {offset_time} "
-                    f"(diff: {diff_sec:+d} seconds)", target=str(file))
+        log.verbose(
+            f"Setting timezone tags: {OFFSET_TIME} from {current_offset} to {offset_time} "
+            f"(diff: {diff_sec:+d} seconds)",
+            target=str(file),
+        )
         tz_tags = {
             OFFSET_TIME: offset_time,
             OFFSET_TIME_ORIGINAL: offset_time,
@@ -117,12 +119,10 @@ def _insta360_new_name(file: Path, shift: timedelta, is_negative: bool) -> str |
     return _INSTA360_FILENAME_PATTERN.sub(f"_{new_time.strftime('%Y%m%d_%H%M%S')}_", file.name)
 
 
-def decide_time_shift(meta: MediaMetadata, time_diff: str, offset_time: str,
-                      overwrite: bool) -> list[Action]:
+def decide_time_shift(meta: MediaMetadata, time_diff: str, offset_time: str, overwrite: bool) -> list[Action]:
     """The steps that shift one file's timestamps, plus the name sync that
     follows for an Insta360 clip whose name carries the same time."""
-    resolved = _compute_time_shift(meta.path, time_diff, offset_time, meta.get(MAKE),
-                                   meta.get(OFFSET_TIME))
+    resolved = _compute_time_shift(meta.path, time_diff, offset_time, meta.get(MAKE), meta.get(OFFSET_TIME))
     if resolved is None:
         return [Failed(meta.path, "time shift not applicable to this file")]
     total_seconds_offset, tz_tags = resolved
@@ -150,8 +150,9 @@ def decide_time_shift(meta: MediaMetadata, time_diff: str, offset_time: str,
     return actions
 
 
-def shift_exif_time(path: Path | list[Path], time_diff: str = "", offset_time: str = "",
-                   overwrite: bool = False, parallel: bool = False) -> BatchResult[list[Action]]:
+def shift_exif_time(
+    path: Path | list[Path], time_diff: str = "", offset_time: str = "", overwrite: bool = False, parallel: bool = False
+) -> BatchResult[list[Action]]:
     """Shift EXIF timestamps; OffsetTime only supported for SONY. Insta360 files renamed."""
     if not time_diff and not offset_time:
         raise UserInputError("At least one of time_diff or offset_time must be provided.")
@@ -176,8 +177,9 @@ def decide_altitude_shift(meta: MediaMetadata, offset: float, overwrite: bool) -
     return [WriteTags(meta.path, build_tags(SetExifOptions(altitude=new_alt)), overwrite)]
 
 
-def shift_altitude(path: Path | list[Path], offset: float, overwrite: bool = False,
-                  parallel: bool = False) -> BatchResult[list[Action]]:
+def shift_altitude(
+    path: Path | list[Path], offset: float, overwrite: bool = False, parallel: bool = False
+) -> BatchResult[list[Action]]:
     """Shift GPSAltitude by a fixed offset (drone/ground-level correction)."""
     files = list_files(path)
 
@@ -186,12 +188,12 @@ def shift_altitude(path: Path | list[Path], offset: float, overwrite: bool = Fal
         meta = MediaMetadata.of(file, ctx.backend.read_tags(file, (ALTITUDE,)))
         return run(decide_altitude_shift(meta, offset, overwrite))
 
-    return run_per_file(files, process, activity=f"Shifting altitude by {offset} m",
-                        parallel=parallel)
+    return run_per_file(files, process, activity=f"Shifting altitude by {offset} m", parallel=parallel)
 
 
-def decide_convert(meta: MediaMetadata, output_dir: Path, offset_time: str,
-                   make: str | None, model: str | None) -> list[Action]:
+def decide_convert(
+    meta: MediaMetadata, output_dir: Path, offset_time: str, make: str | None, model: str | None
+) -> list[Action]:
     """Rewrap one video into MP4 at its own creation time, then tag the result."""
     media_time = mediatime.parse_media_time(meta.tags, offset_time, target=str(meta.path))
     if media_time is None:
@@ -209,17 +211,25 @@ def decide_convert(meta: MediaMetadata, output_dir: Path, offset_time: str,
     if model:
         tags[MODEL] = model
     return [
-        RemuxVideo(meta.path, output, create_time_utc.strftime("%Y-%m-%dT%H:%M:%S"),
-                   source_is_mp4=source_is_mp4,
-                   has_quicktime_create_date=bool(meta.get(QUICKTIME_CREATE_DATE))),
+        RemuxVideo(
+            meta.path,
+            output,
+            create_time_utc.strftime("%Y-%m-%dT%H:%M:%S"),
+            source_is_mp4=source_is_mp4,
+            has_quicktime_create_date=bool(meta.get(QUICKTIME_CREATE_DATE)),
+        ),
         WriteTags(output, tags, overwrite=True),
     ]
 
 
-def convert_to_mp4(path: Path | list[Path], make: str | None = None, model: str | None = None,
-                   output_directory: Path | None = None,
-                   offset_time: str = mediatime.DEFAULT_TZ_OFFSET,
-                   parallel: bool = False) -> BatchResult[list[Action]]:
+def convert_to_mp4(
+    path: Path | list[Path],
+    make: str | None = None,
+    model: str | None = None,
+    output_directory: Path | None = None,
+    offset_time: str = mediatime.DEFAULT_TZ_OFFSET,
+    parallel: bool = False,
+) -> BatchResult[list[Action]]:
     """Remux videos to MP4 with creation_time metadata + XMP tags (ffmpeg)."""
     # 入口处一次性校验 offset_time 格式，坏参数直接报错，而不是逐文件失败
     mediatime.parse_offset(offset_time)

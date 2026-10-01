@@ -129,8 +129,7 @@ def run_per_file[T, R](
             quarantine(file, failed_folder_name)
             return _FAILED
 
-    raw = run_parallel(files, guarded, parallel=parallel,
-                       on_progress=ctx.reporter(activity))
+    raw = run_parallel(files, guarded, parallel=parallel, on_progress=ctx.reporter(activity))
 
     # 并行执行的结果仍按输入顺序返回，失败清单也据此保持稳定
     result: BatchResult[R] = BatchResult()

@@ -94,15 +94,23 @@ def detect_gap_points(path: Path, gap_seconds: float, gap_meters: float) -> list
         distance = geo_distance(lat1, lon1, lat2, lon2)
         if distance < gap_meters:
             continue
-        log.info(f"Recording gap at point {i}: {whens[i]} -> {whens[i + 1]} "
-                 f"({delta / 60:.0f} min, {distance / 1000:.2f} km)", target=str(path))
+        log.info(
+            f"Recording gap at point {i}: {whens[i]} -> {whens[i + 1]} "
+            f"({delta / 60:.0f} min, {distance / 1000:.2f} km)",
+            target=str(path),
+        )
         gaps.append(whens[i])
     return gaps
 
 
-def _drift_ranges(coords: list[str], times: list[datetime], speed_mps: float,
-                  jump_meters: float, return_meters: float,
-                  max_seconds: float) -> list[tuple[int, int]]:
+def _drift_ranges(
+    coords: list[str],
+    times: list[datetime],
+    speed_mps: float,
+    jump_meters: float,
+    return_meters: float,
+    max_seconds: float,
+) -> list[tuple[int, int]]:
     """Half-open (start, stop) index ranges of drift; the stop point is kept.
 
     A burst triggers on one step whose implied speed or distance is
@@ -141,9 +149,13 @@ def _drift_ranges(coords: list[str], times: list[datetime], speed_mps: float,
     return ranges
 
 
-def detect_drift_points(path: Path, speed_mps: float = 30.0, jump_meters: float = 100.0,
-                        return_meters: float = 30.0, max_seconds: float = 120.0
-                        ) -> list[tuple[str, str]]:
+def detect_drift_points(
+    path: Path,
+    speed_mps: float = 30.0,
+    jump_meters: float = 100.0,
+    return_meters: float = 30.0,
+    max_seconds: float = 120.0,
+) -> list[tuple[str, str]]:
     """(first, last) timestamps of each detected drift burst, both endpoints
     being points the ranges remove.
 
@@ -155,12 +167,19 @@ def detect_drift_points(path: Path, speed_mps: float = 30.0, jump_meters: float 
     tree = xmlutil.parse_file(path)
     track = _get_track(tree)
     coords, whens, times = _track_series(track)
-    return [(whens[a], whens[b - 1]) for a, b in
-            _drift_ranges(coords, times, speed_mps, jump_meters, return_meters, max_seconds)]
+    return [
+        (whens[a], whens[b - 1])
+        for a, b in _drift_ranges(coords, times, speed_mps, jump_meters, return_meters, max_seconds)
+    ]
 
 
-def prune_drift_points(path: Path, speed_mps: float = 30.0, jump_meters: float = 100.0,
-                       return_meters: float = 30.0, max_seconds: float = 120.0) -> int:
+def prune_drift_points(
+    path: Path,
+    speed_mps: float = 30.0,
+    jump_meters: float = 100.0,
+    return_meters: float = 30.0,
+    max_seconds: float = 120.0,
+) -> int:
     """Remove every detected drift burst into <name>-Fixed.kml; returns the
     number of points removed (0 writes nothing)."""
     tree = xmlutil.parse_file(path)
@@ -174,8 +193,7 @@ def prune_drift_points(path: Path, speed_mps: float = 30.0, jump_meters: float =
     when_nodes = track.findall(f"{{{xmlutil.KML_NS}}}when")
     removed = 0
     for start, stop in ranges:
-        log.info(f"Drift burst {whens[start]} -> {whens[stop - 1]}: "
-                 f"removing {stop - start} point(s)", target=str(path))
+        log.info(f"Drift burst {whens[start]} -> {whens[stop - 1]}: removing {stop - start} point(s)", target=str(path))
         for index in range(start, stop):
             track.remove(coord_nodes[index])
             track.remove(when_nodes[index])
@@ -283,8 +301,7 @@ def prune_points(path: Path, bad_points: list[str]) -> None:
     _save_fixed(tree, path)
 
 
-def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
-              move: bool = False) -> None:
+def merge_kml(paths: list[Path], output_path: Path, connected: bool = False, move: bool = False) -> None:
     """Merge multiple KMLs into one LineString (-Connected) or MultiGeometry.
 
     The merged output stays where --output puts it; the source files are
@@ -368,15 +385,15 @@ def fill_kml_altitude_from_google(path: Path, api_key: str | None = None) -> Non
             continue
         parsed.append((node, tuples, indexes))
         # 第三分量缺失与 0 同义（is_missing_altitude 数值判零）
-        carrying = any(len(tuples[i].split(",")) > 2
-                       and not is_missing_altitude(tuples[i].split(",")[2]) for i in indexes)
+        carrying = any(
+            len(tuples[i].split(",")) > 2 and not is_missing_altitude(tuples[i].split(",")[2]) for i in indexes
+        )
         track = _track_of(node)
         has_altitude[track] = has_altitude.get(track, False) or carrying
 
     skipped = sum(1 for carrying in has_altitude.values() if carrying)
     if skipped:
-        log.info(f"Tracks already carrying altitude: {skipped} of {len(has_altitude)}, left alone",
-                 target=str(path))
+        log.info(f"Tracks already carrying altitude: {skipped} of {len(has_altitude)}, left alone", target=str(path))
 
     tuples_by_node: dict[xmlutil.etree._Element, list[str]] = {}
     alt_targets: list[tuple[xmlutil.etree._Element, int]] = []  # 下标与 points 对齐
@@ -440,8 +457,7 @@ def convert_kml_to_multigeometry(path: Path, output_path: Path | None = None) ->
 
     # 构建输出 KML：kml > Folder > (name + Style* + StyleMap* + Placemark > MultiGeometry)
     kml_ns = xmlutil.doc_ns(tree)
-    root = xmlutil.etree.fromstring(
-        f"<?xml version='1.0' encoding='UTF-8'?><kml xmlns='{kml_ns}'/>".encode())
+    root = xmlutil.etree.fromstring(f"<?xml version='1.0' encoding='UTF-8'?><kml xmlns='{kml_ns}'/>".encode())
     output_tree = root.getroottree()
     folder = xmlutil.etree.SubElement(root, f"{{{kml_ns}}}Folder")
 

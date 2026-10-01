@@ -33,8 +33,7 @@ def read_zip_name(archive_dir: Path) -> str:
     try:
         data = json.loads(manifest_path(archive_dir).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise UserInputError(
-            f"Cannot read archive manifest {display_path(manifest_path(archive_dir))}: {exc}") from exc
+        raise UserInputError(f"Cannot read archive manifest {display_path(manifest_path(archive_dir))}: {exc}") from exc
     return str(data.get("zip") or DEFAULT_ZIP_NAME)
 
 
@@ -52,13 +51,12 @@ def resolve_archive(zip_path: str | None) -> tuple[Path, Path]:
     else:
         configured = str(ctx.config["archive_path"] or "")
         if not configured:
-            raise UserInputError(
-                "Archive directory is not configured (set archive_path or pass --zip)")
+            raise UserInputError("Archive directory is not configured (set archive_path or pass --zip)")
         archive_dir = Path(configured).expanduser().resolve()
     if not manifest_path(archive_dir).is_file():
         raise UserInputError(
-            f"{display_path(archive_dir)} is not a tracktool archive "
-            "(run `tracktool archive init` first)")
+            f"{display_path(archive_dir)} is not a tracktool archive (run `tracktool archive init` first)"
+        )
     if not zip_path:
         zip_file = archive_dir / read_zip_name(archive_dir)
     return archive_dir, zip_file

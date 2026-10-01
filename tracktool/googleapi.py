@@ -53,7 +53,8 @@ def _request_json(api_url: str, api_name: str, retry_count: int = 3, timeout: in
             if attempt < retry_count:
                 delay = 2 ** (attempt - 1)
                 log.warning(
-                    f"{api_name} transient error (attempt {attempt}/{retry_count}): {exc}; retrying in {delay}s")
+                    f"{api_name} transient error (attempt {attempt}/{retry_count}): {exc}; retrying in {delay}s"
+                )
                 time.sleep(delay)
                 continue
             raise GoogleApiError(f"{api_name} failed after {retry_count} attempt(s): {exc}") from exc
@@ -124,13 +125,14 @@ def get_altitudes(
 
         response = _request_json(api_url, f"Google Elevation API (batch {index}/{len(batches)})", retry_count, timeout)
         status = response.get("status")
-        results = response.get("results", [])[:len(batch)]
+        results = response.get("results", [])[: len(batch)]
         if status == "OK" and len(results) != len(batch):
             log.debug(f"Batch {index} OK, received {len(results)} result(s) for {len(batch)} point(s)")
         elif status != "OK":
             # ZERO_RESULTS（如海面）也算没有高程，补 None 保持与 points 一一对应
-            log.warning(f"Batch {index}/{len(batches)} returned no elevation ({status}); "
-                        f"{len(batch)} point(s) count as missing")
+            log.warning(
+                f"Batch {index}/{len(batches)} returned no elevation ({status}); {len(batch)} point(s) count as missing"
+            )
         for result in results:
             elevation = result.get("elevation")
             elevations.append(round(elevation, 2) if elevation is not None else None)
@@ -173,8 +175,9 @@ def _parse_reverse_geocode(results: list[dict]) -> Location:
     return Location(
         country=_component_value(results, ["country"]),
         state=_component_value(results, ["administrative_area_level_1"]),
-        city=_component_value(results, ["locality", "administrative_area_level_2", "postal_town",
-                                         "sublocality_level_1", "sublocality"]),
+        city=_component_value(
+            results, ["locality", "administrative_area_level_2", "postal_town", "sublocality_level_1", "sublocality"]
+        ),
         country_code_iso=_component_value(results, ["country"], short_name=True),
     )
 
@@ -202,5 +205,6 @@ def get_location(
     results = response.get("results", [])
     location = _parse_reverse_geocode(results)
     log.debug(
-        f"Reverse geocoding OK: {location.country} / {location.state} / {location.city} / {location.country_code_iso}")
+        f"Reverse geocoding OK: {location.country} / {location.state} / {location.city} / {location.country_code_iso}"
+    )
     return location

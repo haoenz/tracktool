@@ -46,24 +46,35 @@ class TestDescribe:
 
     def test_a_shift_reads_as_a_signed_amount(self):
         assert describe(ShiftTags(Path("a.jpg"), ["A", "B"], timedelta(hours=1, minutes=30))) == (
-            "shift time", "2 timestamp tag(s) by +1:30:00")
+            "shift time",
+            "2 timestamp tag(s) by +1:30:00",
+        )
         assert describe(ShiftTags(Path("a.jpg"), ["A"], timedelta(hours=-2))) == (
-            "shift time", "1 timestamp tag(s) by -2:00:00")
+            "shift time",
+            "1 timestamp tag(s) by -2:00:00",
+        )
 
     def test_a_remux_says_which_way_it_goes(self):
         out = Path("out") / "a.mp4"
 
         assert describe(RemuxVideo(Path("a.mov"), out, "2024-05-01T00:00:00", False, False)) == (
-            "convert", "-> a.mp4 (ffmpeg)")
+            "convert",
+            "-> a.mp4 (ffmpeg)",
+        )
         assert describe(RemuxVideo(Path("a.mp4"), out, "2024-05-01T00:00:00", True, False)) == (
-            "rewrap", "-> a.mp4 (ffmpeg)")
+            "rewrap",
+            "-> a.mp4 (ffmpeg)",
+        )
         assert describe(RemuxVideo(Path("a.mp4"), out, "2024-05-01T00:00:00", True, True)) == (
-            "copy", "-> a.mp4 (keeping an _original)")
+            "copy",
+            "-> a.mp4 (keeping an _original)",
+        )
 
     def test_a_lookup_names_the_provider_and_the_point(self):
-        assert describe(Lookup(Path("a.jpg"), "Google Elevation", "39.0,116.0",
-                               point=(39.0, 116.0))) == (
-            "query", "Google Elevation: 39.0,116.0")
+        assert describe(Lookup(Path("a.jpg"), "Google Elevation", "39.0,116.0", point=(39.0, 116.0))) == (
+            "query",
+            "Google Elevation: 39.0,116.0",
+        )
 
     def test_skips_and_failures_read_as_reasons(self):
         assert describe(Skip(Path("a.jpg"), "nothing to do")) == ("skip", "nothing to do")
@@ -85,8 +96,7 @@ class TestApply:
     def test_a_shift_reaches_the_backend(self, backend):
         actions.apply(ShiftTags(Path("a.jpg"), ["ExifIFD:DateTimeOriginal"], timedelta(hours=1)))
 
-        assert backend.shifts == [
-            (Path("a.jpg"), ("ExifIFD:DateTimeOriginal",), timedelta(hours=1), False)]
+        assert backend.shifts == [(Path("a.jpg"), ("ExifIFD:DateTimeOriginal",), timedelta(hours=1), False)]
 
     def test_a_rename_lands_on_disk(self, tmp_path: Path):
         file = tmp_path / "a.jpg"
@@ -119,8 +129,7 @@ class TestApply:
     def test_a_step_runs_the_effect_it_carries(self):
         calls: list[str] = []
 
-        actions.apply(Step(Path("a.kml"), "add to collection", "Default.kml",
-                           lambda: calls.append("ran")))
+        actions.apply(Step(Path("a.kml"), "add to collection", "Default.kml", lambda: calls.append("ran")))
 
         assert calls == ["ran"]
 
@@ -155,9 +164,11 @@ class TestRun:
         assert backend.writes == []
 
     def test_a_failure_stops_the_plan_where_it_happened(self, backend):
-        plan = [WriteTags(Path("a.jpg"), {"Make": "SONY"}),
-                Failed(Path("a.jpg"), "no valid timestamp"),
-                Rename(Path("a.jpg"), "b.jpg")]
+        plan = [
+            WriteTags(Path("a.jpg"), {"Make": "SONY"}),
+            Failed(Path("a.jpg"), "no valid timestamp"),
+            Rename(Path("a.jpg"), "b.jpg"),
+        ]
 
         with pytest.raises(FileFailure):
             run(plan)
@@ -172,8 +183,7 @@ class TestPreviewStopsAtBillableWork:
     """Previewing a command that costs quota must not spend it — that is the
     whole reason the query is a step in the plan rather than a function call."""
 
-    def test_the_elevation_query_is_planned_not_performed(self, tmp_path: Path, backend,
-                                                          plan_mode, monkeypatch):
+    def test_the_elevation_query_is_planned_not_performed(self, tmp_path: Path, backend, plan_mode, monkeypatch):
         files = [tmp_path / f"p{i}.jpg" for i in range(3)]
         for file in files:
             backend.tags[file] = {"GPSLatitude": "39.0", "GPSLongitude": "116.0"}
@@ -190,8 +200,7 @@ class TestPreviewStopsAtBillableWork:
         assert [action.detail for action in plan] == ["39.0,116.0"] * 3
         assert backend.writes == []
 
-    def test_the_geocoding_query_is_planned_not_performed(self, tmp_path: Path, backend,
-                                                          plan_mode, monkeypatch):
+    def test_the_geocoding_query_is_planned_not_performed(self, tmp_path: Path, backend, plan_mode, monkeypatch):
         file = tmp_path / "p.jpg"
         file.touch()
         backend.tags[file] = {"GPSLatitude": "39.0", "GPSLongitude": "116.0"}
@@ -203,6 +212,5 @@ class TestPreviewStopsAtBillableWork:
 
         result = exif_google.set_location_from_google(file)
 
-        assert result.succeeded == [[Lookup(file, "Google Geocoding", "39.0,116.0",
-                                            point=(39.0, 116.0))]]
+        assert result.succeeded == [[Lookup(file, "Google Geocoding", "39.0,116.0", point=(39.0, 116.0))]]
         assert backend.writes == []

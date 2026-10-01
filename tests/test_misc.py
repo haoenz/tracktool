@@ -157,8 +157,7 @@ class TestLegacyKeyMigration:
         assert stored["archive_path"] == str(tmp_path / "arch")
 
     def test_an_old_key_that_is_there_twice_keeps_the_new_value(self, tmp_path: Path):
-        cfg, path = self._load(tmp_path, {"kml_zip_path": str(tmp_path / "a.zip"),
-                                          "archive_path": str(tmp_path / "b")})
+        cfg, path = self._load(tmp_path, {"kml_zip_path": str(tmp_path / "a.zip"), "archive_path": str(tmp_path / "b")})
 
         assert cfg["archive_path"] == str(tmp_path / "b")
         stored = json.loads(path.read_text(encoding="utf-8"))

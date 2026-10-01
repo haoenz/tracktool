@@ -35,16 +35,18 @@ def _serve(monkeypatch, record: dict) -> list[tuple[str, ...]]:
 
 class TestReadTags:
     def test_one_call_returns_every_requested_tag(self, monkeypatch, tmp_path):
-        calls = _serve(monkeypatch, {
-            "SourceFile": "p.jpg",
-            "ExifIFD:DateTimeOriginal": "2024:05:01 08:00:00",
-            "GPS:GPSAltitude": 100,
-            "Composite:GPSAltitude": 100,
-            "IFD0:Make": "SONY",
-        })
+        calls = _serve(
+            monkeypatch,
+            {
+                "SourceFile": "p.jpg",
+                "ExifIFD:DateTimeOriginal": "2024:05:01 08:00:00",
+                "GPS:GPSAltitude": 100,
+                "Composite:GPSAltitude": 100,
+                "IFD0:Make": "SONY",
+            },
+        )
 
-        tags = exiftool.read_tags(tmp_path / "p.jpg",
-                                  ["ExifIFD:DateTimeOriginal", "GPSAltitude", "Make", "Make"])
+        tags = exiftool.read_tags(tmp_path / "p.jpg", ["ExifIFD:DateTimeOriginal", "GPSAltitude", "Make", "Make"])
 
         assert len(calls) == 1
         assert "-n" in calls[0]
@@ -62,13 +64,16 @@ class TestReadTags:
     def test_derived_tags_take_the_composite_group(self, monkeypatch, tmp_path):
         # exiftool 对 GPS 派生标签同时给出 GPS: 与 Composite: 两份；-n 之下 GPS: 是无符号
         # 量值，只有 Composite 带 GPSAltitudeRef 符号，所以必须落 Composite
-        _serve(monkeypatch, {
-            "SourceFile": "p.jpg",
-            "GPS:GPSAltitude": 50,
-            "Composite:GPSAltitude": -50,
-            "Composite:GPSLatitude": -12.3456789012222,
-            "Composite:GPSLongitude": 116.987654321097,
-        })
+        _serve(
+            monkeypatch,
+            {
+                "SourceFile": "p.jpg",
+                "GPS:GPSAltitude": 50,
+                "Composite:GPSAltitude": -50,
+                "Composite:GPSLatitude": -12.3456789012222,
+                "Composite:GPSLongitude": 116.987654321097,
+            },
+        )
 
         tags = exiftool.read_tags(tmp_path / "p.jpg", ["GPSLatitude", "GPSLongitude", "GPSAltitude"])
 
@@ -77,28 +82,36 @@ class TestReadTags:
 
     def test_family_zero_group_resolves_to_family_one(self, monkeypatch, tmp_path):
         # "-Exif:DateTimeOriginal" 用的族 0 名在 -G1 输出里落在 ExifIFD
-        _serve(monkeypatch, {
-            "SourceFile": "p.jpg",
-            "ExifIFD:DateTimeOriginal": "2024:05:01 08:00:00",
-            "XMP-exif:DateTimeOriginal": "2024:05:01 08:00:00+08:00",
-        })
+        _serve(
+            monkeypatch,
+            {
+                "SourceFile": "p.jpg",
+                "ExifIFD:DateTimeOriginal": "2024:05:01 08:00:00",
+                "XMP-exif:DateTimeOriginal": "2024:05:01 08:00:00+08:00",
+            },
+        )
 
         assert exiftool.read_tags(tmp_path / "p.jpg", ["Exif:DateTimeOriginal"]) == {
-            "Exif:DateTimeOriginal": "2024:05:01 08:00:00"}
+            "Exif:DateTimeOriginal": "2024:05:01 08:00:00"
+        }
 
     def test_ambiguous_name_is_reported_not_guessed(self, monkeypatch, tmp_path, caplog):
-        _serve(monkeypatch, {
-            "SourceFile": "p.jpg",
-            "ExifIFD:DateTimeOriginal": "2024:05:01 08:00:00",
-            "XMP-exif:DateTimeOriginal": "2024:05:01 08:00:00+08:00",
-        })
+        _serve(
+            monkeypatch,
+            {
+                "SourceFile": "p.jpg",
+                "ExifIFD:DateTimeOriginal": "2024:05:01 08:00:00",
+                "XMP-exif:DateTimeOriginal": "2024:05:01 08:00:00+08:00",
+            },
+        )
 
         assert exiftool.read_tags(tmp_path / "p.jpg", ["DateTimeOriginal"]) == {}
         assert "Ambiguous tag" in caplog.text
 
     def test_malformed_output_is_a_tool_failure(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(exiftool, "invoke_persistent",
-                            lambda *params, config=None: ["perl: warning: Setting locale failed."])
+        monkeypatch.setattr(
+            exiftool, "invoke_persistent", lambda *params, config=None: ["perl: warning: Setting locale failed."]
+        )
 
         with pytest.raises(exiftool.ExiftoolError, match="Unreadable exiftool JSON output"):
             exiftool.read_tags(tmp_path / "p.jpg", ["Make"])
@@ -114,10 +127,13 @@ class TestBatchedCallers:
     def test_find_missing_reads_all_requested_tags_at_once(self, monkeypatch, tmp_path):
         photo = tmp_path / "p.jpg"
         photo.touch()  # list_files 只看路径形态，内容由桩读取提供
-        calls = _serve(monkeypatch, {
-            "SourceFile": "p.jpg",
-            "Composite:GPSPosition": "39.1 116.2",
-        })
+        calls = _serve(
+            monkeypatch,
+            {
+                "SourceFile": "p.jpg",
+                "Composite:GPSPosition": "39.1 116.2",
+            },
+        )
 
         batch = find_missing_tag(photo, ["GPSPosition", "GPSAltitude"])
 
@@ -144,8 +160,7 @@ class TestReadTagsAgainstExiftool:
     def test_later_reads_are_not_polluted_by_the_startup_warning(self, tmp_path):
         photo = tmp_path / "p.jpg"
         make_test_jpeg(photo)
-        exiftool.invoke(str(photo), "-GPSAltitude=7", "-GPSAltitudeRef=Above Sea Level",
-                        "-overwrite_original")
+        exiftool.invoke(str(photo), "-GPSAltitude=7", "-GPSAltitudeRef=Above Sea Level", "-overwrite_original")
 
         assert exiftool.read_tags(photo, ["GPSAltitude"]) == {"GPSAltitude": "7"}
         assert exiftool.read_tags(photo, ["GPSAltitude"]) == {"GPSAltitude": "7"}
@@ -153,8 +168,7 @@ class TestReadTagsAgainstExiftool:
     def test_below_sea_level_reads_as_a_negative_number(self, tmp_path):
         photo = tmp_path / "p.jpg"
         make_test_jpeg(photo)
-        exiftool.invoke(str(photo), "-GPSAltitude=50", "-GPSAltitudeRef=Below Sea Level",
-                        "-overwrite_original")
+        exiftool.invoke(str(photo), "-GPSAltitude=50", "-GPSAltitudeRef=Below Sea Level", "-overwrite_original")
 
         assert exiftool.read_tags(photo, ["GPSAltitude"]) == {"GPSAltitude": "-50"}
 
@@ -175,15 +189,16 @@ class TestPositionReadsEachFileOnce:
         photo = media_dir / "2024-05-01 a.jpg"
         make_test_jpeg(photo)
         # 拍摄时间在轨迹 [00:00, 00:03] UTC 内
-        exiftool.invoke(str(photo),
-                        "-ExifIFD:DateTimeOriginal=2024:05:01 08:01:30",
-                        "-ExifIFD:OffsetTimeOriginal=+08:00",
-                        "-overwrite_original")
+        exiftool.invoke(
+            str(photo),
+            "-ExifIFD:DateTimeOriginal=2024:05:01 08:01:30",
+            "-ExifIFD:OffsetTimeOriginal=+08:00",
+            "-overwrite_original",
+        )
         zip_path = tmp_path / "Archive.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("2024-05-01 test.kml", TRACK_KML)
-        (tmp_path / "archive.json").write_text(
-            '{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
+        (tmp_path / "archive.json").write_text('{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
         cfg = Config(path=tmp_path / "config.json").load()
         cfg["archive_path"] = str(tmp_path)
         monkeypatch.setattr(ctx, "config", cfg)
@@ -197,8 +212,7 @@ class TestPositionReadsEachFileOnce:
 
         # 计数范围只覆盖批量本身：标签写入走一次性进程，不经过持久进程
         monkeypatch.setattr(exiftool, "invoke_persistent", counting)
-        geotag_from_kml(media_dir, options=GeotagOptions(
-            overwrite=True, failed_folder_name="Failed"))
+        geotag_from_kml(media_dir, options=GeotagOptions(overwrite=True, failed_folder_name="Failed"))
 
         assert len(reads) == 1, reads
         assert "39" in exiftool.get_media_tag(photo, "GPSPosition")

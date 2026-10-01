@@ -39,8 +39,7 @@ class TestTrackLoading:
         track = make_track()
 
         assert track.name == "2024-05-01 test.kml"
-        assert track.points[0] == TrackPoint(39.0, 116.0, 100.0,
-                                             datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC))
+        assert track.points[0] == TrackPoint(39.0, 116.0, 100.0, datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC))
         assert len(track.points) == 4
 
     def test_mismatched_lists_are_rejected_at_load(self):
@@ -138,10 +137,8 @@ class TestFindBestTrack:
         assert best.seconds_from_nearest == 30
 
     def test_kml_without_gps_skipped(self):
-        tracks = [make_track('<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>',
-                             "2024-05-01 empty.kml")]
-        assert _find_best_track(tracks, datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC),
-                                multiday=False) is None
+        tracks = [make_track('<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>', "2024-05-01 empty.kml")]
+        assert _find_best_track(tracks, datetime(2024, 5, 1, 0, 0, 0, tzinfo=UTC), multiday=False) is None
 
 
 class TestCandidateDates:
@@ -165,10 +162,13 @@ class TestTrackLibrary:
         return zip_path
 
     def test_layered_entries_load_by_month(self, tmp_path):
-        zip_path = self._zip(tmp_path, {
-            "Default/2024-05/2024-05-01 a.kml": TRACK_KML,
-            "Default/2024-06/2024-06-01 b.kml": TRACK_KML,
-        })
+        zip_path = self._zip(
+            tmp_path,
+            {
+                "Default/2024-05/2024-05-01 a.kml": TRACK_KML,
+                "Default/2024-06/2024-06-01 b.kml": TRACK_KML,
+            },
+        )
         library = _TrackLibrary(zip_path)
 
         assert [t.name for t in library.tracks_for(["2024-05-01"])] == ["2024-05-01 a.kml"]
@@ -180,14 +180,16 @@ class TestTrackLibrary:
         assert [t.name for t in library.tracks_for(["2023-01-01"])] == ["2024-05-01 flat.kml"]
 
     def test_multiday_window_spans_months(self, tmp_path):
-        zip_path = self._zip(tmp_path, {
-            "Train/2024-04/2024-04-30 t.kml": TRACK_KML,
-            "Train/2024-05/2024-05-02 t.kml": TRACK_KML,
-        })
+        zip_path = self._zip(
+            tmp_path,
+            {
+                "Train/2024-04/2024-04-30 t.kml": TRACK_KML,
+                "Train/2024-05/2024-05-02 t.kml": TRACK_KML,
+            },
+        )
         library = _TrackLibrary(zip_path)
 
-        names = {t.name for t in library.tracks_for(
-            _candidate_dates(datetime(2024, 5, 1, 0, 0), multiday=True))}
+        names = {t.name for t in library.tracks_for(_candidate_dates(datetime(2024, 5, 1, 0, 0), multiday=True))}
         assert names == {"2024-04-30 t.kml", "2024-05-02 t.kml"}
 
     def test_a_month_parses_once_and_is_cached(self, tmp_path):
@@ -201,19 +203,25 @@ class TestTrackLibrary:
 
     def test_broken_kml_is_skipped_not_fatal(self, tmp_path):
         broken = TRACK_KML.replace("<when>2024-05-01T00:02:00Z</when>", "")
-        zip_path = self._zip(tmp_path, {
-            "Default/2024-05/2024-05-01 bad.kml": broken,
-            "Default/2024-05/2024-05-01 good.kml": TRACK_KML,
-        })
+        zip_path = self._zip(
+            tmp_path,
+            {
+                "Default/2024-05/2024-05-01 bad.kml": broken,
+                "Default/2024-05/2024-05-01 good.kml": TRACK_KML,
+            },
+        )
         library = _TrackLibrary(zip_path)
 
         assert [t.name for t in library.tracks_for(["2024-05-01"])] == ["2024-05-01 good.kml"]
 
     def test_non_kml_entries_are_ignored(self, tmp_path):
-        zip_path = self._zip(tmp_path, {
-            "Default/2024-05/2024-05-01 a.kml": TRACK_KML,
-            "Default/2024-05/notes.txt": "not a track",
-        })
+        zip_path = self._zip(
+            tmp_path,
+            {
+                "Default/2024-05/2024-05-01 a.kml": TRACK_KML,
+                "Default/2024-05/notes.txt": "not a track",
+            },
+        )
         library = _TrackLibrary(zip_path)
 
         assert [t.name for t in library.tracks_for(["2024-05-01"])] == ["2024-05-01 a.kml"]
@@ -226,8 +234,7 @@ class TestVerifyOrSkip:
         return TrackMatch(point, 0, True)
 
     def test_matching_position_proceeds(self):
-        assert _verify_or_skip(39.0, 116.0, self._match(39.0, 116.0),
-                               GeotagOptions()) is True
+        assert _verify_or_skip(39.0, 116.0, self._match(39.0, 116.0), GeotagOptions()) is True
 
     def test_mismatch_beyond_threshold_skips(self):
         far = self._match(40.0, 117.0)
@@ -236,8 +243,7 @@ class TestVerifyOrSkip:
 
     def test_equator_position_is_a_real_coordinate(self):
         # 纬度 0 是合法坐标，不能因为 falsy 被当成「没有位置」
-        assert _verify_or_skip(0.0, 116.0, self._match(0.0, 116.0),
-                               GeotagOptions()) is True
+        assert _verify_or_skip(0.0, 116.0, self._match(0.0, 116.0), GeotagOptions()) is True
 
 
 class TestKmlType:
@@ -253,8 +259,7 @@ class TestKmlType:
         # TrackTags 是 Document 级 ExtendedData，紧跟在 <Document> 之后
         kml_content = TRACK_KML.replace(
             "<Document>",
-            "<Document>"
-            "<ExtendedData><Data name='TrackTags'><value>徒步</value></Data></ExtendedData>",
+            "<Document><ExtendedData><Data name='TrackTags'><value>徒步</value></Data></ExtendedData>",
         )
         kml = tmp_path / "2024-05-01 test.kml"
         kml.write_text(kml_content, encoding="utf-8")
@@ -282,8 +287,13 @@ class TestDecidePosition:
         return find
 
     @staticmethod
-    def _match(latitude: float = 39.1, longitude: float = 116.1, altitude: float = 110.0,
-               seconds: float = 0.0, inside: bool = True) -> TrackMatch:
+    def _match(
+        latitude: float = 39.1,
+        longitude: float = 116.1,
+        altitude: float = 110.0,
+        seconds: float = 0.0,
+        inside: bool = True,
+    ) -> TrackMatch:
         point = TrackPoint(latitude, longitude, altitude, datetime(2024, 5, 1, tzinfo=UTC))
         return TrackMatch(point, seconds, inside)
 
@@ -296,14 +306,22 @@ class TestDecidePosition:
         assert result == [Skip(Path("2024-05-01 a.jpg"), "GPS data already exists")]
 
     def test_a_track_match_plans_the_write(self):
-        result = decide_position(self._meta(**self.TIME), self._finder(self._match()),
-                                 GeotagOptions(overwrite=True))
+        result = decide_position(self._meta(**self.TIME), self._finder(self._match()), GeotagOptions(overwrite=True))
 
-        assert result == [WriteTags(Path("2024-05-01 a.jpg"), {
-            "GPSLatitude": "39.1", "GPSLatitudeRef": "N",
-            "GPSLongitude": "116.1", "GPSLongitudeRef": "E",
-            "GPSAltitudeRef": "Above Sea Level", "GPSAltitude": "110.0",
-        }, True)]
+        assert result == [
+            WriteTags(
+                Path("2024-05-01 a.jpg"),
+                {
+                    "GPSLatitude": "39.1",
+                    "GPSLatitudeRef": "N",
+                    "GPSLongitude": "116.1",
+                    "GPSLongitudeRef": "E",
+                    "GPSAltitudeRef": "Above Sea Level",
+                    "GPSAltitude": "110.0",
+                },
+                True,
+            )
+        ]
 
     def test_the_decision_against_a_real_archive(self):
         # 00:01:30 UTC 落在 [00:01, 00:02] 正中间，取到 00:02 那个点
@@ -312,7 +330,8 @@ class TestDecidePosition:
         result = decide_position(
             self._meta(**self.TIME),
             lambda media_time: _find_best_track(tracks, media_time, multiday=False),
-            GeotagOptions())
+            GeotagOptions(),
+        )
 
         assert result[0].tags["GPSLatitude"] == "39.2"
         assert result[0].tags["GPSAltitude"] == "120.0"
@@ -328,37 +347,43 @@ class TestDecidePosition:
         assert result == [Failed(Path("2024-05-01 a.jpg"), "no matching GPS data in the KML archive")]
 
     def test_a_match_beyond_the_time_limit_is_a_failure(self):
-        result = decide_position(self._meta(**self.TIME),
-                                 self._finder(self._match(seconds=90.0, inside=False)),
-                                 GeotagOptions(max_time_diff_seconds=60))
+        result = decide_position(
+            self._meta(**self.TIME),
+            self._finder(self._match(seconds=90.0, inside=False)),
+            GeotagOptions(max_time_diff_seconds=60),
+        )
 
         assert result == [Failed(Path("2024-05-01 a.jpg"), "best match 90.0s outside the 60s limit")]
 
     def test_the_existing_altitude_is_kept_when_the_track_has_none(self):
         # KML 点的海拔是 0（未记录），沿用文件里已有的值
-        result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
-                                 self._finder(self._match(altitude=0.0)),
-                                 GeotagOptions(force=True))
+        result = decide_position(
+            self._meta(**self.TIME, **self.FULL_GPS), self._finder(self._match(altitude=0.0)), GeotagOptions(force=True)
+        )
 
         assert result[0].tags["GPSAltitude"] == "110.0"
 
     def test_force_rewrites_even_a_fully_tagged_file(self):
-        result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
-                                 self._finder(self._match()), GeotagOptions(force=True))
+        result = decide_position(
+            self._meta(**self.TIME, **self.FULL_GPS), self._finder(self._match()), GeotagOptions(force=True)
+        )
 
         assert [type(action) for action in result] == [WriteTags]
 
     def test_a_verification_mismatch_fails_without_quarantine(self):
-        result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
-                                 self._finder(self._match(latitude=40.0, longitude=117.0)),
-                                 GeotagOptions(verify_existing_gps=True))
+        result = decide_position(
+            self._meta(**self.TIME, **self.FULL_GPS),
+            self._finder(self._match(latitude=40.0, longitude=117.0)),
+            GeotagOptions(verify_existing_gps=True),
+        )
 
-        assert result == [Failed(Path("2024-05-01 a.jpg"), "existing GPS disagrees with the KML",
-                                 quarantine=False)]
+        assert result == [Failed(Path("2024-05-01 a.jpg"), "existing GPS disagrees with the KML", quarantine=False)]
 
     def test_a_passing_verification_has_nothing_to_write(self):
-        result = decide_position(self._meta(**self.TIME, **self.FULL_GPS),
-                                 self._finder(self._match()),
-                                 GeotagOptions(verify_existing_gps=True))
+        result = decide_position(
+            self._meta(**self.TIME, **self.FULL_GPS),
+            self._finder(self._match()),
+            GeotagOptions(verify_existing_gps=True),
+        )
 
         assert result == [Skip(Path("2024-05-01 a.jpg"), "existing GPS agrees with the KML match")]

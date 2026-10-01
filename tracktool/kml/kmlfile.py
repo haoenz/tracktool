@@ -68,8 +68,7 @@ def kind_from_tree(tree: xmlutil.etree._ElementTree, target: str = "") -> TrackK
 def set_kml_type(path: Path, kind: TrackKind) -> None:
     """Overwrite the TrackTags ExtendedData value in place."""
     tree = xmlutil.parse_file(path)
-    nodes = xmlutil.findall(
-        tree, f"/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='{TRACK_TAGS}']/kml:value")
+    nodes = xmlutil.findall(tree, f"/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='{TRACK_TAGS}']/kml:value")
     for node in nodes:
         node.text = kind.value
     if xmlutil.save(tree, path):

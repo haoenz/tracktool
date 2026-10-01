@@ -50,8 +50,7 @@ class TestResolveArchive:
 
     def test_explicit_zip_path_wins(self, tmp_path: Path, monkeypatch):
         zip_path = make_archive(tmp_path / "archive")
-        self._install(tmp_path, monkeypatch,
-                      archive_path=str(make_archive(tmp_path / "other")))
+        self._install(tmp_path, monkeypatch, archive_path=str(make_archive(tmp_path / "other")))
 
         archive_dir, resolved = resolve_archive(str(zip_path))
         assert resolved == zip_path.resolve()
@@ -69,8 +68,7 @@ class TestResolveArchive:
         """ZIP 文件名记在 archive.json 里，不必非叫 Archive.zip。"""
         directory = tmp_path / "archive"
         make_archive(directory)
-        (directory / "archive.json").write_text(
-            '{"version": 1, "zip": "Tracks.zip"}', encoding="utf-8")
+        (directory / "archive.json").write_text('{"version": 1, "zip": "Tracks.zip"}', encoding="utf-8")
         self._install(tmp_path, monkeypatch, archive_path=str(directory))
 
         _, zip_file = resolve_archive(None)
@@ -98,8 +96,7 @@ class TestResolveArchive:
         """归档未声明时 merge 拒绝整个归档步骤，而不是把归档建出来。"""
         from tracktool.kml.edit import merge_kml
 
-        self._install(tmp_path, monkeypatch, archive_path=str(tmp_path / "fresh"),
-                      kml_backup_dir_name="Backup")
+        self._install(tmp_path, monkeypatch, archive_path=str(tmp_path / "fresh"), kml_backup_dir_name="Backup")
 
         src = tmp_path / "2024-05-01 test.kml"
         src.write_text(TRACK_KML, encoding="utf-8")
@@ -110,15 +107,13 @@ class TestResolveArchive:
         assert not (tmp_path / "merged.kml").exists()
         assert src.is_file()
 
-    def test_merge_kml_writes_nothing_when_the_manifest_cannot_be_read(
-            self, tmp_path: Path, monkeypatch):
+    def test_merge_kml_writes_nothing_when_the_manifest_cannot_be_read(self, tmp_path: Path, monkeypatch):
         """归档这一步失败时不留半成品：合并结果还没写，源文件也没搬走。"""
         from tracktool.kml.edit import merge_kml
 
         blocked = tmp_path / "blocked"
         blocked.write_text("not a directory", encoding="utf-8")
-        self._install(tmp_path, monkeypatch, archive_path=str(blocked),
-                      kml_backup_dir_name="Backup")
+        self._install(tmp_path, monkeypatch, archive_path=str(blocked), kml_backup_dir_name="Backup")
 
         src = tmp_path / "2024-05-01 test.kml"
         src.write_text(TRACK_KML, encoding="utf-8")
@@ -134,8 +129,7 @@ class TestResolveArchive:
         from tracktool.kml.edit import merge_kml
 
         zip_path = make_archive(tmp_path / "archive")
-        self._install(tmp_path, monkeypatch, archive_path=str(zip_path.parent),
-                      kml_backup_dir_name="Backup")
+        self._install(tmp_path, monkeypatch, archive_path=str(zip_path.parent), kml_backup_dir_name="Backup")
 
         src = tmp_path / "2024-05-01 test.kml"
         src.write_text(TRACK_KML, encoding="utf-8")

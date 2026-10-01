@@ -55,8 +55,7 @@ class TagConfig:
 # 按优先级排列的候选时间标签：先试到的先用，解析不了才落到下一条。
 # 这里只管「先试谁、怎么解」，要读哪些标签归 tags.TIME_TAGS。
 _TAG_CONFIGS = [
-    TagConfig(CAPTURE_TIME, TZStrategy.SEPARATE,
-              [OFFSET_TIME_ORIGINAL, OFFSET_TIME, OFFSET_TIME_DIGITIZED]),
+    TagConfig(CAPTURE_TIME, TZStrategy.SEPARATE, [OFFSET_TIME_ORIGINAL, OFFSET_TIME, OFFSET_TIME_DIGITIZED]),
     TagConfig(H264_CAPTURE_TIME, TZStrategy.INCLUDE),
     TagConfig(XMP_CAPTURE_TIME, TZStrategy.INCLUDE),
     TagConfig(QUICKTIME_CREATE_DATE, TZStrategy.UTC),
@@ -91,8 +90,9 @@ def _aware(naive: datetime, offset: str) -> datetime:
     return naive.replace(tzinfo=timezone(timedelta(seconds=seconds)))
 
 
-def parse_media_time(tags: Mapping[str, str], default_offset: str = DEFAULT_TZ_OFFSET,
-                     target: str | None = None) -> datetime | None:
+def parse_media_time(
+    tags: Mapping[str, str], default_offset: str = DEFAULT_TZ_OFFSET, target: str | None = None
+) -> datetime | None:
     """Pick the highest-priority parseable timestamp out of already-read tags.
 
     `tags` is keyed by the TIME_TAGS names (read_tags output), which

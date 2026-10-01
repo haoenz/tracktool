@@ -52,7 +52,8 @@ class Track:
         when_texts = [(node.text or "").strip() for node in xmlutil.findall(tree, "//kml:when")]
         if len(coord_texts) != len(when_texts):
             raise UserInputError(
-                f"KML track has {len(coord_texts)} coordinate(s) but {len(when_texts)} timestamp(s): {name}")
+                f"KML track has {len(coord_texts)} coordinate(s) but {len(when_texts)} timestamp(s): {name}"
+            )
 
         points: list[TrackPoint] = []
         for coord_text, when_text in zip(coord_texts, when_texts, strict=True):

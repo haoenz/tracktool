@@ -28,10 +28,12 @@ runner = CliRunner()
 def _make_geotaggable_jpeg(path: Path) -> None:
     """JPEG with a timestamp inside the track (00:01:30 UTC = 08:01:30+08:00)."""
     make_test_jpeg(path)
-    exiftool.invoke(str(path),
-                    "-ExifIFD:DateTimeOriginal=2024:05:01 08:01:30",
-                    "-ExifIFD:OffsetTimeOriginal=+08:00",
-                    "-overwrite_original")
+    exiftool.invoke(
+        str(path),
+        "-ExifIFD:DateTimeOriginal=2024:05:01 08:01:30",
+        "-ExifIFD:OffsetTimeOriginal=+08:00",
+        "-overwrite_original",
+    )
 
 
 def _write_kml_zip(tmp_path: Path) -> Path:
@@ -39,8 +41,7 @@ def _write_kml_zip(tmp_path: Path) -> Path:
     zip_path = tmp_path / "Archive.zip"
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr("2024-05-01 test.kml", TRACK_KML)
-    (tmp_path / "archive.json").write_text(
-        '{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
+    (tmp_path / "archive.json").write_text('{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
     return zip_path
 
 
@@ -66,8 +67,7 @@ def _batch_with_bad_file(media_dir: Path, parallel: bool = False) -> list[Path]:
     bad = media_dir / "no-time.jpg"
     bad.write_bytes(b"\x00")
 
-    geotag_from_kml(media_dir, options=GeotagOptions(failed_folder_name="Failed"),
-                          parallel=parallel)
+    geotag_from_kml(media_dir, options=GeotagOptions(failed_folder_name="Failed"), parallel=parallel)
     return [good1, good2]
 
 
@@ -99,8 +99,7 @@ class TestSetPositionBatchIsolation:
         timeless = media_dir / "timeless.jpg"
         make_test_jpeg(timeless)
 
-        geotag_from_kml(media_dir, options=GeotagOptions(
-            failed_folder_name="Failed"))
+        geotag_from_kml(media_dir, options=GeotagOptions(failed_folder_name="Failed"))
 
         assert exiftool.get_media_tag(good, "GPSPosition")
         assert (media_dir / "Failed" / "timeless.jpg").is_file()
@@ -112,8 +111,7 @@ class TestSetPositionBatchIsolation:
         bad = media_dir / "no-time.jpg"
         bad.write_bytes(b"\x00")
 
-        result = geotag_from_kml(media_dir, options=GeotagOptions(
-            failed_folder_name="Failed"))
+        result = geotag_from_kml(media_dir, options=GeotagOptions(failed_folder_name="Failed"))
 
         assert [len(plan) for plan in result.succeeded] == [1, 1]  # 两个好文件各一条写入计划
         assert [p.name for p in result.failed] == ["no-time.jpg"]
@@ -126,9 +124,9 @@ class TestCliExitCodeReflectsBatch:
 
     def _invoke(self, media_dir: Path, zip_path: str):
         # media_dir fixture 已把 ctx.config 指向临时路径，CLI 不会读用户真实配置
-        return runner.invoke(cli.app, ["exif", "geotag", str(media_dir),
-                                       "--zip", zip_path, "--failed-folder", "Failed",
-                                       "--overwrite"])
+        return runner.invoke(
+            cli.app, ["exif", "geotag", str(media_dir), "--zip", zip_path, "--failed-folder", "Failed", "--overwrite"]
+        )
 
     def test_partial_failure_exits_three(self, media_dir):
         media_dir, cfg = media_dir

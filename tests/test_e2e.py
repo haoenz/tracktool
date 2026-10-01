@@ -39,8 +39,7 @@ def scene(tmp_path: Path) -> Scene:
     archive = tmp_path / "Archive.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("2024-05-01 test.kml", TRACK_KML)
-    (tmp_path / "archive.json").write_text(
-        '{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
+    (tmp_path / "archive.json").write_text('{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
     return Scene(media=media, archive=archive)
 
 
@@ -53,8 +52,7 @@ def _photo(scene: Scene, name: str, minutes: int) -> Path:
     path = scene.media / name
     make_test_jpeg(path)
     local = datetime(2024, 5, 1, 0, minutes, 0, tzinfo=UTC) + timedelta(hours=8)
-    exiftool.invoke(str(path), f"-Exif:DateTimeOriginal={local.strftime('%Y:%m:%d %H:%M:%S')}",
-                    "-overwrite_original")
+    exiftool.invoke(str(path), f"-Exif:DateTimeOriginal={local.strftime('%Y:%m:%d %H:%M:%S')}", "-overwrite_original")
     return path
 
 
@@ -65,10 +63,8 @@ class TestReportingWhatIsMissing:
 
         result = find_missing_tag(scene.media, ["GPSPosition", "GPSAltitude"])
 
-        assert [entry.file.name for entry in result.succeeded] == [
-            "photo0.jpg", "photo1.jpg", "photo30.jpg"]
-        assert all(entry.missing_tags == ["GPSPosition", "GPSAltitude"]
-                   for entry in result.succeeded)
+        assert [entry.file.name for entry in result.succeeded] == ["photo0.jpg", "photo1.jpg", "photo30.jpg"]
+        assert all(entry.missing_tags == ["GPSPosition", "GPSAltitude"] for entry in result.succeeded)
         assert result.ok
 
 
@@ -76,9 +72,9 @@ class TestGeotaggingFromTheArchive:
     def test_the_position_and_altitude_of_the_track_land_on_the_photo(self, scene):
         inside = [_photo(scene, f"photo{minutes}.jpg", minutes) for minutes in (0, 1)]
 
-        batch = geotag_from_kml(scene.media, str(scene.archive),
-                                options=GeotagOptions(overwrite=True,
-                                                      failed_folder_name="TrackPosFailed"))
+        batch = geotag_from_kml(
+            scene.media, str(scene.archive), options=GeotagOptions(overwrite=True, failed_folder_name="TrackPosFailed")
+        )
 
         assert [len(plan) for plan in batch.succeeded] == [1, 1]  # 一张照片一条写入
         assert batch.ok
@@ -90,9 +86,9 @@ class TestGeotaggingFromTheArchive:
         inside = _photo(scene, "photo0.jpg", 0)
         outside = _photo(scene, "photo30.jpg", 30)  # 27 分钟，远超 60 秒阈值
 
-        batch = geotag_from_kml(scene.media, str(scene.archive),
-                                options=GeotagOptions(overwrite=True,
-                                                      failed_folder_name="TrackPosFailed"))
+        batch = geotag_from_kml(
+            scene.media, str(scene.archive), options=GeotagOptions(overwrite=True, failed_folder_name="TrackPosFailed")
+        )
 
         assert [path.name for path in batch.failed] == ["photo30.jpg"]
         assert (scene.media / "TrackPosFailed" / "photo30.jpg").is_file()
@@ -124,8 +120,7 @@ class TestTheDirectPaths:
     def test_a_position_written_by_hand_reads_back(self, scene):
         photo = _photo(scene, "photo0.jpg", 0)
 
-        set_exif(photo, SetExifOptions(position="31.230416 121.473701", altitude=4.0,
-                                       overwrite=True))
+        set_exif(photo, SetExifOptions(position="31.230416 121.473701", altitude=4.0, overwrite=True))
 
         assert exiftool.get_media_tag(photo, "GPSPosition") == "31.230416 121.473701"
         assert exiftool.get_media_tag(photo, "GPSAltitude") == "4"

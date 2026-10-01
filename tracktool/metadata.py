@@ -38,7 +38,7 @@ def is_missing_altitude(value: str | float | None) -> bool:
         return True
     try:
         return float(value) == ZERO_ALTITUDE
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         # 非数值形态无法判为零，按旧行为视为有值
         return False
 
@@ -59,8 +59,7 @@ class MetadataBackend(Protocol):
         """Assign the given tags, keeping a backup of the original unless told not to."""
         ...
 
-    def shift_tags(self, path: Path, tags: Sequence[str], delta: timedelta,
-                   *, overwrite: bool = False) -> None:
+    def shift_tags(self, path: Path, tags: Sequence[str], delta: timedelta, *, overwrite: bool = False) -> None:
         """Move each named timestamp tag by delta, leaving every other tag alone."""
         ...
 

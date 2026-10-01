@@ -98,13 +98,20 @@ class TestSetExif:
     def test_the_tags_and_the_overwrite_flag_reach_the_backend(self, backend, photo):
         set_exif(photo, SetExifOptions(position="39.9 116.4", altitude=-50, overwrite=True))
 
-        assert backend.writes == [(
-            photo,
-            {"GPSLatitude": "39.9", "GPSLatitudeRef": "N",
-             "GPSLongitude": "116.4", "GPSLongitudeRef": "E",
-             "GPSAltitudeRef": "Below Sea Level", "GPSAltitude": "50"},
-            True,
-        )]
+        assert backend.writes == [
+            (
+                photo,
+                {
+                    "GPSLatitude": "39.9",
+                    "GPSLatitudeRef": "N",
+                    "GPSLongitude": "116.4",
+                    "GPSLongitudeRef": "E",
+                    "GPSAltitudeRef": "Below Sea Level",
+                    "GPSAltitude": "50",
+                },
+                True,
+            )
+        ]
 
 
 class TestMoveAltitude:
@@ -119,8 +126,7 @@ class TestMoveAltitude:
 
         shift_altitude(photo, -2.5)
 
-        assert backend.writes == [
-            (photo, {"GPSAltitudeRef": "Above Sea Level", "GPSAltitude": "97.5"}, False)]
+        assert backend.writes == [(photo, {"GPSAltitudeRef": "Above Sea Level", "GPSAltitude": "97.5"}, False)]
 
 
 class TestGoogleAltitude:
@@ -151,11 +157,10 @@ class TestExiftoolArgv:
         monkeypatch.setattr(exiftool, "invoke", lambda *params, config=None: calls.append(params) or [])
 
         exiftool.ExiftoolBackend(Config()).shift_tags(
-            tmp_path / "x.jpg", ["DateTimeOriginal"], timedelta(hours=-2), overwrite=True)
+            tmp_path / "x.jpg", ["DateTimeOriginal"], timedelta(hours=-2), overwrite=True
+        )
 
-        assert calls == [(str(tmp_path / "x.jpg"),
-                          "-DateTimeOriginal-=0:0:0 2:0:0",
-                          "-overwrite_original")]
+        assert calls == [(str(tmp_path / "x.jpg"), "-DateTimeOriginal-=0:0:0 2:0:0", "-overwrite_original")]
 
     def test_a_write_spells_an_assignment(self, monkeypatch, tmp_path):
         calls: list[tuple[str, ...]] = []

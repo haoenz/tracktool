@@ -143,8 +143,7 @@ def describe(action: Action) -> tuple[str, str]:
             return "shift time", f"{len(tags)} timestamp tag(s) by {_signed(delta)}"
         case Rename(new_name=new_name):
             return "rename", f"-> {new_name}"
-        case RemuxVideo(output=output, source_is_mp4=is_mp4,
-                        has_quicktime_create_date=has_create_date):
+        case RemuxVideo(output=output, source_is_mp4=is_mp4, has_quicktime_create_date=has_create_date):
             if is_mp4 and has_create_date:
                 # 源已是 MP4 且带创建时间：搬走原件后直接复制，不必过 ffmpeg
                 return "copy", f"-> {output.name} (keeping an _original)"
@@ -190,8 +189,9 @@ def _remux(action: RemuxVideo) -> None:
     """The ffmpeg branch of RemuxVideo, including the original-file shuffle."""
     file, output = action.file, action.output
     if not action.source_is_mp4:
-        _ffmpeg(["-i", str(file), "-c", "copy",
-                 "-metadata", f"creation_time={action.create_time_utc}", str(output)], file)
+        _ffmpeg(
+            ["-i", str(file), "-c", "copy", "-metadata", f"creation_time={action.create_time_utc}", str(output)], file
+        )
         return
 
     original = file.with_name(file.name + "_original")
@@ -199,8 +199,20 @@ def _remux(action: RemuxVideo) -> None:
     if action.has_quicktime_create_date:
         shutil.copy2(original, output)
         return
-    _ffmpeg(["-i", str(original), "-metadata", f"creation_time={action.create_time_utc}",
-             "-c", "copy", "-map", "0", str(output)], file)
+    _ffmpeg(
+        [
+            "-i",
+            str(original),
+            "-metadata",
+            f"creation_time={action.create_time_utc}",
+            "-c",
+            "copy",
+            "-map",
+            "0",
+            str(output),
+        ],
+        file,
+    )
 
 
 def _ffmpeg(args: list[str], source: Path) -> None:

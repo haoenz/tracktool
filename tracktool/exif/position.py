@@ -68,8 +68,7 @@ class _TrackLibrary:
         self._cache: dict[str, list[Track]] = {}
         self._unlayered_tracks: list[Track] | None = None
         self._lock = threading.Lock()
-        log.info(f"Archive holds {total} KML entries in {len(self._by_month)} months: "
-                 f"{display_path(zip_path)}")
+        log.info(f"Archive holds {total} KML entries in {len(self._by_month)} months: {display_path(zip_path)}")
 
     def tracks_for(self, dates: list[str]) -> list[Track]:
         """Every track the candidate dates could match, parsed once per month."""
@@ -90,15 +89,13 @@ class _TrackLibrary:
                 infos = self._by_month.get(month, [])
                 cached = [track for info in infos if (track := self._parse(info)) is not None]
                 self._cache[month] = cached
-                log.debug(f"Loaded {len(cached)} tracks for {month} from ZIP: "
-                          f"{display_path(self._zip_path)}")
+                log.debug(f"Loaded {len(cached)} tracks for {month} from ZIP: {display_path(self._zip_path)}")
         return cached
 
     def _always_tracks(self) -> list[Track]:
         with self._lock:
             if self._unlayered_tracks is None:
-                self._unlayered_tracks = [track for info in self._unlayered
-                                          if (track := self._parse(info)) is not None]
+                self._unlayered_tracks = [track for info in self._unlayered if (track := self._parse(info)) is not None]
             return self._unlayered_tracks
 
     def _parse(self, info: zipfile.ZipInfo) -> Track | None:
@@ -140,8 +137,9 @@ def _candidate_dates(media_time: datetime, multiday: bool) -> list[str]:
     return dates
 
 
-def _find_best_track(tracks: list[Track], media_time: datetime, multiday: bool,
-                     target_file: str | None = None) -> TrackMatch | None:
+def _find_best_track(
+    tracks: list[Track], media_time: datetime, multiday: bool, target_file: str | None = None
+) -> TrackMatch | None:
     """Nearest point among KMLs whose name contains the media date (±1 day
     with multiday): an in-duration match wins immediately, otherwise the
     closest out-of-duration point is kept."""
@@ -154,9 +152,11 @@ def _find_best_track(tracks: list[Track], media_time: datetime, multiday: bool,
         pos = candidate.nearest(media_time.astimezone(UTC))
         if pos is None:
             continue
-        log.verbose(f"Found GPS coordinate in {candidate.name} (lon/lat/alt): "
-                    f"{pos.point.longitude} {pos.point.latitude} {pos.point.altitude}",
-                    target=target_file)
+        log.verbose(
+            f"Found GPS coordinate in {candidate.name} (lon/lat/alt): "
+            f"{pos.point.longitude} {pos.point.latitude} {pos.point.altitude}",
+            target=target_file,
+        )
         if pos.inside_duration:
             return pos
         if best is None or pos.seconds_from_nearest < best.seconds_from_nearest:
@@ -164,33 +164,34 @@ def _find_best_track(tracks: list[Track], media_time: datetime, multiday: bool,
     return best
 
 
-def _verify_or_skip(latitude: float, longitude: float, best: TrackMatch,
-                    options: GeotagOptions, target_file: str | None = None) -> bool:
+def _verify_or_skip(
+    latitude: float, longitude: float, best: TrackMatch, options: GeotagOptions, target_file: str | None = None
+) -> bool:
     """Distance check of existing GPS against the KML match; False = skip the
     file (mismatch beyond threshold and no force)."""
-    distance = coords.geo_distance(latitude, longitude,
-                                   best.point.latitude, best.point.longitude)
+    distance = coords.geo_distance(latitude, longitude, best.point.latitude, best.point.longitude)
     if distance > options.max_distance_meters:
-        log.warning(f"Existing GPS and KML GPS differ by {round(distance, 2)} meters "
-                    f"(Threshold: {options.max_distance_meters}m)", target=target_file)
+        log.warning(
+            f"Existing GPS and KML GPS differ by {round(distance, 2)} meters "
+            f"(Threshold: {options.max_distance_meters}m)",
+            target=target_file,
+        )
         return options.force
-    log.debug(f"Existing GPS and KML GPS match within threshold ({round(distance, 2)} meters).",
-              target=target_file)
+    log.debug(f"Existing GPS and KML GPS match within threshold ({round(distance, 2)} meters).", target=target_file)
     return True
 
 
-def decide_position(meta: MediaMetadata, find_best: FindBestTrack,
-                    options: GeotagOptions) -> list[Action]:
+def decide_position(meta: MediaMetadata, find_best: FindBestTrack, options: GeotagOptions) -> list[Action]:
     """What to do with one file, as a value: nothing here reads or writes.
 
     `find_best` is the track lookup, handed over so a file that already has
     everything is skipped without searching the archive at all — the archive
     holds thousands of points and most files in a library are already tagged.
     """
-    if meta.has_position and meta.has_altitude \
-            and not options.force and not options.verify_existing_gps:
-        log.debug(f"GPSPosition already exists: {meta.get('GPSLatitude')} {meta.get('GPSLongitude')}",
-                  target=str(meta.path))
+    if meta.has_position and meta.has_altitude and not options.force and not options.verify_existing_gps:
+        log.debug(
+            f"GPSPosition already exists: {meta.get('GPSLatitude')} {meta.get('GPSLongitude')}", target=str(meta.path)
+        )
         log.debug(f"GPSAltitude already exists: {meta.get('GPSAltitude')}", target=str(meta.path))
         return [Skip(meta.path, "GPS data already exists")]
 
@@ -202,8 +203,12 @@ def decide_position(meta: MediaMetadata, find_best: FindBestTrack,
     if best is None:
         return [Failed(meta.path, "no matching GPS data in the KML archive")]
     if best.seconds_from_nearest > options.max_time_diff_seconds:
-        return [Failed(meta.path, f"best match {round(best.seconds_from_nearest, 2)}s outside "
-                                  f"the {options.max_time_diff_seconds}s limit")]
+        return [
+            Failed(
+                meta.path,
+                f"best match {round(best.seconds_from_nearest, 2)}s outside the {options.max_time_diff_seconds}s limit",
+            )
+        ]
 
     position = meta.position
     if options.verify_existing_gps and position is not None:
@@ -215,15 +220,21 @@ def decide_position(meta: MediaMetadata, find_best: FindBestTrack,
 
     # KML 没带海拔时沿用文件里已有的值
     new_altitude = best.point.altitude or meta.altitude
-    return [WriteTags(meta.path,
-                      build_tags(SetExifOptions(position=f"{best.point.latitude} {best.point.longitude}",
-                                                altitude=new_altitude)),
-                      options.overwrite)]
+    return [
+        WriteTags(
+            meta.path,
+            build_tags(SetExifOptions(position=f"{best.point.latitude} {best.point.longitude}", altitude=new_altitude)),
+            options.overwrite,
+        )
+    ]
 
 
-def geotag_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
-                          options: GeotagOptions | None = None,
-                          parallel: bool = False) -> BatchResult[list[Action]]:
+def geotag_from_kml(
+    path: Path | list[Path],
+    kml_zip_path: str | None = None,
+    options: GeotagOptions | None = None,
+    parallel: bool = False,
+) -> BatchResult[list[Action]]:
     """Set GPS position/altitude on media files from the KML ZIP archive.
 
     A file list is accepted so one call can cover a whole selection: the
@@ -244,11 +255,23 @@ def geotag_from_kml(path: Path | list[Path], kml_zip_path: str | None = None,
     def process(file: Path) -> list[Action]:
         # 时间标签与 GPS 标签一次读齐，每个文件只往返 exiftool 一次
         meta = MediaMetadata.of(file, ctx.backend.read_tags(file, POSITION_TAGS))
-        return run(decide_position(
-            meta, lambda media_time: _find_best_track(
-                library.tracks_for(_candidate_dates(media_time, options.multiday)),
-                media_time, options.multiday, str(file)),
-            options))
+        return run(
+            decide_position(
+                meta,
+                lambda media_time: _find_best_track(
+                    library.tracks_for(_candidate_dates(media_time, options.multiday)),
+                    media_time,
+                    options.multiday,
+                    str(file),
+                ),
+                options,
+            )
+        )
 
-    return run_per_file(files, process, activity="Setting GPS info from KML",
-                        failed_folder_name=options.failed_folder_name, parallel=parallel)
+    return run_per_file(
+        files,
+        process,
+        activity="Setting GPS info from KML",
+        failed_folder_name=options.failed_folder_name,
+        parallel=parallel,
+    )

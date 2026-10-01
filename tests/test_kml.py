@@ -22,15 +22,13 @@ runner = CliRunner()
 def _drop_zip_entry(zip_path: Path, entry_name: str) -> None:
     """重写压缩包并去掉某条 entry，造出「ZIP 与聚合不一致」的归档。"""
     with zipfile.ZipFile(zip_path) as zf:
-        remaining = {info.filename: zf.read(info.filename)
-                     for info in zf.infolist() if info.filename != entry_name}
+        remaining = {info.filename: zf.read(info.filename) for info in zf.infolist() if info.filename != entry_name}
     with zipfile.ZipFile(zip_path, "w") as zf:
         for name, blob in remaining.items():
             zf.writestr(name, blob)
 
 
-def _push(*tracks: Path, zip_path: Path, type_: TrackKind | None = TrackKind.DEFAULT,
-          move: bool = False) -> list[Path]:
+def _push(*tracks: Path, zip_path: Path, type_: TrackKind | None = TrackKind.DEFAULT, move: bool = False) -> list[Path]:
     """File tracks the way `kml push` does; returns the ones it could not file."""
     return workflows.push_tracks(list(tracks), str(zip_path), type_, move).failed
 
@@ -65,7 +63,8 @@ def gapped_track_file(tmp_path: Path) -> Path:
         "<Document>\n<name>2024-05-01 gapped</name>\n<Folder>\n<Placemark>\n<name>track</name>\n"
         f"<gx:Track>\n{whens}\n{coords}\n</gx:Track>\n"
         "</Placemark>\n</Folder>\n</Document>\n</kml>",
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     return path
 
 
@@ -116,7 +115,8 @@ class TestSplitKml:
             "<Document>\n<Folder>\n<Placemark>\n"
             f"<gx:Track>\n{whens}\n{coords}\n</gx:Track>\n"
             "</Placemark>\n</Folder>\n</Document>\n</kml>",
-            encoding="utf-8")
+            encoding="utf-8",
+        )
         assert edit.detect_gap_points(path, gap_seconds=300, gap_meters=500) == []
 
     def test_detect_gap_requires_timestamps(self, track_file: Path):
@@ -140,8 +140,7 @@ class TestSplitKml:
         assert not list(track_file.parent.glob("*-Splited-*.kml"))
 
     def test_cli_auto_conflicts_with_points(self, track_file: Path):
-        result = runner.invoke(
-            app, ["kml", "split", str(track_file), "--auto", "2024-05-01T00:01:00Z"])
+        result = runner.invoke(app, ["kml", "split", str(track_file), "--auto", "2024-05-01T00:01:00Z"])
         assert result.exit_code != 0
 
     def test_cli_requires_points_or_auto(self, track_file: Path):
@@ -180,7 +179,8 @@ def _write_track(tmp_path: Path, name: str, points: list[tuple[str, str]]) -> Pa
         "<Document>\n<Folder>\n<Placemark>\n"
         f"<gx:Track>\n{whens}\n{coords}\n</gx:Track>\n"
         "</Placemark>\n</Folder>\n</Document>\n</kml>",
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     return path
 
 
@@ -200,10 +200,12 @@ class TestDetectDrift:
     def test_drift_burst_detected_and_pruned(self, tmp_path: Path):
         """原地记录中飞出 ~333 m 又回来：检出区间，prune 只删漂移点。"""
         points = _stationary(5)
-        points += [(_second(5), "116.0 39.003 100"),
-                   (_second(6), "116.0 39.0031 100"),
-                   (_second(7), "116.0 39.0029 100"),
-                   (_second(8), "116.0 39.003 100")]
+        points += [
+            (_second(5), "116.0 39.003 100"),
+            (_second(6), "116.0 39.0031 100"),
+            (_second(7), "116.0 39.0029 100"),
+            (_second(8), "116.0 39.003 100"),
+        ]
         points += _stationary(3, start=9)
         path = _write_track(tmp_path, "drift.kml", points)
 
@@ -227,21 +229,18 @@ class TestDetectDrift:
 
         assert edit.detect_drift_points(path) == [("2024-05-01T00:00:05Z", "2024-05-01T00:00:05Z")]
         assert edit.prune_drift_points(path) == 1
-        assert len(xmlutil.findall(xmlutil.parse_file(tmp_path / "spike-Fixed.kml"),
-                                   "//gx:coord")) == 7
+        assert len(xmlutil.findall(xmlutil.parse_file(tmp_path / "spike-Fixed.kml"), "//gx:coord")) == 7
 
     def test_real_movement_is_not_drift(self, tmp_path: Path):
         """每步 50 m、0.83 m/s 的稀疏真实步行：不触发，不删任何点。"""
-        points = [(f"2024-05-01T00:{m:02d}:00Z", f"116.0 {39.0 + 0.00045 * m:.5f} 100")
-                  for m in range(6)]
+        points = [(f"2024-05-01T00:{m:02d}:00Z", f"116.0 {39.0 + 0.00045 * m:.5f} 100") for m in range(6)]
         path = _write_track(tmp_path, "walk.kml", points)
         assert edit.detect_drift_points(path) == []
 
     def test_departure_without_return_is_kept(self, tmp_path: Path):
         """触发后 200 秒才回锚点（超出时间窗）：不确认，整段保留。"""
         points = _stationary(5)
-        points += [(_second(5), "116.0 39.003 100"),
-                   (_second(6), "116.0 39.003 100")]
+        points += [(_second(5), "116.0 39.003 100"), (_second(6), "116.0 39.003 100")]
         points += [(f"2024-05-01T00:{m:02d}:00Z", "116.0 39.003 100") for m in range(1, 3)]
         points += [("2024-05-01T00:03:30Z", BASE)]
         path = _write_track(tmp_path, "away.kml", points)
@@ -254,8 +253,7 @@ class TestDetectDrift:
 
     def test_cli_auto_prune(self, tmp_path: Path):
         points = _stationary(5)
-        points += [(_second(5), "116.0 39.003 100"),
-                   (_second(6), "116.0 39.0029 100")]
+        points += [(_second(5), "116.0 39.003 100"), (_second(6), "116.0 39.0029 100")]
         points += _stationary(3, start=7)
         path = _write_track(tmp_path, "cli-drift.kml", points)
 
@@ -341,8 +339,7 @@ LINESTRING_KML = """<?xml version="1.0" encoding="UTF-8"?>
 </kml>"""
 
 
-PLACEMARK_KML = ("<Placemark><LineString><coordinates>{coordinates}</coordinates>"
-                 "</LineString></Placemark>")
+PLACEMARK_KML = "<Placemark><LineString><coordinates>{coordinates}</coordinates></LineString></Placemark>"
 
 DOCUMENT_KML = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -475,8 +472,7 @@ class TestArchive:
         second.write_text(TRACK_KML, encoding="utf-8")
         _push(second, zip_path=zip_path)
 
-        assert sorted(zipfile.ZipFile(zip_path).namelist()) == sorted(
-            [_zip_entry(track_file), _zip_entry(second)])
+        assert sorted(zipfile.ZipFile(zip_path).namelist()) == sorted([_zip_entry(track_file), _zip_entry(second)])
 
     def test_push_pop_roundtrip(self, track_file: Path, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(track_file.parent)  # pop 落在当前目录，这里就是源文件所在目录
@@ -567,8 +563,7 @@ class TestArchive:
         assert len(xmlutil.findall(xmlutil.parse_file(desktop), "//kml:Placemark")) == 0
         assert len(xmlutil.findall(xmlutil.parse_file(mobile), "//kml:LineString")) == 0
 
-    def test_pop_refuses_to_overwrite_an_existing_file(self, track_file: Path, tmp_path: Path,
-                                                       monkeypatch):
+    def test_pop_refuses_to_overwrite_an_existing_file(self, track_file: Path, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(track_file.parent)
         zip_path = self._archive_dir(tmp_path) / "Archive.zip"
         _push(track_file, zip_path=zip_path)
@@ -667,8 +662,7 @@ class TestTrackKind:
         # 往返测试需要先注入一个（2bulu 导出的 KML 均带此节点）
         kml_content = TRACK_KML.replace(
             "<Document>",
-            "<Document>"
-            f"<ExtendedData><Data name='TrackTags'><value>{tag}</value></Data></ExtendedData>",
+            f"<Document><ExtendedData><Data name='TrackTags'><value>{tag}</value></Data></ExtendedData>",
         )
         kml = tmp_path / "2024-05-01 test.kml"
         kml.write_text(kml_content, encoding="utf-8")
@@ -723,11 +717,12 @@ class TestTrackKind:
         assert result.exit_code == 0
         assert result.output.strip() == "Unknown"  # 只是识别结果的如实呈现
 
+
 def _kml_with_tag(tag: str) -> str:
     """带 TrackTags 的轨迹，类型由文件自己说明。"""
     return TRACK_KML.replace(
-        "<Document>",
-        f"<Document><ExtendedData><Data name='TrackTags'><value>{tag}</value></Data></ExtendedData>")
+        "<Document>", f"<Document><ExtendedData><Data name='TrackTags'><value>{tag}</value></Data></ExtendedData>"
+    )
 
 
 class TestArchiveLayering:
@@ -761,8 +756,7 @@ class TestArchiveLayering:
 class TestArchiveStatusAndRebuild:
     """E2：视图是派生的——指纹回答「落后没有」，rebuild 从真值再生。"""
 
-    def test_a_push_that_syncs_the_views_records_the_fingerprint(
-            self, track_file: Path, tmp_path: Path):
+    def test_a_push_that_syncs_the_views_records_the_fingerprint(self, track_file: Path, tmp_path: Path):
         zip_path = make_archive(tmp_path / "archive")
 
         _push(track_file, zip_path=zip_path)
@@ -772,8 +766,7 @@ class TestArchiveStatusAndRebuild:
         assert result.exit_code == 0
         assert "in sync" in result.output
 
-    def test_status_reports_never_synced_when_the_manifest_has_no_fingerprint(
-            self, track_file: Path, tmp_path: Path):
+    def test_status_reports_never_synced_when_the_manifest_has_no_fingerprint(self, track_file: Path, tmp_path: Path):
         """迁移后的老归档：manifest 从没记过指纹，status 如实说「从未同步」。"""
         zip_path = make_archive(tmp_path / "archive")
         _push(track_file, zip_path=zip_path)
@@ -787,8 +780,7 @@ class TestArchiveStatusAndRebuild:
         assert result.exit_code == 0
         assert "never been synced" in result.output
 
-    def test_status_reports_stale_when_the_zip_moves_behind_the_views(
-            self, track_file: Path, tmp_path: Path):
+    def test_status_reports_stale_when_the_zip_moves_behind_the_views(self, track_file: Path, tmp_path: Path):
         """真值动了而视图没跟上：指纹对不上，status 报「落后」。"""
         zip_path = make_archive(tmp_path / "archive")
         _push(track_file, zip_path=zip_path)
@@ -863,8 +855,9 @@ class TestGlobExpansion:
         staging, early, late = self._staging(tmp_path)
         zip_path = make_archive(tmp_path / "archive")
 
-        result = runner.invoke(app, ["kml", "push", str(staging / "*.kml"),
-                                     "--type", "Default", "--zip", str(zip_path)])
+        result = runner.invoke(
+            app, ["kml", "push", str(staging / "*.kml"), "--type", "Default", "--zip", str(zip_path)]
+        )
 
         assert result.exit_code == 0
         with zipfile.ZipFile(zip_path) as zf:
@@ -874,8 +867,9 @@ class TestGlobExpansion:
         staging, _, _ = self._staging(tmp_path)
         zip_path = make_archive(tmp_path / "archive")
 
-        result = runner.invoke(app, ["kml", "push", str(staging / "2020-*.kml"),
-                                     "--type", "Default", "--zip", str(zip_path)])
+        result = runner.invoke(
+            app, ["kml", "push", str(staging / "2020-*.kml"), "--type", "Default", "--zip", str(zip_path)]
+        )
 
         assert result.exit_code == 1
         assert zipfile.ZipFile(zip_path).namelist() == []
@@ -885,8 +879,9 @@ class TestGlobExpansion:
         staging, early, _ = self._staging(tmp_path)
         zip_path = make_archive(tmp_path / "archive")
 
-        result = runner.invoke(app, ["kml", "push", str(early), str(staging / "missing.kml"),
-                                     "--type", "Default", "--zip", str(zip_path)])
+        result = runner.invoke(
+            app, ["kml", "push", str(early), str(staging / "missing.kml"), "--type", "Default", "--zip", str(zip_path)]
+        )
 
         assert result.exit_code == 1
         assert zipfile.ZipFile(zip_path).namelist() == []

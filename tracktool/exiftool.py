@@ -234,7 +234,7 @@ class _StayOpenProcess:
                     proc.stdin.write("-stay_open\nFalse\n")
                     proc.stdin.flush()
                     proc.wait(timeout=10)
-                except (OSError, subprocess.TimeoutExpired):
+                except OSError, subprocess.TimeoutExpired:
                     proc.kill()
             self._stderr.close()
 
@@ -284,8 +284,7 @@ def read_tags(path: Path, tags: Sequence[str], *, config: Config | None = None) 
     requested = list(dict.fromkeys(tags))
     lines = invoke_persistent("-j", "-G1", "-n", *[f"-{tag}" for tag in requested], str(path), config=config)
     payload = _parse_read_output(lines, path)
-    return {tag: str(payload[key]).strip() for tag in requested
-            if (key := _resolve_key(payload, tag)) is not None}
+    return {tag: str(payload[key]).strip() for tag in requested if (key := _resolve_key(payload, tag)) is not None}
 
 
 def get_media_tag(path: Path, tag: str, *, config: Config | None = None) -> str:
@@ -327,8 +326,7 @@ class ExiftoolBackend(MetadataBackend):
             params.append("-overwrite_original")
         invoke(*params, *_large_file_args(path), config=self._config)
 
-    def shift_tags(self, path: Path, tags: Sequence[str], delta: timedelta,
-                   *, overwrite: bool = False) -> None:
+    def shift_tags(self, path: Path, tags: Sequence[str], delta: timedelta, *, overwrite: bool = False) -> None:
         sign = "-=" if delta < timedelta(0) else "+="
         operand = _shift_amount(delta)
         params = [str(path), *(f"-{tag}{sign}{operand}" for tag in tags)]

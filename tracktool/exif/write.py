@@ -76,8 +76,7 @@ def build_tags(options: SetExifOptions) -> dict[str, str]:
     return tags
 
 
-def set_exif(path: Path | list[Path], options: SetExifOptions,
-             parallel: bool = False) -> BatchResult[list[Action]]:
+def set_exif(path: Path | list[Path], options: SetExifOptions, parallel: bool = False) -> BatchResult[list[Action]]:
     """Apply EXIF tags to one file, every file in a directory, or a file list.
 
     The same tags go to every file, so the decisions are built once and the
@@ -98,8 +97,7 @@ class MissingTagResult:
     missing_tags: list[str]
 
 
-def find_missing_tag(path: Path | list[Path], tags: list[str],
-                     parallel: bool = False) -> BatchResult[MissingTagResult]:
+def find_missing_tag(path: Path | list[Path], tags: list[str], parallel: bool = False) -> BatchResult[MissingTagResult]:
     """Files missing the given tags; zero altitude counts as missing.
 
     A file that cannot be read is counted as failed instead of aborting the

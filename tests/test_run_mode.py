@@ -64,8 +64,7 @@ class TestKmlWritesAreReported:
         source.write_text(
             TRACK_KML.replace(
                 "<Document>",
-                "<Document><ExtendedData><Data name='TrackTags'>"
-                "<value>火车</value></Data></ExtendedData>",
+                "<Document><ExtendedData><Data name='TrackTags'><value>火车</value></Data></ExtendedData>",
             ),
             encoding="utf-8",
         )
@@ -73,8 +72,8 @@ class TestKmlWritesAreReported:
         runner.invoke(app, ["--dry-run", "kml", "set-type", str(source), "Flight"])
 
         node = xmlutil.find(
-            xmlutil.parse_file(source),
-            "/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='TrackTags']/kml:value")
+            xmlutil.parse_file(source), "/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='TrackTags']/kml:value"
+        )
         assert (node.text or "") == "火车"
 
 
@@ -84,12 +83,13 @@ class TestArchiveWritesAreReported:
         source = _kml(tmp_path)
         archive_dir = tmp_path / "archive"
 
-        result = runner.invoke(app, ["--dry-run", "kml", "push", str(source),
-                                     "--zip", str(archive_dir / "Archive.zip")])
+        result = runner.invoke(
+            app, ["--dry-run", "kml", "push", str(source), "--zip", str(archive_dir / "Archive.zip")]
+        )
 
         assert result.exit_code == 1
-        assert not archive_dir.exists()             # 目录没建
-        assert source.is_file()                     # 也没被搬走
+        assert not archive_dir.exists()  # 目录没建
+        assert source.is_file()  # 也没被搬走
 
     def test_popping_a_track_creates_nothing(self, tmp_path: Path, monkeypatch):
         source = _kml(tmp_path)
@@ -176,8 +176,7 @@ class TestReadOnlyCommandsStillReport:
         (tmp_path / "a.jpg").touch()
         monkeypatch.setattr(ctx, "backend", InMemoryBackend())
 
-        result = runner.invoke(app,
-                               ["--dry-run", "exif", "show-missing", str(tmp_path), "GPSPosition"])
+        result = runner.invoke(app, ["--dry-run", "exif", "show-missing", str(tmp_path), "GPSPosition"])
 
         assert result.exit_code == 0, result.output
         assert "GPSPosition" in result.output
@@ -204,6 +203,6 @@ class TestTheFlagIsGlobal:
         result = runner.invoke(app, ["exif", "shift-altitude", str(tmp_path), "10"])
 
         assert result.exit_code == 0, result.output
-        assert backend.writes == [(tmp_path / "a.jpg",
-                                   {"GPSAltitudeRef": "Above Sea Level", "GPSAltitude": "110.0"},
-                                   False)]
+        assert backend.writes == [
+            (tmp_path / "a.jpg", {"GPSAltitudeRef": "Above Sea Level", "GPSAltitude": "110.0"}, False)
+        ]

@@ -68,11 +68,14 @@ class TestAppErrorHierarchy:
         assert UserInputError.exit_code == cli.EXIT_USER_ERROR == 1
         assert ToolError.exit_code == EXIT_TOOL_ERROR == 2
 
-    @pytest.mark.parametrize("exc", [
-        ConfigError("bad config"),
-        UserInputError("bad value"),
-        SetExifError("bad position"),
-    ])
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            ConfigError("bad config"),
+            UserInputError("bad value"),
+            SetExifError("bad position"),
+        ],
+    )
     def test_user_errors_exit_one(self, monkeypatch, exc):
         def failing_app() -> None:
             raise exc
@@ -82,10 +85,13 @@ class TestAppErrorHierarchy:
             cli_main()
         assert exc_info.value.code == cli.EXIT_USER_ERROR == 1
 
-    @pytest.mark.parametrize("exc", [
-        ExiftoolError("exiftool not found"),
-        GoogleApiError("API quota exceeded"),
-    ])
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            ExiftoolError("exiftool not found"),
+            GoogleApiError("API quota exceeded"),
+        ],
+    )
     def test_tool_errors_exit_two(self, monkeypatch, exc):
         def failing_app() -> None:
             raise exc
@@ -107,12 +113,15 @@ class TestStdlibErrorsAreNotSwallowed:
     XMLSyntaxError 都在白名单里，任何一处 stdlib 报错都会被当成「用户输入错误」
     一行带过——真 bug 因此丢掉 traceback。现在只有 AppError 派生类被折叠。"""
 
-    @pytest.mark.parametrize("exc", [
-        ValueError("bad value"),
-        FileNotFoundError("missing.zip"),
-        OSError("io blew up"),
-        etree.XMLSyntaxError("malformed KML", 1, 1, 1),
-    ])
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            ValueError("bad value"),
+            FileNotFoundError("missing.zip"),
+            OSError("io blew up"),
+            etree.XMLSyntaxError("malformed KML", 1, 1, 1),
+        ],
+    )
     def test_stdlib_types_propagate(self, monkeypatch, exc):
         def failing_app() -> None:
             raise exc
@@ -125,11 +134,14 @@ class TestStdlibErrorsAreNotSwallowed:
 class TestExitCodeTable:
     """0 全成功 / 1 用户输入 / 2 外部工具或 API / 3 部分失败。"""
 
-    @pytest.mark.parametrize("argv", [
-        ["nosuchcommand"],                        # 命令名打错
-        ["exif", "set", "--nonexistent-option"],  # 选项不认识
-        ["exif", "set"],                          # 缺必填参数
-    ])
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["nosuchcommand"],  # 命令名打错
+            ["exif", "set", "--nonexistent-option"],  # 选项不认识
+            ["exif", "set"],  # 缺必填参数
+        ],
+    )
     def test_usage_errors_fold_into_user_error(self, monkeypatch, argv):
         # typer 给用法错误留的是 2，与 EXIT_TOOL_ERROR 同值；cli_main 必须把
         # 这一来源归一成 1，否则调用方分不清「参数拼错」和「外部工具挂了」
@@ -148,8 +160,7 @@ class TestExitCodeTable:
         cli._finish(BatchResult(succeeded=[None]))
         cli._finish(BatchResult())  # nothing to process is still success
 
-    def test_preview_batch_reports_the_failure_and_still_exits_three(self, tmp_path: Path,
-                                                                    plan_mode, caplog):
+    def test_preview_batch_reports_the_failure_and_still_exits_three(self, tmp_path: Path, plan_mode, caplog):
         # 预演与退出码同属一次调用：会显示计划的命令照样要为失败的文件退 3
         batch = BatchResult(failed=[tmp_path / "bad.jpg"])
         with pytest.raises(typer.Exit) as exc_info:
@@ -186,16 +197,14 @@ class TestRunModeFlag:
         assert ctx.mode is RunMode.APPLY
 
     def test_after_the_subcommand_it_is_a_usage_error(self, tmp_path: Path):
-        result = runner.invoke(app, ["kml", "split", self._kml(tmp_path),
-                                     "2024-05-01T00:01:00Z", "--dry-run"])
+        result = runner.invoke(app, ["kml", "split", self._kml(tmp_path), "2024-05-01T00:01:00Z", "--dry-run"])
 
         assert result.exit_code != 0
         # 旧写法明确不再成立：把开关收到全局一处，代价就是这个
         assert "--dry-run" in result.output
 
     def test_a_command_that_never_had_the_flag_now_has_it(self, tmp_path: Path):
-        result = runner.invoke(app, ["--dry-run", "kml", "split", self._kml(tmp_path),
-                                     "2024-05-01T00:01:00Z"])
+        result = runner.invoke(app, ["--dry-run", "kml", "split", self._kml(tmp_path), "2024-05-01T00:01:00Z"])
 
         assert result.exit_code == 0, result.output
         assert not (tmp_path / "2024-05-01 test-Splited-1.kml").exists()

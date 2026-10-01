@@ -79,8 +79,7 @@ def _read_track(path: Path, type_: TrackKind | None) -> _Track | None:
         return None
     if kind is None:
         # 识别不出不是一种类型：报错让人指定，而不是归进一个 Unknown 类目
-        log.error("Cannot recognize the track type (set one with `kml set-type` or pass --type)",
-                  target=str(path))
+        log.error("Cannot recognize the track type (set one with `kml set-type` or pass --type)", target=str(path))
         return None
     return _Track(path=path, type_=kind, content=content)
 
@@ -125,8 +124,9 @@ def _move_to_backup(tracks: list[_Track], archive_dir: Path) -> None:
         move_to_folder(track.path, ctx.config.kml_backup_dir_name, archive_dir)
 
 
-def push_tracks(paths: list[Path], zip_path: str | None = None, type_: TrackKind | None = None,
-                move: bool = False) -> BatchResult[list[Action]]:
+def push_tracks(
+    paths: list[Path], zip_path: str | None = None, type_: TrackKind | None = None, move: bool = False
+) -> BatchResult[list[Action]]:
     """File tracks into the archive: both collections, then the ZIP.
 
     The steps are where the batch happens: each collection is opened once for
@@ -158,17 +158,40 @@ def push_tracks(paths: list[Path], zip_path: str | None = None, type_: TrackKind
     steps: list[Action] = []
     for type_, tracks in by_type.items():
         desktop_path, mobile_path = collections.collection_paths(type_, archive_dir)
-        steps.append(Step(file=desktop_path, kind="add to collection", detail=_names(tracks),
-                          effect=partial(_file_desktop, desktop_path, type_, tracks)))
-        steps.append(Step(file=mobile_path, kind="add to mobile collection", detail=_names(tracks),
-                          effect=partial(_file_mobile, mobile_path, tracks)))
+        steps.append(
+            Step(
+                file=desktop_path,
+                kind="add to collection",
+                detail=_names(tracks),
+                effect=partial(_file_desktop, desktop_path, type_, tracks),
+            )
+        )
+        steps.append(
+            Step(
+                file=mobile_path,
+                kind="add to mobile collection",
+                detail=_names(tracks),
+                effect=partial(_file_mobile, mobile_path, tracks),
+            )
+        )
     if pending:
-        steps.append(Step(file=zip_file, kind="append to ZIP", detail=_names(pending),
-                          effect=partial(_append_to_zip, pending, zip_file)))
+        steps.append(
+            Step(
+                file=zip_file,
+                kind="append to ZIP",
+                detail=_names(pending),
+                effect=partial(_append_to_zip, pending, zip_file),
+            )
+        )
     if pending and move:
-        steps.append(Step(file=archive_dir / ctx.config.kml_backup_dir_name,
-                          kind="move to backup folder", detail=_names(pending),
-                          effect=partial(_move_to_backup, pending, archive_dir)))
+        steps.append(
+            Step(
+                file=archive_dir / ctx.config.kml_backup_dir_name,
+                kind="move to backup folder",
+                detail=_names(pending),
+                effect=partial(_move_to_backup, pending, archive_dir),
+            )
+        )
 
     result.succeeded.append(run(steps))
     return result
@@ -181,8 +204,9 @@ def _organize_repaired(files: list[Path]) -> None:
             move_to_folder(file, REPAIRED_FOLDER)
 
 
-def resolve_missing_gps(path: Path, parallel: bool = False,
-                        kml_zip_path: str | None = None) -> BatchResult[list[Action]]:
+def resolve_missing_gps(
+    path: Path, parallel: bool = False, kml_zip_path: str | None = None
+) -> BatchResult[list[Action]]:
     """修复缺失 GPSPosition/GPSAltitude 的媒体文件：先补海拔，再补位置；
     补好海拔的文件移入 GoogleAltOK 目录。
 
@@ -204,14 +228,13 @@ def resolve_missing_gps(path: Path, parallel: bool = False,
         log.verbose(f"File: {display_path(entry.file)}, Missing: {', '.join(entry.missing_tags)}")
 
     # 仅缺失海拔的文件
-    missing_alt_only = [r for r in missing.succeeded
-                        if ALTITUDE in r.missing_tags and POSITION not in r.missing_tags]
+    missing_alt_only = [r for r in missing.succeeded if ALTITUDE in r.missing_tags and POSITION not in r.missing_tags]
     if missing_alt_only:
         log.info(f"Processing {len(missing_alt_only)} files missing only GPSAltitude")
         files = [r.file for r in missing_alt_only]
-        result.merge(fill_altitude_from_google(files, overwrite=True,
-                                              failed_folder_name="GoogleAltFailed",
-                                              parallel=parallel))
+        result.merge(
+            fill_altitude_from_google(files, overwrite=True, failed_folder_name="GoogleAltFailed", parallel=parallel)
+        )
         # 预演时这步由 move_to_folder 自己拒绝执行并说明
         _organize_repaired(files)
 
@@ -219,16 +242,25 @@ def resolve_missing_gps(path: Path, parallel: bool = False,
     missing_pos = [r for r in missing.succeeded if POSITION in r.missing_tags]
     if missing_pos:
         log.info(f"Processing {len(missing_pos)} files missing GPSPosition")
-        result.merge(geotag_from_kml([r.file for r in missing_pos], kml_zip_path,
-                                           options=GeotagOptions(overwrite=True,
-                                                                      failed_folder_name="TrackPosFailed"),
-                                           parallel=parallel))
+        result.merge(
+            geotag_from_kml(
+                [r.file for r in missing_pos],
+                kml_zip_path,
+                options=GeotagOptions(overwrite=True, failed_folder_name="TrackPosFailed"),
+                parallel=parallel,
+            )
+        )
     return result
 
 
-def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = None,
-                     offset_time: str = mediatime.DEFAULT_TZ_OFFSET, parallel: bool = False,
-                     kml_zip_path: str | None = None) -> BatchResult[list[Action]]:
+def resolve_vid_exif(
+    path: Path,
+    make: str | None = None,
+    model: str | None = None,
+    offset_time: str = mediatime.DEFAULT_TZ_OFFSET,
+    parallel: bool = False,
+    kml_zip_path: str | None = None,
+) -> BatchResult[list[Action]]:
     """VID → VID_original，转换 MP4 到新 VID，再补全 GPS；重跑从断点继续。
 
     每一步做没做过，由磁盘上的现状说明：VID_original 在就是改过名了，新 VID 在
@@ -252,8 +284,7 @@ def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = No
         return result
     elif ctx.is_plan:
         # 预演不动目录：待转换的文件此刻还在 VID 里
-        log.info(f"would rename {vid_path.name} to {vid_original_path.name} "
-                 f"and create a new {vid_path.name}")
+        log.info(f"would rename {vid_path.name} to {vid_original_path.name} and create a new {vid_path.name}")
     else:
         vid_path.rename(vid_original_path)
         log.info("Renamed VID to VID_original")
@@ -270,8 +301,11 @@ def resolve_vid_exif(path: Path, make: str | None = None, model: str | None = No
     # 还没改（预演）就是 VID
     source = vid_original_path if vid_original_path.is_dir() else vid_path
     log.info(f"Processing media files from {display_path(source)}")
-    result.merge(convert_to_mp4(source, make=make, model=model, output_directory=vid_path,
-                                offset_time=offset_time, parallel=parallel))
+    result.merge(
+        convert_to_mp4(
+            source, make=make, model=model, output_directory=vid_path, offset_time=offset_time, parallel=parallel
+        )
+    )
 
     # 第四步：补 GPS——它的输入是上一步的产物。两个目录都在，才说明产物已落盘；
     # 预演里新 VID 还没建出来，所以说一句会做这一步，然后到此为止

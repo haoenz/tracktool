@@ -12,8 +12,7 @@ from tracktool import mediatime, tags
 
 def _named_constants() -> dict[str, str]:
     """Every module-level name holding a single tag spelling."""
-    return {name: value for name, value in vars(tags).items()
-            if name.isupper() and isinstance(value, str)}
+    return {name: value for name, value in vars(tags).items() if name.isupper() and isinstance(value, str)}
 
 
 class TestSpellings:
@@ -39,8 +38,7 @@ class TestReadGroups:
 
 class TestTimestampTagSets:
     def test_every_make_constant_is_a_key(self):
-        assert {make for make, _ in tags.TIMESTAMP_TAG_SETS} == {
-            tags.MAKE_SONY, tags.MAKE_FUJIFILM, tags.MAKE_INSTA360}
+        assert {make for make, _ in tags.TIMESTAMP_TAG_SETS} == {tags.MAKE_SONY, tags.MAKE_FUJIFILM, tags.MAKE_INSTA360}
 
     def test_each_set_is_a_distinct_group_of_known_tags(self):
         known = set(_named_constants().values())

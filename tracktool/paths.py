@@ -36,7 +36,7 @@ def _relative_to_cwd(path: str | Path) -> str | None:
     not exist (another drive or mount) or climbs more than _MAX_PARENTS."""
     try:
         relative = os.path.relpath(path)
-    except (OSError, ValueError):
+    except OSError, ValueError:
         # 换盘符/UNC 没有相对形式；工作目录已不存在时 relpath 同样会失败
         return None
     if sum(1 for part in Path(relative).parts if part == "..") > _MAX_PARENTS:
@@ -54,7 +54,7 @@ def _below_home(path: str | Path) -> Path | None:
     home = Path.home()
     if len(absolute.parts) < len(home.parts):
         return None
-    head, tail = absolute.parts[:len(home.parts)], absolute.parts[len(home.parts):]
+    head, tail = absolute.parts[: len(home.parts)], absolute.parts[len(home.parts) :]
     if [os.path.normcase(part) for part in head] != [os.path.normcase(part) for part in home.parts]:
         return None
     return Path(*tail)

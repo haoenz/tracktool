@@ -74,8 +74,13 @@ def _update_files_hash_log(files: list[Path], hash_log: dict) -> tuple[int, int]
     return counters["add"], counters["update"]
 
 
-def get_directories_hash(directories: list[Path], include: str = ".*", exclude: str = "^$",
-                         hash_log_path: Path | None = None, prune: bool = False) -> list[DirectoryHash]:
+def get_directories_hash(
+    directories: list[Path],
+    include: str = ".*",
+    exclude: str = "^$",
+    hash_log_path: Path | None = None,
+    prune: bool = False,
+) -> list[DirectoryHash]:
     """Compute/update MD5 hashes for files in directories, optionally persisted."""
     hash_log: dict = {}
     if hash_log_path is not None:
@@ -99,14 +104,12 @@ def get_directories_hash(directories: list[Path], include: str = ".*", exclude: 
     if hash_log_path is not None:
         if ctx.is_plan:
             # 哈希本身是只读的，只有日志落盘这一步属于预演该拦下的
-            log.info(f"Would update the hash log: {add_count} added, {update_count} updated",
-                     target=str(hash_log_path))
+            log.info(f"Would update the hash log: {add_count} added, {update_count} updated", target=str(hash_log_path))
         else:
             if add_count == 0 and update_count == 0:
                 log.debug("No changes to hash log", target=str(hash_log_path))
             else:
-                log.info(f"Hash log updated: {add_count} added, {update_count} updated",
-                         target=str(hash_log_path))
+                log.info(f"Hash log updated: {add_count} added, {update_count} updated", target=str(hash_log_path))
             hash_log_path.write_text(json.dumps(hash_log, indent=2), encoding="utf-8")
 
     return [
@@ -125,8 +128,13 @@ def get_directories_hash(directories: list[Path], include: str = ".*", exclude: 
     ]
 
 
-def compare_directories(directories: list[Path], include: str = ".*", exclude: str = "^$",
-                        unique: bool = False, hash_log_path: Path | None = None) -> dict[Path, list[Path]]:
+def compare_directories(
+    directories: list[Path],
+    include: str = ".*",
+    exclude: str = "^$",
+    unique: bool = False,
+    hash_log_path: Path | None = None,
+) -> dict[Path, list[Path]]:
     """Compare directories by MD5.
 
     unique=True: files not present in ANY other directory.
@@ -141,11 +149,9 @@ def compare_directories(directories: list[Path], include: str = ".*", exclude: s
     for current in dir_hashes:
         others = [s for d, s in zip(dir_hashes, md5_sets, strict=True) if d is not current]
         if unique:
-            result[current.directory] = [h.path for h in current.hashes
-                                         if not any(h.md5 in s for s in others)]
+            result[current.directory] = [h.path for h in current.hashes if not any(h.md5 in s for s in others)]
         else:
-            result[current.directory] = [h.path for h in current.hashes
-                                         if any(h.md5 not in s for s in others)]
+            result[current.directory] = [h.path for h in current.hashes if any(h.md5 not in s for s in others)]
     return result
 
 
@@ -179,8 +185,9 @@ def prune_hash_log(hash_log_path: Path) -> None:
             return False
         return True
 
-    kept = run_parallel(list(hash_log.keys()), file_still_exists, parallel=True,
-                        on_progress=ctx.reporter("Clearing hash log"))
+    kept = run_parallel(
+        list(hash_log.keys()), file_still_exists, parallel=True, on_progress=ctx.reporter("Clearing hash log")
+    )
     removed_count = len(hash_log) - sum(1 for keep in kept if keep)
 
     if removed_count:

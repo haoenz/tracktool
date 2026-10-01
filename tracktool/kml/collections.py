@@ -68,8 +68,11 @@ def new_empty_kml(type_: TrackKind | None = None) -> xmlutil.etree._ElementTree:
     """An empty collection document, styled for the track type when given."""
     if type_ is not None:
         name, color = COLLECTION_STYLES[type_]
-        return xmlutil.parse_string(_EMPTY_STYLED_TEMPLATE.format(
-            kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS, name=name, color=color, type_=type_))
+        return xmlutil.parse_string(
+            _EMPTY_STYLED_TEMPLATE.format(
+                kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS, name=name, color=color, type_=type_
+            )
+        )
     return xmlutil.parse_string(_EMPTY_PLAIN_TEMPLATE.format(kml_ns=xmlutil.KML_NS, gx_ns=xmlutil.GX_NS))
 
 
@@ -159,8 +162,7 @@ class DesktopCollection(TrackCollection):
         log.verbose(f"Added track to collection: {track.stem}", target=str(self.path))
 
 
-def _find_desktop_placemark(tree: xmlutil.etree._ElementTree,
-                            track_name: str) -> xmlutil.etree._Element | None:
+def _find_desktop_placemark(tree: xmlutil.etree._ElementTree, track_name: str) -> xmlutil.etree._Element | None:
     """The first desktop Placemark whose name contains the track name."""
     return xmlutil.find(tree, f"//kml:Placemark[kml:name[contains(., '{track_name}')]]")
 
@@ -212,8 +214,7 @@ class MobileCollection(TrackCollection):
         log.verbose(f"Added track to mobile collection: {track.stem}", target=str(self.path))
 
 
-def _find_mobile_linestring(tree: xmlutil.etree._ElementTree,
-                            track_name: str) -> xmlutil.etree._Element | None:
+def _find_mobile_linestring(tree: xmlutil.etree._ElementTree, track_name: str) -> xmlutil.etree._Element | None:
     """The mobile LineString whose id is the track name."""
     return xmlutil.find(tree, f"//kml:LineString[@id='{track_name}']")
 

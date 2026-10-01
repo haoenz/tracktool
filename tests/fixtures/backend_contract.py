@@ -49,8 +49,7 @@ class BackendContract:
         assert backend.read_tags(photo, [STAMP]) == {STAMP: "2024:04:30 22:30:00"}
 
     def test_a_shift_leaves_the_tags_it_does_not_name(self, backend, photo):
-        backend.write_tags(photo, {CITY: "Shanghai", STAMP: "2024:05:01 08:00:00"},
-                           overwrite=True)
+        backend.write_tags(photo, {CITY: "Shanghai", STAMP: "2024:05:01 08:00:00"}, overwrite=True)
 
         backend.shift_tags(photo, [STAMP], timedelta(minutes=10), overwrite=True)
 
