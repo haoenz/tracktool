@@ -47,6 +47,28 @@ def track_file(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.fixture
+def gapped_track_file(tmp_path: Path) -> Path:
+    """四点轨迹：1、2 点之间记录中断 40 分钟且跳远（默认阈值可检出）。"""
+    points = [
+        ("2024-05-01T00:00:00Z", "116.0 39.0 100"),
+        ("2024-05-01T00:01:00Z", "116.001 39.001 100"),
+        ("2024-05-01T00:41:00Z", "116.2 39.2 120"),
+        ("2024-05-01T00:42:00Z", "116.201 39.201 100"),
+    ]
+    whens = "".join(f"<when>{w}</when>" for w, _ in points)
+    coords = "".join(f"<gx:coord>{c}</gx:coord>" for _, c in points)
+    path = tmp_path / "2024-05-01 gapped.kml"
+    path.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">\n'
+        "<Document>\n<name>2024-05-01 gapped</name>\n<Folder>\n<Placemark>\n<name>track</name>\n"
+        f"<gx:Track>\n{whens}\n{coords}\n</gx:Track>\n"
+        "</Placemark>\n</Folder>\n</Document>\n</kml>",
+        encoding="utf-8")
+    return path
+
+
 class TestSplitKml:
     def test_split_two(self, track_file: Path):
         edit.split_kml(track_file, ["2024-05-01T00:01:00Z"])
@@ -64,6 +86,67 @@ class TestSplitKml:
     def test_split_by_coordinate(self, track_file: Path):
         edit.split_kml(track_file, ["116.1 39.1 110"])
         assert (track_file.parent / "2024-05-01 test-Splited-1.kml").is_file()
+
+    def test_detect_gap_and_split(self, gapped_track_file: Path):
+        points = edit.detect_gap_points(gapped_track_file, gap_seconds=300, gap_meters=500)
+        assert points == ["2024-05-01T00:01:00Z"]  # 中断前最后一个点
+
+        edit.split_kml(gapped_track_file, points)
+        part1 = gapped_track_file.parent / "2024-05-01 gapped-Splited-1.kml"
+        part2 = gapped_track_file.parent / "2024-05-01 gapped-Splited-2.kml"
+        tree1 = xmlutil.parse_file(part1)
+        tree2 = xmlutil.parse_file(part2)
+        assert len(xmlutil.findall(tree1, "//gx:coord")) == 2  # 点 0-1
+        assert len(xmlutil.findall(tree2, "//gx:coord")) == 2  # 点 2-3
+
+    def test_detect_gap_pause_in_place_is_no_gap(self, tmp_path: Path):
+        """时间跳 40 分钟但原地未动：不算中断，不切。"""
+        points = [
+            ("2024-05-01T00:00:00Z", "116.0 39.0 100"),
+            ("2024-05-01T00:01:00Z", "116.0 39.0 100"),
+            ("2024-05-01T00:41:00Z", "116.0 39.0 100"),
+            ("2024-05-01T00:42:00Z", "116.0 39.0 100"),
+        ]
+        whens = "".join(f"<when>{w}</when>" for w, _ in points)
+        coords = "".join(f"<gx:coord>{c}</gx:coord>" for _, c in points)
+        path = tmp_path / "2024-05-01 paused.kml"
+        path.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">\n'
+            "<Document>\n<Folder>\n<Placemark>\n"
+            f"<gx:Track>\n{whens}\n{coords}\n</gx:Track>\n"
+            "</Placemark>\n</Folder>\n</Document>\n</kml>",
+            encoding="utf-8")
+        assert edit.detect_gap_points(path, gap_seconds=300, gap_meters=500) == []
+
+    def test_detect_gap_requires_timestamps(self, track_file: Path):
+        """2bulu 导出都带 when；无时间戳的轨迹直接报错而非静默漏检。"""
+        raw = track_file.read_text(encoding="utf-8")
+        stripped = "\n".join(line for line in raw.splitlines() if "<when>" not in line)
+        track_file.write_text(stripped, encoding="utf-8")
+        with pytest.raises(UserInputError):
+            edit.detect_gap_points(track_file, gap_seconds=300, gap_meters=500)
+
+    def test_cli_auto_split(self, gapped_track_file: Path):
+        result = runner.invoke(app, ["kml", "split", str(gapped_track_file), "--auto"])
+        assert result.exit_code == 0, result.output
+        assert (gapped_track_file.parent / "2024-05-01 gapped-Splited-1.kml").is_file()
+        assert (gapped_track_file.parent / "2024-05-01 gapped-Splited-2.kml").is_file()
+
+    def test_cli_auto_no_gap_makes_nothing(self, track_file: Path):
+        """默认阈值下连续轨迹检不出中断，不产生任何文件。"""
+        result = runner.invoke(app, ["kml", "split", str(track_file), "--auto"])
+        assert result.exit_code == 0, result.output
+        assert not list(track_file.parent.glob("*-Splited-*.kml"))
+
+    def test_cli_auto_conflicts_with_points(self, track_file: Path):
+        result = runner.invoke(
+            app, ["kml", "split", str(track_file), "--auto", "2024-05-01T00:01:00Z"])
+        assert result.exit_code != 0
+
+    def test_cli_requires_points_or_auto(self, track_file: Path):
+        result = runner.invoke(app, ["kml", "split", str(track_file)])
+        assert result.exit_code != 0
 
 
 class TestRemoveBadPoints:

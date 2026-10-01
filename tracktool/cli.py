@@ -219,10 +219,22 @@ def kml_pop(
 @kml_app.command("split")
 def kml_split(
     path: Annotated[Path, typer.Argument(help="KML file to split")],
-    split_points: Annotated[list[str], typer.Argument(help="Timestamps or coordinates to split at")],
+    split_points: Annotated[list[str] | None, typer.Argument(help="Timestamps or coordinates to split at (omit with --auto)")] = None,
+    auto: Annotated[bool, typer.Option("--auto", help="Split at detected recording gaps instead of given points")] = False,
+    gap_seconds: Annotated[float, typer.Option(min=0, help="--auto: minimum time jump (seconds)")] = 300.0,
+    gap_meters: Annotated[float, typer.Option(min=0, help="--auto: minimum distance jump (meters)")] = 500.0,
 ) -> None:
-    """Split a track at the given timestamps/coordinates."""
+    """Split a track at the given timestamps/coordinates, or at recording gaps with --auto."""
     path = _resolve_path(path)
+    if auto and split_points:
+        raise UserInputError("Pass either split points or --auto, not both")
+    if not auto and not split_points:
+        raise UserInputError("No split points given; use --auto to detect recording gaps")
+    if auto:
+        split_points = kml_edit.detect_gap_points(path, gap_seconds, gap_meters)
+        if not split_points:
+            log.info("No recording gap detected, nothing to split", target=str(path))
+            return
     kml_edit.split_kml(path, split_points)
 
 

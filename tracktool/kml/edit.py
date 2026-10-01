@@ -7,9 +7,11 @@ sources into the archive afterwards.
 """
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import googleapi, log
+from ..coords import geo_distance
 from ..context import ctx
 from ..errors import UserInputError
 from ..fileutil import move_to_folder
@@ -50,6 +52,47 @@ def _track_location_index(track: xmlutil.etree._Element, location: str) -> int:
     if index == -1:
         log.error(f"Location not found in track: {location}")
     return index
+
+
+def detect_gap_points(path: Path, gap_seconds: float, gap_meters: float) -> list[str]:
+    """Timestamps marking recording gaps: a time jump AND a distance jump.
+
+    A recording interruption shows up between two adjacent points as both a
+    long time span (the recorder was off) and a long distance (it resumed
+    elsewhere); either alone is normal — a pause without moving, a tunnel
+    without signal — and does not call for a split. Each returned timestamp
+    is the last point of the segment before a gap, exactly what split_kml
+    takes as a split point.
+    """
+    tree = xmlutil.parse_file(path)
+    track = _get_track(tree)
+    coords = [c.text or "" for c in track.findall(f"{{{xmlutil.GX_NS}}}coord")]
+    whens = [w.text or "" for w in track.findall(f"{{{xmlutil.KML_NS}}}when")]
+    if not whens or len(whens) != len(coords):
+        raise UserInputError("Track points must carry timestamps to detect gaps")
+
+    try:
+        times = []
+        for w in whens:
+            t = datetime.fromisoformat(w.strip().replace("Z", "+00:00"))
+            times.append(t if t.tzinfo else t.replace(tzinfo=timezone.utc))
+    except ValueError as exc:
+        raise UserInputError(f"Unparseable track timestamp: {exc}") from exc
+
+    gaps = []
+    for i in range(len(coords) - 1):
+        delta = (times[i + 1] - times[i]).total_seconds()
+        if delta < gap_seconds:
+            continue
+        lon1, lat1 = (float(v) for v in coords[i].split()[:2])
+        lon2, lat2 = (float(v) for v in coords[i + 1].split()[:2])
+        distance = geo_distance(lat1, lon1, lat2, lon2)
+        if distance < gap_meters:
+            continue
+        log.info(f"Recording gap at point {i}: {whens[i]} -> {whens[i + 1]} "
+                 f"({delta / 60:.0f} min, {distance / 1000:.2f} km)", target=str(path))
+        gaps.append(whens[i])
+    return gaps
 
 
 def split_kml(path: Path, split_points: list[str]) -> None:
