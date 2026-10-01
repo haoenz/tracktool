@@ -169,6 +169,119 @@ class TestRemoveBadPoints:
             edit.prune_points(track_file, ["a", "b", "c"])
 
 
+def _write_track(tmp_path: Path, name: str, points: list[tuple[str, str]]) -> Path:
+    """1 秒级采样风格的 gx:Track 文件，供漂移探测用例合成轨迹。"""
+    whens = "".join(f"<when>{w}</when>" for w, _ in points)
+    coords = "".join(f"<gx:coord>{c}</gx:coord>" for _, c in points)
+    path = tmp_path / name
+    path.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">\n'
+        "<Document>\n<Folder>\n<Placemark>\n"
+        f"<gx:Track>\n{whens}\n{coords}\n</gx:Track>\n"
+        "</Placemark>\n</Folder>\n</Document>\n</kml>",
+        encoding="utf-8")
+    return path
+
+
+def _second(t: int) -> str:
+    return f"2024-05-01T00:00:{t:02d}Z"
+
+
+# 纬度 0.001 度 ≈ 111 m，全部用纬度偏移控制距离
+BASE = "116.0 39.0 100"
+
+
+def _stationary(count: int, start: int = 0):
+    return [(_second(start + i), BASE) for i in range(count)]
+
+
+class TestDetectDrift:
+    def test_drift_burst_detected_and_pruned(self, tmp_path: Path):
+        """原地记录中飞出 ~333 m 又回来：检出区间，prune 只删漂移点。"""
+        points = _stationary(5)
+        points += [(_second(5), "116.0 39.003 100"),
+                   (_second(6), "116.0 39.0031 100"),
+                   (_second(7), "116.0 39.0029 100"),
+                   (_second(8), "116.0 39.003 100")]
+        points += _stationary(3, start=9)
+        path = _write_track(tmp_path, "drift.kml", points)
+
+        bursts = edit.detect_drift_points(path)
+        assert bursts == [("2024-05-01T00:00:05Z", "2024-05-01T00:00:08Z")]
+
+        assert edit.prune_drift_points(path) == 4
+        fixed = tmp_path / "drift-Fixed.kml"
+        tree = xmlutil.parse_file(fixed)
+        assert len(xmlutil.findall(tree, "//gx:coord")) == 8
+        assert len(xmlutil.findall(tree, "//kml:when")) == 8
+        # 锚点与返回点都保留
+        assert (tmp_path / "drift.kml").read_text(encoding="utf-8").count("<gx:coord>") == 12
+
+    def test_single_point_spike(self, tmp_path: Path):
+        """单点尖峰：飞出一点、下一点即回，只删这一个点。"""
+        points = _stationary(5)
+        points += [(_second(5), "116.0 39.002 100")]
+        points += _stationary(2, start=6)
+        path = _write_track(tmp_path, "spike.kml", points)
+
+        assert edit.detect_drift_points(path) == [("2024-05-01T00:00:05Z", "2024-05-01T00:00:05Z")]
+        assert edit.prune_drift_points(path) == 1
+        assert len(xmlutil.findall(xmlutil.parse_file(tmp_path / "spike-Fixed.kml"),
+                                   "//gx:coord")) == 7
+
+    def test_real_movement_is_not_drift(self, tmp_path: Path):
+        """每步 50 m、0.83 m/s 的稀疏真实步行：不触发，不删任何点。"""
+        points = [(f"2024-05-01T00:{m:02d}:00Z", f"116.0 {39.0 + 0.00045 * m:.5f} 100")
+                  for m in range(6)]
+        path = _write_track(tmp_path, "walk.kml", points)
+        assert edit.detect_drift_points(path) == []
+
+    def test_departure_without_return_is_kept(self, tmp_path: Path):
+        """触发后 200 秒才回锚点（超出时间窗）：不确认，整段保留。"""
+        points = _stationary(5)
+        points += [(_second(5), "116.0 39.003 100"),
+                   (_second(6), "116.0 39.003 100")]
+        points += [(f"2024-05-01T00:{m:02d}:00Z", "116.0 39.003 100") for m in range(1, 3)]
+        points += [("2024-05-01T00:03:30Z", BASE)]
+        path = _write_track(tmp_path, "away.kml", points)
+        assert edit.detect_drift_points(path) == []
+
+    def test_no_drift_writes_nothing(self, tmp_path: Path):
+        path = _write_track(tmp_path, "clean.kml", _stationary(10))
+        assert edit.prune_drift_points(path) == 0
+        assert not (tmp_path / "clean-Fixed.kml").exists()
+
+    def test_cli_auto_prune(self, tmp_path: Path):
+        points = _stationary(5)
+        points += [(_second(5), "116.0 39.003 100"),
+                   (_second(6), "116.0 39.0029 100")]
+        points += _stationary(3, start=7)
+        path = _write_track(tmp_path, "cli-drift.kml", points)
+
+        result = runner.invoke(app, ["kml", "prune", str(path), "--auto"])
+        assert result.exit_code == 0, result.output
+        fixed = tmp_path / "cli-drift-Fixed.kml"
+        assert fixed.is_file()
+        assert len(xmlutil.findall(xmlutil.parse_file(fixed), "//gx:coord")) == 8
+
+    def test_cli_auto_no_drift_makes_nothing(self, tmp_path: Path):
+        path = _write_track(tmp_path, "cli-clean.kml", _stationary(10))
+        result = runner.invoke(app, ["kml", "prune", str(path), "--auto"])
+        assert result.exit_code == 0, result.output
+        assert not list(tmp_path.glob("*-Fixed.kml"))
+
+    def test_cli_auto_conflicts_with_points(self, tmp_path: Path):
+        path = _write_track(tmp_path, "c.kml", _stationary(4))
+        result = runner.invoke(app, ["kml", "prune", str(path), "--auto", BASE])
+        assert result.exit_code != 0
+
+    def test_cli_requires_points_or_auto(self, tmp_path: Path):
+        path = _write_track(tmp_path, "c.kml", _stationary(4))
+        result = runner.invoke(app, ["kml", "prune", str(path)])
+        assert result.exit_code != 0
+
+
 class TestMergeKml:
     @staticmethod
     def _archive(tmp_path: Path, monkeypatch) -> Path:

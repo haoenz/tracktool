@@ -241,10 +241,23 @@ def kml_split(
 @kml_app.command("prune")
 def kml_prune(
     path: Annotated[Path, typer.Argument(help="KML file")],
-    bad_points: Annotated[list[str], typer.Argument(help="One point, or two points as a range (max 2)")],
+    bad_points: Annotated[list[str] | None, typer.Argument(help="One point, or two points as a range (max 2; omit with --auto)")] = None,
+    auto: Annotated[bool, typer.Option("--auto", help="Remove detected drift bursts instead of given points")] = False,
+    speed_mps: Annotated[float, typer.Option(min=0, help="--auto: implausible speed that triggers a burst (m/s)")] = 30.0,
+    jump_meters: Annotated[float, typer.Option(min=0, help="--auto: implausible single-step distance (meters)")] = 100.0,
+    return_meters: Annotated[float, typer.Option(min=0, help="--auto: coming back this close to the anchor ends a burst")] = 30.0,
+    max_seconds: Annotated[float, typer.Option(min=0, help="--auto: a burst must return within this window (seconds)")] = 120.0,
 ) -> None:
-    """Remove bad points (or the range between two) from a track."""
+    """Remove bad points (or the range between two), or drift bursts with --auto."""
     path = _resolve_path(path)
+    if auto and bad_points:
+        raise UserInputError("Pass either bad points or --auto, not both")
+    if not auto and not bad_points:
+        raise UserInputError("No bad points given; use --auto to detect drift bursts")
+    if auto:
+        if not kml_edit.prune_drift_points(path, speed_mps, jump_meters, return_meters, max_seconds):
+            log.info("No drift burst detected, nothing to prune", target=str(path))
+        return
     kml_edit.prune_points(path, bad_points)
 
 

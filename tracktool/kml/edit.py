@@ -7,7 +7,7 @@ sources into the archive afterwards.
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import googleapi, log
@@ -54,6 +54,22 @@ def _track_location_index(track: xmlutil.etree._Element, location: str) -> int:
     return index
 
 
+def _track_series(track: xmlutil.etree._Element) -> tuple[list[str], list[str], list[datetime]]:
+    """(coord texts, when texts, datetimes) of the track; timestamps mandatory."""
+    coords = [c.text or "" for c in track.findall(f"{{{xmlutil.GX_NS}}}coord")]
+    whens = [w.text or "" for w in track.findall(f"{{{xmlutil.KML_NS}}}when")]
+    if not whens or len(whens) != len(coords):
+        raise UserInputError("Track points must carry timestamps to detect gaps")
+    try:
+        times = []
+        for w in whens:
+            t = datetime.fromisoformat(w.strip().replace("Z", "+00:00"))
+            times.append(t if t.tzinfo else t.replace(tzinfo=timezone.utc))
+    except ValueError as exc:
+        raise UserInputError(f"Unparseable track timestamp: {exc}") from exc
+    return coords, whens, times
+
+
 def detect_gap_points(path: Path, gap_seconds: float, gap_meters: float) -> list[str]:
     """Timestamps marking recording gaps: a time jump AND a distance jump.
 
@@ -66,18 +82,7 @@ def detect_gap_points(path: Path, gap_seconds: float, gap_meters: float) -> list
     """
     tree = xmlutil.parse_file(path)
     track = _get_track(tree)
-    coords = [c.text or "" for c in track.findall(f"{{{xmlutil.GX_NS}}}coord")]
-    whens = [w.text or "" for w in track.findall(f"{{{xmlutil.KML_NS}}}when")]
-    if not whens or len(whens) != len(coords):
-        raise UserInputError("Track points must carry timestamps to detect gaps")
-
-    try:
-        times = []
-        for w in whens:
-            t = datetime.fromisoformat(w.strip().replace("Z", "+00:00"))
-            times.append(t if t.tzinfo else t.replace(tzinfo=timezone.utc))
-    except ValueError as exc:
-        raise UserInputError(f"Unparseable track timestamp: {exc}") from exc
+    coords, whens, times = _track_series(track)
 
     gaps = []
     for i in range(len(coords) - 1):
@@ -93,6 +98,102 @@ def detect_gap_points(path: Path, gap_seconds: float, gap_meters: float) -> list
                  f"({delta / 60:.0f} min, {distance / 1000:.2f} km)", target=str(path))
         gaps.append(whens[i])
     return gaps
+
+
+def _drift_ranges(coords: list[str], times: list[datetime], speed_mps: float,
+                  jump_meters: float, return_meters: float,
+                  max_seconds: float) -> list[tuple[int, int]]:
+    """Half-open (start, stop) index ranges of drift; the stop point is kept.
+
+    A burst triggers on one step whose implied speed or distance is
+    implausible, and counts as drift only if the track comes back within
+    return_meters of the anchor inside max_seconds — a real departure never
+    does. Slow creeping drift stays under the radar by design; that is what
+    the manual two-point prune is for.
+    """
+    points = [tuple(float(v) for v in c.split()[:2]) for c in coords]  # KML: lon lat
+
+    def dist(a: int, b: int) -> float:
+        lon1, lat1 = points[a]
+        lon2, lat2 = points[b]
+        return geo_distance(lat1, lon1, lat2, lon2)
+
+    ranges: list[tuple[int, int]] = []
+    i = 0
+    while i < len(coords) - 1:
+        step = dist(i, i + 1)
+        delta = (times[i + 1] - times[i]).total_seconds()
+        speed = step / delta if delta > 0 else float("inf")
+        if step < jump_meters and speed < speed_mps:
+            i += 1
+            continue
+        limit = times[i] + timedelta(seconds=max_seconds)
+        k = i + 1
+        while k < len(coords) and times[k] <= limit and dist(i, k) > return_meters:
+            k += 1
+        if k < len(coords) and times[k] <= limit and dist(i, k) <= return_meters:
+            if k > i + 1:
+                ranges.append((i + 1, k))
+            i = k
+        else:
+            # never came back near the anchor: a real departure, move on
+            i += 1
+    return ranges
+
+
+def detect_drift_points(path: Path, speed_mps: float = 30.0, jump_meters: float = 100.0,
+                        return_meters: float = 30.0, max_seconds: float = 120.0
+                        ) -> list[tuple[str, str]]:
+    """(first, last) timestamps of each detected drift burst, both endpoints
+    being points the ranges remove.
+
+    A drift burst is a run of points that jumps implausibly far from where
+    the recording was — a single step above speed_mps or beyond jump_meters —
+    and comes back within return_meters of the anchor inside max_seconds:
+    exactly the shape a manual two-point prune erases.
+    """
+    tree = xmlutil.parse_file(path)
+    track = _get_track(tree)
+    coords, whens, times = _track_series(track)
+    return [(whens[a], whens[b - 1]) for a, b in
+            _drift_ranges(coords, times, speed_mps, jump_meters, return_meters, max_seconds)]
+
+
+def prune_drift_points(path: Path, speed_mps: float = 30.0, jump_meters: float = 100.0,
+                       return_meters: float = 30.0, max_seconds: float = 120.0) -> int:
+    """Remove every detected drift burst into <name>-Fixed.kml; returns the
+    number of points removed (0 writes nothing)."""
+    tree = xmlutil.parse_file(path)
+    track = _get_track(tree)
+    coords, whens, times = _track_series(track)
+    ranges = _drift_ranges(coords, times, speed_mps, jump_meters, return_meters, max_seconds)
+    if not ranges:
+        return 0
+
+    coord_nodes = track.findall(f"{{{xmlutil.GX_NS}}}coord")
+    when_nodes = track.findall(f"{{{xmlutil.KML_NS}}}when")
+    removed = 0
+    for start, stop in ranges:
+        log.info(f"Drift burst {whens[start]} -> {whens[stop - 1]}: "
+                 f"removing {stop - start} point(s)", target=str(path))
+        for index in range(start, stop):
+            track.remove(coord_nodes[index])
+            track.remove(when_nodes[index])
+        removed += stop - start
+    log.info(f"Removed {removed} drift point(s) from track", target=str(path))
+    _save_fixed(tree, path)
+    return removed
+
+
+def _save_fixed(tree: xmlutil.etree._ElementTree, path: Path) -> None:
+    """Write the edited tree as <name>-Fixed.kml next to the source."""
+    new_kml_name = f"{path.stem}-Fixed".replace(":", "")
+    name_node = xmlutil.find(tree, "/kml:kml/kml:Document/kml:name")
+    if name_node is not None:
+        name_node.text = new_kml_name
+    new_kml_path = path.parent / f"{new_kml_name}.kml"
+    if xmlutil.save(tree, new_kml_path):
+        log.info("Created cleaned track file", target=str(new_kml_path))
 
 
 def split_kml(path: Path, split_points: list[str]) -> None:
@@ -179,14 +280,7 @@ def prune_points(path: Path, bad_points: list[str]) -> None:
             removed_count += 1
 
     log.info(f"Removed {removed_count} bad point(s) from track", target=str(path))
-
-    new_kml_name = f"{path.stem}-Fixed".replace(":", "")
-    name_node = xmlutil.find(tree, "/kml:kml/kml:Document/kml:name")
-    if name_node is not None:
-        name_node.text = new_kml_name
-    new_kml_path = path.parent / f"{new_kml_name}.kml"
-    if xmlutil.save(tree, new_kml_path):
-        log.info("Created cleaned track file", target=str(new_kml_path))
+    _save_fixed(tree, path)
 
 
 def merge_kml(paths: list[Path], output_path: Path, connected: bool = False,
