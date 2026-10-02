@@ -6,7 +6,6 @@
 
 - **KML 轨迹管理**：归档（ZIP 真值分层存储 + 桌面/手机双汇总视图 + 备份）、视图状态检查与重建、拆分、删坏点（手动两点 + `--auto` 自动清漂移）、合并、Google 高程回填（只认整轨没有高程的手绘轨迹）
 - **EXIF 地理标记**：按拍摄时间与 KML 轨迹二分匹配写入 GPS、Google 高程/逆地理编码补全、时间平移、海拔偏移、MP4 转封装、媒体分类、缺失修复编排
-- **文件去重**：MD5 哈希日志、重复文件查找、目录对比
 
 ## 安装
 
@@ -37,6 +36,41 @@ tracktool kml push "./tracks/2024-05-*.kml"
 # --move 在归档之外把源文件收进归档的 Backup/（归档里已有的轨迹按名判重跳过，也一并搬走）
 tracktool kml push ./2024-05-03\ 徒步.kml --move
 ```
+
+## 目录比较与重复文件查找：使用 fclones
+
+通用文件比较与去重交给 [fclones](https://github.com/pkolaczk/fclones)，tracktool 已移除 `hash dirs`、`hash compare`、`hash dupes` 和 `hash prune`。fclones 独立使用，不是 tracktool 的运行依赖；可从[官方 Releases](https://github.com/pkolaczk/fclones/releases) 下载，或参照[安装说明](https://github.com/pkolaczk/fclones#installation)安装。
+
+下面的目录比较按**文件内容是否在另一目录存在**判断，忽略文件名、目录层级和副本数量。只修改 EXIF 也会造成内容差异；它不是按照片画面判断相似，也不检查目录结构是否相同。
+
+以下命令已在 Linux、fclones 0.35.0 上验证。把示例路径换成实际绝对路径，任务缓存和报告都放在待比较目录之外：
+
+```bash
+XDG_CACHE_HOME="/path/to/compare-task-001" fclones group \
+  --isolate --unique --hidden --no-ignore --min 0 \
+  --hash-fn blake3 --cache \
+  "/path/to/A" "/path/to/B" > "/path/to/compare-result.txt"
+```
+
+`--isolate --unique` 列出只在一边存在的内容，同一目录里的重复副本不会被当成另一边已有备份。`--hidden --no-ignore --min 0` 将隐藏文件、被忽略规则排除的文件和空文件纳入扫描。需要将硬链接和指向文件的符号链接也作为独立路径纳入时，加上 `--match-links --symbolic-links`。
+
+缓存用于**同一次比较任务的中断恢复**：
+
+- 开始新任务时使用全新的缓存目录，例如 `compare-task-001`；fclones 会自动创建内部缓存。
+- 比较期间（包括中断等待恢复期间）保持两个输入目录不变。中断后保留缓存，重新执行相同命令，即可复用已保存的哈希。
+- 文件修改后开始新比较，换用新的缓存目录，例如 `compare-task-002`。不要靠大小或修改时间判断旧缓存仍然有效，也不要复用旧的 `hash.json`。
+- 恢复仍会遍历目录；尚未保存的结果可能重算，单个大文件的全文件哈希算到一半中断时，可能需要重读该文件。[官方缓存说明](https://github.com/pkolaczk/fclones#incremental-mode)
+
+正常完成后，报告列出的路径就是另一边缺少对应内容的文件；没有读取错误且报告为 0 个差异文件，才表示按上述规则一致。fclones 遇到无法读取的文件可能警告并跳过，退出码仍为 0，因此要检查终端中的警告；有差异本身也不会使退出码变成非零。报告中的哈希字段不保证都是完整文件哈希，不要用它另建哈希清单，应直接使用分组结果。
+
+只查找单个目录内的重复文件，可使用：
+
+```bash
+fclones group --hidden --no-ignore --min 0 --hash-fn blake3 \
+  "/path/to/photos"
+```
+
+以上 `group` 命令只扫描和报告，启用 `--cache` 时另写缓存，不删除或改写输入文件。macOS、Windows 的缓存目录配置不同，`XDG_CACHE_HOME` 这段示例只适用于 Linux。
 
 ## 轨迹时间匹配
 
@@ -129,7 +163,7 @@ ZIP 压缩包是归档的**真值**，条目按 `<类型>/<yyyy-MM>/<文件名>`
 ## 实现说明
 
 - exiftool 以 `-stay_open` 常驻进程通信（每线程一个），批量处理不必为每个文件启动一次进程
-- 日志与标准输出里的路径按用户视角显示：优先相对当前工作目录（且至多向上一级），否则在家目录之下显示为 `~...`，再不然用绝对路径。写进文件的值（配置文件、哈希日志）不受影响，保持原样
+- 日志与标准输出里的路径按用户视角显示：优先相对当前工作目录（且至多向上一级），否则在家目录之下显示为 `~...`，再不然用绝对路径。写进配置和 KML 文件的值不受影响，保持原样
 - 并行处理使用线程池（I/O 密集负载）
 - `kml fill-altitude` 只补**整轨都没有高程**的轨迹（手绘规划那种）。KML 里一条轨迹＝一个 Placemark，判据是**逐条**的：一条轨迹上只要有一个点带非零海拔，这条就整条不写（那是设备记录的真实高程，不该被 DEM 值替换），同一份文件里的手绘轨迹照补；零海拔与缺分量同义，都算没有。媒体侧的 `exif fill-altitude` 则是逐文件地只补缺失标签
 - `kml prune --auto` 自动清漂移：某步隐含速度超过 `--speed-mps`（默认 30 m/s）或单步距离超过 `--jump-meters`（默认 100 m）即触发，且轨迹须在 `--max-seconds`（默认 120 s）内回到锚点 `--return-meters`（默认 30 m）内才确认为漂移——真实的出发一去不返，不会误删。缓慢爬走式漂移每步速度都很低，不在此列，仍用手动两点 prune

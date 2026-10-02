@@ -14,7 +14,7 @@ import pytest
 from conftest import TRACK_KML, InMemoryBackend, make_archive
 from typer.testing import CliRunner
 
-from tracktool import dedup, workflows
+from tracktool import workflows
 from tracktool.cli import app
 from tracktool.config import Config
 from tracktool.context import ctx
@@ -143,22 +143,6 @@ class TestMovesAndSideFilesAreReported:
         runner.invoke(app, ["--dry-run", "exif", "group", str(tmp_path)])
 
         assert sorted(p.name for p in tmp_path.iterdir()) == ["a.jpg", "b.mp4"]
-
-    def test_the_hash_log_is_not_written(self, tmp_path: Path, plan_mode):
-        (tmp_path / "a.txt").write_text("x", encoding="utf-8")
-        hash_log = tmp_path / "hashes.json"
-
-        dedup.get_directories_hash([tmp_path], hash_log_path=hash_log)
-
-        assert not hash_log.exists()
-
-    def test_clearing_the_hash_log_leaves_it_whole(self, tmp_path: Path, plan_mode):
-        hash_log = tmp_path / "hashes.json"
-        hash_log.write_text('{"gone.txt": {"MD5": "X", "LastWriteTime": 1}}', encoding="utf-8")
-
-        dedup.prune_hash_log(hash_log)
-
-        assert "gone.txt" in hash_log.read_text(encoding="utf-8")
 
     def test_a_config_value_is_not_persisted(self, tmp_path: Path, plan_mode, monkeypatch):
         config = Config(path=tmp_path / "config.json").load()

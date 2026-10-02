@@ -70,7 +70,7 @@ type = "layers"
 layers = [
     "tracktool.cli",
     "tracktool.workflows",
-    "tracktool.exif | tracktool.dedup",
+    "tracktool.exif",
     "tracktool.kml",
     "tracktool.actions | tracktool.workspace | tracktool.discover | tracktool.googleapi | tracktool.mediatime",
     "tracktool.fileutil",

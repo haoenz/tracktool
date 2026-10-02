@@ -1,4 +1,4 @@
-"""Tests for dedup, config, and Set-Exif tag building."""
+"""Tests for config and Set-Exif tag building."""
 
 import json
 from pathlib import Path
@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from tracktool import dedup
 from tracktool.cli import app
 from tracktool.config import Config, normalize
 from tracktool.context import ctx
@@ -312,51 +311,3 @@ class TestConfigSetCommand:
         result = runner.invoke(app, ["config", "set"])
         assert result.exit_code == 1
         assert "Available keys" in str(result.exception)
-
-
-class TestDedup:
-    def test_hash_and_compare(self, tmp_path: Path):
-        dir_a = tmp_path / "a"
-        dir_b = tmp_path / "b"
-        dir_a.mkdir()
-        dir_b.mkdir()
-        (dir_a / "shared.txt").write_text("same")
-        (dir_b / "shared.txt").write_text("same")
-        (dir_a / "only_a.txt").write_text("a only")
-        (dir_b / "only_b.txt").write_text("b only")
-
-        result = dedup.compare_directories([dir_a, dir_b])
-        only_paths = {p.name for files in result.values() for p in files}
-        assert only_paths == {"only_a.txt", "only_b.txt"}
-
-        unique = dedup.compare_directories([dir_a, dir_b], unique=True)
-        unique_paths = {p.name for files in unique.values() for p in files}
-        assert unique_paths == {"only_a.txt", "only_b.txt"}
-
-    def test_hash_log_roundtrip(self, tmp_path: Path):
-        directory = tmp_path / "files"
-        directory.mkdir()
-        (directory / "f.txt").write_text("data")
-        log_path = tmp_path / "log.json"
-
-        dedup.get_directories_hash([directory], hash_log_path=log_path)
-        assert log_path.is_file()
-        stored = json.loads(log_path.read_text(encoding="utf-8"))
-        assert str(directory / "f.txt") in stored
-
-        # clear log drops entries for deleted files
-        (directory / "f.txt").unlink()
-        dedup.prune_hash_log(log_path)
-        stored = json.loads(log_path.read_text(encoding="utf-8"))
-        assert str(directory / "f.txt") not in stored
-
-    def test_find_duplicates(self, tmp_path: Path):
-        directory = tmp_path / "dupes"
-        directory.mkdir()
-        (directory / "one.txt").write_text("same content")
-        (directory / "two.txt").write_text("same content")
-        (directory / "three.txt").write_text("different")
-
-        groups = dedup.find_duplicate_files(directory)
-        assert len(groups) == 1
-        assert len(groups[0].files) == 2

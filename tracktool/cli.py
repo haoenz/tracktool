@@ -9,7 +9,7 @@ import typer
 from rich import box
 from rich.table import Table
 
-from . import __version__, coords, dedup, googleapi, log, mediatime, workflows
+from . import __version__, coords, googleapi, log, mediatime, workflows
 from .actions import describe
 from .config import DEFAULTS, normalize
 from .context import RunMode, ctx
@@ -42,13 +42,11 @@ kml_app = typer.Typer(help="KML track management", no_args_is_help=True)
 archive_app = typer.Typer(help="Track archive: declare and inspect the archive directory", no_args_is_help=True)
 exif_app = typer.Typer(help="EXIF geotagging and media repair", no_args_is_help=True)
 google_app = typer.Typer(help="Google Maps API queries", no_args_is_help=True)
-hash_app = typer.Typer(help="MD5 hash log, duplicates, directory comparison", no_args_is_help=True)
 config_app = typer.Typer(help="Configuration", no_args_is_help=True)
 app.add_typer(kml_app, name="kml")
 app.add_typer(archive_app, name="archive")
 app.add_typer(exif_app, name="exif")
 app.add_typer(google_app, name="google")
-app.add_typer(hash_app, name="hash")
 app.add_typer(config_app, name="config")
 
 ParallelOpt = Annotated[bool, typer.Option("--parallel", help=f"Process in parallel ({DEFAULT_WORKERS} threads)")]
@@ -593,67 +591,6 @@ def google_location(
 
     location = googleapi.get_location(point[0], point[1], api_key, language=language)
     print(json.dumps(location.as_dict(), ensure_ascii=False, indent=2))
-
-
-# ── hash ────────────────────────────────────────────────────────────────────
-
-
-@hash_app.command("dirs")
-def hash_dirs(
-    directories: Annotated[list[Path], typer.Argument(help="Directories to hash")],
-    include: Annotated[str, typer.Option("--include", help="Include regex on full path")] = ".*",
-    exclude: Annotated[str, typer.Option("--exclude", help="Exclude regex on full path")] = "^$",
-    hash_log: Annotated[Path | None, typer.Option("--log", help="Hash log JSON path")] = None,
-    prune: Annotated[bool, typer.Option("--prune", help="Drop entries for deleted files")] = False,
-) -> None:
-    """Compute/update MD5 hashes for directory contents."""
-    directories = [_resolve_path(d) for d in directories]
-    results = dedup.get_directories_hash(directories, include, exclude, hash_log, prune)
-    for result in results:
-        print(f"{display_path(result.directory)} ({len(result.hashes)} files)")
-
-
-@hash_app.command("compare")
-def hash_compare(
-    directories: Annotated[list[Path], typer.Argument(help="Directories to compare")],
-    unique: Annotated[bool, typer.Option("--unique", help="Files not in ANY other directory")] = False,
-    include: Annotated[str, typer.Option("--include", help="Include regex")] = ".*",
-    exclude: Annotated[str, typer.Option("--exclude", help="Exclude regex")] = "^$",
-    hash_log: Annotated[Path | None, typer.Option("--log", help="Hash log JSON path")] = None,
-) -> None:
-    """Compare directories by MD5 (default: missing from at least one other)."""
-    directories = [_resolve_path(d) for d in directories]
-    result = dedup.compare_directories(directories, include, exclude, unique, hash_log)
-    for directory, files in result.items():
-        print(f"{display_path(directory)}: {len(files)} file(s)")
-        for file in files:
-            print(f"  {display_path(file)}")
-
-
-@hash_app.command("dupes")
-def hash_dupes(
-    directory: Annotated[Path, typer.Argument(help="Directory to scan")],
-    hash_log: Annotated[Path | None, typer.Option("--log", help="Hash log JSON path")] = None,
-) -> None:
-    """Find duplicate files by MD5."""
-    directory = _resolve_path(directory)
-    groups = dedup.find_duplicate_files(directory, hash_log)
-    if not groups:
-        log.info("No duplicate files found")
-        return
-    for group in groups:
-        print(f"{group.md5}:")
-        for file in group.files:
-            print(f"  {display_path(file)}")
-
-
-@hash_app.command("prune")
-def hash_prune(
-    hash_log: Annotated[Path, typer.Argument(help="Hash log JSON path")],
-) -> None:
-    """Remove entries for deleted files from the hash log."""
-    hash_log = _resolve_path(hash_log)
-    dedup.prune_hash_log(hash_log)
 
 
 # ── config ──────────────────────────────────────────────────────────────────

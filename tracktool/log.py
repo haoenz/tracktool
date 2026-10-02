@@ -14,8 +14,8 @@ Library helpers stay quiet about severity: a condition is logged at its
 decision point by the caller that acts on it (e.g. mediatime returns None and
 the caller decides whether that is a warning, an error, or ignorable).
 
-Wording: fact before consequence ("...; file skipped", "...; keeping existing
-hash"), no trailing punctuation; stored tags by EXIF tag name (GPSPosition),
+Wording: fact before consequence ("...; file skipped"), no trailing
+punctuation; stored tags by EXIF tag name (GPSPosition),
 concepts in plain words (GPS data). Paths are drawn the way the user's own
 shell would draw them (paths.display_path): relative to the working directory,
 `~...` below home, absolute when neither reads better.

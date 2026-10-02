@@ -87,18 +87,6 @@ class TestPathsInOutput:
         assert f"[{Path('work', 'a.kml')}] Archiving KML track" in caplog.text
         assert str(tmp_path) not in caplog.text
 
-    def test_hash_dupes_prints_relative_paths(self, tmp_path: Path, fake_home: Path):
-        directory = tmp_path / "dupes"
-        directory.mkdir()
-        (directory / "one.txt").write_text("same content", encoding="utf-8")
-        (directory / "two.txt").write_text("same content", encoding="utf-8")
-
-        result = runner.invoke(app, ["hash", "dupes", str(directory)])
-
-        assert result.exit_code == 0
-        assert str(Path("dupes", "one.txt")) in result.output
-        assert str(tmp_path) not in result.output
-
     def test_stored_paths_are_shown_verbatim(self, tmp_path: Path, monkeypatch):
         # config show 打印的就是文件里的值：忠实展示，不跟着显示规则走
         monkeypatch.setattr(ctx, "config", Config(path=tmp_path / "config.json").load())

@@ -6,8 +6,8 @@ recognize; one that climbs further up is easier to read as an absolute path
 than as a ladder of `..`. Paths below the home directory take the same
 shortcut through `~`.
 
-This is how a path is *drawn*, never how it is stored: config values, the
-hash log and the KML files keep the real form, so a command that writes a
+This is how a path is *drawn*, never how it is stored: configuration and
+KML files keep the real form, so a command that writes a
 path into a file must not route it through here. Nothing here touches the
 file system — the comparisons are lexical.
 """

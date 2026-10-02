@@ -7,7 +7,6 @@ A file the user names is processed whatever it is — pointing at it is the
 stronger statement than an extension.
 """
 
-import re
 from pathlib import Path
 
 from . import log
@@ -46,15 +45,3 @@ def list_files(path: Path | list[Path]) -> list[Path]:
     if skipped := len(files) - len(media):
         log.debug(f"Skipped {skipped} non-media file(s) (unknown extension)", target=str(path))
     return media
-
-
-def leaf_files(path: Path, include: str = ".*", exclude: str = "^$") -> list[Path]:
-    """Recursively scan a directory, filtering by regex on the full path."""
-    include_re = re.compile(include, re.IGNORECASE)
-    exclude_re = re.compile(exclude, re.IGNORECASE)
-    log.debug("Scanning directory for files", target=str(path))
-    return [
-        f
-        for f in sorted(path.rglob("*"))
-        if f.is_file() and include_re.search(str(f)) and not exclude_re.search(str(f))
-    ]
