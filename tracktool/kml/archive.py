@@ -21,7 +21,9 @@ it back.
 
 import hashlib
 import json
+import os
 import shutil
+import tempfile
 import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -211,6 +213,7 @@ def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path
     Matching and removal stay two functions on purpose: a restore looks the
     track up once (by file name, in _inspect_archive) and acts on that exact
     entry, so search and delete can never disagree about what was found.
+    If rebuilding fails, the extracted file and original ZIP both remain.
     """
     target_path = output_directory / Path(entry_name).name
     if target_path.exists():
@@ -222,14 +225,29 @@ def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path
 
     with zipfile.ZipFile(zip_path) as zf, zf.open(entry_name) as src, open(target_path, "wb") as dst:
         shutil.copyfileobj(src, dst)
+        dst.flush()
+        os.fsync(dst.fileno())
     log.info(f"Extracted from ZIP: {entry_name}", target=str(zip_path))
 
-    # zipfile has no entry-delete API: rewrite the archive without the entry
-    with zipfile.ZipFile(zip_path) as zf:
-        remaining = {info.filename: zf.read(info.filename) for info in zf.infolist() if info.filename != entry_name}
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name, blob in remaining.items():
-            zf.writestr(name, blob)
+    # Keep the original intact until the replacement is complete and durable.
+    # A sibling temporary file permits an atomic replacement on the same filesystem.
+    with tempfile.NamedTemporaryFile(
+        dir=zip_path.parent, prefix=f".{zip_path.name}.", suffix=".tmp", delete_on_close=False
+    ) as temporary:
+        with zipfile.ZipFile(zip_path) as source, zipfile.ZipFile(temporary, "w") as replacement:
+            replacement.comment = source.comment
+            for info in source.infolist():
+                if info.filename != entry_name:
+                    replacement.writestr(info, source.read(info))
+        temporary.flush()
+        with zipfile.ZipFile(temporary) as replacement:
+            bad_entry = replacement.testzip()
+            if bad_entry is not None:
+                raise zipfile.BadZipFile(f"Corrupt entry in replacement archive: {bad_entry}")
+        shutil.copymode(zip_path, temporary.name)
+        os.fsync(temporary.fileno())
+        temporary.close()
+        os.replace(temporary.name, zip_path)
     log.debug(f"Removed from ZIP: {entry_name}", target=str(zip_path))
 
 
