@@ -113,14 +113,14 @@ def _compute_time_shift(
     return total_seconds_offset, tz_tags
 
 
-def _insta360_new_name(file: Path, shift: timedelta, is_negative: bool) -> str | None:
-    """The name an Insta360 clip should carry after the shift, or None when the
+def _insta360_new_name(file: Path, shift: timedelta) -> str | None:
+    """The name an Insta360 clip should carry after the signed shift, or None when the
     name does not encode a timestamp (an Insta360 build's does)."""
     m = _INSTA360_FILENAME_PATTERN.search(file.stem)
     if not m:
         return None
     original_time = datetime.strptime(m[1], "%Y%m%d_%H%M%S")
-    new_time = original_time - shift if is_negative else original_time + shift
+    new_time = original_time + shift
     return _INSTA360_FILENAME_PATTERN.sub(f"_{new_time.strftime('%Y%m%d_%H%M%S')}_", file.name)
 
 
@@ -147,7 +147,7 @@ def decide_time_shift(meta: MediaMetadata, time_diff: str, offset_time: str, ove
     if tz_tags:
         actions.append(WriteTags(meta.path, tz_tags, overwrite))
     if make == MAKE_INSTA360 and ext == ".mp4":
-        new_name = _insta360_new_name(meta.path, shift, total_seconds_offset < 0)
+        new_name = _insta360_new_name(meta.path, shift)
         if new_name is None:
             log.error("Filename does not match Insta360 naming pattern", target=str(meta.path))
         else:

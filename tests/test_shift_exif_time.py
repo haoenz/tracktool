@@ -6,6 +6,8 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
+
 from tracktool import actions
 from tracktool.actions import Failed, Rename, ShiftTags, Skip, WriteTags
 from tracktool.exif.media import (
@@ -82,18 +84,18 @@ class TestInsta360NewName:
 
     def test_shifts_timestamp_forward(self):
         assert (
-            _insta360_new_name(Path("VID_20240501_120000_00.mp4"), timedelta(hours=1, minutes=30), is_negative=False)
+            _insta360_new_name(Path("VID_20240501_120000_00.mp4"), timedelta(hours=1, minutes=30))
             == "VID_20240501_133000_00.mp4"
         )
 
     def test_shifts_timestamp_backward_across_midnight(self):
         assert (
-            _insta360_new_name(Path("VID_20240501_001500_00.mp4"), timedelta(minutes=30), is_negative=True)
+            _insta360_new_name(Path("VID_20240501_001500_00.mp4"), timedelta(minutes=-30))
             == "VID_20240430_234500_00.mp4"
         )
 
     def test_a_name_without_a_timestamp_has_no_successor(self):
-        assert _insta360_new_name(Path("not-instabuild.mp4"), timedelta(hours=1), is_negative=False) is None
+        assert _insta360_new_name(Path("not-instabuild.mp4"), timedelta(hours=1)) is None
 
     def test_the_planned_rename_lands_on_disk(self, tmp_path: Path):
         file = tmp_path / "VID_20240501_120000_00.mp4"
@@ -156,17 +158,30 @@ class TestDecideTimeShift:
 
         assert result == [Failed(Path("a.mp4"), "time shift not applicable to this file")]
 
-    def test_an_insta360_clip_gets_its_name_shifted_too(self):
-        result = decide_time_shift(_meta("VID_20240501_120000_00.mp4", Make=MAKE_INSTA360), "+1h", "", False)
+    @pytest.mark.parametrize(
+        ("timestamp", "time_diff", "delta", "expected_timestamp"),
+        [
+            ("20240501_120000", "+1h", timedelta(hours=1), "20240501_130000"),
+            ("20240501_120000", "-1h", timedelta(hours=-1), "20240501_110000"),
+            ("20240502_001500", "-30m", timedelta(minutes=-30), "20240501_234500"),
+            ("20240501_001500", "-30m", timedelta(minutes=-30), "20240430_234500"),
+            ("20240101_001500", "-30m", timedelta(minutes=-30), "20231231_234500"),
+            ("20240301_001500", "-30m", timedelta(minutes=-30), "20240229_234500"),
+            ("20240501_234500", "+30m", timedelta(minutes=30), "20240502_001500"),
+        ],
+    )
+    def test_an_insta360_clip_gets_its_name_shifted_too(self, timestamp, time_diff, delta, expected_timestamp):
+        name = f"VID_{timestamp}_00.mp4"
+        result = decide_time_shift(_meta(name, Make=MAKE_INSTA360), time_diff, "", False)
 
         assert result == [
             ShiftTags(
-                Path("VID_20240501_120000_00.mp4"),
+                Path(name),
                 TIMESTAMP_TAG_SETS[(MAKE_INSTA360, ".mp4")],
-                timedelta(hours=1),
+                delta,
                 False,
             ),
-            Rename(Path("VID_20240501_120000_00.mp4"), "VID_20240501_130000_00.mp4"),
+            Rename(Path(name), f"VID_{expected_timestamp}_00.mp4"),
         ]
 
     def test_an_insta360_clip_with_a_foreign_name_keeps_it(self, caplog):
