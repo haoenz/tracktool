@@ -10,11 +10,12 @@ process or an ffmpeg run in the way.
 """
 
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .. import log, mediatime
-from ..actions import Action, Failed, RemuxVideo, Rename, ShiftTags, Skip, WriteTags, run
+from ..actions import Action, Failed, RemuxVideo, Rename, ShiftTags, Skip, WriteTags, preflight, run
 from ..context import ctx
 from ..discover import MEDIA_EXTENSIONS, list_files
 from ..errors import UserInputError
@@ -164,12 +165,53 @@ def shift_exif_time(
 
     files = list_files(path)
 
-    def process(file: Path) -> list[Action]:
+    def plan(file: Path) -> list[Action]:
         # Make 与 OffsetTime 一次读齐，每个文件只往返 exiftool 一次
         meta = MediaMetadata.of(file, ctx.backend.read_tags(file, SHIFT_TAGS))
-        return run(decide_time_shift(meta, time_diff, offset_time, overwrite))
+        return decide_time_shift(meta, time_diff, offset_time, overwrite)
 
-    return run_per_file(files, process, activity="Shifting Exif time", parallel=parallel)
+    return _run_media_batch(files, plan, activity="Shifting Exif time", parallel=parallel)
+
+
+def _run_media_batch(
+    files: list[Path],
+    decide: Callable[[Path], list[Action]],
+    *,
+    activity: str,
+    parallel: bool,
+    check_only: bool = False,
+    skip_existing_outputs: bool = False,
+) -> BatchResult[list[Action]]:
+    """Read and check the entire batch before any metadata or filenames change."""
+    prepared = run_per_file(
+        files, lambda file: (file, decide(file)), activity=f"Planning: {activity}", parallel=parallel
+    )
+    ready_files = [file for file, _ in prepared.succeeded]
+    checked = preflight([plan for _, plan in prepared.succeeded], skip_existing_outputs=skip_existing_outputs)
+    plans = dict(zip(ready_files, checked, strict=True))
+
+    def validate(file: Path) -> tuple[Path, list[Action]]:
+        plan = plans[file]
+        # Report every rejection before allowing the first successful write.
+        run([action for action in plan if isinstance(action, Failed)])
+        return file, plan
+
+    validated = run_per_file(ready_files, validate, activity=f"Checking: {activity}")
+    result: BatchResult[list[Action]] = BatchResult(failed=prepared.failed + validated.failed)
+    if check_only:
+        result.succeeded = [plan for _, plan in validated.succeeded]
+    else:
+        result.merge(
+            run_per_file(
+                [file for file, _ in validated.succeeded],
+                lambda file: run(plans[file]),
+                activity=activity,
+                parallel=parallel,
+            )
+        )
+    failed = set(result.failed)
+    result.failed = [file for file in files if file in failed]
+    return result
 
 
 def decide_altitude_shift(meta: MediaMetadata, offset: float, overwrite: bool) -> list[Action]:
@@ -219,8 +261,6 @@ def decide_convert(
     create_time_utc = media_time.astimezone(UTC)
     output = output_dir / f"{meta.path.stem}.mp4"
     source_is_mp4 = meta.path.suffix.lower() == ".mp4"
-    if output != meta.path and output.exists():
-        return [Skip(meta.path, f"output already exists: {output.name}")]
 
     clock = media_time.strftime("%Y:%m:%d %H:%M:%S")
     if media_time.microsecond:
@@ -265,6 +305,7 @@ def convert_to_mp4(
     time_source: str | None = None,
     *,
     check_only: bool = False,
+    skip_existing_outputs: bool = False,
 ) -> BatchResult[list[Action]]:
     """Remux videos, or preflight a directory workflow without performing writes."""
     # 入口处一次性校验 offset_time 格式，坏参数直接报错，而不是逐文件失败
@@ -272,15 +313,18 @@ def convert_to_mp4(
     files = list_files(path)
     output_dir = output_directory if output_directory is not None else (files[0].parent if files else Path())
 
-    def process(file: Path) -> list[Action]:
+    def plan(file: Path) -> list[Action]:
         meta = MediaMetadata.of(file, ctx.backend.read_tags(file, VIDEO_TIME_TAGS))
-        plan = decide_convert(meta, output_dir, offset_time, make, model, timezone_policy, time_source)
-        if check_only:
-            run([action for action in plan if isinstance(action, Failed)])
-            return plan
-        return run(plan)
+        return decide_convert(meta, output_dir, offset_time, make, model, timezone_policy, time_source)
 
-    return run_per_file(files, process, activity="Converting to MP4", parallel=parallel)
+    return _run_media_batch(
+        files,
+        plan,
+        activity="Converting to MP4",
+        parallel=parallel,
+        check_only=check_only,
+        skip_existing_outputs=skip_existing_outputs,
+    )
 
 
 def validate_conversion_options(

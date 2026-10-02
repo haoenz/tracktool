@@ -16,6 +16,7 @@ argument: a preview that has to be threaded down by hand is one a command can
 forget, and the forgetting is silent — the run simply happens.
 """
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -164,6 +165,116 @@ def _signed(delta: timedelta) -> str:
     return f"{'-' if delta < timedelta(0) else '+'}{abs(delta)}"
 
 
+def _path_key(path: Path) -> Path:
+    """Compare directory entries without following the final symlink."""
+    return Path(os.path.normcase(str(path.parent.resolve() / path.name)))
+
+
+def _occupied(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
+
+
+def _backup_path(path: Path) -> Path:
+    return path.with_name(path.name + "_original")
+
+
+def _plan_paths(plan: list[Action]) -> set[Path]:
+    """Reserve inputs, outputs and backups together for a whole file's plan."""
+    paths: set[Path] = set()
+    for action in plan:
+        if isinstance(action, WriteTags | ShiftTags | Rename | RemuxVideo):
+            paths.add(_path_key(action.file))
+            paths.add(_path_key(action.file.resolve()))
+        if isinstance(action, Rename):
+            paths.add(_path_key(action.file.with_name(action.new_name)))
+        if isinstance(action, RemuxVideo):
+            paths.add(_path_key(action.output))
+            if action.source_is_mp4:
+                paths.add(_path_key(_backup_path(action.file)))
+        if isinstance(action, WriteTags | ShiftTags) and not action.overwrite:
+            paths.add(_path_key(_backup_path(action.file)))
+    return paths
+
+
+def _path_problem(plan: list[Action], skip_existing_outputs: bool = False) -> Failed | Skip | None:
+    for action in plan:
+        target = None
+        backup = None
+        if isinstance(action, Rename):
+            target = action.file.with_name(action.new_name)
+        elif isinstance(action, RemuxVideo):
+            target = action.output
+            if action.source_is_mp4:
+                backup = _backup_path(action.file)
+        elif isinstance(action, WriteTags | ShiftTags) and not action.overwrite:
+            backup = _backup_path(action.file)
+        if target is not None:
+            if _path_key(target) != _path_key(action.file) and _occupied(target):
+                if (
+                    isinstance(action, RemuxVideo)
+                    and skip_existing_outputs
+                    and target.is_file()
+                    and not target.is_symlink()
+                ):
+                    return Skip(action.file, f"output already exists: {target}")
+                return Failed(action.file, f"Output already exists: {target}", quarantine=False)
+            if isinstance(action, RemuxVideo) and target.is_symlink():
+                return Failed(action.file, f"Output is a symbolic link: {target}", quarantine=False)
+            for parent in target.parents:
+                if _occupied(parent) and not parent.is_dir():
+                    return Failed(action.file, f"Output directory is blocked: {parent}", quarantine=False)
+        if backup is not None and _occupied(backup) and (backup.is_symlink() or not backup.is_file()):
+            return Failed(action.file, f"Backup path is occupied: {backup}", quarantine=False)
+    return None
+
+
+def preflight(plans: list[list[Action]], *, skip_existing_outputs: bool = False) -> list[list[Action]]:
+    """Check every plan against the initial filesystem and all other plans.
+
+    Conflicting files stay in place. A destination used as another source is
+    also a conflict: execution order must not decide which file survives.
+    """
+    checked = list(plans)
+    owners: dict[Path, set[int]] = {}
+    for index, plan in enumerate(plans):
+        if not plan or any(isinstance(action, Failed) for action in plan):
+            continue
+        try:
+            for path in _plan_paths(plan):
+                owners.setdefault(path, set()).add(index)
+            if problem := _path_problem(plan, skip_existing_outputs):
+                checked[index] = [problem]
+        except OSError as exc:
+            checked[index] = [Failed(plan[0].file, f"Cannot check file paths: {exc}", quarantine=False)]
+    conflicts: dict[int, list[str]] = {}
+    for path, indices in owners.items():
+        if len(indices) > 1:
+            for index in indices:
+                conflicts.setdefault(index, []).append(str(path))
+    for index, paths in conflicts.items():
+        checked[index] = [
+            Failed(plans[index][0].file, f"Batch path conflict: {', '.join(sorted(paths))}", quarantine=False)
+        ]
+    return checked
+
+
+def _move_without_overwrite(source: Path, target: Path) -> None:
+    """Publish an existing file without copying bytes or replacing a target.
+
+    Hard-link creation exclusively claims the target name. If linking is not
+    supported, fail safely; if unlinking fails, both names retain the data.
+    """
+    if _path_key(source) == _path_key(target):
+        return
+    try:
+        os.link(source, target, follow_symlinks=False)
+        source.unlink()
+    except OSError as exc:
+        reason = f"Cannot move {source} to {target} without overwriting: {exc}"
+        log.error(reason, target=str(source))
+        raise FileFailure(reason, quarantine=False) from exc
+
+
 def apply(action: Action) -> None:
     """Perform one planned step. Only run() calls this."""
     match action:
@@ -172,7 +283,7 @@ def apply(action: Action) -> None:
         case ShiftTags(file=file, tags=tags, delta=delta, overwrite=overwrite):
             ctx.backend.shift_tags(file, tags, delta, overwrite=overwrite)
         case Rename(file=file, new_name=new_name):
-            file.rename(file.with_name(new_name))
+            _move_without_overwrite(file, file.with_name(new_name))
         case RemuxVideo():
             _remux(action)
         case Step(effect=effect):
@@ -189,8 +300,9 @@ def apply(action: Action) -> None:
 def _remux(action: RemuxVideo) -> None:
     """The ffmpeg branch of RemuxVideo, including the original-file shuffle."""
     file, output = action.file, action.output
-    if output != file and output.exists():
-        raise FileFailure(f"Output already exists: {output}", quarantine=False)
+    if problem := _path_problem([action]):
+        log.error(problem.reason, target=str(file))
+        raise FileFailure(problem.reason, quarantine=False)
     # Prepare output before touching the source. Reruns preserve the first
     # backup rather than replacing it with an already corrected version.
     with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".mp4", delete=False) as handle:
@@ -226,8 +338,11 @@ def _remux(action: RemuxVideo) -> None:
                 except BaseException:
                     original.unlink(missing_ok=True)
                     raise
-        temporary.replace(output)
-        if action.source_is_mp4 and file != output:
+        if _path_key(output) == _path_key(file):
+            temporary.replace(output)
+        else:
+            _move_without_overwrite(temporary, output)
+        if action.source_is_mp4 and _path_key(file) != _path_key(output):
             file.unlink()
     finally:
         temporary.unlink(missing_ok=True)
@@ -246,6 +361,7 @@ def run(actions: list[Action]) -> list[Action]:
     batch's FileFailure in either mode, so a preview's exit code tells the same
     story as the run it previews instead of always looking healthy.
     """
+    actions = preflight([actions])[0]
     for action in actions:
         if isinstance(action, Failed):
             log.warning(action.reason, target=str(action.file))

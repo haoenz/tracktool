@@ -283,17 +283,21 @@ def resolve_vid_exif(
     # that directory-wide operation. Pending files must remain at their paths.
     source = vid_original_path if vid_original_path.is_dir() else vid_path
     if source.is_dir():
+        # On a first run VID will become empty. Check against the currently
+        # vacant sibling to model that destination without moving any files.
+        check_output = vid_path if source == vid_original_path else vid_original_path
         checked = convert_to_mp4(
             source,
-            output_directory=vid_path,
+            output_directory=check_output,
             offset_time=offset_time,
             timezone_policy=timezone_policy,
             time_source=time_source,
             parallel=parallel,
             check_only=True,
+            skip_existing_outputs=True,
         )
         if not checked.ok:
-            log.warning("Video repair paused before directory changes; resolve the timestamp decisions and retry")
+            log.warning("Video repair paused before directory changes; resolve timestamp or path conflicts and retry")
             return BatchResult(failed=checked.failed)
 
     # 第一步：VID → VID_original。已经改过名（包括上次中断留下的一半）就跳过
@@ -331,6 +335,7 @@ def resolve_vid_exif(
             parallel=parallel,
             timezone_policy=timezone_policy,
             time_source=time_source,
+            skip_existing_outputs=True,
         )
     )
 
