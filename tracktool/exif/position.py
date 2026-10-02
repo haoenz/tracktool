@@ -4,9 +4,9 @@ The archive's tracks are read and parsed per month on first demand — layered
 entries carry their month in the entry path, so a batch whose media spans two
 weeks touches two months' entries instead of decompressing the whole ZIP —
 and each media file's timestamp is matched against the tracks whose name
-carries the date (±1 day with -Multiday). A match strictly inside a track's
-duration wins immediately, otherwise the smallest outside-diff is used when
-it is within MaxTimeDiffSeconds (default 60s).
+carries the date (±1 day with --multiday). Recording bounds reject impossible
+tracks before binary search. The closest point across all remaining tracks
+wins if it is within MaxTimeDiffSeconds (default 60s).
 
 `decide_position` holds that whole rule as a function of one file's metadata
 and a track lookup, returning the steps to take; the batch only replays them.
@@ -138,18 +138,26 @@ def _candidate_dates(media_time: datetime, multiday: bool) -> list[str]:
 
 
 def _find_best_track(
-    tracks: list[Track], media_time: datetime, multiday: bool, target_file: str | None = None
+    tracks: list[Track],
+    media_time: datetime,
+    multiday: bool,
+    target_file: str | None = None,
+    *,
+    max_time_diff_seconds: int = MAX_TIME_DIFF_SECONDS,
 ) -> TrackMatch | None:
     """Nearest point among KMLs whose name contains the media date (±1 day
-    with multiday): an in-duration match wins immediately, otherwise the
-    closest out-of-duration point is kept."""
+    with multiday), within the tolerance. Ties prefer an in-duration match,
+    then track name, point time and coordinates, independent of archive order.
+    """
     dates = _candidate_dates(media_time, multiday)
+    utc_time = media_time.astimezone(UTC)
 
     best: TrackMatch | None = None
+    best_key: tuple[float, bool, str, datetime, float, float, float] | None = None
     for candidate in tracks:
         if not any(date in candidate.name for date in dates):
             continue
-        pos = candidate.nearest(media_time.astimezone(UTC))
+        pos = candidate.nearest(utc_time, max_seconds=max_time_diff_seconds)
         if pos is None:
             continue
         log.verbose(
@@ -157,10 +165,18 @@ def _find_best_track(
             f"{pos.point.longitude} {pos.point.latitude} {pos.point.altitude}",
             target=target_file,
         )
-        if pos.inside_duration:
-            return pos
-        if best is None or pos.seconds_from_nearest < best.seconds_from_nearest:
+        key = (
+            pos.seconds_from_nearest,
+            not pos.inside_duration,
+            candidate.name,
+            pos.point.time,
+            pos.point.latitude,
+            pos.point.longitude,
+            pos.point.altitude,
+        )
+        if best_key is None or key < best_key:
             best = pos
+            best_key = key
     return best
 
 
@@ -263,6 +279,7 @@ def geotag_from_kml(
                     media_time,
                     options.multiday,
                     str(file),
+                    max_time_diff_seconds=options.max_time_diff_seconds,
                 ),
                 options,
             )

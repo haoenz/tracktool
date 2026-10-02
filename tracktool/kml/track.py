@@ -9,8 +9,9 @@ keeps the binary search and its duration logic in one place.
 """
 
 from bisect import bisect_left
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from itertools import pairwise
 
 from ..errors import UserInputError
 from . import xmlutil
@@ -44,6 +45,13 @@ class Track:
 
     name: str
     points: tuple[TrackPoint, ...]
+    _times: tuple[datetime, ...] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        times = tuple(point.time for point in self.points)
+        if any(previous > current for previous, current in pairwise(times)):
+            raise UserInputError(f"KML track timestamps are not in time order: {self.name}")
+        object.__setattr__(self, "_times", times)
 
     @classmethod
     def from_kml(cls, tree: xmlutil.etree._ElementTree, name: str) -> Track:
@@ -72,15 +80,19 @@ class Track:
             points.append(TrackPoint(latitude, longitude, altitude, time))
         return cls(name, tuple(points))
 
-    def nearest(self, time: datetime) -> TrackMatch | None:
-        """The point closest in time, or None when the track has no points.
+    def nearest(self, time: datetime, *, max_seconds: float | None = None) -> TrackMatch | None:
+        """Closest point, optionally bounded by an inclusive time tolerance.
 
-        A moment strictly inside the recording wins immediately; otherwise the
-        caller decides whether the closest out-of-duration point is close enough.
+        Endpoints cheaply reject impossible tracks before binary search. Gaps
+        inside a recording still need the actual nearest point checked.
         """
-        times = [point.time for point in self.points]
+        times = self._times
         if not times:
             return None
+        if max_seconds is not None:
+            distance_from_duration = max((times[0] - time).total_seconds(), (time - times[-1]).total_seconds(), 0)
+            if distance_from_duration > max_seconds:
+                return None
 
         # 等价于 [Array]::BinarySearch：找到第一个 >= time 的位置
         insert_index = bisect_left(times, time)
@@ -93,4 +105,7 @@ class Track:
             index = insert_index
 
         point = self.points[index]
-        return TrackMatch(point, abs((time - point.time).total_seconds()), inside_duration)
+        seconds = abs((time - point.time).total_seconds())
+        if max_seconds is not None and seconds > max_seconds:
+            return None
+        return TrackMatch(point, seconds, inside_duration)

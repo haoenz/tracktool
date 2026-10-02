@@ -411,7 +411,7 @@ def exif_geotag(
     path: Annotated[Path, typer.Argument(help="File or directory")],
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     max_time_diff: Annotated[
-        int, typer.Option("--max-time-diff", help="Max seconds outside track duration")
+        int, typer.Option("--max-time-diff", help="Max seconds from the nearest recorded track point")
     ] = MAX_TIME_DIFF_SECONDS,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     force: Annotated[bool, typer.Option("--force", help="Update even when GPS exists")] = False,

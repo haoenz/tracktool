@@ -105,7 +105,7 @@ class TestFindBestTrack:
     def setup_method(self):
         self.track = make_track()
 
-    def test_inside_match_wins(self):
+    def test_closest_inside_match_wins(self):
         # 第一个候选（06:00 轨迹）在持续时间外，第二个（00:00 轨迹）命中持续时间
         far = make_track(TRACK_KML.replace("T00:0", "T06:0"), "2024-05-01 far.kml")
         near = make_track(TRACK_KML, "2024-05-01 near.kml")
@@ -120,7 +120,7 @@ class TestFindBestTrack:
         far = make_track(TRACK_KML, "2024-05-01 far.kml")
         near = make_track(TRACK_KML.replace("T00:0", "T06:0"), "2024-05-01 near.kml")
         media_time = datetime(2024, 5, 1, 5, 30, 0, tzinfo=UTC)
-        best = _find_best_track([far, near], media_time, multiday=False)
+        best = _find_best_track([far, near], media_time, multiday=False, max_time_diff_seconds=1800)
         assert best is not None
         assert best.inside_duration is False
         # far 轨迹最近点 00:03 差 19620s，near 轨迹 06:00 差 1800s
