@@ -43,20 +43,22 @@ from ..tags import (
 )
 from .write import SetExifOptions, build_tags
 
-_RELATIVE_TIME_PATTERN = re.compile(r"(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
+_RELATIVE_TIME_PATTERN = re.compile(r"([+-]?)(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
 _INSTA360_FILENAME_PATTERN = re.compile(r"_(\d{8}_\d{6})_")
 
 
 def _parse_time_diff(time_diff: str) -> int:
     """'+1h30m' / '-2d' -> signed seconds."""
-    is_negative = time_diff.startswith("-")
-    clean = time_diff.lstrip("+-")
-    m = _RELATIVE_TIME_PATTERN.search(clean)
-    if not m:
-        raise UserInputError(f"Invalid TimeDiff: {time_diff}")
-    days, hours, minutes, seconds = (int(g) if g else 0 for g in m.groups())
+    m = _RELATIVE_TIME_PATTERN.fullmatch(time_diff)
+    if not m or not any(m.groups()[1:]):
+        raise UserInputError(
+            f"Invalid TimeDiff: {time_diff!r}; expected integer d/h/m/s components in order, "
+            "with at most one leading sign and no spaces (e.g. +1h30m or -2d)."
+        )
+    sign, *components = m.groups()
+    days, hours, minutes, seconds = (int(g) if g else 0 for g in components)
     total = days * 86400 + hours * 3600 + minutes * 60 + seconds
-    return -total if is_negative else total
+    return -total if sign == "-" else total
 
 
 def _parse_tz_offset(offset: str) -> int | None:
@@ -80,7 +82,7 @@ def _compute_time_shift(
     total_seconds_offset = 0
     tz_tags: dict[str, str] = {}
 
-    if time_diff.strip():
+    if time_diff:
         total_seconds_offset += _parse_time_diff(time_diff)
 
     if offset_time.strip():
@@ -162,6 +164,8 @@ def shift_exif_time(
     """Shift EXIF timestamps; OffsetTime only supported for SONY. Insta360 files renamed."""
     if not time_diff and not offset_time:
         raise UserInputError("At least one of time_diff or offset_time must be provided.")
+    if time_diff:
+        _parse_time_diff(time_diff)
 
     files = list_files(path)
 

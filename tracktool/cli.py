@@ -470,13 +470,15 @@ def exif_set_location(
 @exif_app.command("shift-time")
 def exif_shift_time(
     path: Annotated[Path, typer.Argument(help="File or directory")],
-    time_diff: Annotated[str | None, typer.Option("--by", help="Shift like +1h30m, -2d")] = None,
+    time_diff: Annotated[str | None, typer.Option("--by", help="Integer d/h/m/s in order, e.g. +1h30m, -2d")] = None,
     offset_time: Annotated[str | None, typer.Option("--offset-time", help="New timezone offset (SONY only)")] = None,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite originals")] = False,
     parallel: ParallelOpt = False,
 ) -> None:
     """Shift EXIF timestamps; Insta360 files are renamed too."""
     path = _resolve_path(path)
+    if time_diff == "":
+        raise UserInputError("--by must not be empty; use a shift such as +1h30m or -2d.")
     if not time_diff and not offset_time:
         log.error("At least one of --by or --offset-time must be provided")
         raise typer.Exit(code=EXIT_USER_ERROR)
