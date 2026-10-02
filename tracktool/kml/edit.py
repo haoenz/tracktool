@@ -347,9 +347,15 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False, mov
     if xmlutil.save(output_tree, output_path):
         log.info(f"Saved merged KML to: {display_path(output_path)}")
 
-    for path in dict.fromkeys(paths):
-        archive.push_compressed_kml(path, zip_file)
-        if move:
+    sources = list(dict.fromkeys(paths))
+    entries = []
+    for path in sources:
+        kind = kmlfile.get_kml_type(path)
+        entries.append((path, kind.value if kind else archive.UNCLASSIFIED))
+    # The safe ZIP append copies once per batch, never once per source.
+    archive.push_compressed_kmls(entries, zip_file)
+    if move:
+        for path in sources:
             move_to_folder(path, ctx.config.kml_backup_dir_name, archive_dir)
 
 

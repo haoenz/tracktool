@@ -134,7 +134,7 @@ def push_compressed_kml(kml_path: Path, zip_path: Path) -> None:
 
 
 def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) -> None:
-    """Add (path, kind) pairs to the ZIP, opening it once for the whole batch.
+    """Stage a whole batch beside the ZIP, then atomically publish it.
 
     The caller recognizes the tracks and hands in each kind, so nothing is
     parsed twice. Dedup is per entry path, not per file name: the same name
@@ -146,16 +146,46 @@ def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) ->
         for kml_path, _ in entries:
             log.info(f"Would add to ZIP: {kml_path.name}", target=str(zip_path))
         return
-    with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as zf:
-        names = {info.filename for info in zf.infolist()}
-        for kml_path, kind in entries:
-            entry = zip_entry_name(kml_path, kind)
-            if entry in names:
-                log.warning(f"Already exists in ZIP: {entry}", target=str(zip_path))
-                continue
-            zf.write(kml_path, entry)
-            names.add(entry)
-            log.info(f"Added to ZIP: {entry}", target=str(zip_path))
+    exists = zip_path.is_file()
+    names: set[str] = set()
+    if exists:
+        with zipfile.ZipFile(zip_path) as zf:
+            names = set(zf.namelist())
+    pending = []
+    for kml_path, kind in entries:
+        entry = zip_entry_name(kml_path, kind)
+        if entry in names:
+            log.warning(f"Already exists in ZIP: {entry}", target=str(zip_path))
+            continue
+        pending.append((kml_path, entry))
+        names.add(entry)
+    if not pending:
+        return
+
+    # Copy compressed bytes, preserving entry metadata without recompression.
+    # An abrupt process exit can leave this scratch file, but never alters the
+    # old ZIP. Each retry uses a fresh file rather than trusting unfinished work.
+    with tempfile.NamedTemporaryFile(
+        dir=zip_path.parent, prefix=f".{zip_path.name}.", suffix=".tmp", delete_on_close=False
+    ) as temporary:
+        if exists:
+            with zip_path.open("rb") as source:
+                shutil.copyfileobj(source, temporary)
+        with zipfile.ZipFile(temporary, "a", zipfile.ZIP_DEFLATED) as replacement:
+            for kml_path, entry in pending:
+                replacement.write(kml_path, entry)
+        temporary.flush()
+        with zipfile.ZipFile(temporary) as replacement:
+            bad_entry = replacement.testzip()
+            if bad_entry is not None:
+                raise zipfile.BadZipFile(f"Corrupt entry in replacement archive: {bad_entry}")
+        if exists:
+            shutil.copymode(zip_path, temporary.name)
+        os.fsync(temporary.fileno())
+        temporary.close()
+        os.replace(temporary.name, zip_path)
+    for _, entry in pending:
+        log.info(f"Added to ZIP: {entry}", target=str(zip_path))
 
 
 def archive_fingerprint(zip_file: Path) -> str:
