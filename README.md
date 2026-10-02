@@ -38,6 +38,46 @@ tracktool kml push "./tracks/2024-05-*.kml"
 tracktool kml push ./2024-05-03\ 徒步.kml --move
 ```
 
+## 视频拍摄时区
+
+`exif to-mp4` 和 `exif repair-vid` 使用同一套拍摄时区规则：
+
+| 情况 | 默认行为（`--timezone-policy auto`） |
+| --- | --- |
+| 有有效拍摄时间，但没有显式时区 | 保持年月日时分秒，补 `+08:00`，或 `--offset-time` 指定的时区 |
+| 已有显式时区，包括 `Z`、`+00:00`、`-00:00` | 保留文件不处理，提示用户选择 `keep` 或 `force`；退出码为 3 |
+| 没有有效拍摄时间，或多个拍摄时间相互矛盾 | 保留文件并报告原因；矛盾时可用 `--time-source TAG` 明确选择时间来源 |
+
+```bash
+# 没有显式时区时补 +08:00；已有时区则跳过并提醒
+tracktool exif to-mp4 ./videos
+
+# 没有显式时区时补 +09:00；此参数单独使用不会覆盖已有时区
+tracktool exif to-mp4 ./videos --offset-time +09:00
+
+# 沿用已存储的时区及其表达的绝对时刻；缺时区仍使用默认值
+tracktool exif to-mp4 ./videos --timezone-policy keep
+
+# 保持钟面时间，强制替换为默认的 +08:00
+tracktool exif to-mp4 ./videos --timezone-policy force
+
+# 保持钟面时间，强制替换为 +09:00
+tracktool exif to-mp4 ./videos --timezone-policy force --offset-time +09:00
+
+# 时间字段相互矛盾时，明确采用其中一个
+tracktool exif to-mp4 ./video.mp4 --timezone-policy keep --time-source XMP-exif:DateTimeOriginal
+```
+
+`force` 用来纠正误标：`12:00+00:00` 强制设为 `+08:00` 后是 `12:00+08:00`，不是保持同一时刻的 `20:00+08:00`。`keep` 信任已存储的偏移，即使它是零；不要仅凭偏移为零就判断它是误标。
+
+转换读取 XMP、Keys、UserData、EXIF、H264 拍摄时间和 QuickTime 创建时间，保留时区是否显式记录的信息。QuickTime 整数时间本身不存独立的时区偏移；尽管规范按 UTC 解释，本工具在**没有显式时区可用时**按指定的拍摄时区解释它的钟面值。这是处理约定，不能自动判断相机原本是否正确使用了 UTC；若确定文件中的值是真正的 UTC，请用 `--offset-time +00:00`。
+
+写入时，XMP/Keys 拍摄时间包含时区，QuickTime 创建时间及轨道/媒体创建时间规范化为 UTC，表达同一个时刻。明确的字符串拍摄时间优先；QuickTime 整数时间与它的 UTC 值或当地钟面值一致时可兼容读取，否则要求选择来源。`--time-source` 支持 `XMP-exif:DateTimeOriginal`、`Keys:CreationDate`、`UserData:DateTimeOriginal`、`ExifIFD:DateTimeOriginal`、`H264:DateTimeOriginal`、`XMP-xmp:CreateDate`、`QuickTime:CreateDate`、`Track1:TrackCreateDate`；它不会替代已有时区所需的 `keep`/`force` 选择。
+
+`to-mp4` 逐文件处理，待选择策略的文件不移动、不创建备份，其余文件继续。`repair-vid` 涉及整个 `VID` 目录改名，因此先检查目录内所有文件；只要有文件尚不能处理，本次目录编排就以 3 退出，目录保持原状。补齐策略后可重新运行。
+
+重复运行时，`auto` 会跳过已补好时区的文件，`keep` 保持原时刻，`force` 使用同一目标时区也不会累积偏移。转换保留首次创建的 `_original` 备份；已有备份不会被重复运行覆盖。
+
 ## 预演
 
 `--dry-run` 是整次运行的模式，写在子命令**之前**，所有会改文件的命令都自动生效：

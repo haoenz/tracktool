@@ -42,6 +42,8 @@ XMP_CAPTURE_TIME = "XMP-exif:DateTimeOriginal"
 XMP_CREATE_DATE = "XMP-xmp:CreateDate"
 XMP_MODIFY_DATE = "XMP-xmp:ModifyDate"
 QUICKTIME_CREATE_DATE = "QuickTime:CreateDate"
+USERDATA_CAPTURE_TIME = "UserData:DateTimeOriginal"
+KEYS_CAPTURE_TIME = "Keys:CreationDate"
 QUICKTIME_MODIFY_DATE = "QuickTime:ModifyDate"
 TRACK_CREATE_DATE = "Track1:TrackCreateDate"
 TRACK_MODIFY_DATE = "Track1:TrackModifyDate"
@@ -74,6 +76,14 @@ TIME_TAGS: tuple[str, ...] = (
     OFFSET_TIME_ORIGINAL,
     OFFSET_TIME,
     OFFSET_TIME_DIGITIZED,
+)
+
+# Video conversion also recognizes explicit capture timestamps in MP4 string tags.
+VIDEO_TIME_TAGS: tuple[str, ...] = (*TIME_TAGS, KEYS_CAPTURE_TIME, USERDATA_CAPTURE_TIME, XMP_CREATE_DATE)
+VIDEO_UTC_CREATE_TAGS: tuple[str, ...] = (
+    QUICKTIME_CREATE_DATE,
+    "QuickTime:TrackCreateDate",
+    "QuickTime:MediaCreateDate",
 )
 
 # 判断「这个文件何时、在哪儿拍的」所需的全部

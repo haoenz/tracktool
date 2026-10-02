@@ -18,6 +18,7 @@ forget, and the forgetting is silent — the run simply happens.
 
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
@@ -59,9 +60,9 @@ class Rename:
 class RemuxVideo:
     """Rewrap a video into MP4 through ffmpeg, at the given creation time.
 
-    An MP4 source is first preserved next to itself as `<name>_original`, then
-    either rewrapped or copied depending on whether it already carries
-    QuickTime:CreateDate; a non-MP4 source is rewrapped straight to the output.
+    Output is prepared in a temporary file. MP4 sources retain their first
+    `<name>_original` backup before replacement; an existing QuickTime:CreateDate
+    permits copying instead of rewrapping. Subsequent WriteTags normalizes dates.
     """
 
     file: Path
@@ -188,31 +189,48 @@ def apply(action: Action) -> None:
 def _remux(action: RemuxVideo) -> None:
     """The ffmpeg branch of RemuxVideo, including the original-file shuffle."""
     file, output = action.file, action.output
-    if not action.source_is_mp4:
-        _ffmpeg(
-            ["-i", str(file), "-c", "copy", "-metadata", f"creation_time={action.create_time_utc}", str(output)], file
-        )
-        return
-
-    original = file.with_name(file.name + "_original")
-    shutil.move(str(file), str(original))
-    if action.has_quicktime_create_date:
-        shutil.copy2(original, output)
-        return
-    _ffmpeg(
-        [
-            "-i",
-            str(original),
-            "-metadata",
-            f"creation_time={action.create_time_utc}",
-            "-c",
-            "copy",
-            "-map",
-            "0",
-            str(output),
-        ],
-        file,
-    )
+    if output != file and output.exists():
+        raise FileFailure(f"Output already exists: {output}", quarantine=False)
+    # Prepare output before touching the source. Reruns preserve the first
+    # backup rather than replacing it with an already corrected version.
+    with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".mp4", delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        if action.source_is_mp4 and action.has_quicktime_create_date:
+            shutil.copy2(file, temporary)
+        else:
+            _ffmpeg(
+                [
+                    "-i",
+                    str(file),
+                    "-c",
+                    "copy",
+                    *(["-map", "0"] if action.source_is_mp4 else []),
+                    "-metadata",
+                    f"creation_time={action.create_time_utc}",
+                    str(temporary),
+                ],
+                file,
+            )
+        if action.source_is_mp4:
+            original = file.with_name(file.name + "_original")
+            try:
+                backup = original.open("xb")
+            except FileExistsError:
+                log.verbose("Keeping the existing original backup", target=str(original))
+            else:
+                try:
+                    with backup as dst, file.open("rb") as src:
+                        shutil.copyfileobj(src, dst)
+                    shutil.copystat(file, original)
+                except BaseException:
+                    original.unlink(missing_ok=True)
+                    raise
+        temporary.replace(output)
+        if action.source_is_mp4 and file != output:
+            file.unlink()
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _ffmpeg(args: list[str], source: Path) -> None:

@@ -22,6 +22,8 @@ from ..fileutil import BatchResult, move_to_folder, run_per_file
 from ..metadata import MediaMetadata
 from ..tags import (
     ALTITUDE,
+    CAPTURE_TIME,
+    KEYS_CAPTURE_TIME,
     MAKE,
     MAKE_INSTA360,
     MAKE_SONY,
@@ -31,9 +33,12 @@ from ..tags import (
     OFFSET_TIME_ORIGINAL,
     QUICKTIME_CREATE_DATE,
     SHIFT_TAGS,
-    TIME_TAGS,
     TIMESTAMP_TAG_SETS,
+    USERDATA_CAPTURE_TIME,
+    VIDEO_TIME_TAGS,
+    VIDEO_UTC_CREATE_TAGS,
     XMP_CAPTURE_TIME,
+    XMP_CREATE_DATE,
 )
 from .write import SetExifOptions, build_tags
 
@@ -192,20 +197,47 @@ def shift_altitude(
 
 
 def decide_convert(
-    meta: MediaMetadata, output_dir: Path, offset_time: str, make: str | None, model: str | None
+    meta: MediaMetadata,
+    output_dir: Path,
+    offset_time: str,
+    make: str | None,
+    model: str | None,
+    timezone_policy: mediatime.TimezonePolicy = mediatime.TimezonePolicy.AUTO,
+    time_source: str | None = None,
 ) -> list[Action]:
     """Rewrap one video into MP4 at its own creation time, then tag the result."""
-    media_time = mediatime.parse_media_time(meta.tags, offset_time, target=str(meta.path))
-    if media_time is None:
-        return [Failed(meta.path, "no valid timestamp")]
+    try:
+        resolved = mediatime.resolve_video_time(meta.tags, offset_time, timezone_policy, time_source)
+    except UserInputError as exc:
+        return [Failed(meta.path, str(exc), quarantine=False)]
+    media_time = resolved.value
+    log.verbose(
+        f"Using {resolved.source.tag}={resolved.source.raw}; resolved capture time: {media_time.isoformat()}",
+        target=str(meta.path),
+    )
 
     create_time_utc = media_time.astimezone(UTC)
     output = output_dir / f"{meta.path.stem}.mp4"
     source_is_mp4 = meta.path.suffix.lower() == ".mp4"
-    if not source_is_mp4 and output.exists():
+    if output != meta.path and output.exists():
         return [Skip(meta.path, f"output already exists: {output.name}")]
 
-    tags = {XMP_CAPTURE_TIME: create_time_utc.strftime("%Y:%m:%d %H:%M:%S") + offset_time}
+    clock = media_time.strftime("%Y:%m:%d %H:%M:%S")
+    if media_time.microsecond:
+        clock += f".{media_time.microsecond:06d}"
+    zone = media_time.strftime("%z")
+    zone = f"{zone[:3]}:{zone[3:]}"
+    # String capture tags retain the selected wall clock and zone. Header
+    # integers are UTC, even when the original camera used local time there.
+    tags = {XMP_CAPTURE_TIME: clock + zone, KEYS_CAPTURE_TIME: clock + zone}
+    tags.update({tag: create_time_utc.strftime("%Y:%m:%d %H:%M:%S") for tag in VIDEO_UTC_CREATE_TAGS})
+    if meta.get(USERDATA_CAPTURE_TIME):
+        tags[USERDATA_CAPTURE_TIME] = clock + zone
+    if meta.get(XMP_CREATE_DATE):
+        tags[XMP_CREATE_DATE] = clock + zone
+    if meta.get(CAPTURE_TIME):
+        tags[CAPTURE_TIME] = clock
+        tags.update({tag: zone for tag in (OFFSET_TIME_ORIGINAL, OFFSET_TIME, OFFSET_TIME_DIGITIZED)})
     if make:
         tags[MAKE] = make
     if model:
@@ -214,7 +246,7 @@ def decide_convert(
         RemuxVideo(
             meta.path,
             output,
-            create_time_utc.strftime("%Y-%m-%dT%H:%M:%S"),
+            create_time_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
             source_is_mp4=source_is_mp4,
             has_quicktime_create_date=bool(meta.get(QUICKTIME_CREATE_DATE)),
         ),
@@ -229,19 +261,39 @@ def convert_to_mp4(
     output_directory: Path | None = None,
     offset_time: str = mediatime.DEFAULT_TZ_OFFSET,
     parallel: bool = False,
+    timezone_policy: mediatime.TimezonePolicy = mediatime.TimezonePolicy.AUTO,
+    time_source: str | None = None,
+    *,
+    check_only: bool = False,
 ) -> BatchResult[list[Action]]:
-    """Remux videos to MP4 with creation_time metadata + XMP tags (ffmpeg)."""
+    """Remux videos, or preflight a directory workflow without performing writes."""
     # 入口处一次性校验 offset_time 格式，坏参数直接报错，而不是逐文件失败
-    mediatime.parse_offset(offset_time)
+    validate_conversion_options(offset_time, timezone_policy, time_source)
     files = list_files(path)
     output_dir = output_directory if output_directory is not None else (files[0].parent if files else Path())
 
     def process(file: Path) -> list[Action]:
-        # 时间标签一次读齐；QuickTime:CreateDate 已在 TIME_TAGS 内，MP4 分支直接取用
-        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, TIME_TAGS))
-        return run(decide_convert(meta, output_dir, offset_time, make, model))
+        meta = MediaMetadata.of(file, ctx.backend.read_tags(file, VIDEO_TIME_TAGS))
+        plan = decide_convert(meta, output_dir, offset_time, make, model, timezone_policy, time_source)
+        if check_only:
+            run([action for action in plan if isinstance(action, Failed)])
+            return plan
+        return run(plan)
 
     return run_per_file(files, process, activity="Converting to MP4", parallel=parallel)
+
+
+def validate_conversion_options(
+    offset_time: str, timezone_policy: mediatime.TimezonePolicy, time_source: str | None
+) -> None:
+    """Reject invalid batch options before any file or directory is changed."""
+    mediatime.parse_offset(offset_time)
+    if timezone_policy not in mediatime.TimezonePolicy:
+        raise UserInputError(f"Unknown timezone policy: {timezone_policy}")
+    if time_source is not None and time_source not in mediatime.VIDEO_TIME_SOURCES:
+        raise UserInputError(
+            f"Unknown time source: {time_source}. Choose from {', '.join(mediatime.VIDEO_TIME_SOURCES)}"
+        )
 
 
 def group_media_files(path: Path) -> None:

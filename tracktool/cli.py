@@ -53,7 +53,19 @@ app.add_typer(config_app, name="config")
 
 ParallelOpt = Annotated[bool, typer.Option("--parallel", help=f"Process in parallel ({DEFAULT_WORKERS} threads)")]
 QuietOpt = Annotated[bool, typer.Option("--quiet", "-q", help="Only warnings and errors")]
-OffsetTimeOpt = Annotated[str, typer.Option("--offset-time", help="Default timezone offset")]
+OffsetTimeOpt = Annotated[
+    str, typer.Option("--offset-time", help="Fallback/forced capture timezone; preserves the wall clock")
+]
+TimezonePolicyOpt = Annotated[
+    mediatime.TimezonePolicy,
+    typer.Option("--timezone-policy", help="Existing timezone: auto skips, keep preserves, force replaces the zone"),
+]
+TimeSourceOpt = Annotated[
+    str | None,
+    typer.Option(
+        "--time-source", help="Capture timestamp tag to use when values conflict (e.g. XMP-exif:DateTimeOriginal)"
+    ),
+]
 
 
 def _version_callback(value: bool) -> None:
@@ -493,11 +505,15 @@ def exif_to_mp4(
     model: Annotated[str | None, typer.Option("--model", help="Camera model to write")] = None,
     offset_time: OffsetTimeOpt = mediatime.DEFAULT_TZ_OFFSET,
     parallel: ParallelOpt = False,
+    timezone_policy: TimezonePolicyOpt = mediatime.TimezonePolicy.AUTO,
+    time_source: TimeSourceOpt = None,
 ) -> None:
     """Remux videos to MP4 with creation_time + XMP tags (ffmpeg)."""
     path = _resolve_path(path)
     output_dir = _resolve_path(output_directory) if output_directory else None
-    result = exif_media.convert_to_mp4(path, make, model, output_dir, offset_time, parallel)
+    result = exif_media.convert_to_mp4(
+        path, make, model, output_dir, offset_time, parallel, timezone_policy, time_source
+    )
     _finish(result)
 
 
@@ -530,10 +546,14 @@ def exif_repair_vid(
     offset_time: OffsetTimeOpt = mediatime.DEFAULT_TZ_OFFSET,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     parallel: ParallelOpt = False,
+    timezone_policy: TimezonePolicyOpt = mediatime.TimezonePolicy.AUTO,
+    time_source: TimeSourceOpt = None,
 ) -> None:
     """Video pipeline: VID -> VID_original, convert to MP4, then repair GPS."""
     path = _resolve_path(path)
-    result = workflows.resolve_vid_exif(path, make, model, offset_time, parallel, zip_path)
+    result = workflows.resolve_vid_exif(
+        path, make, model, offset_time, parallel, zip_path, timezone_policy, time_source
+    )
     _finish(result)
 
 

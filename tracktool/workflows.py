@@ -41,7 +41,7 @@ from .actions import Action, Step, run
 from .context import ctx
 from .errors import UserInputError
 from .exif.google import fill_altitude_from_google
-from .exif.media import convert_to_mp4
+from .exif.media import convert_to_mp4, validate_conversion_options
 from .exif.position import GeotagOptions, geotag_from_kml
 from .exif.write import find_missing_tag
 from .fileutil import BatchResult, move_to_folder
@@ -260,6 +260,8 @@ def resolve_vid_exif(
     offset_time: str = mediatime.DEFAULT_TZ_OFFSET,
     parallel: bool = False,
     kml_zip_path: str | None = None,
+    timezone_policy: mediatime.TimezonePolicy = mediatime.TimezonePolicy.AUTO,
+    time_source: str | None = None,
 ) -> BatchResult[list[Action]]:
     """VID → VID_original，转换 MP4 到新 VID，再补全 GPS；重跑从断点继续。
 
@@ -268,6 +270,7 @@ def resolve_vid_exif(
     Ctrl-C）之后重跑会接着做完，而不是被「VID_original 已存在」挡住、让用户手工
     收拾半个目录。
     """
+    validate_conversion_options(offset_time, timezone_policy, time_source)
     path = path.resolve()
     vid_path = path / "VID"
     vid_original_path = path / "VID_original"
@@ -275,6 +278,23 @@ def resolve_vid_exif(
 
     if vid_original_path.exists() and not vid_original_path.is_dir():
         raise UserInputError(f"{display_path(vid_original_path)} is in the way; move it aside before re-running")
+
+    # Moving VID relocates every file, so obtain all timezone decisions before
+    # that directory-wide operation. Pending files must remain at their paths.
+    source = vid_original_path if vid_original_path.is_dir() else vid_path
+    if source.is_dir():
+        checked = convert_to_mp4(
+            source,
+            output_directory=vid_path,
+            offset_time=offset_time,
+            timezone_policy=timezone_policy,
+            time_source=time_source,
+            parallel=parallel,
+            check_only=True,
+        )
+        if not checked.ok:
+            log.warning("Video repair paused before directory changes; resolve the timestamp decisions and retry")
+            return BatchResult(failed=checked.failed)
 
     # 第一步：VID → VID_original。已经改过名（包括上次中断留下的一半）就跳过
     if vid_original_path.is_dir():
@@ -303,7 +323,14 @@ def resolve_vid_exif(
     log.info(f"Processing media files from {display_path(source)}")
     result.merge(
         convert_to_mp4(
-            source, make=make, model=model, output_directory=vid_path, offset_time=offset_time, parallel=parallel
+            source,
+            make=make,
+            model=model,
+            output_directory=vid_path,
+            offset_time=offset_time,
+            parallel=parallel,
+            timezone_policy=timezone_policy,
+            time_source=time_source,
         )
     )
 
