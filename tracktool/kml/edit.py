@@ -6,7 +6,9 @@ after the edit); merging fills altitude through Google and can file the
 sources into the archive afterwards.
 """
 
+import os
 import re
+import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -17,9 +19,9 @@ from ..errors import UserInputError
 from ..fileutil import move_to_folder
 from ..metadata import is_missing_altitude
 from ..paths import display_path
-from ..workspace import resolve_archive
+from ..workspace import manifest_path, resolve_archive
 from . import archive, kmlfile, xmlutil
-from .collections import new_empty_kml
+from .collections import collection_paths, new_empty_kml
 
 _TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _COORDINATE_PATTERN = re.compile(r"-?\d{1,3}(\.\d+)?\s-?\d{1,2}(\.\d+)?\s\d+(\.\d+)?")
@@ -301,6 +303,40 @@ def prune_points(path: Path, bad_points: list[str]) -> None:
     _save_fixed(tree, path)
 
 
+def _merge_output_path(output_path: Path, archive_dir: Path, zip_file: Path) -> Path:
+    """Refuse occupied outputs before reading or modifying any source/archive."""
+    output_path = output_path.expanduser().absolute()
+    if output_path.exists() or output_path.is_symlink():
+        raise UserInputError(f"Output already exists: {display_path(output_path)}")
+    output_path = output_path.resolve()
+    reserved = {zip_file.resolve(), manifest_path(archive_dir).resolve()}
+    for kind in kmlfile.TrackKind:
+        reserved.update(path.resolve() for path in collection_paths(kind, archive_dir))
+    if output_path in reserved:
+        raise UserInputError(f"Output is an archive storage path: {display_path(output_path)}")
+    if not output_path.parent.is_dir():
+        raise UserInputError(f"Output directory does not exist: {display_path(output_path.parent)}")
+    return output_path
+
+
+def _save_merge_output(tree: xmlutil.etree._ElementTree, output_path: Path) -> None:
+    """Publish a complete merge without replacing a destination appearing later."""
+    if ctx.is_plan:
+        log.info(f"Would write {display_path(output_path)}")
+        return
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=output_path.parent, prefix=f".{output_path.name}.", suffix=".tmp", delete_on_close=False
+        ) as temporary:
+            xmlutil.save(tree, Path(temporary.name))
+            os.fsync(temporary.fileno())
+            temporary.close()
+            os.link(temporary.name, output_path)
+    except OSError as exc:
+        raise UserInputError(f"Cannot publish output without overwriting {display_path(output_path)}: {exc}") from exc
+    log.info(f"Saved merged KML to: {display_path(output_path)}")
+
+
 def merge_kml(paths: list[Path], output_path: Path, connected: bool = False, move: bool = False) -> None:
     """Merge multiple KMLs into one LineString (-Connected) or MultiGeometry.
 
@@ -310,6 +346,8 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False, mov
     once and moved once: the ZIP skips the duplicate by entry path, and the
     dedup below keeps the move from chasing a file already carried away.
     """
+    archive_dir, zip_file = resolve_archive(None)
+    output_path = _merge_output_path(output_path, archive_dir, zip_file)
     all_line_strings: list[str] = []
     first_description = ""
     for i, path in enumerate(paths):
@@ -340,12 +378,9 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False, mov
         log.info(f"Merged {len(all_line_strings)} track(s) into MultiGeometry")
 
     # 归档位置与压缩包先备好，再写合并结果：归档这一步失败不该留下一个半成品
-    archive_dir, zip_file = resolve_archive(None)
     archive.ensure_zip_file(zip_file)
 
-    output_path = output_path.resolve()
-    if xmlutil.save(output_tree, output_path):
-        log.info(f"Saved merged KML to: {display_path(output_path)}")
+    _save_merge_output(output_tree, output_path)
 
     sources = list(dict.fromkeys(paths))
     entries = []

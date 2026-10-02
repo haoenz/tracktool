@@ -317,13 +317,13 @@ def kml_prune(
 @kml_app.command("merge")
 def kml_merge(
     paths: Annotated[list[Path], typer.Argument(help="KML files to merge, wildcards allowed")],
-    output_path: Annotated[Path, typer.Option("--output", "-o", help="Output KML path")],
+    output_path: Annotated[Path, typer.Option("--output", "-o", help="New output KML path (must not exist)")],
     connected: Annotated[bool, typer.Option("--connected", help="Concatenate into one LineString")] = False,
     move: Annotated[bool, typer.Option("--move", help="Also move the source files into the backup folder")] = False,
 ) -> None:
     """Merge multiple KMLs into one file."""
     paths = _expand_paths(paths)
-    kml_edit.merge_kml(paths, output_path.expanduser().resolve(), connected, move)
+    kml_edit.merge_kml(paths, output_path.expanduser().absolute(), connected, move)
 
 
 @kml_app.command("to-multigeom")

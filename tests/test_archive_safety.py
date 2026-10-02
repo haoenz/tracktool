@@ -12,6 +12,7 @@ from conftest import TRACK_KML, make_archive
 from tracktool import workflows
 from tracktool.config import Config
 from tracktool.context import ctx
+from tracktool.errors import UserInputError
 from tracktool.kml import archive, edit
 from tracktool.kml.kmlfile import TrackKind
 
@@ -64,6 +65,20 @@ with patch.object(zipfile.ZipFile, "write", interrupt):
     with zipfile.ZipFile(zip_path) as zf:
         assert len(zf.namelist()) == 2
         assert zf.testzip() is None
+
+
+def test_merge_refuses_to_overwrite_source(tmp_path, monkeypatch):
+    zip_path = make_archive(tmp_path / "archive")
+    config = Config(tmp_path / "config.json")
+    config["archive_path"] = str(zip_path.parent)
+    monkeypatch.setattr(ctx, "config", config)
+    source = track(tmp_path / "sources")
+    before, zip_before = source.read_bytes(), zip_path.read_bytes()
+    with pytest.raises(UserInputError, match="Output"):
+        edit.merge_kml([source], source, move=True)
+    assert source.read_bytes() == before
+    assert zip_path.read_bytes() == zip_before
+    assert not (zip_path.parent / "Backup").exists()
 
 
 @pytest.mark.parametrize("failure", ["copy", "write", "validate", "sync", "replace", "interrupt"])
@@ -183,6 +198,81 @@ def merge_inputs(tmp_path, monkeypatch):
     return source, zip_path
 
 
+@pytest.mark.parametrize("preview", [False, True])
+@pytest.mark.parametrize(
+    "occupied",
+    [
+        "source",
+        "file",
+        "directory",
+        "symlink",
+        "dangling",
+        "hardlink",
+        "zip",
+        "manifest",
+        "missing_zip",
+        "missing_view",
+        "parent_alias",
+    ],
+)
+def test_merge_preflight_rejects_occupied_and_reserved_outputs(merge_inputs, tmp_path, monkeypatch, preview, occupied):
+    from tracktool.context import RunMode
+
+    source, zip_path = merge_inputs
+    output = tmp_path / "output.kml"
+    if occupied == "source":
+        output = source
+    elif occupied == "file":
+        output.write_bytes(b"another track")
+    elif occupied == "directory":
+        output.mkdir()
+    elif occupied == "symlink":
+        output.symlink_to(source)
+    elif occupied == "dangling":
+        output.symlink_to(tmp_path / "absent.kml")
+    elif occupied == "hardlink":
+        os.link(source, output)
+    elif occupied in ("zip", "missing_zip"):
+        output = zip_path
+        if occupied == "missing_zip":
+            zip_path.unlink()
+    elif occupied == "manifest":
+        output = zip_path.parent / "archive.json"
+    elif occupied == "missing_view":
+        output = zip_path.parent / "Default.kml"
+    else:
+        alias = tmp_path / "alias"
+        alias.symlink_to(source.parent, target_is_directory=True)
+        output = alias / source.name
+    files = [p for p in tmp_path.rglob("*") if p.is_file() and not p.is_symlink()]
+    before = {p: p.read_bytes() for p in files}
+    all_paths = set(tmp_path.rglob("*"))
+    monkeypatch.setattr(ctx, "mode", RunMode.PLAN if preview else RunMode.APPLY)
+    with pytest.raises(UserInputError, match="Output"):
+        edit.merge_kml([source], output, move=True)
+    assert {p: p.read_bytes() for p in files} == before
+    assert set(tmp_path.rglob("*")) == all_paths
+
+
+def test_merge_does_not_overwrite_target_appearing_after_preflight(merge_inputs, tmp_path, monkeypatch):
+    source, zip_path = merge_inputs
+    before, zip_before = source.read_bytes(), zip_path.read_bytes()
+    output = tmp_path / "merged.kml"
+    link = os.link
+
+    def race(src, dst):
+        Path(dst).write_bytes(b"arrived during merge")
+        link(src, dst)
+
+    monkeypatch.setattr(edit.os, "link", race)
+    with pytest.raises(UserInputError, match="without overwriting"):
+        edit.merge_kml([source], output, move=True)
+    assert output.read_bytes() == b"arrived during merge"
+    assert source.read_bytes() == before
+    assert zip_path.read_bytes() == zip_before
+    assert not list(tmp_path.glob(".merged.kml.*.tmp"))
+
+
 def test_merge_batches_archive_publication_and_preserves_original_points(merge_inputs, tmp_path, monkeypatch):
     source, zip_path = merge_inputs
     second = track(source.parent, "2024-05-02 next.kml")
@@ -205,3 +295,20 @@ def test_merge_batches_archive_publication_and_preserves_original_points(merge_i
             assert (zip_path.parent / "Backup" / p.name).read_bytes() == data
             assert not p.exists()
     assert output.is_file()
+
+
+def test_merge_cli_preserves_a_dangling_output_symlink(merge_inputs, tmp_path):
+    from typer.testing import CliRunner
+
+    from tracktool.cli import app
+
+    source, zip_path = merge_inputs
+    output = tmp_path / "linked.kml"
+    absent = tmp_path / "absent.kml"
+    output.symlink_to(absent)
+    before = zip_path.read_bytes()
+    result = CliRunner().invoke(app, ["--dry-run", "kml", "merge", str(source), "-o", str(output)])
+    assert isinstance(result.exception, UserInputError)
+    assert "Output already exists" in str(result.exception)
+    assert output.is_symlink() and not absent.exists()
+    assert zip_path.read_bytes() == before
