@@ -57,7 +57,8 @@ class Config:
         self.path = path
         self._data: dict[str, Any] = dict(DEFAULTS)
 
-    def load(self) -> Config:
+    def load(self, *, persist_migration: bool = True) -> Config:
+        """Load and migrate in memory; callers can disable migration writes for previews."""
         if self.path.is_file():
             try:
                 loaded = json.loads(self.path.read_text(encoding="utf-8"))
@@ -67,7 +68,7 @@ class Config:
                 raise ConfigError(f"Config {display_path(self.path)} is not a JSON object")
             migrated = self._migrate_legacy_keys(loaded)
             self._data.update(loaded)
-            if migrated:
+            if migrated and persist_migration:
                 # config 在层序最底、够不着 log，所以平移不发声；效果用 config show 看
                 self.save()
         return self

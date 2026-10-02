@@ -117,7 +117,7 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 
 ## 配置
 
-配置文件是项目根目录的 `config.json`，字段：`log_level`、`archive_path`、`kml_backup_dir_name`、`output_filters`、`google_api_key`。`archive_path` 指向**归档目录**；归档是声明出来的——目录里要有 `archive.json` 身份文件，只有 `tracktool archive init` 能创建它（对已有归档文件的目录补办身份即可收编），其余命令碰到没有身份文件的目录一律报错，路径打错不会静默多出第二份归档。配置里读到旧键 `kml_zip_path` 时会在加载时自动平移为所在目录的 `archive_path` 并回写。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
+配置文件是项目根目录的 `config.json`，字段：`log_level`、`archive_path`、`kml_backup_dir_name`、`output_filters`、`google_api_key`。`archive_path` 指向**归档目录**；归档是声明出来的——目录里要有 `archive.json` 身份文件，只有 `tracktool archive init` 能创建它（对已有归档文件的目录补办身份即可收编），其余命令碰到没有身份文件的目录一律报错，路径打错不会静默多出第二份归档。配置里读到旧键 `kml_zip_path` 时会在加载时自动平移为所在目录的 `archive_path`；正常运行会回写，`--dry-run` 只在内存中转换，保留配置文件原样。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
 
 ## 归档：真值与视图
 

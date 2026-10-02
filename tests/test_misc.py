@@ -172,6 +172,67 @@ class TestLegacyKeyMigration:
         assert cfg["archive_path"] == ""
         assert cfg["log_level"] == "DEBUG"
 
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            ({"kml_zip_path": "/tracks/Archive.zip"}, "/tracks"),
+            ({"kml_zip_path": ""}, ""),
+            ({"kml_zip_path": "/old/Archive.zip", "archive_path": "/new"}, "/new"),
+        ],
+    )
+    def test_migration_can_stay_in_memory(self, tmp_path, monkeypatch, content, expected):
+        path = tmp_path / "config.json"
+        original = json.dumps(content).encode()
+        path.write_bytes(original)
+        cfg = Config(path=path)
+
+        def unexpected_save():
+            pytest.fail("In-memory migration tried to save the config")
+
+        monkeypatch.setattr(cfg, "save", unexpected_save)
+        cfg.load(persist_migration=False)
+
+        assert cfg["archive_path"] == expected
+        assert "kml_zip_path" not in cfg.as_dict()
+        assert path.read_bytes() == original
+
+    @pytest.mark.parametrize("command", [["show"], ["set", "log_level", "DEBUG"]])
+    def test_cli_dry_run_does_not_save_legacy_config(self, tmp_path, monkeypatch, command):
+        path = tmp_path / "config.json"
+        original = b'{"kml_zip_path": "/tracks/Archive.zip", "log_level": "INFO"}'
+        path.write_bytes(original)
+        before = path.stat().st_mtime_ns
+        cfg = Config(path=path)
+        monkeypatch.setattr(ctx, "config", cfg)
+
+        def read_only():
+            raise PermissionError("Config is read-only")
+
+        monkeypatch.setattr(cfg, "save", read_only)
+        result = runner.invoke(app, ["--dry-run", "config", *command])
+
+        assert result.exit_code == 0, result.output
+        assert cfg["archive_path"] == "/tracks"
+        assert "kml_zip_path" not in cfg.as_dict()
+        assert path.read_bytes() == original
+        assert path.stat().st_mtime_ns == before
+
+    def test_normal_run_after_preview_still_saves_migration(self, tmp_path, monkeypatch):
+        path = tmp_path / "config.json"
+        original = b'{"kml_zip_path": "/tracks/Archive.zip"}'
+        path.write_bytes(original)
+        monkeypatch.setattr(ctx, "config", Config(path=path))
+
+        preview = runner.invoke(app, ["--dry-run", "config", "show"])
+        assert preview.exit_code == 0, preview.output
+        assert path.read_bytes() == original
+
+        applied = runner.invoke(app, ["config", "show"])
+        assert applied.exit_code == 0, applied.output
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        assert stored["archive_path"] == "/tracks"
+        assert "kml_zip_path" not in stored
+
 
 class TestNormalize:
     def test_log_level_is_uppercased_and_validated(self):

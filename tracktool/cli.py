@@ -89,7 +89,7 @@ def main(
     # 生效（写入集中在少数几个原语上，见 context.RunMode）。代价是它必须写在
     # 子命令之前——`tracktool --dry-run kml push a.kml`。
     ctx.mode = RunMode.PLAN if dry_run else RunMode.APPLY
-    ctx.config.load()
+    ctx.config.load(persist_migration=not ctx.is_plan)
     if verbose == 1:
         log.set_level("VERBOSE")
     elif verbose >= 2:
