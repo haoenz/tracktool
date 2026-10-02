@@ -163,8 +163,11 @@ class DesktopCollection(TrackCollection):
 
 
 def _find_desktop_placemark(tree: xmlutil.etree._ElementTree, track_name: str) -> xmlutil.etree._Element | None:
-    """The first desktop Placemark whose name contains the track name."""
-    return xmlutil.find(tree, f"//kml:Placemark[kml:name[contains(., '{track_name}')]]")
+    """The unique desktop Placemark with this exact name."""
+    nodes = tree.xpath("//kml:Placemark[kml:name=$name]", namespaces=xmlutil.nsmap_for(tree), name=track_name)
+    if len(nodes) > 1:
+        raise UserInputError(f"Ambiguous track in desktop collection: {track_name}")
+    return nodes[0] if nodes else None
 
 
 def has_desktop_track(track_name: str, collection_path: Path) -> bool:
@@ -173,7 +176,7 @@ def has_desktop_track(track_name: str, collection_path: Path) -> bool:
 
 
 def remove_track_from_desktop_collection(track_name: str, collection_path: Path) -> None:
-    """Drop every desktop Placemark whose name contains the track name."""
+    """Drop the unique desktop Placemark whose name equals the track name."""
     tree = xmlutil.parse_file(collection_path)
     track = _find_desktop_placemark(tree, track_name)
     if track is None:
@@ -216,7 +219,10 @@ class MobileCollection(TrackCollection):
 
 def _find_mobile_linestring(tree: xmlutil.etree._ElementTree, track_name: str) -> xmlutil.etree._Element | None:
     """The mobile LineString whose id is the track name."""
-    return xmlutil.find(tree, f"//kml:LineString[@id='{track_name}']")
+    nodes = tree.xpath("//kml:LineString[@id=$name]", namespaces=xmlutil.nsmap_for(tree), name=track_name)
+    if len(nodes) > 1:
+        raise UserInputError(f"Ambiguous track in mobile collection: {track_name}")
+    return nodes[0] if nodes else None
 
 
 def has_mobile_track(track_name: str, collection_path: Path) -> bool:

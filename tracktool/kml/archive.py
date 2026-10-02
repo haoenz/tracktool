@@ -103,10 +103,32 @@ def ensure_zip_file(zip_file: Path) -> None:
     log.info("Created new ZIP archive", target=str(zip_file))
 
 
-def find_zip_entry(kml_name: str, zip_path: Path) -> str | None:
-    """The entry whose file name contains kml_name, None when there is none."""
+def find_zip_entry(kml_name: str, zip_path: Path, type_: TrackKind | None = None) -> str | None:
+    """Resolve a full filename or stem, refusing ambiguous archive identities.
+
+    Layered entries take their type from the folder, just as rebuild does.
+    Legacy flat entries must carry recognizable TrackTags for a typed lookup.
+    """
+    if not kml_name or "/" in kml_name or "\\" in kml_name:
+        raise UserInputError("Use a complete track filename or stem, without directories")
+    matches = []
     with zipfile.ZipFile(zip_path) as zf:
-        return next((info.filename for info in zf.infolist() if kml_name in Path(info.filename).name), None)
+        for info in zf.infolist():
+            path = Path(info.filename)
+            if info.is_dir() or kml_name not in (path.name, path.stem):
+                continue
+            if type_ is not None:
+                if "/" in info.filename:
+                    if info.filename.split("/", 1)[0] != type_.value:
+                        continue
+                else:
+                    tree = xmlutil.parse_string(zf.read(info).decode("utf-8"))
+                    if kmlfile.kind_from_tree(tree) != type_:
+                        continue
+            matches.append(info.filename)
+    if len(matches) > 1:
+        raise UserInputError(f"Ambiguous track {kml_name!r}: {', '.join(sorted(matches))}")
+    return matches[0] if matches else None
 
 
 def zip_entry_name(kml_path: Path, kind: str) -> str:
@@ -383,12 +405,15 @@ class _ArchiveState:
     """What the archive holds for one track, plus every disagreement found."""
 
     zip_entry: str | None
+    track_name: str
     in_desktop: bool
     in_mobile: bool
     problems: list[str]
 
 
-def _inspect_archive(kml_name: str, zip_file: Path, desktop_collection: Path, mobile_collection: Path) -> _ArchiveState:
+def _inspect_archive(
+    kml_name: str, zip_file: Path, desktop_collection: Path, mobile_collection: Path, type_: TrackKind
+) -> _ArchiveState:
     """Look the track up in the archive's three records, collecting disagreements.
 
     Listed as a restore consumes them: the ZIP, then the desktop collection
@@ -396,11 +421,14 @@ def _inspect_archive(kml_name: str, zip_file: Path, desktop_collection: Path, mo
     optional as a file but must hold the track once it exists.
     """
     zip_exists = zip_file.is_file()
-    zip_entry = find_zip_entry(kml_name, zip_file) if zip_exists else None
+    zip_entry = find_zip_entry(kml_name, zip_file, type_) if zip_exists else None
+    track_name = Path(zip_entry).stem if zip_entry else kml_name
+    if zip_entry is None and track_name.lower().endswith(".kml"):
+        track_name = track_name[:-4]
     desktop_exists = desktop_collection.is_file()
-    in_desktop = desktop_exists and collections.has_desktop_track(kml_name, desktop_collection)
+    in_desktop = desktop_exists and collections.has_desktop_track(track_name, desktop_collection)
     mobile_exists = mobile_collection.is_file()
-    in_mobile = mobile_exists and collections.has_mobile_track(kml_name, mobile_collection)
+    in_mobile = mobile_exists and collections.has_mobile_track(track_name, mobile_collection)
 
     problems: list[str] = []
     if not zip_exists:
@@ -413,7 +441,7 @@ def _inspect_archive(kml_name: str, zip_file: Path, desktop_collection: Path, mo
         problems.append(f"Track not found in collection: {kml_name}")
     if mobile_exists and not in_mobile:
         problems.append(f"Track not found in mobile collection: {kml_name}")
-    return _ArchiveState(zip_entry, in_desktop, in_mobile, problems)
+    return _ArchiveState(zip_entry, track_name, in_desktop, in_mobile, problems)
 
 
 def pop_kml_archive(
@@ -430,7 +458,7 @@ def pop_kml_archive(
     archive_dir = zip_file.parent
     desktop_collection, mobile_collection = collections.collection_paths(type_, archive_dir)
 
-    state = _inspect_archive(kml_name, zip_file, desktop_collection, mobile_collection)
+    state = _inspect_archive(kml_name, zip_file, desktop_collection, mobile_collection, type_)
     if state.problems:
         if not force:
             raise UserInputError(f"Cannot restore {kml_name}: " + "; ".join(state.problems))
@@ -440,6 +468,6 @@ def pop_kml_archive(
     if state.zip_entry is not None:
         pop_zip_entry(state.zip_entry, zip_file)
     if state.in_desktop:
-        collections.remove_track_from_desktop_collection(kml_name, desktop_collection)
+        collections.remove_track_from_desktop_collection(state.track_name, desktop_collection)
     if state.in_mobile:
-        collections.remove_track_from_mobile_collection(kml_name, mobile_collection)
+        collections.remove_track_from_mobile_collection(state.track_name, mobile_collection)
