@@ -9,7 +9,9 @@ Quarantining covers the whole per-file operation, not only the EXIF write —
 failures also arise from tag reads, media-time parsing, API calls and renames.
 """
 
+import os
 import shutil
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,33 +64,78 @@ class BatchResult[R]:
         self.failed += other.failed
 
 
-def move_to_folder(path: Path, folder_name: str, parent_directory: Path | None = None) -> None:
+def move_to_folder(path: Path, folder_name: str, parent_directory: Path | None = None) -> bool:
     """Move file into folder_name, creating it if needed.
 
     Under PLAN mode the move is reported rather than made: a preview must not
     rearrange the directory it is previewing, and this is the one place every
-    move of a file goes through.
+    move of a file goes through. Returns True only when the file was moved.
     """
     target_parent = parent_directory if parent_directory is not None else path.parent
     target_dir = target_parent / folder_name
     target_path = target_dir / path.name
+    if target_path.exists() or target_path.is_symlink():
+        log.warning(f"File already exists in {folder_name} folder; not moved", target=str(target_path))
+        return False
     if ctx.is_plan:
         log.info(f"Would move into {folder_name}", target=str(target_path))
-        return
+        return False
     if not target_dir.is_dir():
-        target_dir.mkdir()
+        target_dir.mkdir(exist_ok=True)
         log.info(f"Created folder: {folder_name}", target=str(target_dir))
-    if target_path.exists():
-        log.warning(f"File already exists in {folder_name} folder", target=str(target_path))
-        return
     shutil.move(str(path), str(target_path))
     log.verbose(f"Moved to {folder_name} folder", target=str(target_path))
+    return True
 
 
 def quarantine(path: Path, folder_name: str | None) -> None:
     """Move a failed file into the failure folder; no-op without one."""
-    if folder_name:
-        move_to_folder(path, folder_name)
+    if folder_name and move_to_folder(path, folder_name):
+        log.info(f"Failed file moved to {path.parent / folder_name / path.name}", target=str(path))
+
+
+def _preflight_quarantine(files: list[Path], folder_name: str | None) -> set[Path]:
+    """Return files eligible for automatic failure moves, before processing starts.
+
+    An unusable directory disables automatic moves for this batch. Individual
+    name conflicts only disable the affected moves. PLAN never creates a
+    directory or write probe; APPLY prepares each directory once before workers.
+    """
+    if not folder_name or not files:
+        return set()
+    directories = list(dict.fromkeys(file.parent / folder_name for file in files))
+    eligible = set(files)
+    try:
+        for directory in directories:
+            ancestor = directory
+            while not (ancestor.exists() or ancestor.is_symlink()):
+                ancestor = ancestor.parent
+            if not ancestor.is_dir():
+                raise NotADirectoryError(f"Not a directory: {ancestor}")
+            if not os.access(ancestor, os.W_OK | os.X_OK):
+                raise PermissionError(f"Directory is not writable/searchable: {ancestor}")
+        if not ctx.is_plan:
+            for directory in directories:
+                directory.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(dir=directory, prefix=".tracktool-write-check-"):
+                    pass
+
+        owners: dict[str, list[Path]] = {}
+        for file in files:
+            target = file.parent / folder_name / file.name
+            key = os.path.normcase(str(target.parent.resolve() / target.name))
+            owners.setdefault(key, []).append(file)
+            if target.exists() or target.is_symlink():
+                eligible.discard(file)
+                log.warning(f"Failure destination already exists; file will not be moved: {target}", target=str(file))
+        for target_name, sources in owners.items():
+            if len(sources) > 1:
+                eligible.difference_update(sources)
+                log.warning(f"Multiple inputs share failure destination; these files will not be moved: {target_name}")
+    except (OSError, ValueError) as exc:
+        log.warning(f"Automatic failure-file moves disabled for this batch: {exc}; processing will continue")
+        return set()
+    return eligible
 
 
 def run_per_file[T, R](
@@ -105,7 +152,8 @@ def run_per_file[T, R](
     processed, its reason is already logged at the raising site, and only the
     counting happens here. Any other exception is unexpected and gets one
     entry of its own in the log. Both kinds end up in BatchResult.failed (in
-    input order) and, unless there is no failed folder, are quarantined.
+    input order). Automatic moves are preflighted and best-effort: a directory
+    or move failure must never interrupt processing of other files.
 
     Catching broadly is the point: a systemic failure (missing exiftool, bad
     API key) repeats the error per file instead of silently dropping the rest
@@ -116,17 +164,30 @@ def run_per_file[T, R](
     previews; it only stops the quarantine move, which move_to_folder does.
     """
 
+    eligible = _preflight_quarantine(files, failed_folder_name)
+
+    def organize_failure(file: Path, reason: Exception) -> None:
+        if file not in eligible:
+            return
+        try:
+            quarantine(file, failed_folder_name)
+        except Exception as exc:
+            log.error(
+                f"Processing failed: {reason}; could not move failed file: {exc}. Continuing the batch",
+                target=str(file),
+            )
+
     def guarded(file: Path) -> R:
         try:
             return process(file)
         except FileFailure as exc:
             log.debug(f"{activity} failed: {exc}", target=str(file))
             if exc.quarantine:
-                quarantine(file, failed_folder_name)
+                organize_failure(file, exc)
             return _FAILED
         except Exception as exc:  # per-file isolation is the whole contract
             log.error(f"{activity} failed: {exc}", target=str(file))
-            quarantine(file, failed_folder_name)
+            organize_failure(file, exc)
             return _FAILED
 
     raw = run_parallel(files, guarded, parallel=parallel, on_progress=ctx.reporter(activity))
@@ -140,8 +201,5 @@ def run_per_file[T, R](
             result.succeeded.append(outcome)
 
     if result.failed:
-        message = f"{activity}: {len(result.failed)} file(s) failed"
-        if failed_folder_name:
-            message += f", moved to {failed_folder_name}"
-        log.warning(message)
+        log.warning(f"{activity}: {len(result.failed)} file(s) failed")
     return result

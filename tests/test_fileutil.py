@@ -168,7 +168,8 @@ class TestFileFailure:
 
         assert result.failed == [file]
         assert file.exists()
-        assert not (tmp_path / "Failed").exists()
+        # APPLY preflights the directory before it knows which failures opt out.
+        assert list((tmp_path / "Failed").iterdir()) == []
 
     def test_unexpected_errors_are_still_logged_as_errors(self, tmp_path: Path, caplog):
         file = tmp_path / "a.txt"

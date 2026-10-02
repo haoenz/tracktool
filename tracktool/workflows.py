@@ -232,11 +232,15 @@ def resolve_missing_gps(
     if missing_alt_only:
         log.info(f"Processing {len(missing_alt_only)} files missing only GPSAltitude")
         files = [r.file for r in missing_alt_only]
-        result.merge(
-            fill_altitude_from_google(files, overwrite=True, failed_folder_name="GoogleAltFailed", parallel=parallel)
+        repaired = fill_altitude_from_google(
+            files, overwrite=True, failed_folder_name="GoogleAltFailed", parallel=parallel
         )
+        result.merge(repaired)
         # 预演时这步由 move_to_folder 自己拒绝执行并说明
-        _organize_repaired(files)
+        # A failed file can remain in place when automatic failure moves are
+        # unavailable; its presence must not be mistaken for a repair success.
+        failed = set(repaired.failed)
+        _organize_repaired([file for file in files if file not in failed])
 
     # 缺失位置的文件
     missing_pos = [r for r in missing.succeeded if POSITION in r.missing_tags]
