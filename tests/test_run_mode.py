@@ -69,12 +69,28 @@ class TestKmlWritesAreReported:
             encoding="utf-8",
         )
 
-        runner.invoke(app, ["--dry-run", "kml", "set-type", str(source), "Flight"])
+        runner.invoke(app, ["--dry-run", "kml", "set-type", str(source), "--type", "Flight"])
 
         node = xmlutil.find(
             xmlutil.parse_file(source), "/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='TrackTags']/kml:value"
         )
         assert (node.text or "") == "火车"
+
+    def test_setting_the_type_on_a_wildcard_leaves_every_file_alone(self, tmp_path: Path, plan_mode):
+        before = TRACK_KML.replace(
+            "<Document>",
+            "<Document><ExtendedData><Data name='TrackTags'><value>火车</value></Data></ExtendedData>",
+        )
+        first = tmp_path / "2024-05-01 first.kml"
+        second = tmp_path / "2024-05-02 second.kml"
+        first.write_text(before, encoding="utf-8")
+        second.write_text(before, encoding="utf-8")
+
+        result = runner.invoke(app, ["--dry-run", "kml", "set-type", str(tmp_path / "*.kml"), "--type", "Flight"])
+
+        assert result.exit_code == 0, result.output
+        assert first.read_text(encoding="utf-8") == before
+        assert second.read_text(encoding="utf-8") == before
 
 
 class TestArchiveWritesAreReported:

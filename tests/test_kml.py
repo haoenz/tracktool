@@ -684,7 +684,7 @@ class TestTrackKind:
     def test_cli_set_then_get(self, tmp_path: Path):
         kml = self._kml_with_track_tags(tmp_path, "火车")
 
-        result = runner.invoke(app, ["kml", "set-type", str(kml), "Train"])
+        result = runner.invoke(app, ["kml", "set-type", str(kml), "--type", "Train"])
         assert result.exit_code == 0
         result = runner.invoke(app, ["kml", "type", str(kml)])
         assert result.exit_code == 0
@@ -694,7 +694,7 @@ class TestTrackKind:
         # 非法类型值在 CLI 入口被 typer 拒绝，不再流向下游
         kml = tmp_path / "2024-05-01 test.kml"
         kml.write_text(TRACK_KML, encoding="utf-8")
-        result = runner.invoke(app, ["kml", "set-type", str(kml), "Bogus"])
+        result = runner.invoke(app, ["kml", "set-type", str(kml), "--type", "Bogus"])
         assert result.exit_code != 0
 
     def test_cli_invalid_case_rejected(self, tmp_path: Path):
@@ -899,3 +899,82 @@ class TestGlobExpansion:
         assert result.exit_code == 0
         assert output.is_file()
         assert len(zipfile.ZipFile(zip_path).namelist()) == 2  # merge 也归档输入
+
+
+class TestSetTypeBatch:
+    """kml set-type 的通配符批量：整表交给批量入口，一个文件失败不吞整批。"""
+
+    @staticmethod
+    def _taggable(tmp_path: Path, name: str, tag: str = "火车") -> Path:
+        """2bulu 导出的轨迹带 TrackTags 节点；没有它 set-type 无处可写。"""
+        kml = tmp_path / name
+        kml.write_text(
+            TRACK_KML.replace(
+                "<Document>",
+                f"<Document><ExtendedData><Data name='TrackTags'><value>{tag}</value></Data></ExtendedData>",
+            ),
+            encoding="utf-8",
+        )
+        return kml
+
+    @staticmethod
+    def _tag_of(path: Path) -> str:
+        """读回的就是写入路径那条 XPath 指向的节点。"""
+        node = xmlutil.find(xmlutil.parse_file(path), kmlfile.TRACK_TAGS_NODE)
+        return "" if node is None else (node.text or "")
+
+    def test_wildcard_retypes_every_match_and_nothing_else(self, tmp_path: Path):
+        first = self._taggable(tmp_path, "2024-05-01 first.kml")
+        second = self._taggable(tmp_path, "2024-05-02 second.kml")
+        outside = self._taggable(tmp_path, "2023-04-01 outside.kml")
+
+        result = runner.invoke(app, ["kml", "set-type", str(tmp_path / "2024-05-*.kml"), "--type", "Train"])
+
+        assert result.exit_code == 0, result.output
+        assert self._tag_of(first) == "Train"
+        assert self._tag_of(second) == "Train"
+        assert self._tag_of(outside) == "火车"
+        # 写进去的是英文名，get 必须能读回（set→get 往返）
+        assert kmlfile.get_kml_type(first) is TrackKind.TRAIN
+
+    def test_wildcard_without_matches_is_a_user_error(self, tmp_path: Path):
+        kml = self._taggable(tmp_path, "2024-05-01 first.kml")
+
+        result = runner.invoke(app, ["kml", "set-type", str(tmp_path / "2019-*.kml"), "--type", "Train"])
+
+        assert result.exit_code == 1
+        assert self._tag_of(kml) == "火车"
+
+    def test_an_unreadable_file_is_counted_and_the_batch_goes_on(self, tmp_path: Path):
+        good = self._taggable(tmp_path, "2024-05-01 good.kml")
+        bad = tmp_path / "2024-05-02 bad.kml"
+        bad.write_text("<kml><oops>", encoding="utf-8")
+
+        result = runner.invoke(app, ["kml", "set-type", str(good), str(bad), "--type", "Flight"])
+
+        assert result.exit_code == 3
+        assert self._tag_of(good) == "Flight"
+        assert bad.read_bytes() == b"<kml><oops>"  # 坏文件保持原样
+
+    def test_a_file_without_track_tags_fails_instead_of_pretending(self, tmp_path: Path, caplog):
+        # 派生文件（split、手绘）没有 TrackTags 节点，重写等于什么都没改：
+        # 报成功会让批量的计数说谎（沙盒里就有 23 条这样的轨迹）
+        plain = tmp_path / "2024-05-01 plain.kml"
+        plain.write_text(TRACK_KML, encoding="utf-8")
+        before = plain.read_bytes()  # Windows 写盘是 CRLF，比字节才算"一个字节都没动"
+
+        result = runner.invoke(app, ["kml", "set-type", str(plain), "--type", "Train"])
+
+        assert result.exit_code == 3
+        assert plain.read_bytes() == before
+        assert "No TrackTags node" in caplog.text
+
+    def test_the_type_must_be_an_option_and_nothing_is_written_without_it(self, tmp_path: Path):
+        kml = self._taggable(tmp_path, "2024-05-01 first.kml")
+
+        # 缺 --type
+        assert runner.invoke(app, ["kml", "set-type", str(kml)]).exit_code != 0
+        # 旧的位置写法（类型跟在文件后）现在必须报错，而不是被当成第二个路径
+        assert runner.invoke(app, ["kml", "set-type", str(kml), "Train"]).exit_code != 0
+
+        assert self._tag_of(kml) == "火车"

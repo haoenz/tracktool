@@ -10,8 +10,13 @@ from enum import StrEnum
 from pathlib import Path
 
 from .. import log
+from ..errors import UserInputError
+from ..fileutil import BatchResult, FileFailure, run_per_file
 from ..tags import POS_END_NAME, POS_START_NAME, TRACK_TAGS
 from . import xmlutil
+
+# 写入与读取共用的一条 XPath：TrackTags 的 value 节点住在哪儿，读写就得一致
+TRACK_TAGS_NODE = f"/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='{TRACK_TAGS}']/kml:value"
 
 
 class TrackKind(StrEnum):
@@ -65,14 +70,51 @@ def kind_from_tree(tree: xmlutil.etree._ElementTree, target: str = "") -> TrackK
     return kind
 
 
-def set_kml_type(path: Path, kind: TrackKind) -> None:
-    """Overwrite the TrackTags ExtendedData value in place."""
+def set_kml_type(path: Path, kind: TrackKind) -> bool:
+    """Overwrite the TrackTags ExtendedData value in place.
+
+    False means the document holds no TrackTags value to overwrite — a derived
+    file (split, merge, hand-drawn) rather than one 2bulu exported. Saying so
+    keeps a batch's success count honest: rewriting such a file changes nothing,
+    so claiming "updated" would be a lie with a log line to back it up.
+    """
     tree = xmlutil.parse_file(path)
-    nodes = xmlutil.findall(tree, f"/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='{TRACK_TAGS}']/kml:value")
+    nodes = xmlutil.findall(tree, TRACK_TAGS_NODE)
+    if not nodes:
+        return False
     for node in nodes:
         node.text = kind.value
     if xmlutil.save(tree, path):
         log.info(f"Updated track tags to: {kind.value}", target=str(path))
+    else:
+        # save 只在 PLAN 下返回 False：预演要说出这一批会改成什么，而不只是"会写"
+        log.info(f"Would set track tags to: {kind.value}", target=str(path))
+    return True
+
+
+def set_kml_types(paths: list[Path], kind: TrackKind) -> BatchResult[None]:
+    """Set the track type on every KML of a batch.
+
+    The CLI expands the wildcards and hands the list over as one table, so each
+    file is an entry of the same batch: a file that cannot be read and a file
+    that carries no TrackTags value are logged and counted rather than aborting
+    the rest. Files the user named are processed whatever they are — pointing
+    at one is the stronger statement than an extension, and a non-KML fails at
+    the parse, per file, with its own reason.
+    """
+
+    def process(path: Path) -> None:
+        try:
+            updated = set_kml_type(path, kind)
+        except UserInputError as exc:
+            log.error(str(exc), target=str(path))
+            raise FileFailure(str(exc), quarantine=False) from exc
+        if not updated:
+            reason = "No TrackTags node to overwrite; the type is unchanged"
+            log.error(reason, target=str(path))
+            raise FileFailure(reason, quarantine=False)
+
+    return run_per_file(paths, process, activity="Setting track type")
 
 
 @dataclass

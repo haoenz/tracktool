@@ -221,12 +221,11 @@ def kml_type(
 
 @kml_app.command("set-type")
 def kml_set_type(
-    path: Annotated[Path, typer.Argument(help="KML file")],
-    track_type: Annotated[TrackKind, typer.Argument(help="Track type (Default/Train/Flight)")],
+    paths: Annotated[list[Path], typer.Argument(help="KML file(s) to retype, wildcards allowed")],
+    track_type: Annotated[TrackKind, typer.Option("--type", help="Track type (Default/Train/Flight)")],
 ) -> None:
-    """Set the track type (TrackTags) of a KML."""
-    path = _resolve_path(path)
-    kmlfile.set_kml_type(path, track_type)
+    """Set the track type (TrackTags) of one or more KMLs."""
+    _finish(kmlfile.set_kml_types(_expand_paths(paths), track_type))
 
 
 @kml_app.command("push")
