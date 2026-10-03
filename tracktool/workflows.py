@@ -32,6 +32,7 @@ step's inputs only exist once an earlier step has written.
 """
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -63,7 +64,7 @@ class _Track:
     content: KmlContent
 
 
-def _read_track(path: Path, type_: TrackKind | None) -> _Track | None:
+def _read_track(path: Path, type_: TrackKind | None, tag_map: Mapping[str, str] | None = None) -> _Track | None:
     """Read what the archive needs from a track; None — logged — when it cannot be filed.
 
     Reading happens while the plan is built, so a track that cannot be filed
@@ -71,7 +72,7 @@ def _read_track(path: Path, type_: TrackKind | None) -> _Track | None:
     the steps instead of being read again per collection.
     """
     try:
-        kind = type_ if type_ is not None else kmlfile.get_kml_type(path)
+        kind = type_ if type_ is not None else kmlfile.get_kml_type(path, tag_map=tag_map)
         collections.desktop_date(path)  # 桌面聚合按文件名里的日期归档
         content = kmlfile.get_kml_content(path)
     except UserInputError as exc:
@@ -125,7 +126,12 @@ def _move_to_backup(tracks: list[_Track], archive_dir: Path) -> None:
 
 
 def push_tracks(
-    paths: list[Path], zip_path: str | None = None, type_: TrackKind | None = None, move: bool = False
+    paths: list[Path],
+    zip_path: str | None = None,
+    type_: TrackKind | None = None,
+    move: bool = False,
+    *,
+    tag_map: Mapping[str, str] | None = None,
 ) -> BatchResult[list[Action]]:
     """File tracks into the archive: both collections, then the ZIP.
 
@@ -145,7 +151,7 @@ def push_tracks(
 
     pending: list[_Track] = []
     for path in paths:
-        track = _read_track(path, type_)
+        track = _read_track(path, type_, tag_map)
         if track is None:
             result.failed.append(path)
         else:

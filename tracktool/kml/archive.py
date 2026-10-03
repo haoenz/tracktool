@@ -25,7 +25,7 @@ import os
 import shutil
 import tempfile
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -103,7 +103,9 @@ def ensure_zip_file(zip_file: Path) -> None:
     log.info("Created new ZIP archive", target=str(zip_file))
 
 
-def find_zip_entry(kml_name: str, zip_path: Path, type_: TrackKind | None = None) -> str | None:
+def find_zip_entry(
+    kml_name: str, zip_path: Path, type_: TrackKind | None = None, *, tag_map: Mapping[str, str] | None = None
+) -> str | None:
     """Resolve a full filename or stem, refusing ambiguous archive identities.
 
     Layered entries take their type from the folder, just as rebuild does.
@@ -123,7 +125,7 @@ def find_zip_entry(kml_name: str, zip_path: Path, type_: TrackKind | None = None
                         continue
                 else:
                     tree = xmlutil.parse_string(zf.read(info).decode("utf-8"))
-                    if kmlfile.kind_from_tree(tree) != type_:
+                    if kmlfile.kind_from_tree(tree, tag_map=tag_map) != type_:
                         continue
             matches.append(info.filename)
     if len(matches) > 1:
@@ -145,13 +147,13 @@ def zip_entry_name(kml_path: Path, kind: str) -> str:
     return f"{kind}/{yyyymm[:4]}-{yyyymm[4:]}/{kml_path.name}"
 
 
-def push_compressed_kml(kml_path: Path, zip_path: Path) -> None:
+def push_compressed_kml(kml_path: Path, zip_path: Path, *, tag_map: Mapping[str, str] | None = None) -> None:
     """Add a KML to the ZIP archive if not already present.
 
     Single-file callers have not recognized the track; its kind comes from the
     file's own TrackTags, defaulting to _unclassified rather than guessed.
     """
-    kind = kmlfile.get_kml_type(kml_path)
+    kind = kmlfile.get_kml_type(kml_path, tag_map=tag_map)
     push_compressed_kmls([(kml_path, kind.value if kind else UNCLASSIFIED)], zip_path)
 
 
@@ -303,7 +305,7 @@ def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path
     log.debug(f"Removed from ZIP: {entry_name}", target=str(zip_path))
 
 
-def status(zip_path: str | None) -> None:
+def status(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -> None:
     """Report whether the desktop and mobile views match the ZIP, the truth.
 
     One comparison answers it: the manifest records the ZIP's fingerprint as of
@@ -343,7 +345,7 @@ def status(zip_path: str | None) -> None:
         log.warning("Views are out of date with the ZIP (run `tracktool archive rebuild`)", target=str(archive_dir))
 
 
-def rebuild(zip_path: str | None) -> None:
+def rebuild(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -> None:
     """Regenerate the desktop and mobile collections from the ZIP, the truth.
 
     Every view is built the way a push builds it — an empty collection plus the
@@ -362,7 +364,7 @@ def rebuild(zip_path: str | None) -> None:
     with zipfile.ZipFile(zip_file) as zf:
         for info in sorted(zf.infolist(), key=lambda i: i.filename):
             tree = xmlutil.parse_string(zf.read(info.filename).decode("utf-8"))
-            kind = _entry_kind(info.filename, tree)
+            kind = _entry_kind(info.filename, tree, tag_map=tag_map)
             if kind is None:
                 skipped += 1
                 continue
@@ -386,7 +388,9 @@ def rebuild(zip_path: str | None) -> None:
     log.info("Views are in sync with the ZIP", target=str(archive_dir))
 
 
-def _entry_kind(entry_name: str, tree: xmlutil.etree._ElementTree) -> TrackKind | None:
+def _entry_kind(
+    entry_name: str, tree: xmlutil.etree._ElementTree, *, tag_map: Mapping[str, str] | None = None
+) -> TrackKind | None:
     """The kind an entry belongs to: its folder when layered, its TrackTags when flat.
 
     None — never guessed — for _unclassified entries and for anything a legacy
@@ -397,7 +401,7 @@ def _entry_kind(entry_name: str, tree: xmlutil.etree._ElementTree) -> TrackKind 
             return TrackKind(entry_name.split("/", 1)[0])
         except ValueError:
             return None
-    return kmlfile.kind_from_tree(tree)
+    return kmlfile.kind_from_tree(tree, tag_map=tag_map)
 
 
 @dataclass(frozen=True)
@@ -412,7 +416,12 @@ class _ArchiveState:
 
 
 def _inspect_archive(
-    kml_name: str, zip_file: Path, desktop_collection: Path, mobile_collection: Path, type_: TrackKind
+    kml_name: str,
+    zip_file: Path,
+    desktop_collection: Path,
+    mobile_collection: Path,
+    type_: TrackKind,
+    tag_map: Mapping[str, str] | None = None,
 ) -> _ArchiveState:
     """Look the track up in the archive's three records, collecting disagreements.
 
@@ -421,7 +430,7 @@ def _inspect_archive(
     optional as a file but must hold the track once it exists.
     """
     zip_exists = zip_file.is_file()
-    zip_entry = find_zip_entry(kml_name, zip_file, type_) if zip_exists else None
+    zip_entry = find_zip_entry(kml_name, zip_file, type_, tag_map=tag_map) if zip_exists else None
     track_name = Path(zip_entry).stem if zip_entry else kml_name
     if zip_entry is None and track_name.lower().endswith(".kml"):
         track_name = track_name[:-4]
@@ -445,7 +454,12 @@ def _inspect_archive(
 
 
 def pop_kml_archive(
-    kml_name: str, type_: TrackKind = TrackKind.DEFAULT, zip_path: str | None = None, force: bool = False
+    kml_name: str,
+    type_: TrackKind = TrackKind.DEFAULT,
+    zip_path: str | None = None,
+    force: bool = False,
+    *,
+    tag_map: Mapping[str, str] | None = None,
 ) -> None:
     """Restore a KML track: extract from ZIP and remove from both collections.
 
@@ -458,7 +472,7 @@ def pop_kml_archive(
     archive_dir = zip_file.parent
     desktop_collection, mobile_collection = collections.collection_paths(type_, archive_dir)
 
-    state = _inspect_archive(kml_name, zip_file, desktop_collection, mobile_collection, type_)
+    state = _inspect_archive(kml_name, zip_file, desktop_collection, mobile_collection, type_, tag_map)
     if state.problems:
         if not force:
             raise UserInputError(f"Cannot restore {kml_name}: " + "; ".join(state.problems))

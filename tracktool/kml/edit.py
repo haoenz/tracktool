@@ -9,6 +9,7 @@ sources into the archive afterwards.
 import os
 import re
 import tempfile
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -337,7 +338,14 @@ def _save_merge_output(tree: xmlutil.etree._ElementTree, output_path: Path) -> N
     log.info(f"Saved merged KML to: {display_path(output_path)}")
 
 
-def merge_kml(paths: list[Path], output_path: Path, connected: bool = False, move: bool = False) -> None:
+def merge_kml(
+    paths: list[Path],
+    output_path: Path,
+    connected: bool = False,
+    move: bool = False,
+    *,
+    tag_map: Mapping[str, str] | None = None,
+) -> None:
     """Merge multiple KMLs into one LineString (-Connected) or MultiGeometry.
 
     The merged output stays where --output puts it; the source files are
@@ -385,7 +393,7 @@ def merge_kml(paths: list[Path], output_path: Path, connected: bool = False, mov
     sources = list(dict.fromkeys(paths))
     entries = []
     for path in sources:
-        kind = kmlfile.get_kml_type(path)
+        kind = kmlfile.get_kml_type(path, tag_map=tag_map)
         entries.append((path, kind.value if kind else archive.UNCLASSIFIED))
     # The safe ZIP append copies once per batch, never once per source.
     archive.push_compressed_kmls(entries, zip_file)

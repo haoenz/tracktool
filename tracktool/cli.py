@@ -198,7 +198,7 @@ def archive_status(
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
 ) -> None:
     """Report whether the collections match the ZIP (the archive's truth)."""
-    kml_archive.status(zip_path)
+    kml_archive.status(zip_path, tag_map=ctx.config.track_tag_map)
 
 
 @archive_app.command("rebuild")
@@ -206,7 +206,7 @@ def archive_rebuild(
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
 ) -> None:
     """Regenerate the desktop and mobile collections from the ZIP."""
-    kml_archive.rebuild(zip_path)
+    kml_archive.rebuild(zip_path, tag_map=ctx.config.track_tag_map)
 
 
 @kml_app.command("type")
@@ -215,7 +215,7 @@ def kml_type(
 ) -> None:
     """Print the track type (TrackTags)."""
     path = _resolve_path(path)
-    kind = kmlfile.get_kml_type(path)
+    kind = kmlfile.get_kml_type(path, tag_map=ctx.config.track_tag_map)
     print(kind if kind is not None else "Unknown")
 
 
@@ -240,7 +240,7 @@ def kml_push(
 ) -> None:
     """Archive KMLs: add to both collections, compress into ZIP; sources stay put unless --move."""
     files = _expand_paths(paths)
-    _finish(workflows.push_tracks(files, zip_path, track_type, move))
+    _finish(workflows.push_tracks(files, zip_path, track_type, move, tag_map=ctx.config.track_tag_map))
 
 
 @kml_app.command("pop")
@@ -251,7 +251,7 @@ def kml_pop(
     force: Annotated[bool, typer.Option("--force", help="Warn instead of stopping when the archive disagrees")] = False,
 ) -> None:
     """Restore a KML from the archive: extract into the current directory, remove from collections."""
-    kml_archive.pop_kml_archive(kml_name, track_type, zip_path, force)
+    kml_archive.pop_kml_archive(kml_name, track_type, zip_path, force, tag_map=ctx.config.track_tag_map)
 
 
 @kml_app.command("split")
@@ -325,7 +325,7 @@ def kml_merge(
 ) -> None:
     """Merge multiple KMLs into one file."""
     paths = _expand_paths(paths)
-    kml_edit.merge_kml(paths, output_path.expanduser().absolute(), connected, move)
+    kml_edit.merge_kml(paths, output_path.expanduser().absolute(), connected, move, tag_map=ctx.config.track_tag_map)
 
 
 @kml_app.command("to-multigeom")

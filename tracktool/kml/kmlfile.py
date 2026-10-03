@@ -3,13 +3,21 @@
 A KML's type comes from its TrackTags ExtendedData value (a 2bulu export
 records the activity in Chinese); its content is the LineString coordinates —
 gx:Track coords converted to LineString tuples — plus a stitched description.
+
+Which activity belongs to which category is the user's table, so it lives in
+the config (`track_tag.*`) and reaches this module as a `tag_map` argument. A
+caller that has no Config — a test, a library user — falls back to the built-in
+table, which is the same data `config.DEFAULTS` holds, read the other way
+round.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 from .. import log
+from ..config import DEFAULTS, TRACK_TAG_PREFIX
 from ..errors import UserInputError
 from ..fileutil import BatchResult, FileFailure, run_per_file
 from ..tags import POS_END_NAME, POS_START_NAME, TRACK_TAGS
@@ -32,40 +40,40 @@ class TrackKind(StrEnum):
     FLIGHT = "Flight"
 
 
-# 2bulu TrackTags (Chinese activity names) -> category
-TAG_TO_KIND = {
-    "默认": TrackKind.DEFAULT,
-    "徒步": TrackKind.DEFAULT,
-    "爬山": TrackKind.DEFAULT,
-    "骑行": TrackKind.DEFAULT,
-    "驾车": TrackKind.DEFAULT,
-    "摩托": TrackKind.DEFAULT,
-    "轮船": TrackKind.DEFAULT,
-    "散步": TrackKind.DEFAULT,
-    "飞机": TrackKind.FLIGHT,
-    "滑翔": TrackKind.FLIGHT,
-    "轨交": TrackKind.TRAIN,
-    "缆车": TrackKind.TRAIN,
-    "地铁": TrackKind.TRAIN,
-    "火车": TrackKind.TRAIN,
+# 活动名 -> 类别，从 config 的 `track_tag.*` 默认值反转而来。生产路径走
+# `Config.track_tag_map`（用户可能增补过活动名），这一份服务没有 Config 的调用者：
+# 两边是同一张表的两个方向，不是两张表。
+DEFAULT_TAG_MAP: dict[str, str] = {
+    activity: key[len(TRACK_TAG_PREFIX) :]
+    for key, activities in DEFAULTS.items()
+    if key.startswith(TRACK_TAG_PREFIX)
+    for activity in activities
 }
 
+# 类别名 -> 成员。查表而不是构造 TrackKind：一张手填的表里若出现不存在的类别名，
+# 那条轨迹只是认不出来，不该让整次运行崩在 ValueError 上。
+_KIND_BY_NAME = {kind.value: kind for kind in TrackKind}
 
-def get_kml_type(path: Path) -> TrackKind | None:
+
+def tag_map_for(tag_map: Mapping[str, str] | None) -> Mapping[str, str]:
+    """The caller's table, or the built-in one when nobody handed one over."""
+    return DEFAULT_TAG_MAP if tag_map is None else tag_map
+
+
+def get_kml_type(path: Path, *, tag_map: Mapping[str, str] | None = None) -> TrackKind | None:
     """Map the TrackTags ExtendedData value to a TrackKind; None when unrecognized."""
-    return kind_from_tree(xmlutil.parse_file(path), str(path))
+    return kind_from_tree(xmlutil.parse_file(path), str(path), tag_map=tag_map)
 
 
-def kind_from_tree(tree: xmlutil.etree._ElementTree, target: str = "") -> TrackKind | None:
+def kind_from_tree(
+    tree: xmlutil.etree._ElementTree, target: str = "", *, tag_map: Mapping[str, str] | None = None
+) -> TrackKind | None:
     """The same mapping for an already-parsed document — what rebuild reads from the ZIP."""
     track_tags = xmlutil.extended_data_value(tree, TRACK_TAGS)
-    kind = TAG_TO_KIND.get(track_tags)
+    kind = _KIND_BY_NAME.get(tag_map_for(tag_map).get(track_tags, ""))
     if kind is None:
         # set_kml_type 写入的是英文名（如 "Train"），接受它使 set→get 往返成立
-        try:
-            kind = TrackKind(track_tags)
-        except ValueError:
-            kind = None
+        kind = _KIND_BY_NAME.get(track_tags)
     log.debug(f"Detected track type: {kind} (tag: {track_tags})", target=target or None)
     return kind
 
