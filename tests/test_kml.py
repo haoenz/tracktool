@@ -978,3 +978,35 @@ class TestSetTypeBatch:
         assert runner.invoke(app, ["kml", "set-type", str(kml), "Train"]).exit_code != 0
 
         assert self._tag_of(kml) == "火车"
+
+    def test_create_tag_adds_the_node_and_the_value_reads_back(self, tmp_path: Path):
+        # 派生文件没有 TrackTags 节点：显式开关才建，建在哪由读取那条 XPath 说了算
+        plain = tmp_path / "2024-05-01 plain.kml"
+        plain.write_text(TRACK_KML, encoding="utf-8")
+
+        result = runner.invoke(app, ["kml", "set-type", str(plain), "--type", "Train", "--create-tag"])
+
+        assert result.exit_code == 0, result.output
+        assert kmlfile.get_kml_type(plain) is TrackKind.TRAIN
+        document = xmlutil.find(xmlutil.parse_file(plain), "/kml:kml/kml:Document")
+        children = [xmlutil.etree.QName(child).localname for child in document]
+        assert children[:2] == ["name", "ExtendedData"]  # 2bulu 形状：排在 <name> 之后
+
+    def test_create_tag_keeps_the_extended_data_that_is_already_there(self, tmp_path: Path):
+        kml = tmp_path / "2024-05-01 other.kml"
+        kml.write_text(
+            TRACK_KML.replace(
+                "<name>2024-05-01 test</name>",
+                "<name>2024-05-01 test</name>"
+                "<ExtendedData><Data name='PosStartName'><value>起点</value></Data></ExtendedData>",
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(app, ["kml", "set-type", str(kml), "--type", "Flight", "--create-tag"])
+
+        assert result.exit_code == 0, result.output
+        tree = xmlutil.parse_file(kml)
+        assert self._tag_of(kml) == "Flight"
+        assert xmlutil.extended_data_value(tree, "PosStartName") == "起点"
+        assert len(xmlutil.findall(tree, "/kml:kml/kml:Document/kml:ExtendedData/kml:Data")) == 2

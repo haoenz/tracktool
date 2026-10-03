@@ -92,6 +92,15 @@ class TestKmlWritesAreReported:
         assert first.read_text(encoding="utf-8") == before
         assert second.read_text(encoding="utf-8") == before
 
+    def test_creating_a_missing_tag_is_reported_not_written(self, tmp_path: Path, plan_mode):
+        source = _kml(tmp_path)  # 没有 TrackTags 节点，只有 --create-tag 才写得进去
+        before = source.read_bytes()
+
+        result = runner.invoke(app, ["--dry-run", "kml", "set-type", str(source), "--type", "Train", "--create-tag"])
+
+        assert result.exit_code == 0, result.output
+        assert source.read_bytes() == before
+
 
 class TestArchiveWritesAreReported:
     def test_pushing_an_undeclared_archive_creates_nothing(self, tmp_path: Path, plan_mode):

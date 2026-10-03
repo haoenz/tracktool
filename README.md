@@ -36,6 +36,9 @@ tracktool kml push "./tracks/2024-05-*.kml"
 # kml set-type 同样吃通配符：整批交给批量入口，坏文件与没有 TrackTags 节点的派生文件计入失败，命令退 3
 tracktool kml set-type "./tracks/2024-05-*.kml" --type Train
 
+# 派生文件（split / 手绘）没有 TrackTags 节点，默认报失败；--create-tag 才把节点建出来写入
+tracktool kml set-type "./tracks/2024-05-*.kml" --type Train --create-tag
+
 # --move 在归档之外把源文件收进归档的 Backup/（归档里已有的轨迹按名判重跳过，也一并搬走）
 tracktool kml push ./2024-05-03\ 徒步.kml --move
 ```
