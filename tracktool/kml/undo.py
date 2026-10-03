@@ -20,6 +20,11 @@ leaves one copy too many rather than one too few.
 What this is not: a backup. It reverses operations that were meant, and needs
 the truth they produced to still be there. An archive whose ZIP or backup
 folder is gone is a job for the backups of the archive directory itself.
+
+The whole command is off when `archive_history` is: it would be reading a log
+that stopped being written, so it refuses rather than guess at what the
+archive has done since. The hash checks below are the backstop for the change
+it cannot see — still a refusal, never a wrong reversal.
 """
 
 import zipfile
@@ -82,6 +87,11 @@ def undo_last(zip_path: str | None = None, steps: int = 1, force: bool = False) 
     through states it actually had.
     """
     archive_dir, zip_file = resolve_archive(zip_path)
+    if not history.enabled():
+        raise UserInputError(
+            "Cannot undo: the change log is off (config archive_history = false), so the archive may have moved "
+            "without a record. Turn it back on to undo the changes made since it was switched off"
+        )
     # 不能指望 archive_hash 报错：它直接开文件，抛的是裸 FileNotFoundError
     archive.require_zip_file(zip_file)
 
@@ -178,7 +188,8 @@ def _check_chain(targets: list[history.Change], zip_hash_now: str) -> None:
     if zip_hash_now != newest.zip_hash_after:
         raise UserInputError(
             f"Cannot undo {newest.command} #{newest.id}: the archive has changed since it was recorded "
-            f"({zip_hash_now}, expected {newest.zip_hash_after}). Run `tracktool archive log` to see what came after"
+            f"({zip_hash_now}, expected {newest.zip_hash_after}). Run `tracktool archive log` to see what came "
+            "after; a change made while archive_history was off would not be there"
         )
     # 成对比较时差一条：targets[1:] 比 targets 短一项，strict 在这里必然不成立
     for newer, older in zip(targets, targets[1:], strict=False):

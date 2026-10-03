@@ -257,6 +257,9 @@ def archive_log(
             _change_state(change, undone),
         )
     log.console().print(table)
+    if not ctx.config.archive_history:
+        # 只读命令照常工作：账本是历史，不是状态。但关掉之后它不再增长，读的人要知道
+        log.warning("Recording is off (archive_history = false): the log stops at the newest change listed above")
 
 
 def _describe_change(change: kml_history.Change) -> str:
@@ -748,7 +751,8 @@ def config_set(
     ctx.config.save()
     if key == "log_level":
         log.set_level(value)
-    log.info(f"{key} = {value}")
+    # 布尔按文件里的写法报：config.json 里是 true/false，不是 True/False
+    log.info(f"{key} = {json.dumps(value) if isinstance(value, bool) else value}")
 
 
 def cli_main() -> None:

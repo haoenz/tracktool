@@ -400,7 +400,8 @@ def merge_kml(
     change = history.start(history.MERGE, zip_hash_before=archive.current_hash(zip_file))
     try:
         _save_merge_output(output_tree, output_path)
-        if not ctx.is_plan:
+        # 不记账时连这一遍读都省了：合并输出可能有几十 MB，而它记了也没人要撤
+        if not ctx.is_plan and history.enabled():
             size_bytes, crc32 = history.file_metadata(output_path)
             change.output_file = history.OutputFile(file_path=str(output_path), size_bytes=size_bytes, crc32=crc32)
 

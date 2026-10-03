@@ -589,3 +589,102 @@ def test_the_log_says_there_are_no_changes_yet(archive_zip):
 
     assert result.exit_code == 0
     assert "No recorded changes" in result.output
+
+
+# ── the archive_history switch ──────────────────────────────────────────────
+
+
+def test_a_command_records_nothing_when_the_log_is_off(archive_zip, tmp_path):
+    ctx.config["archive_history"] = False
+    source = track(tmp_path / "sources")
+
+    workflows.push_tracks([source], str(archive_zip))
+
+    # 关掉的是记账，不是命令：归档照旧动了，账本一行没有
+    assert entries(archive_zip) == [archive.zip_entry_name(source, "Default")]
+    assert not log_path(archive_zip).exists()
+
+
+def test_a_merge_records_nothing_when_the_log_is_off(archive_zip, tmp_path):
+    ctx.config["archive_history"] = False
+    source = track(tmp_path / "sources")
+    output = tmp_path / "merged.kml"
+
+    edit.merge_kml([source], output)
+
+    assert output.is_file()
+    assert entries(archive_zip) == [archive.zip_entry_name(source, "Default")]
+    assert not log_path(archive_zip).exists()
+
+
+def test_an_undo_refuses_while_the_log_is_off(archive_zip, tmp_path):
+    source = track(tmp_path / "sources")
+    workflows.push_tracks([source], str(archive_zip))  # recorded
+    ctx.config["archive_history"] = False
+    later = track(tmp_path / "sources", "2024-05-02 later.kml")
+    workflows.push_tracks([later], str(archive_zip))  # not recorded
+
+    before = entries(archive_zip)
+    with pytest.raises(UserInputError, match="archive_history"):
+        undo.undo_last(str(archive_zip))
+
+    assert entries(archive_zip) == before
+    assert len(records(archive_zip)) == 1
+
+
+def test_a_preview_of_an_undo_refuses_while_the_log_is_off(archive_zip, tmp_path):
+    # 开关与 --dry-run 无关：预演报的是这条命令的结论，不是一个字节的差别
+    source = track(tmp_path / "sources")
+    workflows.push_tracks([source], str(archive_zip))
+    ctx.config["archive_history"] = False
+
+    result = runner.invoke(app, ["--dry-run", "archive", "undo", "--zip", str(archive_zip)])
+
+    assert result.exit_code == 1
+
+
+def _push_across_a_gap(archive_zip, tmp_path) -> tuple[Path, Path, Path]:
+    """push、关掉开关再 push、打开开关再 push，返回三份源文件。"""
+    first = track(tmp_path / "sources")
+    workflows.push_tracks([first], str(archive_zip))
+    ctx.config["archive_history"] = False
+    second = track(tmp_path / "sources", "2024-05-02 gap.kml")
+    workflows.push_tracks([second], str(archive_zip))
+    ctx.config["archive_history"] = True
+    third = track(tmp_path / "sources", "2024-05-03 after.kml")
+    workflows.push_tracks([third], str(archive_zip))
+    return first, second, third
+
+
+def test_recording_resumes_when_the_log_is_switched_back_on(archive_zip, tmp_path):
+    first, second, _ = _push_across_a_gap(archive_zip, tmp_path)
+
+    outcome = undo.undo_last(str(archive_zip))
+
+    # 空档有界：已经记下的改动照撤，空档里那一条只是撤不回来，不牵连别的
+    assert outcome.ok
+    assert entries(archive_zip) == [
+        archive.zip_entry_name(first, "Default"),
+        archive.zip_entry_name(second, "Default"),
+    ]
+
+
+def test_stepping_back_across_the_gap_is_refused(archive_zip, tmp_path):
+    _push_across_a_gap(archive_zip, tmp_path)
+
+    with pytest.raises(UserInputError, match="does not start where"):
+        undo.undo_last(str(archive_zip), steps=2)
+
+    assert len(entries(archive_zip)) == 3
+
+
+def test_the_log_still_lists_what_it_holds_when_recording_is_off(archive_zip, tmp_path, caplog):
+    source = track(tmp_path / "sources")
+    workflows.push_tracks([source], str(archive_zip))
+    ctx.config["archive_history"] = False
+
+    result = runner.invoke(app, ["archive", "log", "--zip", str(archive_zip)])
+
+    assert result.exit_code == 0
+    assert "kml push" in result.output
+    assert "Recording is off" in caplog.text

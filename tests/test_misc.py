@@ -137,6 +137,22 @@ class TestConfig:
         assert cfg.google_api_key() == "file-key"
         assert cfg.google_api_key("param-key") == "param-key"
 
+    def test_archive_history_is_on_by_default(self, tmp_path: Path):
+        cfg = Config(path=tmp_path / "config.json").load()
+        assert cfg["archive_history"] is True
+        assert cfg.archive_history is True
+
+    def test_archive_history_reads_a_hand_edited_string(self, tmp_path: Path):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"archive_history": "off"}), encoding="utf-8")
+        assert Config(path=path).load().archive_history is False
+
+    def test_a_value_that_is_not_a_switch_reads_as_on(self, tmp_path: Path):
+        # 与 log_level 同款：写入口严格，读盘兜默认，且兜的方向是「继续记账」
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"archive_history": "maybe"}), encoding="utf-8")
+        assert Config(path=path).load().archive_history is True
+
 
 class TestLegacyKeyMigration:
     """kml_zip_path（ZIP 文件）-> archive_path（归档目录）在 load 时平移一次。"""
@@ -247,6 +263,15 @@ class TestNormalize:
         assert normalize("kml_backup_dir_name", "Old") == "Old"
         assert normalize("output_filters", "ARW|JPG") == "ARW|JPG"
 
+    def test_archive_history_becomes_a_boolean(self):
+        # 写进文件的是 JSON 布尔：字符串 "false" 在 Python 里是真值，
+        # 存成字符串就等于这个开关永远关不掉
+        assert normalize("archive_history", "false") is False
+        assert normalize("archive_history", "OFF") is False
+        assert normalize("archive_history", "true") is True
+        with pytest.raises(UserInputError, match="archive_history is true or false"):
+            normalize("archive_history", "maybe")
+
 
 class TestConfigSetCommand:
     """`config set` 是唯一的写入入口：校验、归一化、拒绝未知键都在这一层。"""
@@ -264,6 +289,18 @@ class TestConfigSetCommand:
         assert result.exit_code == 0
         stored = json.loads(path.read_text(encoding="utf-8"))
         assert stored["log_level"] == "DEBUG"
+
+    def test_set_archive_history_stores_a_boolean(self, tmp_path: Path, monkeypatch):
+        path = self._install(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "set", "archive_history", "off"])
+        assert result.exit_code == 0
+        assert json.loads(path.read_text(encoding="utf-8"))["archive_history"] is False
+
+    def test_a_value_that_is_not_a_switch_exits_one_without_writing(self, tmp_path: Path, monkeypatch):
+        path = self._install(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "set", "archive_history", "maybe"])
+        assert result.exit_code == 1
+        assert json.loads(path.read_text(encoding="utf-8"))["archive_history"] is True
 
     def test_set_archive_path_stores_absolute(self, tmp_path: Path, monkeypatch):
         path = self._install(tmp_path, monkeypatch)

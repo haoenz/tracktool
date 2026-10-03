@@ -167,7 +167,7 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 
 命令名、选项拼写错误、缺必填参数都退 1：typer 内部把这类用法错误记作 2，与「外部工具/API 失败」同值，入口处已把这一来源归一到 1，因此 **2 只表示外部依赖失败**。
 
-表里的「KML 格式错误」只对单文件命令成立：批量命令（`kml push`、`kml set-tag`）把读不出来的那个文件当作它自己的失败，其余照常处理，命令整体退 3。1 保留给「整批还没开始」的情形——路径不存在、通配符无匹配、`--type` 或 `--tag` 取值非法（类别名不在 Default/Train/Flight 里，活动名不在词表里）。`archive undo` 同理：前提缺失或归档已被未记账的改动推走时退 1、一个字节没动，`--force` 跳过项目或自校验不符时退 3。
+表里的「KML 格式错误」只对单文件命令成立：批量命令（`kml push`、`kml set-tag`）把读不出来的那个文件当作它自己的失败，其余照常处理，命令整体退 3。1 保留给「整批还没开始」的情形——路径不存在、通配符无匹配、`--type` 或 `--tag` 取值非法（类别名不在 Default/Train/Flight 里，活动名不在词表里）。`archive undo` 同理：前提缺失、`archive_history` 关着，或归档已被未记账的改动推走时退 1、一个字节没动，`--force` 跳过项目或自校验不符时退 3。
 
 批量命令遇到单个坏文件不会中止整批：该文件计入失败清单，其余文件照常处理，命令以 3 退出，日志里给出 `N file(s) failed` 汇总。指定 `--failed-folder` 后，会在处理前检查失败目录及同名目标。真实执行会提前创建目录，并创建、删除一个空临时文件检查写入能力，因此没有失败时也可能留下空目录；预演只做只读检查。任一失败目录不可用时，停用本批次的自动整理并提示，主任务继续；同名目标只影响对应文件的整理，保留双方。执行中移动失败会同时记录处理原因和整理错误，并继续后续文件；只在实际移动成功后报告移动位置。修复编排不会把留在原处的失败文件归入成功目录。
 
@@ -175,7 +175,7 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 
 ## 配置
 
-配置文件是项目根目录的 `config.json`，字段：`log_level`、`archive_path`、`kml_backup_dir_name`、`output_filters`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向**归档目录**；归档是声明出来的——目录里要有 `archive.json` 身份文件，只有 `tracktool archive init` 能创建它（对已有归档文件的目录补办身份即可收编），其余命令碰到没有身份文件的目录一律报错，路径打错不会静默多出第二份归档。配置里读到旧键 `kml_zip_path` 时会在加载时自动平移为所在目录的 `archive_path`；正常运行会回写，`--dry-run` 只在内存中转换，保留配置文件原样。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
+配置文件是项目根目录的 `config.json`，字段：`log_level`、`archive_path`、`archive_history`、`kml_backup_dir_name`、`output_filters`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向**归档目录**；归档是声明出来的——目录里要有 `archive.json` 身份文件，只有 `tracktool archive init` 能创建它（对已有归档文件的目录补办身份即可收编），其余命令碰到没有身份文件的目录一律报错，路径打错不会静默多出第二份归档。配置里读到旧键 `kml_zip_path` 时会在加载时自动平移为所在目录的 `archive_path`；正常运行会回写，`--dry-run` 只在内存中转换，保留配置文件原样。`archive_history`（默认 `true`）控制归档记账与撤回，代价见「归档撤回」一节。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
 
 `track_tag.<类别>` 是活动词表：KML 里的 `TrackTags` 存的是 2bulu 的活动名（徒步、地铁），归档类别（集合文件名 `Train.kml`、ZIP 条目前缀 `Train/`、`kml push --type` 的取值域）由这张表查出来。用 `tracktool config set` 增删：
 
@@ -215,6 +215,8 @@ tracktool --dry-run archive undo   # 预演：逐条报出要动的每一步，�
 `archive undo` 先把每一条的前提全查一遍，全通过才动手；动手顺序只有一条纪律——**先造副本，后消耗副本**：文件先还原到位，再删归档里那份，中途断掉留下的是多一份副本，不是少一份。日志记的是实际落盘的条目而不是命令行：`kml push a b` 里 b 早已在归档时，撤回只摘掉 a，b 那条是上一次 push 的成果。整批判重的 push 什么都没动，也照样占一条记录。
 
 任一条前提没了就整条拒绝退 1，此时一个字节都没动、记录仍是待撤，把文件找回来再跑一次即可；`--force` 跳过这些项，已经动过手的改动不回滚，命令退 3，没撤成的项写进那条 tombstone 的 `not_undone`，`archive log` 相应显示 `partial`。三种前提各缺不得：`--move` 搬进 `Backup/` 的那份文件（缺 → 那条轨迹只剩 ZIP 里一条，**条目保留不删**）、`pop` 解压出来的那个文件（缺或内容被改 → 那条 pop 永久撤不回来，它是这条轨迹唯一的一份）、还原时源位置不能被占用（被占 → 同 `--move`，保留条目）。归档已经被没记账的改动推走时，`undo` 一律拒绝——哈希校验让它退化成「拒绝」，而不是撤错。
+
+`config set archive_history false` 把整个功能关掉：`kml push` / `kml pop` / `kml merge` 照常改归档，但一行也不记，`archive undo` 直接拒绝退 1（`--dry-run` 也照拒——这是命令的结论，不是一个字节的差别）。关掉期间发生的改动不在账上，那段空档就撤不回来：`--steps` 跨过它会被哈希校验拒绝退 1，而只撤空档之后那些记录（`--steps 1`）仍然成立、也仍然自校验通过。重新打开后新改动照记可撤；已有的 `history.jsonl` 不会被动，关掉只是让它停止增长，`archive log` 也照读不误（末尾提醒一句记账已停）。
 
 日志是撤回的能力，不是备份：`history.jsonl` 丢了等于没有可撤的记录（不报错），`Backup/` 被手工清了要到 `undo` 那一刻才发现。ZIP 丢了 `undo` 救不回来——那要靠归档目录自己的备份。
 

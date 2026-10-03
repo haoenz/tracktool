@@ -134,6 +134,15 @@ def undone_ids(changes: Sequence[Change]) -> set[int]:
     return {change.undo_of for change in changes if change.undo_of is not None}
 
 
+def enabled() -> bool:
+    """Whether this archive keeps its change log (`archive_history` in the config).
+
+    One place asks this — `commit` — so the commands that move the truth
+    cannot each decide for themselves whether to write the line down.
+    """
+    return ctx.config.archive_history
+
+
 def commit(archive_dir: Path, change: Change, *, zip_hash_after: str) -> Change:
     """Append the record, stamped with its id and the truth's new hash.
 
@@ -143,10 +152,15 @@ def commit(archive_dir: Path, change: Change, *, zip_hash_after: str) -> Change:
     caller that wants one test can hand it in.
 
     In PLAN mode the line is reported rather than written — a preview leaves
-    the log exactly as it found it.
+    the log exactly as it found it. So does a switched-off log: the run moves
+    the archive all the same, and the records either side of the gap are what
+    keeps `archive undo` from walking back through it.
     """
     change.zip_hash_after = zip_hash_after
     path = history_log_path(archive_dir)
+    if not enabled():
+        log.verbose(f"Not recording {change.command}: archive_history is off", target=str(path))
+        return change
     if ctx.is_plan:
         log.info(f"Would record {change.command} in {HISTORY_NAME}", target=str(path))
         return change

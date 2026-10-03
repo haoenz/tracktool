@@ -38,6 +38,7 @@ TRACK_TAG_PREFIX = "track_tag."
 DEFAULTS: dict[str, Any] = {
     "log_level": "INFO",
     "archive_path": "",
+    "archive_history": True,
     "kml_backup_dir_name": "Backup",
     "output_filters": "",
     "google_api_key": "",
@@ -87,13 +88,32 @@ def parse_tag_spec(spec: str) -> tuple[str, list[str]]:
     return sign, list(dict.fromkeys(names))
 
 
-def normalize(key: str, value: str) -> str:
+def parse_bool(value: object) -> bool | None:
+    """Read a switch, or None when the value is neither true nor false.
+
+    Spelled out once because two readers want different answers from a bad
+    value: `config set` refuses it, while the property that reads the file
+    keeps the default rather than letting a typo decide.
+    """
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "on", "yes", "1"):
+        return True
+    if text in ("false", "off", "no", "0"):
+        return False
+    return None
+
+
+def normalize(key: str, value: str) -> Any:
     """Validate and canonicalize a value for `config set <key> <value>`.
 
     Per-key rules: log_level is uppercased and must be one of LEVELS;
-    archive_path is expanded to an absolute path; a track_tag key only has its
-    spec checked — turning `+地铁` into a list needs the table's current state,
-    which is `Config.set_tag_list`'s. Other keys pass through.
+    archive_path is expanded to an absolute path; archive_history becomes a
+    JSON boolean — the file holds true/false, not a string that merely reads
+    like one; a track_tag key only has its spec checked — turning `+地铁` into
+    a list needs the table's current state, which is `Config.set_tag_list`'s.
+    Other keys pass through.
     """
     if key == "log_level":
         level = value.upper()
@@ -102,6 +122,11 @@ def normalize(key: str, value: str) -> str:
         return level
     if key == "archive_path":
         return str(Path(value).expanduser().resolve())
+    if key == "archive_history":
+        flag = parse_bool(value)
+        if flag is None:
+            raise UserInputError(f"archive_history is true or false, not {value!r}")
+        return flag
     if key.startswith(TRACK_TAG_PREFIX):
         category = key[len(TRACK_TAG_PREFIX) :]
         if category not in TRACK_KIND_NAMES:
@@ -183,6 +208,17 @@ class Config:
         usable folder name instead of each deciding what "unset" means.
         """
         return str(self._data.get("kml_backup_dir_name") or DEFAULTS["kml_backup_dir_name"])
+
+    @property
+    def archive_history(self) -> bool:
+        """Whether commands record what they change, so `archive undo` can reverse it.
+
+        A value that is neither true nor false reads as the default. That is
+        the same leniency `log_level` shows, and it falls the safe way: a typo
+        keeps the change log being written instead of silently stopping it.
+        """
+        flag = parse_bool(self._data.get("archive_history"))
+        return bool(DEFAULTS["archive_history"]) if flag is None else flag
 
     @cached_property
     def output_filters(self) -> tuple[re.Pattern[str], ...]:
