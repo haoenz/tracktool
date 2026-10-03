@@ -11,7 +11,7 @@ from rich.table import Table
 
 from . import __version__, coords, googleapi, log, mediatime, workflows
 from .actions import describe
-from .config import DEFAULTS, normalize
+from .config import DEFAULTS, TRACK_KIND_NAMES, TRACK_TAG_PREFIX, describe_keys, normalize
 from .context import RunMode, ctx
 from .errors import EXIT_PARTIAL, EXIT_USER_ERROR, AppError, UserInputError
 from .exif import google as exif_google
@@ -604,15 +604,24 @@ def config_show() -> None:
     print(json.dumps(ctx.config.as_dict(), ensure_ascii=False, indent=2))
 
 
-@config_app.command("set")
+# ignore_unknown_options 是为了让值本身可以以 `-` 开头：`-散步` 从活动名表里删掉一个词，
+# 而 click 默认会把任何以 `-` 起头的 token 当成选项。这条命令自己一个选项都没有，
+# 所以放行未知选项不会吃掉任何东西；`--help` 仍是已知选项，照常工作。
+@config_app.command("set", context_settings={"ignore_unknown_options": True})
 def config_set(
     key: Annotated[str | None, typer.Argument(help="Config key")] = None,
     value: Annotated[str | None, typer.Argument(help="Config value")] = None,
 ) -> None:
     """Set a configuration value (e.g. google_api_key, archive_path, log_level)."""
-    available = ", ".join(sorted(DEFAULTS))
+    available = describe_keys()
     if key is None:
         raise UserInputError(f"Usage: tracktool config set <key> <value>. Available keys: {available}")
+    if key.startswith(TRACK_TAG_PREFIX) and key not in DEFAULTS:
+        # 表里的键长而多，拼错时给的是「哪一类」而不是 difflib 猜出来的最近键
+        raise UserInputError(
+            f"Unknown track category: {key}. Categories: {', '.join(TRACK_KIND_NAMES)}; add an activity with "
+            f'tracktool config set "{TRACK_TAG_PREFIX}Default" "+<activity>"'
+        )
     if key not in DEFAULTS:
         close = difflib.get_close_matches(key, DEFAULTS, n=1)
         hint = f" (closest: {close[0]})" if close else ""
@@ -624,6 +633,13 @@ def config_set(
         # 配置不走那些文件原语（config 在最底层，读不到运行模式），
         # 所以这条命令自己声明；写一行配置本来也就是它的全部工作
         log.info(f"Would set {key} = {value}")
+        return
+    if key.startswith(TRACK_TAG_PREFIX):
+        # 活动名表由 Config 落地（+ / - / 整类替换，以及跨类别互斥），
+        # 报出来的是这一类改完之后的样子，而不是敲进去的那段 spec
+        listed = ctx.config.set_tag_list(key, value)
+        ctx.config.save()
+        log.info(f"{key} = {', '.join(listed)}")
         return
     ctx.config[key] = value
     ctx.config.save()

@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from tracktool.cli import app
-from tracktool.config import Config, normalize
+from tracktool.config import TRACK_KIND_NAMES, Config, normalize
 from tracktool.context import ctx
 from tracktool.discover import list_files
 from tracktool.errors import UserInputError
@@ -311,3 +311,154 @@ class TestConfigSetCommand:
         result = runner.invoke(app, ["config", "set"])
         assert result.exit_code == 1
         assert "Available keys" in str(result.exception)
+
+
+class TestConfigTrackTags:
+    """活动名表住在 config：写进去的是「这条轨迹是什么活动」，类别是查表得来的。
+
+    表的键是 `track_tag.<类别>`——那三个名字与归档布局、`--type` 共用，值是一串活动名
+    （2bulu 的 TrackTags 取值）。增补/改归类只动一个词，所以 `+`/`-` 的语法在这里，
+    而不是「重打整张表」。
+    """
+
+    @staticmethod
+    def _install(tmp_path: Path, monkeypatch) -> tuple[Path, Config]:
+        path = tmp_path / "config.json"
+        cfg = Config(path=path).load()
+        cfg.save()
+        monkeypatch.setattr(ctx, "config", cfg)
+        return path, cfg
+
+    def test_the_categories_are_the_archive_layout_names(self):
+        # config 在层序上低于 kml，不能 import TrackKind；两边靠这条断言不漂移
+        from tracktool.kml.kmlfile import TrackKind
+
+        assert TRACK_KIND_NAMES == tuple(kind.value for kind in TrackKind)
+
+    def test_the_defaults_are_the_2bulu_vocabulary_read_backwards(self, tmp_path: Path):
+        table = Config(path=tmp_path / "config.json").track_tag_map
+
+        assert (table["地铁"], table["驾车"], table["滑翔"]) == ("Train", "Default", "Flight")
+        assert len(table) == 14  # 沙盒实测的词表就这 14 个词
+
+    def test_adding_an_activity_files_it_under_that_category(self, tmp_path: Path, monkeypatch):
+        path, cfg = self._install(tmp_path, monkeypatch)
+
+        result = runner.invoke(app, ["config", "set", "track_tag.Train", "+地铁"])
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(path.read_text(encoding="utf-8"))["track_tag.Train"] == ["轨交", "缆车", "地铁", "火车"]
+        assert cfg.track_tag_map["地铁"] == "Train"
+
+    def test_re_filing_an_activity_is_one_command(self, tmp_path: Path, monkeypatch):
+        # 一个活动名只属于一个类别：把它加到这一类，就从别的类里摘掉
+        path, cfg = self._install(tmp_path, monkeypatch)
+
+        runner.invoke(app, ["config", "set", "track_tag.Train", "+驾车"])
+
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        assert "驾车" in stored["track_tag.Train"]
+        assert "驾车" not in stored["track_tag.Default"]
+        assert cfg.track_tag_map["驾车"] == "Train"
+
+    def test_removing_an_activity_takes_it_out(self, tmp_path: Path, monkeypatch):
+        # 值本身以 `-` 起头，click 默认会当成选项——command 的 ignore_unknown_options 放行它
+        path, cfg = self._install(tmp_path, monkeypatch)
+
+        result = runner.invoke(app, ["config", "set", "track_tag.Default", "-散步"])
+
+        assert result.exit_code == 0, result.output
+        assert "散步" not in json.loads(path.read_text(encoding="utf-8"))["track_tag.Default"]
+        assert "散步" not in cfg.track_tag_map
+
+    def test_a_bare_list_replaces_the_category(self, tmp_path: Path, monkeypatch):
+        path, cfg = self._install(tmp_path, monkeypatch)
+
+        runner.invoke(app, ["config", "set", "track_tag.Train", "地铁,火车"])
+
+        assert json.loads(path.read_text(encoding="utf-8"))["track_tag.Train"] == ["地铁", "火车"]
+        assert "轨交" not in cfg.track_tag_map
+
+    def test_an_empty_value_clears_the_category(self, tmp_path: Path, monkeypatch):
+        # 清空之后那批轨迹认不出来，进 _unclassified——「不猜类型」该有的表现
+        path, cfg = self._install(tmp_path, monkeypatch)
+
+        runner.invoke(app, ["config", "set", "track_tag.Flight", ""])
+
+        assert json.loads(path.read_text(encoding="utf-8"))["track_tag.Flight"] == []
+        assert "飞机" not in cfg.track_tag_map
+
+    def test_the_map_is_rebuilt_after_a_write(self, tmp_path: Path, monkeypatch):
+        # track_tag_map 是 cached_property，但它的名字不是配置键，__setitem__ 的
+        # 同名作废够不到它——set_tag_list 必须自己清
+        _, cfg = self._install(tmp_path, monkeypatch)
+        assert "滑雪" not in cfg.track_tag_map
+
+        cfg.set_tag_list("track_tag.Default", "+滑雪")
+
+        assert cfg.track_tag_map["滑雪"] == "Default"
+
+    @pytest.mark.parametrize("spec", ["+", "-", "+a,,b", "x,"])
+    def test_a_malformed_spec_is_rejected(self, tmp_path: Path, monkeypatch, spec: str):
+        path, _ = self._install(tmp_path, monkeypatch)
+        before = path.read_bytes()
+
+        result = runner.invoke(app, ["config", "set", "track_tag.Train", spec])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, UserInputError)
+        assert path.read_bytes() == before  # 拒绝的路径上一个字节都不动
+
+    def test_an_unknown_category_key_is_rejected(self, tmp_path: Path, monkeypatch):
+        path, _ = self._install(tmp_path, monkeypatch)
+
+        result = runner.invoke(app, ["config", "set", "track_tag.Bogus", "+滑雪"])
+
+        assert result.exit_code == 1
+        assert "Categories: Default, Train, Flight" in str(result.exception)
+        assert "track_tag.Bogus" not in json.loads(path.read_text(encoding="utf-8"))
+
+    def test_the_key_list_collapses_the_table(self, tmp_path: Path, monkeypatch):
+        # 三个长键不能把「有哪些键」这句话撑爆
+        self._install(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "set"])
+        assert "track_tag.<Default|Train|Flight>" in str(result.exception)
+
+    def test_a_dry_run_reports_without_writing(self, tmp_path: Path, monkeypatch):
+        path, cfg = self._install(tmp_path, monkeypatch)
+        before = path.read_bytes()
+
+        result = runner.invoke(app, ["--dry-run", "config", "set", "track_tag.Train", "+滑雪"])
+
+        assert result.exit_code == 0, result.output
+        assert path.read_bytes() == before
+        assert "滑雪" not in cfg.track_tag_map
+
+    @staticmethod
+    def _map_of(path: Path) -> dict[str, str]:
+        """The table a config file yields; reading it is what validates the file."""
+        return Config(path=path).load().track_tag_map
+
+    def test_one_activity_under_two_categories_is_an_error(self, tmp_path: Path, monkeypatch):
+        # 手改配置文件造成的重复：报错说清撞在哪，而不是让后写的那份静默获胜
+        path, cfg = self._install(tmp_path, monkeypatch)
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        stored["track_tag.Flight"] = ["轨交"]
+        path.write_text(json.dumps(stored, ensure_ascii=False), encoding="utf-8")
+
+        with pytest.raises(UserInputError, match="listed under both Train and Flight"):
+            self._map_of(path)
+
+    def test_a_key_naming_no_category_is_an_error(self, tmp_path: Path):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"track_tag.滑雪": ["x"]}), encoding="utf-8")
+
+        with pytest.raises(UserInputError, match="Unknown track category in config"):
+            self._map_of(path)
+
+    def test_a_value_that_is_not_a_list_is_an_error(self, tmp_path: Path):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"track_tag.Train": "地铁"}), encoding="utf-8")
+
+        with pytest.raises(UserInputError, match="must be a list"):
+            self._map_of(path)
