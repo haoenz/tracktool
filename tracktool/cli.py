@@ -23,10 +23,13 @@ from .exif.position import MAX_DISTANCE_METERS, MAX_TIME_DIFF_SECONDS
 from .fileutil import BatchResult
 from .kml import archive as kml_archive
 from .kml import edit as kml_edit
+from .kml import history as kml_history
 from .kml import kmlfile
+from .kml import undo as kml_undo
 from .kml.kmlfile import TrackKind
 from .paths import display_path
 from .progress import DEFAULT_WORKERS
+from .workspace import resolve_archive
 
 # typer/_click 给用法错误（UsageError：命令名打错、选项不认识、缺必填参数）
 # 留的保留码。它和我们的表无关，但值恰好与 EXIT_TOOL_ERROR（见 errors.py）相同，
@@ -208,6 +211,75 @@ def archive_rebuild(
 ) -> None:
     """Regenerate the desktop and mobile collections from the ZIP."""
     kml_archive.rebuild(zip_path, tag_map=ctx.config.track_tag_map)
+
+
+@archive_app.command("undo")
+def archive_undo(
+    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    steps: Annotated[int, typer.Option("--steps", min=1, help="How many recorded changes to reverse")] = 1,
+    force: Annotated[
+        bool, typer.Option("--force", help="Skip the items whose premise is gone instead of stopping")
+    ] = False,
+) -> None:
+    """Reverse the last recorded change(s): a push, a restore, or a merge.
+
+    A refusal has touched nothing, so putting back what it names and running
+    the command again works; --force gets past it but settles for less.
+    """
+    if not kml_undo.undo_last(zip_path, steps, force).ok:
+        raise typer.Exit(code=EXIT_PARTIAL)
+
+
+@archive_app.command("log")
+def archive_log(
+    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    last: Annotated[int, typer.Option("--last", min=1, help="How many of the newest changes to show")] = 10,
+) -> None:
+    """List the archive's recorded changes, newest first."""
+    archive_dir, _ = resolve_archive(zip_path)
+    changes = kml_history.load(archive_dir)
+    if not changes:
+        log.info("No recorded changes", target=str(archive_dir))
+        return
+    undone = kml_history.undone_ids(changes)
+    table = Table(box=box.SIMPLE)
+    table.add_column("#", justify="right")
+    table.add_column("When")
+    table.add_column("Command")
+    table.add_column("Change")
+    table.add_column("State")
+    for change in reversed(changes[-last:]):
+        table.add_row(
+            f"#{change.id}",
+            change.timestamp,
+            f"{change.command} (v{change.version})" if change.version != kml_history.VERSION else change.command,
+            _describe_change(change),
+            _change_state(change, undone),
+        )
+    log.console().print(table)
+
+
+def _describe_change(change: kml_history.Change) -> str:
+    """What one record moved, in the counts a reader can scan."""
+    if change.command == kml_history.UNDO:
+        return f"undo of #{change.undo_of}"
+    parts = []
+    if change.added_entries:
+        parts.append(f"+{len(change.added_entries)}")
+    if change.removed_entries:
+        parts.append(f"-{len(change.removed_entries)}")
+    if change.backup_moves:
+        parts.append(f"moved {len(change.backup_moves)}")
+    if change.output_file:
+        parts.append("wrote output")
+    return " ".join(parts) or "no change"
+
+
+def _change_state(change: kml_history.Change, undone: set[int]) -> str:
+    """Whether a record still stands, has been reversed, or was reversed partly."""
+    if change.command == kml_history.UNDO:
+        return "partial" if change.not_undone else "undone"
+    return "undone" if change.id in undone else "pending"
 
 
 @kml_app.command("type")

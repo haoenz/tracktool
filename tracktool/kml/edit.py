@@ -17,11 +17,11 @@ from .. import googleapi, log
 from ..context import ctx
 from ..coords import geo_distance
 from ..errors import UserInputError
-from ..fileutil import move_to_folder
+from ..fileutil import folder_target, move_to_folder
 from ..metadata import is_missing_altitude
 from ..paths import display_path
-from ..workspace import manifest_path, resolve_archive
-from . import archive, kmlfile, xmlutil
+from ..workspace import history_log_path, manifest_path, resolve_archive
+from . import archive, history, kmlfile, xmlutil
 from .collections import collection_paths, new_empty_kml
 
 _TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
@@ -310,7 +310,11 @@ def _merge_output_path(output_path: Path, archive_dir: Path, zip_file: Path) -> 
     if output_path.exists() or output_path.is_symlink():
         raise UserInputError(f"Output already exists: {display_path(output_path)}")
     output_path = output_path.resolve()
-    reserved = {zip_file.resolve(), manifest_path(archive_dir).resolve()}
+    reserved = {
+        zip_file.resolve(),
+        manifest_path(archive_dir).resolve(),
+        history_log_path(archive_dir).resolve(),
+    }
     for kind in kmlfile.TrackKind:
         reserved.update(path.resolve() for path in collection_paths(kind, archive_dir))
     if output_path in reserved:
@@ -353,6 +357,12 @@ def merge_kml(
     collects them into the backup folder. A source listed twice is filed
     once and moved once: the ZIP skips the duplicate by entry path, and the
     dedup below keeps the move from chasing a file already carried away.
+
+    What the run did to the archive is recorded as it goes, and the record is
+    written even when a later step fails. The output file is part of the
+    record even though it never becomes an entry: it is the merged track's
+    only copy, so undoing the merge has to know about it in order to delete
+    it — and has to know when not to.
     """
     archive_dir, zip_file = resolve_archive(None)
     output_path = _merge_output_path(output_path, archive_dir, zip_file)
@@ -387,19 +397,34 @@ def merge_kml(
 
     # 归档位置与压缩包先备好，再写合并结果：归档这一步失败不该留下一个半成品
     archive.ensure_zip_file(zip_file)
+    change = history.start(history.MERGE, zip_hash_before=archive.current_hash(zip_file))
+    try:
+        _save_merge_output(output_tree, output_path)
+        if not ctx.is_plan:
+            size_bytes, crc32 = history.file_metadata(output_path)
+            change.output_file = history.OutputFile(file_path=str(output_path), size_bytes=size_bytes, crc32=crc32)
 
-    _save_merge_output(output_tree, output_path)
-
-    sources = list(dict.fromkeys(paths))
-    entries = []
-    for path in sources:
-        kind = kmlfile.get_kml_type(path, tag_map=tag_map)
-        entries.append((path, kind.value if kind else archive.UNCLASSIFIED))
-    # The safe ZIP append copies once per batch, never once per source.
-    archive.push_compressed_kmls(entries, zip_file)
-    if move:
+        sources = list(dict.fromkeys(paths))
+        change.source_paths = [str(path) for path in sources]
+        entries = []
         for path in sources:
-            move_to_folder(path, ctx.config.kml_backup_dir_name, archive_dir)
+            kind = kmlfile.get_kml_type(path, tag_map=tag_map)
+            entries.append((path, kind.value if kind else archive.UNCLASSIFIED))
+        # The safe ZIP append copies once per batch, never once per source.
+        change.added_entries = archive.push_compressed_kmls(entries, zip_file)
+        if move:
+            backup_folder = ctx.config.kml_backup_dir_name
+            for path in sources:
+                if move_to_folder(path, backup_folder, archive_dir):
+                    change.backup_moves.append(
+                        history.BackupMove(
+                            original_path=str(path),
+                            backup_path=str(folder_target(path, backup_folder, archive_dir)),
+                        )
+                    )
+    finally:
+        # 输出文件与归档条目同属这次改动，中途失败也要交代已经落盘的那部分
+        history.commit(archive_dir, change, zip_hash_after=archive.current_hash(zip_file))
 
 
 def _track_of(node: xmlutil.etree._Element) -> xmlutil.etree._Element:

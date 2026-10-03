@@ -35,7 +35,7 @@ from ..context import ctx
 from ..errors import UserInputError
 from ..paths import display_path
 from ..workspace import DEFAULT_ZIP_NAME, manifest_path, resolve_archive
-from . import collections, kmlfile, xmlutil
+from . import collections, history, kmlfile, xmlutil
 from .kmlfile import KmlContent, TrackKind
 
 # Entries no view holds: their TrackTags say nothing, so there is no kind to file them under.
@@ -158,25 +158,24 @@ def push_compressed_kml(kml_path: Path, zip_path: Path, *, tag_map: Mapping[str,
     push_compressed_kmls([(kml_path, kind.value if kind else UNCLASSIFIED)], zip_path)
 
 
-def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) -> None:
+def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) -> list[str]:
     """Stage a whole batch beside the ZIP, then atomically publish it.
 
     The caller recognizes the tracks and hands in each kind, so nothing is
     parsed twice. Dedup is per entry path, not per file name: the same name
     under two kinds are two tracks, and one of them filing over the other was
     exactly the silent skip this layering exists to prevent.
+
+    Returns the entries that were added, in the order they landed — the
+    entries, never the command line: a name already filed is skipped, and the
+    change log has to record what happened rather than what was asked for.
     """
-    if ctx.is_plan:
-        # 提前返回还有一层理由：ZipFile 的 "a" 模式会把不存在的压缩包建出来
-        for kml_path, _ in entries:
-            log.info(f"Would add to ZIP: {kml_path.name}", target=str(zip_path))
-        return
     exists = zip_path.is_file()
     names: set[str] = set()
     if exists:
         with zipfile.ZipFile(zip_path) as zf:
             names = set(zf.namelist())
-    pending = []
+    pending: list[tuple[Path, str]] = []
     for kml_path, kind in entries:
         entry = zip_entry_name(kml_path, kind)
         if entry in names:
@@ -184,12 +183,42 @@ def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) ->
             continue
         pending.append((kml_path, entry))
         names.add(entry)
-    if not pending:
-        return
+    if ctx.is_plan:
+        # 提前返回还有一层理由：ZipFile 的 "a" 模式会把不存在的压缩包建出来
+        for _, entry in pending:
+            log.info(f"Would add to ZIP: {entry}", target=str(zip_path))
+        return [entry for _, entry in pending]
+    if pending:
+        _publish_appended(pending, zip_path)
+    return [entry for _, entry in pending]
 
-    # Copy compressed bytes, preserving entry metadata without recompression.
-    # An abrupt process exit can leave this scratch file, but never alters the
-    # old ZIP. Each retry uses a fresh file rather than trusting unfinished work.
+
+def push_zip_entry(source: Path, entry: str, zip_path: Path) -> bool:
+    """Add one file under an exact entry path; False when the entry is taken.
+
+    An undo needs this rather than push_compressed_kmls: the entry has to go
+    back exactly where it was, so the path is given instead of derived from
+    the file's own name and kind.
+    """
+    with zipfile.ZipFile(zip_path) as zf:
+        if entry in zf.namelist():
+            log.warning(f"Already exists in ZIP: {entry}", target=str(zip_path))
+            return False
+    if ctx.is_plan:
+        log.info(f"Would add to ZIP: {entry}", target=str(zip_path))
+        return True
+    _publish_appended([(source, entry)], zip_path)
+    return True
+
+
+def _publish_appended(pending: Sequence[tuple[Path, str]], zip_path: Path) -> None:
+    """Publish staged entries: copy the ZIP, append them, replace atomically.
+
+    Copy compressed bytes, preserving entry metadata without recompression.
+    An abrupt process exit can leave this scratch file, but never alters the
+    old ZIP. Each retry uses a fresh file rather than trusting unfinished work.
+    """
+    exists = zip_path.is_file()
     with tempfile.NamedTemporaryFile(
         dir=zip_path.parent, prefix=f".{zip_path.name}.", suffix=".tmp", delete_on_close=False
     ) as temporary:
@@ -211,6 +240,16 @@ def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) ->
         os.replace(temporary.name, zip_path)
     for _, entry in pending:
         log.info(f"Added to ZIP: {entry}", target=str(zip_path))
+
+
+def current_hash(zip_file: Path) -> str:
+    """The ZIP's hash now; EMPTY_ZIP_HASH when there is no ZIP yet.
+
+    A missing archive is the empty archive as far as "did the truth move" is
+    concerned: ensure_zip_file creates exactly the empty ZIP this names, so a
+    change that is about to bring one into being starts from here.
+    """
+    return archive_hash(zip_file) if zip_file.is_file() else EMPTY_ZIP_HASH
 
 
 def archive_hash(zip_file: Path) -> str:
@@ -285,13 +324,17 @@ def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = P
     pop_zip_entry(entry_name, zip_path, output_directory)
 
 
-def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path(".")) -> None:
+def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path(".")) -> Path | None:
     """Extract one exact entry and remove it — what a restore's found entry feeds.
 
     Matching and removal stay two functions on purpose: a restore looks the
     track up once (by file name, in _inspect_archive) and acts on that exact
     entry, so search and delete can never disagree about what was found.
     If rebuilding fails, the extracted file and original ZIP both remain.
+
+    Returns where the entry was written, or None in PLAN mode. The absolute
+    path matters to the caller that records the restore: undoing it runs in
+    another process, whose working directory is not this one.
     """
     target_path = output_directory / Path(entry_name).name
     if target_path.exists():
@@ -299,23 +342,59 @@ def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path
 
     if ctx.is_plan:
         log.info(f"Would extract {entry_name} and remove it from the ZIP", target=str(zip_path))
-        return
+        return None
 
+    _extract_entry(entry_name, zip_path, target_path)
+    log.info(f"Extracted from ZIP: {entry_name}", target=str(zip_path))
+    remove_zip_entries([entry_name], zip_path)
+    return target_path.resolve()
+
+
+def entry_metadata(entry_name: str, zip_path: Path) -> tuple[int, int]:
+    """One entry's own size and CRC-32, straight from the ZIP's directory.
+
+    No decompression. A recorded restore holds these against the file it wrote
+    out, to tell "still that track" from "changed since the entry it came from".
+    """
+    with zipfile.ZipFile(zip_path) as zf:
+        info = zf.getinfo(entry_name)
+        return info.file_size, info.CRC
+
+
+def _extract_entry(entry_name: str, zip_path: Path, target_path: Path) -> None:
+    """Write one entry out durably, before anything removes it from the ZIP."""
     with zipfile.ZipFile(zip_path) as zf, zf.open(entry_name) as src, open(target_path, "wb") as dst:
         shutil.copyfileobj(src, dst)
         dst.flush()
         os.fsync(dst.fileno())
-    log.info(f"Extracted from ZIP: {entry_name}", target=str(zip_path))
 
-    # Keep the original intact until the replacement is complete and durable.
-    # A sibling temporary file permits an atomic replacement on the same filesystem.
+
+def remove_zip_entries(entries: Sequence[str], zip_path: Path) -> None:
+    """Delete entries from the ZIP in one atomic rewrite; a name not held is skipped.
+
+    zipfile has no entry-delete API, so the archive is rewritten wholesale —
+    once per batch rather than once per entry: an undo that drops the five
+    entries a push added pays for one rewrite. The original ZIP stays intact
+    until the replacement is complete and durable.
+    """
+    wanted = set(entries)
+    if not wanted:
+        return
+    if ctx.is_plan:
+        for entry in sorted(wanted):
+            log.info(f"Would remove from ZIP: {entry}", target=str(zip_path))
+        return
+
+    removed: list[str] = []
     with tempfile.NamedTemporaryFile(
         dir=zip_path.parent, prefix=f".{zip_path.name}.", suffix=".tmp", delete_on_close=False
     ) as temporary:
         with zipfile.ZipFile(zip_path) as source, zipfile.ZipFile(temporary, "w") as replacement:
             replacement.comment = source.comment
             for info in source.infolist():
-                if info.filename != entry_name:
+                if info.filename in wanted:
+                    removed.append(info.filename)
+                else:
                     replacement.writestr(info, source.read(info))
         temporary.flush()
         with zipfile.ZipFile(temporary) as replacement:
@@ -326,7 +405,10 @@ def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path
         os.fsync(temporary.fileno())
         temporary.close()
         os.replace(temporary.name, zip_path)
-    log.debug(f"Removed from ZIP: {entry_name}", target=str(zip_path))
+    for entry in sorted(wanted - set(removed)):
+        log.warning(f"Not in ZIP: {entry}", target=str(zip_path))
+    for entry in removed:
+        log.verbose(f"Removed from ZIP: {entry}", target=str(zip_path))
 
 
 def _unrecognized_tags(entries: Sequence[str], zip_file: Path, tag_map: Mapping[str, str] | None) -> Counter[str]:
@@ -407,6 +489,12 @@ def rebuild(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -
     rebuild and incremental pushes land in the same shape. What the manifest's
     old views hash said is irrelevant: the ZIP wins, and the hash
     is refreshed to the ZIP as rebuilt.
+
+    A kind the ZIP holds no entry of is emptied, not skipped: a view that outlives
+    its last entry still lists a track the truth does not have, and skipping the
+    kind was how undoing a push left one behind while the hash said in sync. A
+    kind with neither entries nor view files stays without them — rebuild never
+    brings a view into being that never existed.
     """
     archive_dir, zip_file = resolve_archive(zip_path)
     if ctx.is_plan:
@@ -428,8 +516,11 @@ def rebuild(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -
             content = kmlfile.content_from_tree(tree, info.filename)
             filed.setdefault(kind, []).append((Path(info.filename), content))
 
-    for kind, tracks in filed.items():
+    for kind in TrackKind:
+        tracks = filed.get(kind, [])
         desktop_path, mobile_path = collections.collection_paths(kind, archive_dir)
+        if not tracks and not (desktop_path.is_file() or mobile_path.is_file()):
+            continue
         desktop = collections.DesktopCollection(desktop_path, collections.new_empty_kml(kind))
         mobile = collections.MobileCollection(mobile_path, collections.new_empty_mobile_kml())
         for entry, content in tracks:
@@ -437,7 +528,10 @@ def rebuild(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -
             mobile.add(entry, content)
         desktop.save()
         mobile.save()
-        log.info(f"Rebuilt collections with {len(tracks)} tracks", target=str(desktop_path))
+        if tracks:
+            log.info(f"Rebuilt collections with {len(tracks)} tracks", target=str(desktop_path))
+        else:
+            log.info("Emptied collections: no tracks of this type left in the ZIP", target=str(desktop_path))
     if skipped:
         log.info(f"Left out of the views: {skipped} {UNCLASSIFIED} entries", target=str(archive_dir))
     if unknown:
@@ -532,6 +626,10 @@ def pop_kml_archive(
     restore that finds them in sync leaves them in sync — advance_views_hash
     says so, on the same judgement a push uses. Skipping that left every
     restore reported as out of date until the next rebuild.
+
+    The restore is recorded as it happens: an extracted entry is the track's
+    only copy until it is filed again, so the log is where that file is named
+    and how a later `archive undo` finds its way back.
     """
     zip_file = resolve_archive(zip_path)[1]
     archive_dir = zip_file.parent
@@ -545,13 +643,24 @@ def pop_kml_archive(
             log.warning(f"{problem} (forced)", target=str(archive_dir))
 
     # 只在真的删得掉条目时才取哈希：没有条目可删，真值就没动过，也没什么可前移的
-    zip_hash_before = archive_hash(zip_file) if state.zip_entry is not None else None
-    stored_views_hash = read_views_hash(zip_file)
+    change: history.Change | None = None
+    zip_hash_before: str | None = None
     if state.zip_entry is not None:
-        pop_zip_entry(state.zip_entry, zip_file)
+        zip_hash_before = archive_hash(zip_file)
+        stored_views_hash = read_views_hash(zip_file)
+        size_bytes, crc32 = entry_metadata(state.zip_entry, zip_file)
+        change = history.start(history.POP, zip_hash_before=zip_hash_before)
+        change.removed_entries = [state.zip_entry]
+        extracted = pop_zip_entry(state.zip_entry, zip_file)
+        if extracted is not None:
+            change.extracted_file = history.ExtractedFile(
+                entry_path=state.zip_entry, file_path=str(extracted), size_bytes=size_bytes, crc32=crc32
+            )
     if state.in_desktop:
         collections.remove_track_from_desktop_collection(state.track_name, desktop_collection)
     if state.in_mobile:
         collections.remove_track_from_mobile_collection(state.track_name, mobile_collection)
     if zip_hash_before is not None:
         advance_views_hash(zip_file, zip_hash_before=zip_hash_before, stored_views_hash=stored_views_hash)
+        assert change is not None  # 有条目可删时上面才建得出这笔账，两者同生同灭
+        history.commit(archive_dir, change, zip_hash_after=current_hash(zip_file))

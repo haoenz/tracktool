@@ -64,6 +64,16 @@ class BatchResult[R]:
         self.failed += other.failed
 
 
+def folder_target(path: Path, folder_name: str, parent_directory: Path | None = None) -> Path:
+    """Where move_to_folder puts a file: `<parent_directory>/<folder_name>/<name>`.
+
+    One formula, two readers: the move itself, and the change log, whose record
+    of where a file went has to name the place it actually went.
+    """
+    target_parent = parent_directory if parent_directory is not None else path.parent
+    return target_parent / folder_name / path.name
+
+
 def move_to_folder(path: Path, folder_name: str, parent_directory: Path | None = None) -> bool:
     """Move file into folder_name, creating it if needed.
 
@@ -71,9 +81,8 @@ def move_to_folder(path: Path, folder_name: str, parent_directory: Path | None =
     rearrange the directory it is previewing, and this is the one place every
     move of a file goes through. Returns True only when the file was moved.
     """
-    target_parent = parent_directory if parent_directory is not None else path.parent
-    target_dir = target_parent / folder_name
-    target_path = target_dir / path.name
+    target_path = folder_target(path, folder_name, parent_directory)
+    target_dir = target_path.parent
     if target_path.exists() or target_path.is_symlink():
         log.warning(f"File already exists in {folder_name} folder; not moved", target=str(target_path))
         return False
@@ -85,6 +94,34 @@ def move_to_folder(path: Path, folder_name: str, parent_directory: Path | None =
         log.info(f"Created folder: {folder_name}", target=str(target_dir))
     shutil.move(str(path), str(target_path))
     log.verbose(f"Moved to {folder_name} folder", target=str(target_path))
+    return True
+
+
+def restore_file(original_path: Path, backup_path: Path) -> bool:
+    """Move a file back out of a folder it was carried into; False when blocked.
+
+    The other direction of move_to_folder, and it shares that function's
+    refusals: a file already occupying the original location is not
+    overwritten, and the directory it came from is not recreated — a restore
+    goes back where the file was, or not at all. Returns True only when the
+    file was moved, so a caller can tell "put back" from "kept the archive's
+    copy as the only one left".
+    """
+    if original_path.exists() or original_path.is_symlink():
+        log.warning("File already exists at the original location; not moved", target=str(original_path))
+        return False
+    if not original_path.parent.is_dir():
+        log.warning("Original directory is gone; not moved", target=str(original_path))
+        return False
+    if ctx.is_plan:
+        log.info("Would move back out of the backup folder", target=str(original_path))
+        return False
+    try:
+        shutil.move(str(backup_path), str(original_path))
+    except OSError as exc:
+        log.warning(f"Could not move back out of the backup folder: {exc}", target=str(original_path))
+        return False
+    log.verbose("Moved back out of the backup folder", target=str(original_path))
     return True
 
 

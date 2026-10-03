@@ -20,12 +20,24 @@ from .errors import UserInputError
 from .paths import display_path
 
 MANIFEST_NAME = "archive.json"
+HISTORY_NAME = "history.jsonl"
 DEFAULT_ZIP_NAME = "Archive.zip"
 
 
 def manifest_path(archive_dir: Path) -> Path:
     """The archive's identity file: `<archive_dir>/archive.json`."""
     return archive_dir / MANIFEST_NAME
+
+
+def history_log_path(archive_dir: Path) -> Path:
+    """The archive's change log: `<archive_dir>/history.jsonl`.
+
+    A fixed name inside the archive directory, not a key in the manifest: the
+    archive's identity is its directory (E1), so moving the directory takes
+    its history along, and no command has to know a manifest version to find
+    it.
+    """
+    return archive_dir / HISTORY_NAME
 
 
 def read_zip_name(archive_dir: Path) -> str:
