@@ -1,6 +1,12 @@
 """Configuration management.
 
-Config lives in the project root as `config.json`. The Google Maps API key
+Config lives in the platform's own directory for user configuration —
+`%APPDATA%` on Windows, `~/Library/Application Support` on macOS,
+`$XDG_CONFIG_HOME` or `~/.config` elsewhere — as
+`<that directory>/tracktool/config.json`. Which directory that is is a
+question about the machine, not about where the command was run from: the
+settings are global to the tool, so a run from inside a photo folder finds
+the same file as a run from the project root. The Google Maps API key
 resolution order is: environment variable TRACKTOOL_GOOGLE_API_KEY > CLI
 parameter > config file.
 
@@ -16,6 +22,8 @@ directions, never two spellings of it.
 import json
 import os
 import re
+import sys
+from collections.abc import Mapping
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -23,10 +31,14 @@ from typing import Any
 from .errors import UserInputError
 from .paths import display_path
 
-# Anchored to the source tree, not the working directory: the settings are
-# global to the tool, so a run from inside a photo folder must find the same
-# file as a run from the project root.
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
+CONFIG_NAME = "config.json"
+APP_NAME = "tracktool"
+
+# Where the settings used to live: the repository root, next to the package.
+# It is a migration source only — the first run that finds the platform
+# location empty reads this file, writes the same content to the platform
+# location and removes the old one.
+LEGACY_CONFIG_PATH = Path(__file__).resolve().parent.parent / CONFIG_NAME
 
 ENV_API_KEY = "TRACKTOOL_GOOGLE_API_KEY"
 
@@ -56,6 +68,50 @@ TRACK_KIND_NAMES: tuple[str, ...] = tuple(
 
 # Valid levels in decreasing verbosity.
 LEVELS = ["DEBUG", "VERBOSE", "INFO", "WARNING", "ERROR"]
+
+
+def user_config_dir(
+    platform: str = sys.platform,
+    env: Mapping[str, str] = os.environ,
+    home: Path | None = None,
+) -> Path:
+    """The directory this platform keeps user configuration in, per `APP_NAME`.
+
+    Three conventions answering one question, none of them a special case of
+    another:
+
+    - Windows: `%APPDATA%`, the roaming profile that follows the user between
+      machines; `%LOCALAPPDATA%` is where a cache belongs, not settings. The
+      variable missing is not an error — it falls back inside the profile.
+    - macOS: `~/Library/Application Support`, per Apple's file system guide.
+    - anywhere else: `$XDG_CONFIG_HOME`, which the spec says to ignore unless
+      it is absolute, so a relative value falls back to `~/.config`.
+
+    The arguments are the machine's answers, defaulted to this machine's and
+    overridable so every branch can be tested from any platform: a test hands
+    in the name, the environment and the home directory instead of having to
+    run where the answer it wants is the native one.
+    """
+    root = Path.home() if home is None else home
+    if platform.startswith("win"):
+        roaming = env.get("APPDATA")
+        base = Path(roaming) if roaming else root / "AppData" / "Roaming"
+    elif platform == "darwin":
+        base = root / "Library" / "Application Support"
+    else:
+        xdg = env.get("XDG_CONFIG_HOME")
+        base = Path(xdg) if xdg and Path(xdg).is_absolute() else root / ".config"
+    return base / APP_NAME
+
+
+def default_config_path() -> Path:
+    """The settings file this run reads and writes: `<platform dir>/config.json`.
+
+    A function rather than a constant because the answer depends on the
+    environment the run happens in, and because a test needs to point it
+    somewhere temporary without reaching the machine's real directory.
+    """
+    return user_config_dir() / CONFIG_NAME
 
 
 def describe_keys() -> str:
@@ -139,24 +195,52 @@ def normalize(key: str, value: str) -> Any:
 class Config:
     """Runtime configuration with lazy loading and persisted writes."""
 
-    def __init__(self, path: Path = CONFIG_PATH) -> None:
-        self.path = path
+    def __init__(self, path: Path | None = None) -> None:
+        # 求值放在这里而不是签名的默认值里：平台目录取决于运行环境，而测试要用
+        # 「patch 本模块的 default_config_path」把它指到临时目录去
+        self.path = default_config_path() if path is None else Path(path)
         self._data: dict[str, Any] = dict(DEFAULTS)
+        # 这次加载把配置从旧位置搬了过来时，记下它原来在哪；命令层据此报一句
+        self.migrated_from: Path | None = None
+        # 旧文件删不掉时它为真：搬是搬成了，但那份过时的副本还留在原地
+        self.legacy_left_behind = False
 
     def load(self, *, persist_migration: bool = True) -> Config:
-        """Load and migrate in memory; callers can disable migration writes for previews."""
-        if self.path.is_file():
+        """Load and migrate in memory; callers can disable migration writes for previews.
+
+        Two migrations meet here: an old *key* inside the file, and an old
+        *location* of the file itself — the settings used to sit in the
+        repository root. Both write only under `persist_migration`, so a
+        preview reads whichever file it finds and leaves it where it is.
+        """
+        self.migrated_from = None
+        source = self.path
+        legacy: Path | None = None
+        if not source.is_file() and LEGACY_CONFIG_PATH.is_file():
+            source = LEGACY_CONFIG_PATH
+            legacy = LEGACY_CONFIG_PATH
+        migrated_key = False
+        if source.is_file():
             try:
-                loaded = json.loads(self.path.read_text(encoding="utf-8"))
+                loaded = json.loads(source.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
-                raise ConfigError(f"Failed to read config {display_path(self.path)}: {exc}") from exc
+                raise ConfigError(f"Failed to read config {display_path(source)}: {exc}") from exc
             if not isinstance(loaded, dict):
-                raise ConfigError(f"Config {display_path(self.path)} is not a JSON object")
-            migrated = self._migrate_legacy_keys(loaded)
+                raise ConfigError(f"Config {display_path(source)} is not a JSON object")
+            migrated_key = self._migrate_legacy_keys(loaded)
             self._data.update(loaded)
-            if migrated and persist_migration:
-                # config 在层序最底、够不着 log，所以平移不发声；效果用 config show 看
-                self.save()
+        if persist_migration and (migrated_key or legacy is not None):
+            # 不发声：config 在层序最底、够不着 log，效果用 config show 看。
+            # 搬家按「先造副本、后消耗副本」：新位置先落下完整一份
+            self.save()
+        if persist_migration and legacy is not None:
+            self.migrated_from = legacy
+            try:
+                legacy.unlink()
+            except OSError:
+                # 删不掉不是失败：新位置已经是权威，旧文件留着只是占地方。
+                # 但要说出来——不然用户以为它还有效，下次改的可能是错的那份
+                self.legacy_left_behind = True
         return self
 
     def _migrate_legacy_keys(self, loaded: dict[str, Any]) -> bool:

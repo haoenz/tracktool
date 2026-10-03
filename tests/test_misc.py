@@ -1,13 +1,15 @@
 """Tests for config and Set-Exif tag building."""
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
+from tracktool import config as config_module
 from tracktool.cli import app
-from tracktool.config import TRACK_KIND_NAMES, Config, normalize
+from tracktool.config import TRACK_KIND_NAMES, Config, normalize, user_config_dir
 from tracktool.context import ctx
 from tracktool.discover import list_files
 from tracktool.errors import UserInputError
@@ -247,6 +249,144 @@ class TestLegacyKeyMigration:
         stored = json.loads(path.read_text(encoding="utf-8"))
         assert stored["archive_path"] == "/tracks"
         assert "kml_zip_path" not in stored
+
+
+class TestConfigLocation:
+    """配置文件落在平台自己的配置目录里，三套约定各按各的依据。"""
+
+    def test_windows_uses_the_roaming_profile(self):
+        where = user_config_dir("win32", {"APPDATA": "C:/Users/alice/AppData/Roaming"}, home=Path("/home/alice"))
+        assert where == Path("C:/Users/alice/AppData/Roaming/tracktool")
+
+    def test_windows_without_appdata_falls_back_inside_the_profile(self):
+        # 变量缺失不是错误：Local 是缓存放的地方，配置得往 Roaming 走
+        where = user_config_dir("win32", {}, home=Path("C:/Users/alice"))
+        assert where == Path("C:/Users/alice/AppData/Roaming/tracktool")
+
+    def test_macos_uses_application_support(self):
+        where = user_config_dir("darwin", {}, home=Path("/Users/alice"))
+        assert where == Path("/Users/alice/Library/Application Support/tracktool")
+
+    def test_xdg_config_home_is_honoured_when_absolute(self):
+        where = user_config_dir("linux", {"XDG_CONFIG_HOME": "/home/alice/.config"}, home=Path("/home/alice"))
+        assert where == Path("/home/alice/.config/tracktool")
+
+    def test_a_relative_xdg_config_home_is_ignored(self):
+        # XDG 规范：取值非绝对路径就作废，退回 ~/.config
+        where = user_config_dir("linux", {"XDG_CONFIG_HOME": "relative/dir"}, home=Path("/home/alice"))
+        assert where == Path("/home/alice/.config/tracktool")
+
+    def test_linux_without_the_variable_uses_dot_config(self):
+        where = user_config_dir("linux", {}, home=Path("/home/alice"))
+        assert where == Path("/home/alice/.config/tracktool")
+
+    @pytest.mark.parametrize("platform", ["win32", "darwin", "linux"])
+    def test_every_platform_lands_on_the_same_folder_name(self, platform):
+        assert user_config_dir(platform, {}, home=Path("/home/alice")).name == "tracktool"
+
+    def test_this_machine_resolves_into_the_temporary_directory(self, tmp_path):
+        # 隔离 fixture 的证据：默认位置不是用户的真实配置目录。走模块属性调用
+        # 而不是 import 进来的那个名字——patch 改的是模块属性，不是这份引用
+        assert config_module.default_config_path() == tmp_path / "config-home" / "config.json"
+
+
+def _refuse_to_unlink(self, *args, **kwargs):
+    """Stands in for Path.unlink when the old file cannot be removed — a lock,
+    a permission, another program keeping it open."""
+    raise PermissionError("file is in use")
+
+
+class TestConfigMovesOutOfTheRepository:
+    """配置原先住仓库根；新位置空着而旧位置有文件时，读旧、写新、删旧。
+
+    顺序是「先造副本、后消耗副本」：新位置的完整一份先落盘，才动旧文件，所以
+    中途断掉留下的是一份多余的旧文件，而不是一份缺失的配置。
+    """
+
+    def _legacy(self, tmp_path: Path, monkeypatch, content: dict) -> Path:
+        legacy = tmp_path / "repo" / "config.json"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(json.dumps(content), encoding="utf-8")
+        monkeypatch.setattr(config_module, "LEGACY_CONFIG_PATH", legacy)
+        return legacy
+
+    def test_the_old_file_is_read_and_the_new_one_written(self, tmp_path, monkeypatch):
+        legacy = self._legacy(tmp_path, monkeypatch, {"log_level": "DEBUG", "archive_path": "/tracks"})
+        target = tmp_path / "cfg" / "config.json"
+
+        cfg = Config(path=target).load()
+
+        assert cfg["log_level"] == "DEBUG"
+        assert cfg["archive_path"] == "/tracks"
+        assert cfg.migrated_from == legacy
+        assert json.loads(target.read_text(encoding="utf-8"))["archive_path"] == "/tracks"
+        assert not legacy.exists()
+
+    def test_the_default_location_is_the_one_that_triggers_it(self, tmp_path, monkeypatch):
+        # 命令层不传路径，走平台默认位置——fixture 已把它指到临时目录
+        legacy = self._legacy(tmp_path, monkeypatch, {"log_level": "DEBUG"})
+
+        cfg = Config().load()
+
+        assert cfg["log_level"] == "DEBUG"
+        assert cfg.migrated_from == legacy
+        assert json.loads(config_module.default_config_path().read_text(encoding="utf-8"))["log_level"] == "DEBUG"
+        assert not legacy.exists()
+
+    def test_a_config_already_in_place_wins(self, tmp_path, monkeypatch):
+        legacy = self._legacy(tmp_path, monkeypatch, {"log_level": "DEBUG"})
+        target = tmp_path / "cfg" / "config.json"
+        target.parent.mkdir(parents=True)
+        target.write_text(json.dumps({"log_level": "ERROR"}), encoding="utf-8")
+
+        cfg = Config(path=target).load()
+
+        assert cfg["log_level"] == "ERROR"
+        assert cfg.migrated_from is None
+        assert legacy.exists()  # 没搬，也没删
+
+    def test_a_preview_reads_the_old_file_and_moves_nothing(self, tmp_path, monkeypatch):
+        legacy = self._legacy(tmp_path, monkeypatch, {"log_level": "DEBUG"})
+        target = tmp_path / "cfg" / "config.json"
+
+        cfg = Config(path=target).load(persist_migration=False)
+
+        assert cfg["log_level"] == "DEBUG"  # 内存里照样读到了旧位置的内容
+        assert cfg.migrated_from is None
+        assert legacy.exists()
+        assert not target.exists()
+
+    def test_a_legacy_file_that_cannot_be_deleted_is_left_behind(self, tmp_path, monkeypatch):
+        legacy = self._legacy(tmp_path, monkeypatch, {"log_level": "DEBUG"})
+        target = tmp_path / "cfg" / "config.json"
+        monkeypatch.setattr(Path, "unlink", _refuse_to_unlink)
+
+        cfg = Config(path=target).load()
+
+        assert cfg.migrated_from == legacy  # 搬是搬成了
+        assert cfg.legacy_left_behind is True  # 但旧的没删掉，且记了下来
+        assert target.is_file()  # 新位置是权威
+        assert legacy.is_file()  # 旧的留着，不影响下次加载
+
+    def test_a_legacy_file_still_in_place_is_announced(self, tmp_path, monkeypatch, caplog):
+        self._legacy(tmp_path, monkeypatch, {"log_level": "INFO"})
+        monkeypatch.setattr(Path, "unlink", _refuse_to_unlink)
+        caplog.set_level(logging.INFO)
+
+        result = runner.invoke(app, ["config", "show"])
+
+        assert result.exit_code == 0, result.output
+        assert "is no longer read" in caplog.text
+
+    def test_the_cli_says_where_the_config_went(self, tmp_path, monkeypatch, caplog):
+        self._legacy(tmp_path, monkeypatch, {"log_level": "INFO"})
+        caplog.set_level(logging.INFO)
+
+        result = runner.invoke(app, ["config", "show"])
+
+        assert result.exit_code == 0, result.output
+        assert "Config moved here from" in caplog.text
+        assert "is no longer read" not in caplog.text  # 删干净了就不提它
 
 
 class TestNormalize:

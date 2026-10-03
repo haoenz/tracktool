@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tracktool import config
 from tracktool.context import RunMode, ctx
 
 _MEDIA_TOOLS = ("exiftool", "ffmpeg")
@@ -129,6 +130,30 @@ def apply_mode(monkeypatch) -> None:
     silently turn every later test into a dry run.
     """
     monkeypatch.setattr(ctx, "mode", RunMode.APPLY)
+
+
+@pytest.fixture(autouse=True)
+def config_in_tmp(tmp_path: Path, monkeypatch) -> Path:
+    """Keep every test out of the machine's real configuration.
+
+    The config path is a property of the environment now, so a test that
+    forgot to install its own Config would read and write the developer's
+    actual settings. Both names are redirected, and the context is rebuilt to
+    point there as well:
+
+    - `default_config_path` — where a `Config()` without a path resolves to.
+    - `LEGACY_CONFIG_PATH` — the repository's own config.json. It exists on a
+      developer's machine, so without this a stray CLI call would read it,
+      write a copy into the temporary directory and delete the original.
+
+    A test that wants its own file still says so, and its config is the one
+    in effect: this fixture runs first, the test installs over it.
+    """
+    path = tmp_path / "config-home" / "config.json"
+    monkeypatch.setattr(config, "default_config_path", lambda: path)
+    monkeypatch.setattr(config, "LEGACY_CONFIG_PATH", tmp_path / "no-legacy.json")
+    monkeypatch.setattr(ctx, "config", config.Config())
+    return path
 
 
 @pytest.fixture

@@ -100,6 +100,12 @@ def main(
         log.set_level("WARNING")
     else:
         log.set_level(ctx.config.log_level)
+    # 换地方是一次性事件，说出来；级别随 --quiet 与配置走，所以放在 set_level 之后
+    if ctx.config.migrated_from is not None:
+        moved_from = display_path(ctx.config.migrated_from)
+        log.info(f"Config moved here from {moved_from}", target=ctx.config.path)
+        if ctx.config.legacy_left_behind:
+            log.warning(f"The old config at {moved_from} is no longer read; delete it by hand")
 
 
 def _resolve_path(path: Path, must_exist: bool = True) -> Path:
