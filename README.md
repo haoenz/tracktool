@@ -33,11 +33,20 @@ tracktool kml push ./2024-05-01\ 徒步.kml ./2024-05-02\ 徒步.kml
 # 通配符由工具自己展开（只作用于最后一段路径，按路径序入库），PowerShell 里也能直接用
 tracktool kml push "./tracks/2024-05-*.kml"
 
-# kml set-type 同样吃通配符：整批交给批量入口，坏文件与没有 TrackTags 节点的派生文件计入失败，命令退 3
-tracktool kml set-type "./tracks/2024-05-*.kml" --type Train
+# kml set-tag 同样吃通配符：整批交给批量入口，坏文件与没有 TrackTags 节点的派生文件计入失败，命令退 3
+tracktool kml set-tag "./tracks/2024-05-*.kml" --tag 地铁
 
 # 派生文件（split / 手绘）没有 TrackTags 节点，默认报失败；--create-tag 才把节点建出来写入
-tracktool kml set-type "./tracks/2024-05-*.kml" --type Train --create-tag
+tracktool kml set-tag "./tracks/2024-05-*.kml" --tag 地铁 --create-tag
+
+# --tag 只收活动名，且必须已在词表里；表外词会被拒绝并给出最近的词与加词的那条命令
+tracktool config set track_tag.Train "+滑雪"
+
+# kml type 打归档类别（Default/Train/Flight）；认不出来就打 Unknown，原因走日志
+tracktool kml type ./2024-05-01\ 徒步.kml
+
+# --raw 打 TrackTags 里存的原值——活动名本身，不是类别
+tracktool kml type ./2024-05-01\ 徒步.kml --raw
 
 # --move 在归档之外把源文件收进归档的 Backup/（归档里已有的轨迹按名判重跳过，也一并搬走）
 tracktool kml push ./2024-05-03\ 徒步.kml --move
@@ -151,7 +160,7 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 
 命令名、选项拼写错误、缺必填参数都退 1：typer 内部把这类用法错误记作 2，与「外部工具/API 失败」同值，入口处已把这一来源归一到 1，因此 **2 只表示外部依赖失败**。
 
-表里的「KML 格式错误」只对单文件命令成立：批量命令（`kml push`、`kml set-type`）把读不出来的那个文件当作它自己的失败，其余照常处理，命令整体退 3。1 保留给「整批还没开始」的情形——路径不存在、通配符无匹配、`--type` 取值非法。
+表里的「KML 格式错误」只对单文件命令成立：批量命令（`kml push`、`kml set-tag`）把读不出来的那个文件当作它自己的失败，其余照常处理，命令整体退 3。1 保留给「整批还没开始」的情形——路径不存在、通配符无匹配、`--type` 或 `--tag` 取值非法（类别名不在 Default/Train/Flight 里，活动名不在词表里）。
 
 批量命令遇到单个坏文件不会中止整批：该文件计入失败清单，其余文件照常处理，命令以 3 退出，日志里给出 `N file(s) failed` 汇总。指定 `--failed-folder` 后，会在处理前检查失败目录及同名目标。真实执行会提前创建目录，并创建、删除一个空临时文件检查写入能力，因此没有失败时也可能留下空目录；预演只做只读检查。任一失败目录不可用时，停用本批次的自动整理并提示，主任务继续；同名目标只影响对应文件的整理，保留双方。执行中移动失败会同时记录处理原因和整理错误，并继续后续文件；只在实际移动成功后报告移动位置。修复编排不会把留在原处的失败文件归入成功目录。
 
@@ -159,20 +168,30 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 
 ## 配置
 
-配置文件是项目根目录的 `config.json`，字段：`log_level`、`archive_path`、`kml_backup_dir_name`、`output_filters`、`google_api_key`。`archive_path` 指向**归档目录**；归档是声明出来的——目录里要有 `archive.json` 身份文件，只有 `tracktool archive init` 能创建它（对已有归档文件的目录补办身份即可收编），其余命令碰到没有身份文件的目录一律报错，路径打错不会静默多出第二份归档。配置里读到旧键 `kml_zip_path` 时会在加载时自动平移为所在目录的 `archive_path`；正常运行会回写，`--dry-run` 只在内存中转换，保留配置文件原样。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
+配置文件是项目根目录的 `config.json`，字段：`log_level`、`archive_path`、`kml_backup_dir_name`、`output_filters`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向**归档目录**；归档是声明出来的——目录里要有 `archive.json` 身份文件，只有 `tracktool archive init` 能创建它（对已有归档文件的目录补办身份即可收编），其余命令碰到没有身份文件的目录一律报错，路径打错不会静默多出第二份归档。配置里读到旧键 `kml_zip_path` 时会在加载时自动平移为所在目录的 `archive_path`；正常运行会回写，`--dry-run` 只在内存中转换，保留配置文件原样。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
+
+`track_tag.<类别>` 是活动词表：KML 里的 `TrackTags` 存的是 2bulu 的活动名（徒步、地铁），归档类别（集合文件名 `Train.kml`、ZIP 条目前缀 `Train/`、`kml push --type` 的取值域）由这张表查出来。用 `tracktool config set` 增删：
+
+```bash
+tracktool config set track_tag.Train "+滑雪"        # 加进 Train，并自动从其他类别里摘掉
+tracktool config set track_tag.Train "-缆车"        # 从 Train 里删掉；删不改动其他类别
+tracktool config set track_tag.Default "徒步,爬山"  # 不带符号 = 整表替换
+```
+
+一个活动只能属于一个类别，所以加词时会从其他类别里摘掉，改名归类都是一条命令；幂等，重复执行同一指令不会累积。命令报出的是这一类改完之后的样子，不是敲进去的那段词。同一个词出现在两个类别、类别名拼错、列表里出现空名字都会报错而不是静默忽略——每一种都会让「这条轨迹属于哪一类」失去唯一答案。词表是唯一的判据：加进去的词立刻被 `kml set-tag --tag` 接受，并被 `kml type` 判读成它所属的类别。
 
 ## 归档：真值与视图
 
-ZIP 压缩包是归档的**真值**，条目按 `<类型>/<yyyy-MM>/<文件名>` 分层存放（认不出类型的进 `_unclassified/`，不猜）。桌面 `<类型>.kml` 与手机 `<类型>.Mobile.kml` 是由真值派生的**视图**：
+ZIP 压缩包是归档的**真值**，条目按 `<类型>/<yyyy-MM>/<文件名>` 分层存放。类型不看目录、只看轨迹自己的 `TrackTags`：活动名查词表得到类别，表里没有的词一律进 `_unclassified/`，不猜。桌面 `<类型>.kml` 与手机 `<类型>.Mobile.kml` 是由真值派生的**视图**：
 
-- `tracktool archive status` 报告视图与真值是否一致。`archive.json`（version 2）记着上次视图与真值同步时 ZIP 的指纹，真值一动指纹就对不上；`kml push` 在视图本来就同步的前提下会顺带前移指纹，本来落后就如实报落后。
-- `tracktool archive rebuild` 从真值全量再生两个视图并刷新指纹——视图坏了、落后了都能修，不需要从备份倒腾。
+- `tracktool archive status` 报告视图与真值是否一致，并把「分层之前写下的扁平条目里，哪些的 TrackTags 认不出来」按值汇总一行（每个值只说一次）。`archive.json`（version 2）记着上次视图与真值同步时 ZIP 的指纹，真值一动指纹就对不上；`kml push` 在视图本来就同步的前提下会顺带前移指纹，本来落后就如实报落后。
+- `tracktool archive rebuild` 从真值全量再生两个视图并刷新指纹——视图坏了、落后了都能修，不需要从备份倒腾。放不进任何视图的条目照旧跳过，其中扁平条目里认不出值的那些同样按值汇总。
 
 `kml push` 和 `kml merge` 的入库会先把旧 ZIP 复制到同目录临时文件，在临时文件上追加整批新条目，完成 CRC 校验和文件同步后再原子替换。替换前发生异常或进程被强制结束，旧 ZIP 保持原样；重复条目全部跳过时不复制、不替换。代价是额外容纳一份新 ZIP 的空间、一次旧 ZIP 复制和整包校验，不重新压缩旧条目。普通失败清理临时文件，强制结束可能留下 `.Archive.zip.*.tmp`；重跑使用新的临时文件。这个保护以 ZIP 为边界，失败前可能已更新集合，必要时用 `archive rebuild` 从保留的 ZIP 恢复视图。`Backup/` 仍保存 KML 源文件，不是历史 ZIP 副本。
 
 `kml merge --output` 必须指定尚不存在的新文件路径。已有文件、目录、符号链接（含悬空链接）、输入文件的硬链接或路径别名，以及归档 ZIP/manifest/集合路径，均在写入前拒绝；`--dry-run` 执行同样检查。合并结果先写临时文件，再通过硬链接创建目标名称，期间出现同名目标也不会覆盖；文件系统不支持硬链接时安全报错。源轨迹整批归档成功后，`--move` 才把源文件移入 Backup。
 
-`kml pop` 接受完整文件名或完整名称（不含 `.kml`），不再按子串查找。例如 `tracktool kml pop '2024-05-01 行程.kml' --type Train` 只选择 Train 类型。分层条目以类型目录为准；旧版扁平条目读取 TrackTags 确认类型，未知类型不自动当作 Default。同一类型匹配多个 ZIP 条目，或集合中同名记录不唯一时，恢复在任何修改前拒绝，`--force` 也不能绕过歧义；提取和两个集合的删除均使用同一个已解析名称。
+`kml pop` 接受完整文件名或完整名称（不含 `.kml`），不再按子串查找。例如 `tracktool kml pop '2024-05-01 行程.kml' --type Train` 只选择 Train 类型。分层条目以类型目录为准；旧版扁平条目按 `TrackTags` 查词表确认类型，表外的词不会自动当作 Default。同一类型匹配多个 ZIP 条目，或集合中同名记录不唯一时，恢复在任何修改前拒绝，`--force` 也不能绕过歧义；提取和两个集合的删除均使用同一个已解析名称。
 
 ## 实现说明
 
