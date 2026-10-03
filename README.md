@@ -48,6 +48,9 @@ tracktool kml type ./2024-05-01\ 徒步.kml
 # --raw 打 TrackTags 里存的原值——活动名本身，不是类别
 tracktool kml type ./2024-05-01\ 徒步.kml --raw
 
+# 通配符在进程内展开（按名排序）；一个文件只给裸值，多个文件每行「值<TAB>路径」，值留在第一列
+tracktool kml type "./tracks/2024-05-*.kml"
+
 # --move 在归档之外把源文件收进归档的 Backup/（归档里已有的轨迹按名判重跳过，也一并搬走）
 tracktool kml push ./2024-05-03\ 徒步.kml --move
 ```

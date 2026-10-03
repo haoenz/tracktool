@@ -894,7 +894,7 @@ class TestArchiveStatusAndRebuild:
 
 
 class TestGlobExpansion:
-    """多文件入口（push / merge）的参数通配符：进程内展开，批内按路径排序。"""
+    """多文件入口（push / merge / set-tag / type）的参数通配符：进程内展开，按路径排序。"""
 
     @staticmethod
     def _staging(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -956,6 +956,52 @@ class TestGlobExpansion:
         assert result.exit_code == 0
         assert output.is_file()
         assert len(zipfile.ZipFile(zip_path).namelist()) == 2  # merge 也归档输入
+
+    def test_type_of_a_single_match_keeps_the_bare_value(self, tmp_path: Path):
+        """命中一份就还是裸值一行：脚本 `$(kml type ...)` 的老取法不变。"""
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        (staging / "2024-05-01 only.kml").write_text(_kml_with_tag("火车"), encoding="utf-8")
+
+        result = runner.invoke(app, ["kml", "type", str(staging / "2024-05-*.kml")])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.strip() == "Train"
+
+    def test_type_of_several_matches_prints_value_and_path_per_line(self, tmp_path: Path):
+        """多份时每行「值<TAB>路径」，按名排序——值留在第一列，`cut -f1` 照旧取裸值。"""
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        (staging / "2024-05-02 late.kml").write_text(_kml_with_tag("徒步"), encoding="utf-8")
+        (staging / "2024-05-01 early.kml").write_text(_kml_with_tag("火车"), encoding="utf-8")
+
+        result = runner.invoke(app, ["kml", "type", str(staging / "*.kml")])
+
+        assert result.exit_code == 0, result.output
+        cells = [line.split("\t") for line in result.stdout.splitlines()]
+        assert [value for value, _ in cells] == ["Train", "Default"]
+        assert [Path(path).name for _, path in cells] == ["2024-05-01 early.kml", "2024-05-02 late.kml"]
+
+    def test_type_reports_unrecognized_values_once_by_value(self, tmp_path: Path, caplog):
+        """认不出的按值汇总一行——一份一条会把这屏刷满，与 status/rebuild 同一种说法。"""
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        (staging / "2024-05-01 plain.kml").write_text(TRACK_KML, encoding="utf-8")  # 没有 TrackTags 节点
+        (staging / "2024-05-02 odd.kml").write_text(_kml_with_tag("轨通"), encoding="utf-8")
+
+        result = runner.invoke(app, ["kml", "type", str(staging / "*.kml")])
+
+        assert result.exit_code == 0, result.output
+        assert [line.split("\t")[0] for line in result.stdout.splitlines()] == ["Unknown", "Unknown"]
+        assert "2 track(s) carry an unrecognized TrackTags value" in caplog.text
+        assert len([r for r in caplog.records if "unrecognized TrackTags" in r.getMessage()]) == 1
+
+    def test_type_wildcard_without_matches_is_a_user_error(self, tmp_path: Path):
+        staging, _, _ = self._staging(tmp_path)
+
+        result = runner.invoke(app, ["kml", "type", str(staging / "2020-*.kml")])
+
+        assert result.exit_code == 1
 
 
 class TestSetTagBatch:

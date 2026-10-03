@@ -2,6 +2,7 @@
 
 import difflib
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -211,22 +212,32 @@ def archive_rebuild(
 
 @kml_app.command("type")
 def kml_type(
-    path: Annotated[Path, typer.Argument(help="KML file")],
+    paths: Annotated[list[Path], typer.Argument(help="KML file(s), wildcards allowed")],
     raw: Annotated[bool, typer.Option("--raw", help="Print the TrackTags value as stored, not the category")] = False,
 ) -> None:
     """Print the track type (TrackTags); --raw prints the activity it is read from."""
-    path = _resolve_path(path)
-    if raw:
-        # 原始值只照实给：判读留给不加 --raw 的那条，两者互为补充
-        print(kmlfile.get_track_tags(path) or "Unknown")
-        return
-    kind = kmlfile.get_kml_type(path, tag_map=ctx.config.track_tag_map)
-    if kind is not None:
-        print(kind)
-        return
-    print("Unknown")
-    # stdout 只留那个裸值（脚本在比对它）；「值是什么、该敲哪条命令」走日志
-    log.warning(kmlfile.explain_unknown_tags(kmlfile.get_track_tags(path)), target=str(path))
+    files = _expand_paths(paths)
+    # 一份文件照旧只有一个裸值（脚本在比对它）；一旦展成多份，行里就得认得出是谁，
+    # 于是每行给「值<TAB>路径」——值留在第一列，老写法 `| cut -f1` 照样能用
+    single = len(files) == 1
+    unrecognized: Counter[str] = Counter()
+    for path in files:
+        if raw:
+            # 原始值只照实给：判读留给不加 --raw 的那条，两者互为补充
+            label = kmlfile.get_track_tags(path) or "Unknown"
+        else:
+            kind = kmlfile.get_kml_type(path, tag_map=ctx.config.track_tag_map)
+            label = str(kind) if kind is not None else "Unknown"
+            if kind is None:
+                unrecognized[kmlfile.get_track_tags(path)] += 1
+        print(label if single else f"{label}\t{display_path(path)}")
+    if unrecognized:
+        # stdout 只留那个裸值；「值是什么、该敲哪条命令」走日志。同一条发现会有几百
+        # 遍，所以多份按值汇总一行——与 status/rebuild 报告它用的是同一个说法
+        if single:
+            log.warning(kmlfile.explain_unknown_tags(next(iter(unrecognized))), target=str(files[0]))
+        else:
+            log.warning(kmlfile.summarize_unknown_tags(unrecognized))
 
 
 @kml_app.command("set-tag")
