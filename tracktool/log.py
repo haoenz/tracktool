@@ -10,6 +10,9 @@ Level policy:
 - VERBOSE: per-file actions inside batch loops (moved, converted, tag writes).
 - DEBUG: parsing/protocol details (tag values, timestamps, API request params).
 
+Timestamp: each line carries the time of day (HH:MM) — no date, no seconds —
+and rich omits a value that repeats, so a run reads as a sequence of events.
+
 Library helpers stay quiet about severity: a condition is logged at its
 decision point by the caller that acts on it (e.g. mediatime returns None and
 the caller decides whether that is a warning, an error, or ignorable).
@@ -44,7 +47,14 @@ _LEVEL_NUMBERS: dict[str, int] = {name: logging.getLevelName(name) for name in L
 
 _logger = logging.getLogger("tracktool")
 _logger.propagate = False
-_handler = RichHandler(console=_console, show_path=False, markup=False, highlighter=None, rich_tracebacks=True)
+_handler = RichHandler(
+    console=_console,
+    show_path=False,
+    markup=False,
+    highlighter=None,
+    rich_tracebacks=True,
+    log_time_format="[%H:%M]",
+)
 _handler.setFormatter(logging.Formatter("%(message)s"))
 _logger.addHandler(_handler)
 _logger.setLevel(logging.INFO)
