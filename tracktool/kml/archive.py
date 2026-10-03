@@ -9,7 +9,7 @@ has no entry-delete API. Restoring creates nothing and refuses to run on an
 archive that disagrees with itself, so half a track cannot be restored;
 `--force` turns those refusals into warnings and skips only the step they
 belong to. The desktop and mobile collections next to the ZIP are views:
-derived from the truth, checked against it by fingerprint, regenerable with
+derived from the truth, checked against it by hash, regenerable with
 `archive rebuild`.
 
 Filing a track in — which collections, the ZIP, the backup folder, in what
@@ -41,9 +41,9 @@ from .kmlfile import KmlContent, TrackKind
 # Entries no view holds: their TrackTags say nothing, so there is no kind to file them under.
 UNCLASSIFIED = "_unclassified"
 
-# What archive_fingerprint returns for a ZIP with no entries: the identity that
+# What archive_hash returns for a ZIP with no entries: the identity that
 # makes a virgin archive (empty ZIP, no views yet) count as already in sync.
-EMPTY_ZIP_FINGERPRINT = hashlib.sha256().hexdigest()
+EMPTY_ZIP_HASH = hashlib.sha256().hexdigest()
 
 
 def init_archive(directory: Path, zip_name: str = DEFAULT_ZIP_NAME) -> None:
@@ -213,10 +213,10 @@ def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) ->
         log.info(f"Added to ZIP: {entry}", target=str(zip_path))
 
 
-def archive_fingerprint(zip_file: Path) -> str:
+def archive_hash(zip_file: Path) -> str:
     """A digest of what the ZIP holds: every entry's path, size and CRC, sorted.
 
-    Metadata only, no decompression. Equal fingerprints mean equal entries —
+    Metadata only, no decompression. Equal hashes mean equal entries —
     the one fact "do the views match the truth" compares.
     """
     with zipfile.ZipFile(zip_file) as zf:
@@ -226,8 +226,8 @@ def archive_fingerprint(zip_file: Path) -> str:
         return digest.hexdigest()
 
 
-def read_views_fingerprint(zip_file: Path) -> str | None:
-    """The fingerprint the views last matched, None when never recorded."""
+def read_views_hash(zip_file: Path) -> str | None:
+    """The hash the views last matched, None when never recorded."""
     try:
         data = json.loads(manifest_path(zip_file.parent).read_text(encoding="utf-8"))
     except OSError, json.JSONDecodeError:
@@ -235,16 +235,39 @@ def read_views_fingerprint(zip_file: Path) -> str | None:
     return data.get("views")
 
 
-def record_views_fingerprint(zip_file: Path, fingerprint: str | None) -> None:
-    """Write the views fingerprint into the manifest, bumping it to version 2."""
+def record_views_hash(zip_file: Path, views_hash: str | None) -> None:
+    """Write the views hash into the manifest, bumping it to version 2."""
     manifest = manifest_path(zip_file.parent)
     try:
         data = json.loads(manifest.read_text(encoding="utf-8"))
         data["version"] = 2
-        data["views"] = fingerprint
+        data["views"] = views_hash
         manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except (OSError, json.JSONDecodeError) as exc:
         raise UserInputError(f"Cannot write archive manifest {display_path(manifest)}: {exc}") from exc
+
+
+def advance_views_hash(zip_file: Path, *, zip_hash_before: str, stored_views_hash: str | None) -> bool:
+    """Mark the views as in sync, but only when they were in sync before the change.
+
+    A push or a restore moves the truth and the views by the same track, so the
+    two stay in step — unless the views were already behind, where recording the
+    new hash would claim a sync that never happened. Only `archive rebuild` can
+    make that claim true. A virgin archive (empty ZIP, no views yet) counts as in
+    sync: the first filing creates the ZIP and the views together.
+
+    Returns whether the manifest was advanced.
+    """
+    in_sync_before = stored_views_hash == zip_hash_before or (
+        stored_views_hash is None and zip_hash_before == EMPTY_ZIP_HASH
+    )
+    if not in_sync_before:
+        return False
+    if ctx.is_plan:
+        log.info("Would mark the views as in sync with the ZIP", target=str(zip_file))
+        return True
+    record_views_hash(zip_file, archive_hash(zip_file))
+    return True
 
 
 def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = Path(".")) -> None:
@@ -326,9 +349,9 @@ def _unrecognized_tags(entries: Sequence[str], zip_file: Path, tag_map: Mapping[
 def status(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -> None:
     """Report whether the desktop and mobile views match the ZIP, the truth.
 
-    One comparison answers it: the manifest records the ZIP's fingerprint as of
+    One comparison answers it: the manifest records the ZIP's hash as of
     the last time the views were regenerated, and status holds it against the
-    ZIP's fingerprint now. Missing view files are reported per kind, and
+    ZIP's hash now. Missing view files are reported per kind, and
     _unclassified entries are counted because no view will ever hold them.
 
     Nothing is decompressed unless the ZIP still holds flat entries: their kind
@@ -365,7 +388,7 @@ def status(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) ->
     if missing:
         log.warning(f"Missing view files: {', '.join(missing)}", target=str(archive_dir))
 
-    current, stored = archive_fingerprint(zip_file), read_views_fingerprint(zip_file)
+    current, stored = archive_hash(zip_file), read_views_hash(zip_file)
     if stored == current:
         log.info("Views are in sync with the ZIP", target=str(archive_dir))
     elif stored is None:
@@ -382,7 +405,7 @@ def rebuild(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -
     Every view is built the way a push builds it — an empty collection plus the
     same add() per track — replayed over the ZIP's entries in name order, so a
     rebuild and incremental pushes land in the same shape. What the manifest's
-    old views fingerprint said is irrelevant: the ZIP wins, and the fingerprint
+    old views hash said is irrelevant: the ZIP wins, and the hash
     is refreshed to the ZIP as rebuilt.
     """
     archive_dir, zip_file = resolve_archive(zip_path)
@@ -421,7 +444,7 @@ def rebuild(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -
         # 逐条刷一行会把一条发现变成一堵墙，按值汇总一次说清
         log.warning(kmlfile.summarize_unknown_tags(unknown), target=str(archive_dir))
 
-    record_views_fingerprint(zip_file, archive_fingerprint(zip_file))
+    record_views_hash(zip_file, archive_hash(zip_file))
     log.info("Views are in sync with the ZIP", target=str(archive_dir))
 
 
@@ -504,6 +527,11 @@ def pop_kml_archive(
     a track cannot be restored out of one record while another keeps it.
     --force warns about each disagreement instead of stopping, and skips only
     the step whose record is missing.
+
+    Removing the track moves the truth and the views by the same track, so a
+    restore that finds them in sync leaves them in sync — advance_views_hash
+    says so, on the same judgement a push uses. Skipping that left every
+    restore reported as out of date until the next rebuild.
     """
     zip_file = resolve_archive(zip_path)[1]
     archive_dir = zip_file.parent
@@ -516,9 +544,14 @@ def pop_kml_archive(
         for problem in state.problems:
             log.warning(f"{problem} (forced)", target=str(archive_dir))
 
+    # 只在真的删得掉条目时才取哈希：没有条目可删，真值就没动过，也没什么可前移的
+    zip_hash_before = archive_hash(zip_file) if state.zip_entry is not None else None
+    stored_views_hash = read_views_hash(zip_file)
     if state.zip_entry is not None:
         pop_zip_entry(state.zip_entry, zip_file)
     if state.in_desktop:
         collections.remove_track_from_desktop_collection(state.track_name, desktop_collection)
     if state.in_mobile:
         collections.remove_track_from_mobile_collection(state.track_name, mobile_collection)
+    if zip_hash_before is not None:
+        advance_views_hash(zip_file, zip_hash_before=zip_hash_before, stored_views_hash=stored_views_hash)

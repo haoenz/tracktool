@@ -782,20 +782,53 @@ class TestArchiveLayering:
 
 
 class TestArchiveStatusAndRebuild:
-    """E2：视图是派生的——指纹回答「落后没有」，rebuild 从真值再生。"""
+    """E2：视图是派生的——哈希回答「落后没有」，rebuild 从真值再生。"""
 
-    def test_a_push_that_syncs_the_views_records_the_fingerprint(self, track_file: Path, tmp_path: Path):
+    def test_a_push_that_syncs_the_views_records_the_hash(self, track_file: Path, tmp_path: Path):
         zip_path = make_archive(tmp_path / "archive")
 
         _push(track_file, zip_path=zip_path)
 
-        assert archive.read_views_fingerprint(zip_path) == archive.archive_fingerprint(zip_path)
+        assert archive.read_views_hash(zip_path) == archive.archive_hash(zip_path)
         result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
         assert result.exit_code == 0
         assert "in sync" in result.output
 
-    def test_status_reports_never_synced_when_the_manifest_has_no_fingerprint(self, track_file: Path, tmp_path: Path):
-        """迁移后的老归档：manifest 从没记过指纹，status 如实说「从未同步」。"""
+    def test_a_restore_that_removes_a_track_keeps_the_views_in_sync(
+        self, track_file: Path, tmp_path: Path, monkeypatch
+    ):
+        """回归：pop 把真值与视图一起改对了，就不能再报「落后」。"""
+        zip_path = make_archive(tmp_path / "archive")
+        _push(track_file, zip_path=zip_path)
+        output = tmp_path / "output"
+        output.mkdir()
+        monkeypatch.chdir(output)
+
+        archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path))
+
+        assert archive.read_views_hash(zip_path) == archive.archive_hash(zip_path)
+        result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
+        assert result.exit_code == 0
+        assert "in sync" in result.output
+
+    def test_a_restore_never_claims_a_sync_that_was_not_there(self, track_file: Path, tmp_path: Path, monkeypatch):
+        """视图本来就落后时，pop 不许因为改对了自己那一条就谎报同步。"""
+        zip_path = make_archive(tmp_path / "archive")
+        _push(track_file, zip_path=zip_path)
+        with zipfile.ZipFile(zip_path, "a") as zf:
+            zf.writestr("Default/2024-06/2024-06-01 late.kml", TRACK_KML)
+        output = tmp_path / "output"
+        output.mkdir()
+        monkeypatch.chdir(output)
+
+        archive.pop_kml_archive(track_file.stem, TrackKind.DEFAULT, str(zip_path))
+
+        result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
+        assert result.exit_code == 0
+        assert "out of date" in result.output
+
+    def test_status_reports_never_synced_when_the_manifest_has_no_hash(self, track_file: Path, tmp_path: Path):
+        """迁移后的老归档：manifest 从没记过哈希，status 如实说「从未同步」。"""
         zip_path = make_archive(tmp_path / "archive")
         _push(track_file, zip_path=zip_path)
         manifest = zip_path.parent / "archive.json"
@@ -809,7 +842,7 @@ class TestArchiveStatusAndRebuild:
         assert "never been synced" in result.output
 
     def test_status_reports_stale_when_the_zip_moves_behind_the_views(self, track_file: Path, tmp_path: Path):
-        """真值动了而视图没跟上：指纹对不上，status 报「落后」。"""
+        """真值动了而视图没跟上：哈希对不上，status 报「落后」。"""
         zip_path = make_archive(tmp_path / "archive")
         _push(track_file, zip_path=zip_path)
         with zipfile.ZipFile(zip_path, "a") as zf:
@@ -833,7 +866,7 @@ class TestArchiveStatusAndRebuild:
         assert len(xmlutil.findall(desktop, "//kml:Placemark")) == 1
         mobile = xmlutil.parse_file(zip_path.parent / "Default.Mobile.kml")
         assert len(xmlutil.findall(mobile, "//kml:LineString")) == 1
-        assert archive.read_views_fingerprint(zip_path) == archive.archive_fingerprint(zip_path)
+        assert archive.read_views_hash(zip_path) == archive.archive_hash(zip_path)
 
     def test_rebuild_leaves_unclassified_entries_out_of_the_views(self, tmp_path: Path):
         """_unclassified 条目没有类型，任何视图都不收，rebuild 也不猜。"""

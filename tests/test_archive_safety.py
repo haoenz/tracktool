@@ -196,11 +196,11 @@ def test_append_publishes_complete_batch_preserving_zip_metadata(tmp_path, monke
     assert not list(tmp_path.glob(".Archive.zip.*.tmp"))
 
 
-def test_failed_push_does_not_move_sources_or_advance_fingerprint(tmp_path, monkeypatch):
+def test_failed_push_does_not_move_sources_or_advance_hash(tmp_path, monkeypatch):
     zip_path = make_archive(tmp_path / "archive")
     old = track(tmp_path / "sources")
     workflows.push_tracks([old], str(zip_path))
-    stored = archive.read_views_fingerprint(zip_path)
+    stored = archive.read_views_hash(zip_path)
     before = zip_path.read_bytes()
     new = track(old.parent, "2024-05-02 new.kml")
 
@@ -213,7 +213,7 @@ def test_failed_push_does_not_move_sources_or_advance_fingerprint(tmp_path, monk
     assert new.exists()
     assert not (zip_path.parent / "Backup").exists()
     assert zip_path.read_bytes() == before
-    assert archive.read_views_fingerprint(zip_path) == stored
+    assert archive.read_views_hash(zip_path) == stored
 
 
 def test_append_plan_does_not_create_zip_or_scratch(tmp_path, plan_mode):
