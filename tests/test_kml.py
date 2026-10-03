@@ -925,6 +925,31 @@ class TestArchiveStatusAndRebuild:
         assert result.exit_code == 0
         assert desktop.read_text(encoding="utf-8") == before
 
+    @pytest.mark.parametrize("command", ["status", "rebuild"])
+    def test_a_missing_zip_is_reported_as_user_input(self, track_file: Path, tmp_path: Path, command: str):
+        """归档目录还在（manifest 就是身份）但 ZIP 不在了：报一行，不是 traceback。"""
+        zip_path = make_archive(tmp_path / "archive")
+        _push(track_file, zip_path=zip_path)
+        zip_path.unlink()
+
+        result = runner.invoke(app, ["archive", command, "--zip", str(zip_path)])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, UserInputError)
+        assert "does not exist" in str(result.exception)
+
+    @pytest.mark.parametrize("command", ["status", "rebuild"])
+    def test_a_zip_that_is_not_a_zip_is_reported_as_user_input(self, track_file: Path, tmp_path: Path, command: str):
+        zip_path = make_archive(tmp_path / "archive")
+        _push(track_file, zip_path=zip_path)
+        zip_path.write_bytes(b"not a zip at all")
+
+        result = runner.invoke(app, ["archive", command, "--zip", str(zip_path)])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, UserInputError)
+        assert "Cannot read the archive" in str(result.exception)
+
 
 class TestGlobExpansion:
     """多文件入口（push / merge / set-tag / type）的参数通配符：进程内展开，按路径排序。"""

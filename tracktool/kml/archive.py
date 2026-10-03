@@ -104,6 +104,24 @@ def ensure_zip_file(zip_file: Path) -> None:
     log.info("Created new ZIP archive", target=str(zip_file))
 
 
+def require_zip_file(zip_file: Path) -> None:
+    """Refuse an archive whose ZIP is not there, or is not a ZIP, as user input.
+
+    resolve_archive proves the directory is an archive — the manifest is its
+    identity — and says nothing about the ZIP inside it, which every reader
+    opens directly. Going through here is what turns a deleted or truncated
+    archive into one log line instead of a bare FileNotFoundError or
+    BadZipFile.
+    """
+    if not zip_file.is_file():
+        raise UserInputError(f"KML compressed file does not exist: {display_path(zip_file)}")
+    try:
+        with zipfile.ZipFile(zip_file):
+            pass
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise UserInputError(f"Cannot read the archive {display_path(zip_file)}: {exc}") from exc
+
+
 def find_zip_entry(
     kml_name: str, zip_path: Path, type_: TrackKind | None = None, *, tag_map: Mapping[str, str] | None = None
 ) -> str | None:
@@ -441,6 +459,7 @@ def status(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) ->
     value, so the fix — one `config set` — is named in the report itself.
     """
     archive_dir, zip_file = resolve_archive(zip_path)
+    require_zip_file(zip_file)
 
     counts: dict[str, int] = {}
     unlayered: list[str] = []
@@ -497,6 +516,7 @@ def rebuild(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -
     brings a view into being that never existed.
     """
     archive_dir, zip_file = resolve_archive(zip_path)
+    require_zip_file(zip_file)
     if ctx.is_plan:
         log.info("Would rebuild both collections from the ZIP", target=str(zip_file))
         return

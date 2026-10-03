@@ -82,9 +82,8 @@ def undo_last(zip_path: str | None = None, steps: int = 1, force: bool = False) 
     through states it actually had.
     """
     archive_dir, zip_file = resolve_archive(zip_path)
-    if not zip_file.is_file():
-        # 不能指望 archive_hash 报错：它直接开文件，抛的是裸 FileNotFoundError
-        raise UserInputError(f"KML compressed file does not exist: {display_path(zip_file)}")
+    # 不能指望 archive_hash 报错：它直接开文件，抛的是裸 FileNotFoundError
+    archive.require_zip_file(zip_file)
 
     targets = _targets(archive_dir, steps)
     if not targets:
@@ -143,10 +142,10 @@ def undo_last(zip_path: str | None = None, steps: int = 1, force: bool = False) 
 
 
 def _readable_hash(zip_file: Path) -> str:
-    """The ZIP's hash, with an unreadable archive reported as user input.
+    """The ZIP's hash, with a read that fails reported as user input.
 
-    archive_hash opens the file itself, so a ZIP that is not a ZIP surfaces as
-    a bare BadZipFile — and a bare exception is a traceback, not an answer.
+    require_zip_file has already proved the archive is there and opens; this
+    covers the read itself, which can still fail on its own terms.
     """
     try:
         return archive.current_hash(zip_file)
