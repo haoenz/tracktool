@@ -59,7 +59,7 @@ class TestKmlWritesAreReported:
 
         assert sorted(p.name for p in tmp_path.glob("*.kml")) == [source.name]
 
-    def test_setting_the_track_type_leaves_the_file_alone(self, tmp_path: Path, plan_mode):
+    def test_setting_the_track_activity_leaves_the_file_alone(self, tmp_path: Path, plan_mode):
         source = tmp_path / "2024-05-01 test.kml"
         source.write_text(
             TRACK_KML.replace(
@@ -69,14 +69,14 @@ class TestKmlWritesAreReported:
             encoding="utf-8",
         )
 
-        runner.invoke(app, ["--dry-run", "kml", "set-type", str(source), "--type", "Flight"])
+        runner.invoke(app, ["--dry-run", "kml", "set-tag", str(source), "--tag", "滑翔"])
 
         node = xmlutil.find(
             xmlutil.parse_file(source), "/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='TrackTags']/kml:value"
         )
         assert (node.text or "") == "火车"
 
-    def test_setting_the_type_on_a_wildcard_leaves_every_file_alone(self, tmp_path: Path, plan_mode):
+    def test_setting_the_activity_on_a_wildcard_leaves_every_file_alone(self, tmp_path: Path, plan_mode):
         before = TRACK_KML.replace(
             "<Document>",
             "<Document><ExtendedData><Data name='TrackTags'><value>火车</value></Data></ExtendedData>",
@@ -86,7 +86,7 @@ class TestKmlWritesAreReported:
         first.write_text(before, encoding="utf-8")
         second.write_text(before, encoding="utf-8")
 
-        result = runner.invoke(app, ["--dry-run", "kml", "set-type", str(tmp_path / "*.kml"), "--type", "Flight"])
+        result = runner.invoke(app, ["--dry-run", "kml", "set-tag", str(tmp_path / "*.kml"), "--tag", "滑翔"])
 
         assert result.exit_code == 0, result.output
         assert first.read_text(encoding="utf-8") == before
@@ -96,7 +96,7 @@ class TestKmlWritesAreReported:
         source = _kml(tmp_path)  # 没有 TrackTags 节点，只有 --create-tag 才写得进去
         before = source.read_bytes()
 
-        result = runner.invoke(app, ["--dry-run", "kml", "set-type", str(source), "--type", "Train", "--create-tag"])
+        result = runner.invoke(app, ["--dry-run", "kml", "set-tag", str(source), "--tag", "地铁", "--create-tag"])
 
         assert result.exit_code == 0, result.output
         assert source.read_bytes() == before

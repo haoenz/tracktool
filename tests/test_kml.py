@@ -654,12 +654,11 @@ class TestKmlPopCommand:
 
 
 class TestTrackKind:
-    """Issue #7: TrackKind StrEnum + set→get roundtrip."""
+    """TrackKind 是归档类别；写进 TrackTags 的是活动名，类别由词表查出来。"""
 
     @staticmethod
     def _kml_with_track_tags(tmp_path: Path, tag: str = "火车") -> Path:
-        # set_kml_type 只更新已存在的 TrackTags 节点，
-        # 往返测试需要先注入一个（2bulu 导出的 KML 均带此节点）
+        # 2bulu 导出的 KML 都带这个节点；没有它 set-tag 无处可写（要 --create-tag）
         kml_content = TRACK_KML.replace(
             "<Document>",
             f"<Document><ExtendedData><Data name='TrackTags'><value>{tag}</value></Data></ExtendedData>",
@@ -668,34 +667,44 @@ class TestTrackKind:
         kml.write_text(kml_content, encoding="utf-8")
         return kml
 
-    def test_set_get_roundtrip(self, tmp_path: Path):
-        # kml set-type 写入的是英文名（如 "Train"），get 必须能读回，不再落 Unknown
+    def test_writing_an_activity_reads_back_as_its_category(self, tmp_path: Path):
+        # 写进去的是活动名（地铁），读出来的是类别（Train）：投影是查表，不是约定
         kml = self._kml_with_track_tags(tmp_path, "火车")
-        kmlfile.set_kml_type(kml, TrackKind.TRAIN)
+
+        assert kmlfile.set_track_tags(kml, "地铁") is True
+
+        assert kmlfile.get_track_tags(kml) == "地铁"
         assert kmlfile.get_kml_type(kml) is TrackKind.TRAIN
 
-    def test_written_value_is_plain_string(self, tmp_path: Path):
+    def test_the_written_value_is_the_activity_itself(self, tmp_path: Path):
+        # 字段里不再出现类别名——写 "Train" 会让 push 认不出它、归进 _unclassified
         kml = self._kml_with_track_tags(tmp_path, "火车")
-        kmlfile.set_kml_type(kml, TrackKind.FLIGHT)
-        tree = xmlutil.parse_file(kml)
-        node = xmlutil.find(tree, "/kml:kml/kml:Document/kml:ExtendedData/kml:Data[@name='TrackTags']/kml:value")
-        assert (node.text or "") == "Flight"
+
+        kmlfile.set_track_tags(kml, "滑翔")
+
+        node = xmlutil.find(xmlutil.parse_file(kml), kmlfile.TRACK_TAGS_NODE)
+        assert (node.text or "") == "滑翔"
+        assert kmlfile.get_kml_type(kml) is TrackKind.FLIGHT
 
     def test_cli_set_then_get(self, tmp_path: Path):
         kml = self._kml_with_track_tags(tmp_path, "火车")
 
-        result = runner.invoke(app, ["kml", "set-type", str(kml), "--type", "Train"])
-        assert result.exit_code == 0
+        result = runner.invoke(app, ["kml", "set-tag", str(kml), "--tag", "地铁"])
+        assert result.exit_code == 0, result.output
         result = runner.invoke(app, ["kml", "type", str(kml)])
         assert result.exit_code == 0
-        assert result.output.strip() == "Train"
+        assert result.stdout.strip() == "Train"
 
-    def test_cli_rejects_unknown_type(self, tmp_path: Path):
-        # 非法类型值在 CLI 入口被 typer 拒绝，不再流向下游
-        kml = tmp_path / "2024-05-01 test.kml"
-        kml.write_text(TRACK_KML, encoding="utf-8")
-        result = runner.invoke(app, ["kml", "set-type", str(kml), "--type", "Bogus"])
-        assert result.exit_code != 0
+    def test_cli_rejects_an_activity_outside_the_table(self, tmp_path: Path):
+        # 表外词在入口被拒，并指出两条出路；写进去只会多出一份 _unclassified
+        kml = self._kml_with_track_tags(tmp_path, "火车")
+
+        result = runner.invoke(app, ["kml", "set-tag", str(kml), "--tag", "轨通"])
+
+        assert result.exit_code == 1
+        assert "closest: 轨交" in str(result.exception)
+        assert 'config set "track_tag.Default"' in str(result.exception)
+        assert kmlfile.get_track_tags(kml) == "火车"
 
     def test_cli_invalid_case_rejected(self, tmp_path: Path):
         # 小写 "default" 曾会静默走向 Unknown / KeyError，现在入口即拒
@@ -715,7 +724,26 @@ class TestTrackKind:
 
         result = runner.invoke(app, ["kml", "type", str(kml)])
         assert result.exit_code == 0
-        assert result.output.strip() == "Unknown"  # 只是识别结果的如实呈现
+        # 比 stdout：日志（这里是那条指路）走 stderr，CliRunner 的 output 把两边并在一起
+        assert result.stdout.strip() == "Unknown"  # 只是识别结果的如实呈现
+
+    def test_a_category_name_left_in_the_file_is_reported_with_a_way_out(self, tmp_path: Path, caplog):
+        # 老版 set-type 写进去的英文类别名：判定仍是不识别，但日志要说清它是什么
+        kml = self._kml_with_track_tags(tmp_path, "Train")
+
+        result = runner.invoke(app, ["kml", "type", str(kml)])
+
+        assert result.stdout.strip() == "Unknown"
+        assert '"Train", a category name' in caplog.text
+        assert "kml set-tag --tag" in caplog.text
+
+    def test_raw_prints_the_activity_the_category_was_read_from(self, tmp_path: Path):
+        kml = self._kml_with_track_tags(tmp_path, "地铁")
+
+        result = runner.invoke(app, ["kml", "type", str(kml), "--raw"])
+
+        assert result.exit_code == 0
+        assert result.stdout.strip() == "地铁"
 
 
 def _kml_with_tag(tag: str) -> str:
@@ -824,6 +852,35 @@ class TestArchiveStatusAndRebuild:
         assert "Missing view files" not in result.output
         assert "in sync" in result.output
 
+    def test_a_flat_entry_no_table_can_classify_is_reported_once_by_value(self, tmp_path: Path, caplog):
+        """分层之前写下的老条目：类型只能靠 TrackTags 读，而表外词没有类型可归。
+
+        同一条发现会有几百遍，所以要按值说成一句，且只说一次。
+        """
+        zip_path = make_archive(tmp_path / "archive")
+        with zipfile.ZipFile(zip_path, "a") as zf:
+            for name in ("2024-05-01 a.kml", "2024-05-02 b.kml", "2024-05-03 c.kml"):
+                zf.writestr(name, _kml_with_tag("滑雪"))
+            zf.writestr("2024-05-04 d.kml", _kml_with_tag("轨通"))
+
+        result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "滑雪 (3), 轨通 (1)" in caplog.text
+        assert "kml type --raw" in caplog.text
+        assert len([r for r in caplog.records if "unrecognized TrackTags" in r.getMessage()]) == 1
+
+    def test_rebuild_reports_the_flat_entries_it_cannot_file(self, tmp_path: Path, caplog):
+        zip_path = make_archive(tmp_path / "archive")
+        with zipfile.ZipFile(zip_path, "a") as zf:
+            zf.writestr("2024-05-01 a.kml", _kml_with_tag("滑雪"))
+
+        result = runner.invoke(app, ["archive", "rebuild", "--zip", str(zip_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "Left out of the views: 1 _unclassified entries" in caplog.text
+        assert "滑雪 (1)" in caplog.text
+
     def test_rebuild_in_plan_mode_writes_nothing(self, track_file: Path, tmp_path: Path):
         zip_path = make_archive(tmp_path / "archive")
         _push(track_file, zip_path=zip_path)
@@ -901,12 +958,12 @@ class TestGlobExpansion:
         assert len(zipfile.ZipFile(zip_path).namelist()) == 2  # merge 也归档输入
 
 
-class TestSetTypeBatch:
-    """kml set-type 的通配符批量：整表交给批量入口，一个文件失败不吞整批。"""
+class TestSetTagBatch:
+    """kml set-tag 的通配符批量：整表交给批量入口，一个文件失败不吞整批。"""
 
     @staticmethod
     def _taggable(tmp_path: Path, name: str, tag: str = "火车") -> Path:
-        """2bulu 导出的轨迹带 TrackTags 节点；没有它 set-type 无处可写。"""
+        """2bulu 导出的轨迹带 TrackTags 节点；没有它 set-tag 无处可写。"""
         kml = tmp_path / name
         kml.write_text(
             TRACK_KML.replace(
@@ -928,19 +985,19 @@ class TestSetTypeBatch:
         second = self._taggable(tmp_path, "2024-05-02 second.kml")
         outside = self._taggable(tmp_path, "2023-04-01 outside.kml")
 
-        result = runner.invoke(app, ["kml", "set-type", str(tmp_path / "2024-05-*.kml"), "--type", "Train"])
+        result = runner.invoke(app, ["kml", "set-tag", str(tmp_path / "2024-05-*.kml"), "--tag", "地铁"])
 
         assert result.exit_code == 0, result.output
-        assert self._tag_of(first) == "Train"
-        assert self._tag_of(second) == "Train"
+        assert self._tag_of(first) == "地铁"
+        assert self._tag_of(second) == "地铁"
         assert self._tag_of(outside) == "火车"
-        # 写进去的是英文名，get 必须能读回（set→get 往返）
+        # 写进去的是活动名，类别由词表查出来
         assert kmlfile.get_kml_type(first) is TrackKind.TRAIN
 
     def test_wildcard_without_matches_is_a_user_error(self, tmp_path: Path):
         kml = self._taggable(tmp_path, "2024-05-01 first.kml")
 
-        result = runner.invoke(app, ["kml", "set-type", str(tmp_path / "2019-*.kml"), "--type", "Train"])
+        result = runner.invoke(app, ["kml", "set-tag", str(tmp_path / "2019-*.kml"), "--tag", "地铁"])
 
         assert result.exit_code == 1
         assert self._tag_of(kml) == "火车"
@@ -950,10 +1007,10 @@ class TestSetTypeBatch:
         bad = tmp_path / "2024-05-02 bad.kml"
         bad.write_text("<kml><oops>", encoding="utf-8")
 
-        result = runner.invoke(app, ["kml", "set-type", str(good), str(bad), "--type", "Flight"])
+        result = runner.invoke(app, ["kml", "set-tag", str(good), str(bad), "--tag", "飞机"])
 
         assert result.exit_code == 3
-        assert self._tag_of(good) == "Flight"
+        assert self._tag_of(good) == "飞机"
         assert bad.read_bytes() == b"<kml><oops>"  # 坏文件保持原样
 
     def test_a_file_without_track_tags_fails_instead_of_pretending(self, tmp_path: Path, caplog):
@@ -963,30 +1020,52 @@ class TestSetTypeBatch:
         plain.write_text(TRACK_KML, encoding="utf-8")
         before = plain.read_bytes()  # Windows 写盘是 CRLF，比字节才算"一个字节都没动"
 
-        result = runner.invoke(app, ["kml", "set-type", str(plain), "--type", "Train"])
+        result = runner.invoke(app, ["kml", "set-tag", str(plain), "--tag", "地铁"])
 
         assert result.exit_code == 3
         assert plain.read_bytes() == before
         assert "No TrackTags node" in caplog.text
 
-    def test_the_type_must_be_an_option_and_nothing_is_written_without_it(self, tmp_path: Path):
+    def test_the_activity_is_an_option_and_nothing_is_written_without_it(self, tmp_path: Path):
         kml = self._taggable(tmp_path, "2024-05-01 first.kml")
 
-        # 缺 --type
-        assert runner.invoke(app, ["kml", "set-type", str(kml)]).exit_code != 0
-        # 旧的位置写法（类型跟在文件后）现在必须报错，而不是被当成第二个路径
-        assert runner.invoke(app, ["kml", "set-type", str(kml), "Train"]).exit_code != 0
+        # 缺 --tag
+        assert runner.invoke(app, ["kml", "set-tag", str(kml)]).exit_code != 0
+        # 旧的位置写法（活动名跟在文件后）现在必须报错，而不是被当成第二个路径
+        assert runner.invoke(app, ["kml", "set-tag", str(kml), "地铁"]).exit_code != 0
+        # 旧的 --type 选项整个消失：类别不是这个命令的取值域
+        assert runner.invoke(app, ["kml", "set-tag", str(kml), "--type", "Train"]).exit_code != 0
 
         assert self._tag_of(kml) == "火车"
+
+    def test_an_activity_added_to_the_table_is_accepted(self, tmp_path: Path, monkeypatch):
+        # 串起整条链：表外词被拒 → config set 把它加进表 → 同一条命令通过
+        cfg = Config(path=tmp_path / "config.json").load()
+        cfg.save()
+        monkeypatch.setattr(ctx, "config", cfg)
+        kml = self._taggable(tmp_path, "2024-05-01 first.kml")
+
+        refused = runner.invoke(app, ["kml", "set-tag", str(kml), "--tag", "滑雪"])
+        assert refused.exit_code == 1
+        assert self._tag_of(kml) == "火车"
+
+        added = runner.invoke(app, ["config", "set", "track_tag.Default", "+滑雪"])
+        assert added.exit_code == 0, added.output
+
+        accepted = runner.invoke(app, ["kml", "set-tag", str(kml), "--tag", "滑雪"])
+        assert accepted.exit_code == 0, accepted.output
+        assert self._tag_of(kml) == "滑雪"
+        assert kmlfile.get_kml_type(kml, tag_map=cfg.track_tag_map) is TrackKind.DEFAULT
 
     def test_create_tag_adds_the_node_and_the_value_reads_back(self, tmp_path: Path):
         # 派生文件没有 TrackTags 节点：显式开关才建，建在哪由读取那条 XPath 说了算
         plain = tmp_path / "2024-05-01 plain.kml"
         plain.write_text(TRACK_KML, encoding="utf-8")
 
-        result = runner.invoke(app, ["kml", "set-type", str(plain), "--type", "Train", "--create-tag"])
+        result = runner.invoke(app, ["kml", "set-tag", str(plain), "--tag", "地铁", "--create-tag"])
 
         assert result.exit_code == 0, result.output
+        assert kmlfile.get_track_tags(plain) == "地铁"
         assert kmlfile.get_kml_type(plain) is TrackKind.TRAIN
         document = xmlutil.find(xmlutil.parse_file(plain), "/kml:kml/kml:Document")
         children = [xmlutil.etree.QName(child).localname for child in document]
@@ -1003,10 +1082,10 @@ class TestSetTypeBatch:
             encoding="utf-8",
         )
 
-        result = runner.invoke(app, ["kml", "set-type", str(kml), "--type", "Flight", "--create-tag"])
+        result = runner.invoke(app, ["kml", "set-tag", str(kml), "--tag", "滑翔", "--create-tag"])
 
         assert result.exit_code == 0, result.output
         tree = xmlutil.parse_file(kml)
-        assert self._tag_of(kml) == "Flight"
+        assert self._tag_of(kml) == "滑翔"
         assert xmlutil.extended_data_value(tree, "PosStartName") == "起点"
         assert len(xmlutil.findall(tree, "/kml:kml/kml:Document/kml:ExtendedData/kml:Data")) == 2

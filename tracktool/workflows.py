@@ -79,8 +79,9 @@ def _read_track(path: Path, type_: TrackKind | None, tag_map: Mapping[str, str] 
         log.error(str(exc), target=str(path))
         return None
     if kind is None:
-        # 识别不出不是一种类型：报错让人指定，而不是归进一个 Unknown 类目
-        log.error("Cannot recognize the track type (set one with `kml set-type` or pass --type)", target=str(path))
+        # 识别不出不是一种类型：报出值本身和两条出路（换成词表里的词、把词加进表），
+        # 而不是把它归进一个 Unknown 类目
+        log.error(kmlfile.explain_unknown_tags(kmlfile.get_track_tags(path)), target=str(path))
         return None
     return _Track(path=path, type_=kind, content=content)
 

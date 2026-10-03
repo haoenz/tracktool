@@ -16,14 +16,29 @@ from tracktool.errors import UserInputError
 from tracktool.kml import archive, collections, edit, kmlfile
 from tracktool.kml.kmlfile import TrackKind
 
+_ACTIVITY_OF = {
+    TrackKind.DEFAULT: "徒步",
+    TrackKind.TRAIN: "火车",
+    TrackKind.FLIGHT: "飞机",
+}
+
 
 def track(directory, name="2024-05-01 trip.kml", kind=TrackKind.DEFAULT):
+    """A track filed under `kind`, tagged so its type comes from the file itself.
+
+    TrackTags holds an activity and the archive folder holds a category, but
+    these cases think in categories, so each kind gets one activity from the
+    built-in table. Writing the category name instead would be a value no table
+    classifies, and the entry would land in _unclassified, hiding whatever the
+    case is about. The table's own contract lives in
+    tests/test_misc.py::TestConfigTrackTags.
+    """
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
     path.write_text(
         TRACK_KML.replace(
             "<Document>",
-            f'<Document><ExtendedData><Data name="TrackTags"><value>{kind.value}</value></Data></ExtendedData>',
+            f'<Document><ExtendedData><Data name="TrackTags"><value>{_ACTIVITY_OF[kind]}</value></Data></ExtendedData>',
         ),
         encoding="utf-8",
     )

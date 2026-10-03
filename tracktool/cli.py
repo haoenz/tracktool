@@ -212,23 +212,43 @@ def archive_rebuild(
 @kml_app.command("type")
 def kml_type(
     path: Annotated[Path, typer.Argument(help="KML file")],
+    raw: Annotated[bool, typer.Option("--raw", help="Print the TrackTags value as stored, not the category")] = False,
 ) -> None:
-    """Print the track type (TrackTags)."""
+    """Print the track type (TrackTags); --raw prints the activity it is read from."""
     path = _resolve_path(path)
+    if raw:
+        # 原始值只照实给：判读留给不加 --raw 的那条，两者互为补充
+        print(kmlfile.get_track_tags(path) or "Unknown")
+        return
     kind = kmlfile.get_kml_type(path, tag_map=ctx.config.track_tag_map)
-    print(kind if kind is not None else "Unknown")
+    if kind is not None:
+        print(kind)
+        return
+    print("Unknown")
+    # stdout 只留那个裸值（脚本在比对它）；「值是什么、该敲哪条命令」走日志
+    log.warning(kmlfile.explain_unknown_tags(kmlfile.get_track_tags(path)), target=str(path))
 
 
-@kml_app.command("set-type")
-def kml_set_type(
-    paths: Annotated[list[Path], typer.Argument(help="KML file(s) to retype, wildcards allowed")],
-    track_type: Annotated[TrackKind, typer.Option("--type", help="Track type (Default/Train/Flight)")],
+@kml_app.command("set-tag")
+def kml_set_tag(
+    paths: Annotated[list[Path], typer.Argument(help="KML file(s) to retag, wildcards allowed")],
+    tag: Annotated[str, typer.Option("--tag", help="Activity name from the config track_tag.* table, e.g. 地铁")],
     create_tag: Annotated[
         bool, typer.Option("--create-tag", help="Add a TrackTags node to files that have none")
     ] = False,
 ) -> None:
-    """Set the track type (TrackTags) of one or more KMLs."""
-    _finish(kmlfile.set_kml_types(_expand_paths(paths), track_type, create_tag))
+    """Set the activity (TrackTags) of one or more KMLs."""
+    table = ctx.config.track_tag_map
+    if tag not in table:
+        # 表外词拒绝而不是照写：写进去的词 push 时会被归成 _unclassified，改正后再推
+        # 会在同一条轨迹下多出一个条目（判重按完整 entry 路径）——归档被劈成两份
+        close = difflib.get_close_matches(tag, list(table), n=1, cutoff=0.5)
+        hint = f" (closest: {close[0]})" if close else ""
+        raise UserInputError(
+            f"Unknown activity: {tag}{hint}. Add it first with: "
+            f'tracktool config set "{TRACK_TAG_PREFIX}Default" "+{tag}"'
+        )
+    _finish(kmlfile.set_track_tags_batch(_expand_paths(paths), tag, create_tag))
 
 
 @kml_app.command("push")

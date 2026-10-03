@@ -25,6 +25,7 @@ import os
 import shutil
 import tempfile
 import zipfile
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -305,6 +306,23 @@ def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path
     log.debug(f"Removed from ZIP: {entry_name}", target=str(zip_path))
 
 
+def _unrecognized_tags(entries: Sequence[str], zip_file: Path, tag_map: Mapping[str, str] | None) -> Counter[str]:
+    """Count, by TrackTags value, the entries whose kind cannot be read off the path.
+
+    Only flat (pre-layering) entries need this. The values come back unmapped so
+    the caller can report them as they stand: a track no table can classify has
+    no kind to fall back on, and naming the value is what tells the user which
+    word to add.
+    """
+    counts: Counter[str] = Counter()
+    with zipfile.ZipFile(zip_file) as zf:
+        for name in entries:
+            tree = xmlutil.parse_string(zf.read(name).decode("utf-8"))
+            if kmlfile.kind_from_tree(tree, tag_map=tag_map) is None:
+                counts[kmlfile.track_tags_from_tree(tree)] += 1
+    return counts
+
+
 def status(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -> None:
     """Report whether the desktop and mobile views match the ZIP, the truth.
 
@@ -312,16 +330,29 @@ def status(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) ->
     the last time the views were regenerated, and status holds it against the
     ZIP's fingerprint now. Missing view files are reported per kind, and
     _unclassified entries are counted because no view will ever hold them.
+
+    Nothing is decompressed unless the ZIP still holds flat entries: their kind
+    lives in their TrackTags, and the ones no table can classify are reported by
+    value, so the fix — one `config set` — is named in the report itself.
     """
     archive_dir, zip_file = resolve_archive(zip_path)
 
     counts: dict[str, int] = {}
+    unlayered: list[str] = []
     with zipfile.ZipFile(zip_file) as zf:
         for info in zf.infolist():
-            kind = info.filename.split("/", 1)[0] if "/" in info.filename else "(unlayered)"
+            if "/" in info.filename:
+                kind = info.filename.split("/", 1)[0]
+            else:
+                kind = "(unlayered)"
+                unlayered.append(info.filename)
             counts[kind] = counts.get(kind, 0) + 1
     summary = ", ".join(f"{kind} {count}" for kind, count in sorted(counts.items()))
     log.info(f"ZIP holds {sum(counts.values())} entries ({summary})", target=str(archive_dir))
+    if unlayered:
+        unknown = _unrecognized_tags(unlayered, zip_file, tag_map)
+        if unknown:
+            log.warning(kmlfile.summarize_unknown_tags(unknown), target=str(archive_dir))
 
     # 只对真值里有条目的类型要求视图文件：没有条目的类型从来没有过视图
     missing = [
@@ -361,12 +392,15 @@ def rebuild(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -
 
     filed: dict[TrackKind, list[tuple[Path, KmlContent]]] = {}
     skipped = 0
+    unknown: Counter[str] = Counter()
     with zipfile.ZipFile(zip_file) as zf:
         for info in sorted(zf.infolist(), key=lambda i: i.filename):
             tree = xmlutil.parse_string(zf.read(info.filename).decode("utf-8"))
             kind = _entry_kind(info.filename, tree, tag_map=tag_map)
             if kind is None:
                 skipped += 1
+                if "/" not in info.filename:
+                    unknown[kmlfile.track_tags_from_tree(tree)] += 1
                 continue
             content = kmlfile.content_from_tree(tree, info.filename)
             filed.setdefault(kind, []).append((Path(info.filename), content))
@@ -383,6 +417,9 @@ def rebuild(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -
         log.info(f"Rebuilt collections with {len(tracks)} tracks", target=str(desktop_path))
     if skipped:
         log.info(f"Left out of the views: {skipped} {UNCLASSIFIED} entries", target=str(archive_dir))
+    if unknown:
+        # 逐条刷一行会把一条发现变成一堵墙，按值汇总一次说清
+        log.warning(kmlfile.summarize_unknown_tags(unknown), target=str(archive_dir))
 
     record_views_fingerprint(zip_file, archive_fingerprint(zip_file))
     log.info("Views are in sync with the ZIP", target=str(archive_dir))

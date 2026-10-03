@@ -194,6 +194,27 @@ class TestATrackThatCannotBeFiled:
         assert result.failed == [broken]
         assert broken.is_file()
 
+    def test_an_activity_outside_the_table_names_what_it_read_and_how_to_add_it(self, tmp_path: Path, caplog):
+        # 认不出来时要报出值本身与那条 config set，而不是只报「识别不了」
+        zip_path = _archive(tmp_path)
+        track = _track(tmp_path, "2024-05-01 odd.kml", _tagged("滑雪"))
+
+        result = workflows.push_tracks([track], str(zip_path))
+
+        assert result.failed == [track]
+        assert 'TrackTags holds "滑雪"' in caplog.text
+        assert 'config set "track_tag.Default" "+滑雪"' in caplog.text
+
+    def test_a_category_name_from_an_older_set_type_is_named_as_such(self, tmp_path: Path, caplog):
+        """外层写进去的类别名不再被当类型收下：它没有活动名可查，只能报出来让人改。"""
+        zip_path = _archive(tmp_path)
+        track = _track(tmp_path, "2024-05-01 old.kml", _tagged("Train"))
+
+        result = workflows.push_tracks([track], str(zip_path))
+
+        assert result.failed == [track]
+        assert '"Train", a category name' in caplog.text
+
 
 class TestTheCommand:
     def test_a_batch_left_partly_unfiled_exits_three(self, tmp_path: Path, monkeypatch):
