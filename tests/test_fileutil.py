@@ -11,19 +11,45 @@ class TestMoveToFolder:
     def test_moves_and_creates_folder(self, tmp_path: Path):
         file = tmp_path / "a.txt"
         file.write_text("x")
-        move_to_folder(file, "Failed")
+        assert move_to_folder(file, "Failed") is True
         assert (tmp_path / "Failed" / "a.txt").is_file()
         assert not file.exists()
 
-    def test_existing_target_keeps_both(self, tmp_path: Path):
+    def test_existing_target_with_the_same_content_drops_the_source(self, tmp_path: Path):
+        """目标已有同内容的副本：清掉源文件，而不是留下第二份等用户收拾。"""
+        file = tmp_path / "a.txt"
+        file.write_text("same")
+        target_dir = tmp_path / "Failed"
+        target_dir.mkdir()
+        (target_dir / "a.txt").write_text("same")
+
+        assert move_to_folder(file, "Failed") is True
+
+        assert (target_dir / "a.txt").read_text() == "same"  # 已在的那份没被动
+        assert not file.exists()
+
+    def test_existing_target_with_other_content_keeps_both(self, tmp_path: Path):
+        """内容不同时两处都留着：留哪一份是用户的决定，不是这里能替的。"""
         file = tmp_path / "a.txt"
         file.write_text("new")
         target_dir = tmp_path / "Failed"
         target_dir.mkdir()
         (target_dir / "a.txt").write_text("old")
-        move_to_folder(file, "Failed")
+
+        assert move_to_folder(file, "Failed") is False
+
         assert (target_dir / "a.txt").read_text() == "old"
         assert file.exists()
+
+    def test_a_directory_in_the_way_is_not_a_copy(self, tmp_path: Path):
+        """同名的是目录时没有内容可比：退回原来的保护，不动源文件。"""
+        file = tmp_path / "a.txt"
+        file.write_text("x")
+        (tmp_path / "Failed" / "a.txt").mkdir(parents=True)
+
+        assert move_to_folder(file, "Failed") is False
+
+        assert file.is_file()
 
     def test_explicit_parent(self, tmp_path: Path):
         file = tmp_path / "a.kml"

@@ -161,6 +161,19 @@ class TestMovesAndSideFilesAreReported:
         assert file.is_file()
         assert not (tmp_path / "Failed").exists()
 
+    def test_the_same_content_check_runs_but_a_preview_deletes_nothing(self, tmp_path: Path, plan_mode):
+        # 同内容的判定在预演里照做，清理留给 APPLY：预览不重排它正在预览的目录
+        file = tmp_path / "a.txt"
+        file.write_text("same", encoding="utf-8")
+        target_dir = tmp_path / "Failed"
+        target_dir.mkdir()
+        (target_dir / "a.txt").write_text("same", encoding="utf-8")
+
+        assert move_to_folder(file, "Failed") is False
+
+        assert file.is_file()
+        assert (target_dir / "a.txt").is_file()
+
     def test_grouping_media_leaves_every_file_where_it_was(self, tmp_path: Path, plan_mode):
         (tmp_path / "a.jpg").touch()
         (tmp_path / "b.mp4").touch()

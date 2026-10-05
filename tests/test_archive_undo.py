@@ -502,6 +502,59 @@ def test_an_entry_stays_when_a_later_record_cannot_put_its_file_back(archive_zip
     assert not source.exists()
 
 
+def test_a_copy_the_backup_folder_already_held_is_dropped_and_recorded(archive_zip, tmp_path):
+    """Backup 里已有同内容副本时，第二次 --move 清掉新副本，账照记。
+
+    清掉的副本必须进 backup_moves：不记的话源文件就被静默丢掉，undo 不知道
+    少了什么，也就还不了。记了之后，撤销与一次真搬移同形。
+    """
+    source = track(tmp_path / "sources")
+    content = source.read_text(encoding="utf-8")
+    workflows.push_tracks([source], str(archive_zip), move=True)  # 源件进了 Backup
+
+    stray = source.parent / source.name
+    stray.write_text(content, encoding="utf-8")  # 同内容的散落副本
+
+    workflows.push_tracks([stray], str(archive_zip), move=True)
+
+    assert not stray.exists()  # 副本清掉
+    assert backup_of(archive_zip, source).read_text(encoding="utf-8") == content  # 已在那份没被动
+    record = records(archive_zip)[-1]
+    assert record.added_entries == []  # ZIP 判重，没有第二条
+    assert [Path(move.original_path) for move in record.backup_moves] == [stray]
+
+    outcome = undo.undo_last(str(archive_zip))
+
+    assert outcome.ok
+    assert stray.read_text(encoding="utf-8") == content  # 撤销把副本从 Backup 还回原位
+
+
+def test_one_copy_cannot_be_put_back_twice(archive_zip, tmp_path):
+    """两份源件内容相同、实物只有 Backup 里那一份：后撤的那条还不上，条目留下。
+
+    两个位置共用一份实物，撤销只能还回一个。还不上那条按既有保护留下 ZIP 里的
+    条目——它是这条轨迹仅存的一份；数据不丢，但这次撤回是部分的。
+    """
+    first = track(tmp_path / "one")
+    content = first.read_text(encoding="utf-8")
+    entry = archive.zip_entry_name(first, "Default")
+    workflows.push_tracks([first], str(archive_zip), move=True)  # one/ 那份进了 Backup
+
+    second = track(tmp_path / "two")  # 同名同内容，另一个位置
+    assert second.read_text(encoding="utf-8") == content
+    workflows.push_tracks([second], str(archive_zip), move=True)
+
+    assert not first.exists() and not second.exists()  # 两个位置都空了，实物只有一份
+
+    outcome = undo.undo_last(str(archive_zip), steps=2)
+
+    assert not outcome.ok
+    assert outcome.not_undone
+    assert entries(archive_zip) == [entry]  # 唯一的一份，条目留着
+    assert second.is_file()  # 实物还回了较新的那个位置
+    assert not first.exists()  # 更早那个位置还不上
+
+
 def test_a_forced_merge_undo_keeps_the_output_when_the_sources_are_gone(archive_zip, tmp_path):
     source = track(tmp_path / "sources")
     output = tmp_path / "merged.kml"

@@ -9,6 +9,7 @@ Quarantining covers the whole per-file operation, not only the EXIF write —
 failures also arise from tag reads, media-time parsing, API calls and renames.
 """
 
+import filecmp
 import os
 import shutil
 import tempfile
@@ -74,17 +75,46 @@ def folder_target(path: Path, folder_name: str, parent_directory: Path | None = 
     return target_parent / folder_name / path.name
 
 
+def _same_content(path: Path, target: Path) -> bool:
+    """Whether both paths are plain files holding the very same bytes.
+
+    Only plain files count. A symlink or a directory is something other than a
+    copy of a file, whatever it resolves to, and neither is a thing a move may
+    drop in the source's stead.
+    """
+    if path.is_symlink() or target.is_symlink():
+        return False
+    if not (path.is_file() and target.is_file()):
+        return False
+    return filecmp.cmp(path, target, shallow=False)
+
+
 def move_to_folder(path: Path, folder_name: str, parent_directory: Path | None = None) -> bool:
     """Move file into folder_name, creating it if needed.
 
+    An occupied target is never overwritten, but it is not always a refusal.
+    When the two are plain files holding the same bytes, the source is dropped
+    instead: the folder already holds that file, and keeping a second copy
+    would turn a routine --move into cleanup for the user. A target that
+    differs in content is left alone, with a warning that says so — which of
+    the two the user means to keep is not ours to decide.
+
     Under PLAN mode the move is reported rather than made: a preview must not
     rearrange the directory it is previewing, and this is the one place every
-    move of a file goes through. Returns True only when the file was moved.
+    move of a file goes through. Returns True when the source is no longer
+    where it was — moved, or dropped as a copy the folder already held.
     """
     target_path = folder_target(path, folder_name, parent_directory)
     target_dir = target_path.parent
     if target_path.exists() or target_path.is_symlink():
-        log.warning(f"File already exists in {folder_name} folder; not moved", target=str(target_path))
+        if _same_content(path, target_path):
+            if ctx.is_plan:
+                log.info(f"Would drop this file; {folder_name} already holds its content", target=str(target_path))
+                return False
+            path.unlink()
+            log.info(f"Dropped this file; {folder_name} already holds its content", target=str(target_path))
+            return True
+        log.warning(f"File already exists in {folder_name} with different content; not moved", target=str(target_path))
         return False
     if ctx.is_plan:
         log.info(f"Would move into {folder_name}", target=str(target_path))

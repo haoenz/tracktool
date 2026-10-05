@@ -133,11 +133,26 @@ class TestPushBatch:
         assert (zip_path.parent / "Backup" / track.name).is_file()  # 散落副本收进 Backup
         assert not stray.exists()
 
-        # Backup 里已有同名时：警告不覆盖，新副本留在原地（fileutil 的既有保护）
+        # Backup 里同名且内容相同：副本清掉而不是留第二份——同一次 --move 不该把
+        # 清理留给用户，这份副本照记进 backup_moves，撤销时能从 Backup 还回来
         again = _track(tmp_path, "2024-05-01 a.kml")
         result = workflows.push_tracks([again], str(zip_path), TrackKind.DEFAULT, move=True)
         assert result.ok
-        assert again.is_file()
+        assert not again.exists()
+
+    def test_move_keeps_a_copy_whose_content_differs(self, tmp_path: Path):
+        """同名而内容不同时两处都留着：留哪一份是用户的决定，--move 不动它。"""
+        zip_path = _archive(tmp_path)
+        track = _track(tmp_path, "2024-05-01 a.kml")
+        workflows.push_tracks([track], str(zip_path), TrackKind.DEFAULT, move=True)
+        backup = zip_path.parent / "Backup" / track.name
+
+        other = _track(tmp_path, "2024-05-01 a.kml", content=TRACK_KML.replace("116.0 39.0 100", "117.0 40.0 200"))
+        result = workflows.push_tracks([other], str(zip_path), TrackKind.DEFAULT, move=True)
+
+        assert result.ok
+        assert other.is_file()  # 源件留下
+        assert backup.read_text(encoding="utf-8") == TRACK_KML  # Backup 那份也没被动
 
     def test_the_plan_names_the_move_step_only_when_moving(self, tmp_path: Path, plan_mode):
         zip_path = _archive(tmp_path)

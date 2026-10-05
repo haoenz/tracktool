@@ -122,7 +122,8 @@ def _move_to_backup(tracks: list[_Track], archive_dir: Path, change: history.Cha
     backup_folder = ctx.config.kml_backup_dir_name
     for track in tracks:
         if move_to_folder(track.path, backup_folder, archive_dir):
-            # 只记真的搬成了的：同名已占时源文件留下，那一对与「没带 --move」同义
+            # 只记源文件真的离开了原位的：搬走的，和 Backup 里已有同内容副本而被清掉的
+            # 都算；同名而内容不同时两处都留着，那一对与「没带 --move」同义，不记
             change.backup_moves.append(
                 history.BackupMove(
                     original_path=str(track.path),
@@ -150,7 +151,12 @@ def push_tracks(
     moved into the backup folder, the ones the archive already held included:
     all three stores skip a duplicate by name, so a second filing of a track
     touches nothing, and --move turns the same run into a sweep that also
-    collects the stray copy.
+    collects the stray copy. A stray copy whose content the backup folder
+    already holds is dropped instead of being kept twice; one whose content
+    differs stays where it is, with a warning. Either way the record is about
+    the source: a file the run carried away — including one it dropped as the
+    backup folder's duplicate — is logged as a backup move, and one it left in
+    place is not.
 
     What the run did to the archive is recorded as it goes, and the record is
     written even when a step fails: entries an earlier step already added are
