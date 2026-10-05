@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tracktool import config
+from tracktool import config, log
 from tracktool.context import RunMode, ctx
 
 _MEDIA_TOOLS = ("exiftool", "ffmpeg")
@@ -20,6 +20,23 @@ requires_media_tools = [
         not all(shutil.which(tool) for tool in _MEDIA_TOOLS), reason="requires " + " and ".join(_MEDIA_TOOLS)
     ),
 ]
+
+
+@pytest.fixture(autouse=True)
+def pinned_terminal_width(monkeypatch) -> None:
+    """Give every test the same, generous terminal width.
+
+    Rich settles a console's width once, when it is built, and lays tables and
+    log lines out to it — so an assertion on that output is really an
+    assertion about the length of the temporary directory's path, which is
+    enough to fold a log line or cut a table cell short. Pinning the width
+    here takes that variable out: these tests are about what a command says,
+    not about how much room it had to say it in. `COLUMNS` will not do it —
+    the width is read at construction, before a fixture can set anything.
+    Log lines are still better read from `caplog.text`, which Rich never
+    touches at all.
+    """
+    monkeypatch.setattr(log.console(), "width", 200)
 
 
 def make_archive(directory: Path) -> Path:

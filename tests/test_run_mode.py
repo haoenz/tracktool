@@ -215,7 +215,7 @@ class TestTheFlagIsGlobal:
 
         assert result.exit_code == 0, result.output
         assert backend.writes == []
-        assert "would shift" in result.output or "write tags" in result.output
+        assert "write tags" in result.output
 
     def test_the_same_command_writes_when_the_flag_is_absent(self, tmp_path: Path, monkeypatch):
         backend = InMemoryBackend({tmp_path / "a.jpg": {"GPSAltitude": "100"}})

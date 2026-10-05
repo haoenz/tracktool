@@ -1,6 +1,7 @@
 """Tests for KML editing: split, bad-point removal, archive push/pop."""
 
 import json
+import logging
 import zipfile
 from pathlib import Path
 
@@ -784,7 +785,8 @@ class TestArchiveLayering:
 class TestArchiveStatusAndRebuild:
     """E2：视图是派生的——哈希回答「落后没有」，rebuild 从真值再生。"""
 
-    def test_a_push_that_syncs_the_views_records_the_hash(self, track_file: Path, tmp_path: Path):
+    def test_a_push_that_syncs_the_views_records_the_hash(self, track_file: Path, tmp_path: Path, caplog):
+        caplog.set_level(logging.INFO)
         zip_path = make_archive(tmp_path / "archive")
 
         _push(track_file, zip_path=zip_path)
@@ -792,12 +794,13 @@ class TestArchiveStatusAndRebuild:
         assert archive.read_views_hash(zip_path) == archive.archive_hash(zip_path)
         result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
         assert result.exit_code == 0
-        assert "in sync" in result.output
+        assert "in sync" in caplog.text
 
     def test_a_restore_that_removes_a_track_keeps_the_views_in_sync(
-        self, track_file: Path, tmp_path: Path, monkeypatch
+        self, track_file: Path, tmp_path: Path, monkeypatch, caplog
     ):
         """回归：pop 把真值与视图一起改对了，就不能再报「落后」。"""
+        caplog.set_level(logging.INFO)
         zip_path = make_archive(tmp_path / "archive")
         _push(track_file, zip_path=zip_path)
         output = tmp_path / "output"
@@ -809,10 +812,13 @@ class TestArchiveStatusAndRebuild:
         assert archive.read_views_hash(zip_path) == archive.archive_hash(zip_path)
         result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
         assert result.exit_code == 0
-        assert "in sync" in result.output
+        assert "in sync" in caplog.text
 
-    def test_a_restore_never_claims_a_sync_that_was_not_there(self, track_file: Path, tmp_path: Path, monkeypatch):
+    def test_a_restore_never_claims_a_sync_that_was_not_there(
+        self, track_file: Path, tmp_path: Path, monkeypatch, caplog
+    ):
         """视图本来就落后时，pop 不许因为改对了自己那一条就谎报同步。"""
+        caplog.set_level(logging.INFO)
         zip_path = make_archive(tmp_path / "archive")
         _push(track_file, zip_path=zip_path)
         with zipfile.ZipFile(zip_path, "a") as zf:
@@ -825,10 +831,11 @@ class TestArchiveStatusAndRebuild:
 
         result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
         assert result.exit_code == 0
-        assert "out of date" in result.output
+        assert "out of date" in caplog.text
 
-    def test_status_reports_never_synced_when_the_manifest_has_no_hash(self, track_file: Path, tmp_path: Path):
+    def test_status_reports_never_synced_when_the_manifest_has_no_hash(self, track_file: Path, tmp_path: Path, caplog):
         """迁移后的老归档：manifest 从没记过哈希，status 如实说「从未同步」。"""
+        caplog.set_level(logging.INFO)
         zip_path = make_archive(tmp_path / "archive")
         _push(track_file, zip_path=zip_path)
         manifest = zip_path.parent / "archive.json"
@@ -839,10 +846,11 @@ class TestArchiveStatusAndRebuild:
         result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
 
         assert result.exit_code == 0
-        assert "never been synced" in result.output
+        assert "never been synced" in caplog.text
 
-    def test_status_reports_stale_when_the_zip_moves_behind_the_views(self, track_file: Path, tmp_path: Path):
+    def test_status_reports_stale_when_the_zip_moves_behind_the_views(self, track_file: Path, tmp_path: Path, caplog):
         """真值动了而视图没跟上：哈希对不上，status 报「落后」。"""
+        caplog.set_level(logging.INFO)
         zip_path = make_archive(tmp_path / "archive")
         _push(track_file, zip_path=zip_path)
         with zipfile.ZipFile(zip_path, "a") as zf:
@@ -851,7 +859,7 @@ class TestArchiveStatusAndRebuild:
         result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
 
         assert result.exit_code == 0
-        assert "out of date" in result.output
+        assert "out of date" in caplog.text
 
     def test_rebuild_regenerates_the_views_from_the_zip(self, track_file: Path, tmp_path: Path):
         zip_path = make_archive(tmp_path / "archive")
@@ -868,8 +876,9 @@ class TestArchiveStatusAndRebuild:
         assert len(xmlutil.findall(mobile, "//kml:LineString")) == 1
         assert archive.read_views_hash(zip_path) == archive.archive_hash(zip_path)
 
-    def test_rebuild_leaves_unclassified_entries_out_of_the_views(self, tmp_path: Path):
+    def test_rebuild_leaves_unclassified_entries_out_of_the_views(self, tmp_path: Path, caplog):
         """_unclassified 条目没有类型，任何视图都不收，rebuild 也不猜。"""
+        caplog.set_level(logging.INFO)
         zip_path = make_archive(tmp_path / "archive")
         untagged = tmp_path / "2024-05-01 raw.kml"
         untagged.write_text(TRACK_KML, encoding="utf-8")  # 没有 TrackTags
@@ -880,10 +889,11 @@ class TestArchiveStatusAndRebuild:
         assert result.exit_code == 0, result.output
         # 没有一个可归类的条目，就一个视图文件都不造（与 push 一致），status 也不喊缺文件
         assert not (zip_path.parent / "Default.kml").exists()
+        caplog.clear()  # rebuild 自己也打了这句，只留 status 说的那一份
         result = runner.invoke(app, ["archive", "status", "--zip", str(zip_path)])
         assert result.exit_code == 0
-        assert "Missing view files" not in result.output
-        assert "in sync" in result.output
+        assert "Missing view files" not in caplog.text
+        assert "Views are in sync with the ZIP" in caplog.text
 
     def test_a_flat_entry_no_table_can_classify_is_reported_once_by_value(self, tmp_path: Path, caplog):
         """分层之前写下的老条目：类型只能靠 TrackTags 读，而表外词没有类型可归。

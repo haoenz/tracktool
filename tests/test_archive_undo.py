@@ -10,6 +10,7 @@ copy of it exists somewhere else.** A file whose way back is blocked keeps its
 entry in the ZIP, because after that entry goes the track exists nowhere.
 """
 
+import logging
 import zipfile
 import zlib
 from pathlib import Path
@@ -395,11 +396,13 @@ def test_a_missing_zip_refuses_the_undo_without_a_traceback(archive_zip, tmp_pat
     assert source.is_file()
 
 
-def test_an_archive_with_no_history_has_nothing_to_undo(archive_zip):
+def test_an_archive_with_no_history_has_nothing_to_undo(archive_zip, caplog):
+    caplog.set_level(logging.INFO)
+
     result = runner.invoke(app, ["archive", "undo", "--zip", str(archive_zip)])
 
     assert result.exit_code == 0
-    assert "Nothing to undo" in result.output
+    assert "Nothing to undo" in caplog.text
 
 
 def test_a_changed_extracted_file_refuses_the_undo(archive_zip, tmp_path, monkeypatch):
@@ -637,11 +640,16 @@ def test_the_log_reports_a_partial_undo(archive_zip, tmp_path):
     assert "partial" in listing.output
 
 
-def test_the_log_says_there_are_no_changes_yet(archive_zip):
+def test_the_log_says_there_are_no_changes_yet(archive_zip, caplog):
+    caplog.set_level(logging.INFO)
+
     result = runner.invoke(app, ["archive", "log", "--zip", str(archive_zip)])
 
+    # 断言日志原文而不比 result.output：后者经 Rich 按终端宽度折行，这句子会被
+    # 切进两行（"No" 一行、缩进的 "recorded changes" 一行），折与不折全看这一段
+    # 前面排了多少字符——临时目录路径长一点就翻脸，跟被测代码无关
     assert result.exit_code == 0
-    assert "No recorded changes" in result.output
+    assert "No recorded changes" in caplog.text
 
 
 # ── the archive_history switch ──────────────────────────────────────────────
