@@ -10,6 +10,8 @@ import itertools
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
+from rich.console import Console
+
 DEFAULT_WORKERS = 5
 
 
@@ -56,9 +58,19 @@ def run_parallel[T, R](
         return list(pool.map(wrapped, items))
 
 
-def rich_reporter(activity: str) -> Callable[[int, int], None]:
+def rich_reporter(activity: str, *, console: Console) -> Callable[[int, int], None]:
     """A progress display for one batch: starts on the first report, clears
-    itself once the count reaches its total (transient, so nothing lingers)."""
+    itself once the count reaches its total (transient, so nothing lingers).
+
+    The display draws on the console it is handed, and no other. Sharing one
+    console with the log handler is what keeps the two from fighting over the
+    terminal: `Live` clears its own region by moving the cursor, which only
+    works because the log's write goes through the console the live render is
+    hooked to. Two console objects — rich's global one is stdout, the handler's
+    is stderr — mean neither knows about the other, and the log line gets
+    stapled to the end of the bar. So the console is required rather than
+    defaulted: a default would quietly be that global one and reopen the hole.
+    """
     from rich.progress import (
         BarColumn,
         MofNCompleteColumn,
@@ -76,7 +88,7 @@ def rich_reporter(activity: str) -> Callable[[int, int], None]:
         TaskProgressColumn(),
         MofNCompleteColumn(),
         TimeElapsedColumn(),
-        console=None,
+        console=console,
         transient=True,
     )
     task_id = None
@@ -84,9 +96,12 @@ def rich_reporter(activity: str) -> Callable[[int, int], None]:
     def report(done: int, total: int) -> None:
         nonlocal task_id
         if task_id is None:
-            task_id = progress.add_task(activity, total=total)
+            # 首次报告是在第 1 个文件处理完之后才来的：先把数据补齐再起 Live，
+            # 否则第一帧写着 0/N，和上面刚打出的那行日志自相矛盾
+            task_id = progress.add_task(activity, total=total, completed=done)
             progress.start()
-        progress.update(task_id, completed=done)
+        else:
+            progress.update(task_id, completed=done)
         if done >= total:
             progress.stop()
 

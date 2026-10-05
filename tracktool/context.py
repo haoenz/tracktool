@@ -25,10 +25,12 @@ restores the attribute it patched, but would not undo writes made into the
 object behind it.
 """
 
+import functools
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from . import log
 from .config import Config
 from .exiftool import ExiftoolBackend
 from .metadata import MetadataBackend
@@ -68,7 +70,13 @@ class AppContext:
 def build_context() -> AppContext:
     """Assemble a context around the real adapters, over one Config instance."""
     config = Config()
-    return AppContext(config=config, backend=ExiftoolBackend(config), reporter=rich_reporter)
+    return AppContext(
+        config=config,
+        backend=ExiftoolBackend(config),
+        # 进度条画在日志那个 console 上：两者各写各的终端时，Rich 的 Live 擦不到
+        # 日志那一侧，日志就粘在进度条尾巴上。画在哪儿由这里定，progress 只管画
+        reporter=functools.partial(rich_reporter, console=log.console()),
+    )
 
 
 ctx = build_context()

@@ -51,6 +51,50 @@ class TestBatchReportsThroughContext:
         assert seen == [(1, 3), (2, 3), (3, 3)]
 
     def test_the_default_reporter_is_the_rich_one(self):
+        from functools import partial
+
+        from tracktool import log
         from tracktool.progress import rich_reporter
 
-        assert ctx.reporter is rich_reporter
+        # 默认 reporter 仍是 rich 那一个，只是把 console 焊在装配处：进度条与日志
+        # 必须画在同一个 Console 对象上，Rich 的 Live 才擦得掉自己
+        assert isinstance(ctx.reporter, partial)
+        assert ctx.reporter.func is rich_reporter
+        assert ctx.reporter.keywords == {"console": log.console()}
+
+
+class TestRichReporter:
+    def test_the_first_frame_counts_the_file_it_follows(self, monkeypatch):
+        """首帧就得带上第 1 个文件——report 是在它处理完之后才被调用的。"""
+        from rich.console import Console
+
+        from tracktool.progress import rich_reporter
+
+        events: list[tuple[str, int | None]] = []
+
+        class FakeProgress:
+            def __init__(self, *columns, **kwargs):
+                pass
+
+            def add_task(self, description, total, completed):
+                events.append(("add", completed))
+                return 0
+
+            def start(self):
+                events.append(("start", None))
+
+            def update(self, task_id, completed):
+                events.append(("update", completed))
+
+            def stop(self):
+                events.append(("stop", None))
+
+        monkeypatch.setattr("rich.progress.Progress", FakeProgress)
+
+        report = rich_reporter("Testing", console=Console())
+        report(1, 3)
+        report(2, 3)
+        report(3, 3)
+
+        # 起画前数据就已补齐（0/N 那一帧不会出现），此后每完成一个只是更新
+        assert events == [("add", 1), ("start", None), ("update", 2), ("update", 3), ("stop", None)]
