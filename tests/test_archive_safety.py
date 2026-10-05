@@ -377,6 +377,70 @@ def test_pop_does_not_guess_type_of_untagged_flat_entry(tmp_path):
     assert zip_path.read_bytes() == before
 
 
+def test_pop_without_type_uses_the_found_entrys_own_type(tmp_path, monkeypatch):
+    """不指定 --type 就是在全部条目里找：命中哪一条，就用哪一条自己的类型查视图。"""
+    zip_path = make_archive(tmp_path / "archive")
+    train = track(tmp_path / "train", kind=TrackKind.TRAIN)
+    default = track(tmp_path / "default", name="2024-05-02 other.kml", kind=TrackKind.DEFAULT)
+    assert workflows.push_tracks([train, default], str(zip_path)).ok
+    output = tmp_path / "output"
+    output.mkdir()
+    monkeypatch.chdir(output)
+    other_views = collections.collection_paths(TrackKind.DEFAULT, zip_path.parent)
+    before = [p.read_bytes() for p in other_views]
+
+    archive.pop_kml_archive(train.stem, zip_path=str(zip_path))
+
+    assert kmlfile.get_kml_type(output / train.name) == TrackKind.TRAIN
+    desktop, mobile = collections.collection_paths(TrackKind.TRAIN, zip_path.parent)
+    assert not collections.has_desktop_track(train.stem, desktop)
+    assert not collections.has_mobile_track(train.stem, mobile)
+    assert [p.read_bytes() for p in other_views] == before  # 另一类型的视图一个字没动
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.namelist() == [archive.zip_entry_name(default, "Default")]
+
+
+def test_pop_without_type_refuses_a_name_two_types_hold(tmp_path, monkeypatch):
+    """同名的两种类型是两条不同轨迹：不点名类型即歧义，任何修改前拒绝。"""
+    zip_path = make_archive(tmp_path / "archive")
+    flight = track(tmp_path / "flight", kind=TrackKind.FLIGHT)
+    train = track(tmp_path / "train", kind=TrackKind.TRAIN)
+    assert workflows.push_tracks([flight, train], str(zip_path)).ok
+    before = {p: p.read_bytes() for p in zip_path.parent.iterdir()}
+    output = tmp_path / "output"
+    output.mkdir()
+    monkeypatch.chdir(output)
+
+    with pytest.raises(UserInputError, match="use --type to choose one"):
+        archive.pop_kml_archive(train.stem, zip_path=str(zip_path))
+    assert not list(output.iterdir())
+    assert {p: p.read_bytes() for p in zip_path.parent.iterdir()} == before
+
+    archive.pop_kml_archive(train.stem, TrackKind.TRAIN, str(zip_path))  # 点名之后照常恢复
+    assert (output / train.name).read_bytes() == train.read_bytes()
+
+
+def test_pop_without_type_extracts_an_unclassified_entry_alone(tmp_path, monkeypatch):
+    """没有视图持有它就没有类型可查：只解压，不猜一个类型，也不去碰视图。"""
+    zip_path = make_archive(tmp_path / "archive")
+    untagged = tmp_path / "sources" / "2024-05-01 stray.kml"
+    untagged.parent.mkdir(parents=True)
+    untagged.write_text(TRACK_KML, encoding="utf-8")  # 没有 TrackTags，词表无从查起
+    archive.push_compressed_kml(untagged, zip_path)
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.namelist() == [f"{archive.UNCLASSIFIED}/2024-05/{untagged.name}"]
+    output = tmp_path / "output"
+    output.mkdir()
+    monkeypatch.chdir(output)
+
+    archive.pop_kml_archive(untagged.stem, zip_path=str(zip_path))
+
+    assert (output / untagged.name).read_bytes() == untagged.read_bytes()
+    with zipfile.ZipFile(zip_path) as zf:
+        assert not zf.namelist()
+    assert not list(zip_path.parent.glob("*.kml"))  # 没有类型就不该冒出视图文件
+
+
 def test_merge_batches_archive_publication_and_preserves_original_points(merge_inputs, tmp_path, monkeypatch):
     source, zip_path = merge_inputs
     second = track(source.parent, "2024-05-02 next.kml")

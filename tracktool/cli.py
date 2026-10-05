@@ -358,7 +358,10 @@ def kml_push(
 @kml_app.command("pop")
 def kml_pop(
     kml_name: Annotated[str, typer.Argument(help="Exact track filename or stem to restore")],
-    track_type: Annotated[TrackKind, typer.Option("--type", help="Track type")] = TrackKind.DEFAULT,
+    track_type: Annotated[
+        TrackKind | None,
+        typer.Option("--type", help="Track type; omit to search every type (Default/Train/Flight)"),
+    ] = None,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
     force: Annotated[bool, typer.Option("--force", help="Warn instead of stopping when the archive disagrees")] = False,
 ) -> None:

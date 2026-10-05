@@ -8,9 +8,11 @@ of one hiding the other. It is rewritten wholesale on removal, since zipfile
 has no entry-delete API. Restoring creates nothing and refuses to run on an
 archive that disagrees with itself, so half a track cannot be restored;
 `--force` turns those refusals into warnings and skips only the step they
-belong to. The desktop and mobile collections next to the ZIP are views:
-derived from the truth, checked against it by hash, regenerable with
-`archive rebuild`.
+belong to. A restore resolves an entry's kind with the entry itself, so a
+restore that names no kind searches them all and still acts on the views that
+kind owns rather than on a default. The desktop and mobile collections next to
+the ZIP are views: derived from the truth, checked against it by hash,
+regenerable with `archive rebuild`.
 
 Filing a track in — which collections, the ZIP, the backup folder, in what
 order — is a sequence of domain steps rather than a property of any one of
@@ -122,33 +124,49 @@ def require_zip_file(zip_file: Path) -> None:
         raise UserInputError(f"Cannot read the archive {display_path(zip_file)}: {exc}") from exc
 
 
+@dataclass(frozen=True)
+class ZipEntry:
+    """One resolved archive identity: the entry's path, and the kind it files under.
+
+    kind is None where no view can hold the entry — `_unclassified` ones, and
+    legacy flat ones no table classifies — which is the same None rebuild files
+    nothing under, not a kind to guess.
+    """
+
+    path: str
+    kind: TrackKind | None
+
+
 def find_zip_entry(
     kml_name: str, zip_path: Path, type_: TrackKind | None = None, *, tag_map: Mapping[str, str] | None = None
-) -> str | None:
-    """Resolve a full filename or stem, refusing ambiguous archive identities.
+) -> ZipEntry | None:
+    """Resolve a full filename or stem to one archive entry, refusing ambiguous identities.
 
-    Layered entries take their type from the folder, just as rebuild does.
-    Legacy flat entries must carry recognizable TrackTags for a typed lookup.
+    The entry's kind is resolved with it, from the same place rebuild reads it:
+    the folder for layered entries, TrackTags for flat ones. A caller that got
+    an entry therefore also knows which views hold it. Naming a kind keeps the
+    entries filed under it, so one name under two kinds is two answers and
+    naming one picks it; omitting the kind looks through every entry —
+    `_unclassified` ones included — and leaves the ambiguity to be refused.
     """
     if not kml_name or "/" in kml_name or "\\" in kml_name:
         raise UserInputError("Use a complete track filename or stem, without directories")
-    matches = []
+    matches: list[ZipEntry] = []
     with zipfile.ZipFile(zip_path) as zf:
         for info in zf.infolist():
             path = Path(info.filename)
             if info.is_dir() or kml_name not in (path.name, path.stem):
                 continue
-            if type_ is not None:
-                if "/" in info.filename:
-                    if info.filename.split("/", 1)[0] != type_.value:
-                        continue
-                else:
-                    tree = xmlutil.parse_string(zf.read(info).decode("utf-8"))
-                    if kmlfile.kind_from_tree(tree, tag_map=tag_map) != type_:
-                        continue
-            matches.append(info.filename)
+            # 分层条目看目录段，不必解压；扁平条目的类别只在 TrackTags 里，才要读出来
+            tree = None if "/" in info.filename else xmlutil.parse_string(zf.read(info).decode("utf-8"))
+            kind = _entry_kind(info.filename, tree, tag_map=tag_map)
+            if type_ is not None and kind != type_:
+                continue
+            matches.append(ZipEntry(info.filename, kind))
     if len(matches) > 1:
-        raise UserInputError(f"Ambiguous track {kml_name!r}: {', '.join(sorted(matches))}")
+        names = ", ".join(sorted(match.path for match in matches))
+        hint = " (use --type to choose one)" if type_ is None else ""
+        raise UserInputError(f"Ambiguous track {kml_name!r}: {names}{hint}")
     return matches[0] if matches else None
 
 
@@ -334,12 +352,12 @@ def pop_compressed_kml(kml_name: str, zip_path: Path, output_directory: Path = P
     out stays in the archive, since deleting it would take the track's only
     copy with it.
     """
-    entry_name = find_zip_entry(kml_name, zip_path)
-    if entry_name is None:
+    entry = find_zip_entry(kml_name, zip_path)
+    if entry is None:
         log.warning(f"Entry not found in ZIP: {kml_name}", target=str(zip_path))
         return
-    log.debug(f"Found entry in ZIP: {entry_name}", target=str(zip_path))
-    pop_zip_entry(entry_name, zip_path, output_directory)
+    log.debug(f"Found entry in ZIP: {entry.path}", target=str(zip_path))
+    pop_zip_entry(entry.path, zip_path, output_directory)
 
 
 def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path(".")) -> Path | None:
@@ -563,18 +581,21 @@ def rebuild(zip_path: str | None, *, tag_map: Mapping[str, str] | None = None) -
 
 
 def _entry_kind(
-    entry_name: str, tree: xmlutil.etree._ElementTree, *, tag_map: Mapping[str, str] | None = None
+    entry_name: str, tree: xmlutil.etree._ElementTree | None, *, tag_map: Mapping[str, str] | None = None
 ) -> TrackKind | None:
     """The kind an entry belongs to: its folder when layered, its TrackTags when flat.
 
     None — never guessed — for _unclassified entries and for anything a legacy
     flat name carries no recognizable tags for; they stay out of every view.
+    tree is what a flat entry's tags are read from, and is None for a layered
+    one, whose folder settles the kind before anything is decompressed.
     """
     if "/" in entry_name:
         try:
             return TrackKind(entry_name.split("/", 1)[0])
         except ValueError:
             return None
+    assert tree is not None  # 扁平条目的类别只在 TrackTags 里，调用方必须先解压解析
     return kmlfile.kind_from_tree(tree, tag_map=tag_map)
 
 
@@ -584,52 +605,83 @@ class _ArchiveState:
 
     zip_entry: str | None
     track_name: str
+    kind: TrackKind | None
     in_desktop: bool
     in_mobile: bool
     problems: list[str]
 
 
+def _kind_holding_track(track_name: str, archive_dir: Path) -> TrackKind | None:
+    """Which kind's views still list a track the ZIP no longer holds.
+
+    A restore with no kind named finds the views itself, and a name two kinds
+    hold is exactly as ambiguous as two ZIP entries: it raises before anything
+    is touched, the same as a doubled record inside one view.
+    """
+    holders: list[TrackKind] = []
+    for kind in TrackKind:
+        desktop, mobile = collections.collection_paths(kind, archive_dir)
+        if desktop.is_file() and collections.has_desktop_track(track_name, desktop):
+            holders.append(kind)
+        elif mobile.is_file() and collections.has_mobile_track(track_name, mobile):
+            holders.append(kind)
+    if len(holders) > 1:
+        names = ", ".join(kind.value for kind in holders)
+        raise UserInputError(f"Ambiguous track {track_name!r}: held by the {names} collections")
+    return holders[0] if holders else None
+
+
 def _inspect_archive(
     kml_name: str,
     zip_file: Path,
-    desktop_collection: Path,
-    mobile_collection: Path,
-    type_: TrackKind,
+    archive_dir: Path,
+    type_: TrackKind | None,
     tag_map: Mapping[str, str] | None = None,
 ) -> _ArchiveState:
     """Look the track up in the archive's three records, collecting disagreements.
 
     Listed as a restore consumes them: the ZIP, then the desktop collection
     (the primary record, always expected), then the mobile one, which is
-    optional as a file but must hold the track once it exists.
+    optional as a file but must hold the track once it exists. All three are
+    scoped to one kind — the found entry's own, or the named one — because the
+    same name under two kinds is two tracks, each living in its own views.
+    Only a restore that found no entry in the ZIP at all falls back to looking
+    for the name in every kind's views, which is what a --force cleanup needs.
     """
     zip_exists = zip_file.is_file()
-    zip_entry = find_zip_entry(kml_name, zip_file, type_, tag_map=tag_map) if zip_exists else None
-    track_name = Path(zip_entry).stem if zip_entry else kml_name
-    if zip_entry is None and track_name.lower().endswith(".kml"):
+    entry = find_zip_entry(kml_name, zip_file, type_, tag_map=tag_map) if zip_exists else None
+    track_name = Path(entry.path).stem if entry else kml_name
+    if entry is None and track_name.lower().endswith(".kml"):
         track_name = track_name[:-4]
-    desktop_exists = desktop_collection.is_file()
-    in_desktop = desktop_exists and collections.has_desktop_track(track_name, desktop_collection)
-    mobile_exists = mobile_collection.is_file()
-    in_mobile = mobile_exists and collections.has_mobile_track(track_name, mobile_collection)
+
+    kind = entry.kind if entry else type_
+    if entry is None and kind is None and zip_exists:
+        kind = _kind_holding_track(track_name, archive_dir)
 
     problems: list[str] = []
     if not zip_exists:
         problems.append(f"KML compressed file does not exist: {display_path(zip_file)}")
-    elif zip_entry is None:
+    elif entry is None:
         problems.append(f"Track not found in ZIP: {kml_name}")
-    if not desktop_exists:
-        problems.append(f"Collection KML file does not exist: {display_path(desktop_collection)}")
-    elif not in_desktop:
-        problems.append(f"Track not found in collection: {kml_name}")
-    if mobile_exists and not in_mobile:
-        problems.append(f"Track not found in mobile collection: {kml_name}")
-    return _ArchiveState(zip_entry, track_name, in_desktop, in_mobile, problems)
+
+    in_desktop = in_mobile = False
+    if kind is not None:
+        desktop_collection, mobile_collection = collections.collection_paths(kind, archive_dir)
+        in_desktop = desktop_collection.is_file() and collections.has_desktop_track(track_name, desktop_collection)
+        in_mobile = mobile_collection.is_file() and collections.has_mobile_track(track_name, mobile_collection)
+        if not desktop_collection.is_file():
+            problems.append(f"Collection KML file does not exist: {display_path(desktop_collection)}")
+        elif not in_desktop:
+            problems.append(f"Track not found in collection: {kml_name}")
+        if mobile_collection.is_file() and not in_mobile:
+            problems.append(f"Track not found in mobile collection: {kml_name}")
+
+    return _ArchiveState(entry.path if entry else None, track_name, kind, in_desktop, in_mobile, problems)
 
 
 def pop_kml_archive(
     kml_name: str,
-    type_: TrackKind = TrackKind.DEFAULT,
+    type_: TrackKind | None = None,
     zip_path: str | None = None,
     force: bool = False,
     *,
@@ -642,6 +694,13 @@ def pop_kml_archive(
     --force warns about each disagreement instead of stopping, and skips only
     the step whose record is missing.
 
+    Naming a kind keeps the restore inside it. Omitting one searches every
+    entry in the ZIP and lets the entry that was found name its own kind, so
+    the views acted on are that kind's rather than a guess — one name under two
+    kinds is two tracks, and only the kind picks one. An entry no view holds
+    (under `_unclassified`, or a flat name no table classifies) is extracted on
+    its own.
+
     Removing the track moves the truth and the views by the same track, so a
     restore that finds them in sync leaves them in sync — advance_views_hash
     says so, on the same judgement a push uses. Skipping that left every
@@ -653,14 +712,16 @@ def pop_kml_archive(
     """
     zip_file = resolve_archive(zip_path)[1]
     archive_dir = zip_file.parent
-    desktop_collection, mobile_collection = collections.collection_paths(type_, archive_dir)
 
-    state = _inspect_archive(kml_name, zip_file, desktop_collection, mobile_collection, type_, tag_map)
+    state = _inspect_archive(kml_name, zip_file, archive_dir, type_, tag_map)
     if state.problems:
         if not force:
             raise UserInputError(f"Cannot restore {kml_name}: " + "; ".join(state.problems))
         for problem in state.problems:
             log.warning(f"{problem} (forced)", target=str(archive_dir))
+    if state.zip_entry is not None and state.kind is None:
+        # 认不出类型就是没有任何视图持有它：解压是唯一动作，不去猜一个类型
+        log.info(f"No collection holds this entry: {state.zip_entry}", target=str(archive_dir))
 
     # 只在真的删得掉条目时才取哈希：没有条目可删，真值就没动过，也没什么可前移的
     change: history.Change | None = None
@@ -676,10 +737,13 @@ def pop_kml_archive(
             change.extracted_file = history.ExtractedFile(
                 entry_path=state.zip_entry, file_path=str(extracted), size_bytes=size_bytes, crc32=crc32
             )
-    if state.in_desktop:
-        collections.remove_track_from_desktop_collection(state.track_name, desktop_collection)
-    if state.in_mobile:
-        collections.remove_track_from_mobile_collection(state.track_name, mobile_collection)
+    if state.kind is not None:
+        # 视图按类型分家：同名轨迹在别的类型下是另一条，不该在这里被动到
+        desktop_collection, mobile_collection = collections.collection_paths(state.kind, archive_dir)
+        if state.in_desktop:
+            collections.remove_track_from_desktop_collection(state.track_name, desktop_collection)
+        if state.in_mobile:
+            collections.remove_track_from_mobile_collection(state.track_name, mobile_collection)
     if zip_hash_before is not None:
         advance_views_hash(zip_file, zip_hash_before=zip_hash_before, stored_views_hash=stored_views_hash)
         assert change is not None  # 有条目可删时上面才建得出这笔账，两者同生同灭
