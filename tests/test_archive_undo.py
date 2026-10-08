@@ -424,17 +424,19 @@ def test_a_changed_extracted_file_refuses_the_undo(archive_zip, tmp_path, monkey
     assert (output / first.name).read_text(encoding="utf-8") == "not the track any more"
 
 
-def test_a_lost_backup_file_refuses_the_undo(archive_zip, tmp_path):
+def test_a_cleared_backup_folder_still_undoes_the_move(archive_zip, tmp_path):
+    """Backup 是近期暂存，手工清掉不碍撤回：还原材料还有那笔 push 落下的条目。"""
     source = track(tmp_path / "sources")
+    payload = source.read_bytes()
     workflows.push_tracks([source], str(archive_zip), move=True)
-    entry = archive.zip_entry_name(source, "Default")
     backup_of(archive_zip, source).unlink()
 
-    with pytest.raises(UserInputError, match="carried away is gone"):
-        undo.undo_last(str(archive_zip))
+    outcome = undo.undo_last(str(archive_zip))
 
-    assert entries(archive_zip) == [entry]
-    assert not source.exists()
+    assert outcome.ok
+    assert source.read_bytes() == payload
+    assert not backup_of(archive_zip, source).exists()
+    assert entries(archive_zip) == []
 
 
 def test_an_occupied_original_refuses_the_undo(archive_zip, tmp_path):
@@ -449,21 +451,19 @@ def test_an_occupied_original_refuses_the_undo(archive_zip, tmp_path):
 
 
 def test_a_refusal_is_only_a_pause(archive_zip, tmp_path):
-    """被拒时一个字节都没动、记录仍是 pending：把文件找回来再跑一次就成。"""
+    """被拒时一个字节都没动、记录仍是 pending：把占住原位的东西挪走再跑一次就成。"""
     source = track(tmp_path / "sources")
     workflows.push_tracks([source], str(archive_zip), move=True)
-    backup = backup_of(archive_zip, source)
-    payload = backup.read_bytes()
-    backup.unlink()
+    source.write_bytes(b"in the way")
 
-    with pytest.raises(UserInputError):
+    with pytest.raises(UserInputError, match="something occupies where it came from"):
         undo.undo_last(str(archive_zip))
 
-    backup.write_bytes(payload)
+    source.unlink()
     outcome = undo.undo_last(str(archive_zip))
 
     assert outcome.ok
-    assert source.read_bytes() == payload
+    assert source.is_file()
     assert entries(archive_zip) == []
 
 
@@ -472,37 +472,39 @@ def test_a_refusal_is_only_a_pause(archive_zip, tmp_path):
 
 def test_a_forced_undo_keeps_the_entry_of_a_file_it_cannot_put_back(archive_zip, tmp_path):
     source = track(tmp_path / "sources")
-    workflows.push_tracks([source], str(archive_zip), move=True)
     entry = archive.zip_entry_name(source, "Default")
-    backup_of(archive_zip, source).unlink()
+    workflows.push_tracks([source], str(archive_zip), move=True)
+    backup = backup_of(archive_zip, source)
+    source.write_bytes(b"something else arrived")
 
     outcome = undo.undo_last(str(archive_zip), force=True)
 
     assert not outcome.ok
     assert outcome.mismatched
     assert outcome.not_undone
-    # 源件还不了位，ZIP 里那条就是这条轨迹唯一的一份，删了它就没了
+    # 原位被占、还不了位：条目留在 ZIP，实物也仍在 Backup，什么都没有丢
     assert entries(archive_zip) == [entry]
-    assert not source.exists()
+    assert source.read_bytes() == b"something else arrived"
+    assert backup.is_file()
 
 
-def test_an_entry_stays_when_a_later_record_cannot_put_its_file_back(archive_zip, tmp_path):
-    """跨记录的保护：后一条记录的还原失败，让前一条记录的条目成了唯一副本。
+def test_a_cleared_backup_still_undoes_a_move_that_added_no_entry(archive_zip, tmp_path):
+    """跨记录：第二次 push --move 判重没加条目，只把源件搬进了 Backup。
 
-    第二次 `push --move` 没加条目（判重），只把源文件搬进了 Backup；那份 Backup
-    一丢，第一次 push 落下的条目就成了这条轨迹仅存的一份。
+    Backup 清掉后，还原材料是第一次 push 落下的条目；两步连撤，条目由
+    撤第一次 push 的那步摘掉——还原材料从来不是 Backup 独占的。
     """
     source = track(tmp_path / "sources")
-    entry = archive.zip_entry_name(source, "Default")
+    payload = source.read_bytes()
     workflows.push_tracks([source], str(archive_zip))
     workflows.push_tracks([source], str(archive_zip), move=True)
     backup_of(archive_zip, source).unlink()
 
-    outcome = undo.undo_last(str(archive_zip), steps=2, force=True)
+    outcome = undo.undo_last(str(archive_zip), steps=2)
 
-    assert not outcome.ok
-    assert entries(archive_zip) == [entry]
-    assert not source.exists()
+    assert outcome.ok
+    assert source.read_bytes() == payload
+    assert entries(archive_zip) == []
 
 
 def test_a_copy_the_backup_folder_already_held_is_dropped_and_recorded(archive_zip, tmp_path):
@@ -532,15 +534,14 @@ def test_a_copy_the_backup_folder_already_held_is_dropped_and_recorded(archive_z
     assert stray.read_text(encoding="utf-8") == content  # 撤销把副本从 Backup 还回原位
 
 
-def test_one_copy_cannot_be_put_back_twice(archive_zip, tmp_path):
-    """两份源件内容相同、实物只有 Backup 里那一份：后撤的那条还不上，条目留下。
+def test_both_positions_come_back_when_they_shared_one_backup_copy(archive_zip, tmp_path):
+    """两份源件内容相同、Backup 里只有一份实物：两个位置现在都还得上。
 
-    两个位置共用一份实物，撤销只能还回一个。还不上那条按既有保护留下 ZIP 里的
-    条目——它是这条轨迹仅存的一份；数据不丢，但这次撤回是部分的。
+    较新的记录先把实物搬回它的原位；较早那条还原用的是第一次 push 落下的
+    条目——按「先造副本，后消耗副本」，解压在前、删条目在后，两份都在。
     """
     first = track(tmp_path / "one")
     content = first.read_text(encoding="utf-8")
-    entry = archive.zip_entry_name(first, "Default")
     workflows.push_tracks([first], str(archive_zip), move=True)  # one/ 那份进了 Backup
 
     second = track(tmp_path / "two")  # 同名同内容，另一个位置
@@ -551,25 +552,27 @@ def test_one_copy_cannot_be_put_back_twice(archive_zip, tmp_path):
 
     outcome = undo.undo_last(str(archive_zip), steps=2)
 
-    assert not outcome.ok
-    assert outcome.not_undone
-    assert entries(archive_zip) == [entry]  # 唯一的一份，条目留着
-    assert second.is_file()  # 实物还回了较新的那个位置
-    assert not first.exists()  # 更早那个位置还不上
+    assert outcome.ok
+    assert first.read_text(encoding="utf-8") == content
+    assert second.read_text(encoding="utf-8") == content
+    assert not backup_of(archive_zip, first).exists()
+    assert entries(archive_zip) == []
 
 
-def test_a_forced_merge_undo_keeps_the_output_when_the_sources_are_gone(archive_zip, tmp_path):
+def test_a_cleared_backup_still_undoes_a_merge_with_move(archive_zip, tmp_path):
+    """merge --move 后清掉 Backup：源件从条目还原，输出照删。"""
     source = track(tmp_path / "sources")
+    payload = source.read_bytes()
     output = tmp_path / "merged.kml"
     edit.merge_kml([source], output, move=True)
     backup_of(archive_zip, source).unlink()
 
-    outcome = undo.undo_last(str(archive_zip), force=True)
+    outcome = undo.undo_last(str(archive_zip))
 
-    assert not outcome.ok
-    # 条目留着（源件还不了位），于是输出就是合并结果的唯一一份，也不能删
-    assert entries(archive_zip) == [archive.zip_entry_name(source, "Default")]
-    assert output.is_file()
+    assert outcome.ok
+    assert source.read_bytes() == payload
+    assert entries(archive_zip) == []
+    assert not output.exists()
 
 
 # ── previews and the log command ────────────────────────────────────────────
@@ -588,6 +591,23 @@ def test_a_preview_undo_touches_nothing(archive_zip, tmp_path, monkeypatch):
     assert archive_zip.read_bytes() == before_zip
     assert log_path(archive_zip).read_bytes() == before_log
     assert entries(archive_zip) == [archive.zip_entry_name(source, "Default")]
+
+
+def test_a_preview_of_the_entry_fallback_touches_nothing(archive_zip, tmp_path, monkeypatch):
+    """Backup 清空后的还原走条目解压：预演里照样一个字节不动。"""
+    source = track(tmp_path / "sources")
+    workflows.push_tracks([source], str(archive_zip), move=True)
+    backup_of(archive_zip, source).unlink()
+    before_zip = archive_zip.read_bytes()
+    before_log = log_path(archive_zip).read_bytes()
+
+    monkeypatch.setattr(ctx, "mode", RunMode.PLAN)
+    outcome = undo.undo_last(str(archive_zip))
+
+    assert outcome.ok
+    assert archive_zip.read_bytes() == before_zip
+    assert log_path(archive_zip).read_bytes() == before_log
+    assert not source.exists()
 
 
 def test_a_torn_last_line_is_skipped_and_the_earlier_change_still_undoes(archive_zip, tmp_path):
@@ -631,7 +651,7 @@ def test_the_log_lists_every_change_and_whether_it_still_stands(archive_zip, tmp
 def test_the_log_reports_a_partial_undo(archive_zip, tmp_path):
     source = track(tmp_path / "sources")
     workflows.push_tracks([source], str(archive_zip), move=True)
-    backup_of(archive_zip, source).unlink()
+    source.write_bytes(b"in the way")
 
     result = runner.invoke(app, ["archive", "undo", "--zip", str(archive_zip), "--force"])
 

@@ -3,23 +3,28 @@
 `archive undo` reads the change log backwards and reverses the newest record
 that still stands: it removes the entries the change added, puts back the ones
 it removed, restores the files it carried into the backup folder, and rebuilds
-the views. The views are never reversed directly — they are derived from the
+the views. A carried file is restored from the backup copy when it is still
+there, and from the entry the same change filed when it is not — that entry
+holds the very bytes the file had, so a cleared backup folder costs an undo
+nothing. The views are never reversed directly — they are derived from the
 ZIP (E2), so a single rebuild puts them back in step with a truth that just
 moved.
 
 Every premise is checked before anything is touched, because undoing half of a
 change is how data is lost. A premise that has gone — the archive has moved
-on, a file the change carried is no longer there — refuses the whole undo;
---force downgrades the per-file premises and skips them. One rule holds the
-line when it does: **nothing is deleted until a copy of it exists somewhere
+on, the place a carried file comes back to is occupied — refuses the whole
+undo; --force downgrades the per-file premises and skips them. One rule holds
+the line when it does: **nothing is deleted until a copy of it exists somewhere
 else**, so a file whose way back is blocked keeps its entry in the ZIP and is
 written to the tombstone as not undone. The same rule sets the order: files
 are restored *before* any entry is dropped, so a process that dies in between
 leaves one copy too many rather than one too few.
 
 What this is not: a backup. It reverses operations that were meant, and needs
-the truth they produced to still be there. An archive whose ZIP or backup
-folder is gone is a job for the backups of the archive directory itself.
+the truth they produced to still be there — an archive whose ZIP is gone is a
+job for the backups of the archive directory itself. A backup folder that
+has been cleared is not that: its files were staging, and the entries their
+pushes filed still hold them.
 
 The whole command is off when `archive_history` is: it would be reading a log
 that stopped being written, so it refuses rather than guess at what the
@@ -211,13 +216,12 @@ def _plan(change: history.Change, zip_file: Path) -> _Inverse:
 
     for move in change.backup_moves:
         original, backup = Path(move.original_path), Path(move.backup_path)
-        if not backup.is_file():
-            inverse.problems.append(f"the file this change carried away is gone: {display_path(backup)}")
-        elif original.exists() or original.is_symlink():
+        if original.exists() or original.is_symlink():
             inverse.problems.append(f"something occupies where it came from: {display_path(original)}")
         elif not original.parent.is_dir():
             inverse.problems.append(f"the directory it came from is gone: {display_path(original.parent)}")
         else:
+            # Backup 里那份在不在不是前提：清掉了还有这笔改动落下的条目可解压（_restore_move）
             inverse.restore_moves.append(move)
             continue
         inverse.not_undone.append(display_path(backup))
@@ -229,14 +233,14 @@ def _plan(change: history.Change, zip_file: Path) -> _Inverse:
 
 
 def _keep_what_cannot_be_deleted(inverses: list[_Inverse]) -> None:
-    """Hold back every entry whose copy elsewhere could not be put back.
+    """Hold back every entry whose file could not be put back where it was.
 
     Nothing is deleted until a copy of it exists somewhere else, so an entry
-    whose file cannot be restored has to stay in the ZIP — it is then the last
-    copy of that track. The match is by file name and across the whole batch,
-    not within one record: the record that added an entry and the record whose
-    restore failed may be two different records, and it is the entry that
-    becomes the only copy either way.
+    whose file has not been restored stays in the ZIP — the undo does not
+    spend the archive's record of a track it has not returned. The match is
+    by file name and across the whole batch, not within one record: the record
+    that added an entry and the record whose restore was skipped may be two
+    different records, and the entry is what stands still either way.
     """
     blocked: dict[str, str] = {}
     for inverse in inverses:
@@ -321,7 +325,7 @@ def _apply(inverse: _Inverse, zip_file: Path) -> None:
     """Reverse one record: the files first, then the entries they are copies of."""
     failed: set[str] = set()
     for move in inverse.restore_moves:
-        if not restore_file(Path(move.original_path), Path(move.backup_path)) and not ctx.is_plan:
+        if not _restore_move(move, zip_file) and not ctx.is_plan:
             # 校验时还在、动手时没了：原件没还回去，条目就得留下
             failed.add(Path(move.backup_path).name)
     if failed:
@@ -336,6 +340,51 @@ def _apply(inverse: _Inverse, zip_file: Path) -> None:
     for path in (inverse.drop_extracted, inverse.drop_output):
         if path is not None:
             _drop(path)
+
+
+def _restore_move(move: history.BackupMove, zip_file: Path) -> bool:
+    """Put one carried file back where it came from; False when blocked.
+
+    The backup copy is moved back when it is still there, and extracted from
+    the entry this change filed when it is not — that entry holds the very
+    bytes the file had, so a cleared backup folder costs an undo nothing.
+    What blocks a restore is only on the user's ground: an occupied original
+    place, or a parent directory that is gone.
+    """
+    original, backup = Path(move.original_path), Path(move.backup_path)
+    if backup.is_file():
+        return restore_file(original, backup)
+    entry = _entry_named(backup.name, zip_file)
+    if entry is None:
+        log.warning(f"Cannot restore {display_path(original)}: no single entry named {backup.name} in the ZIP")
+        return False
+    if original.exists() or original.is_symlink():
+        log.warning("File already exists at the original location; not restored", target=str(original))
+        return False
+    if not original.parent.is_dir():
+        log.warning("Original directory is gone; not restored", target=str(original))
+        return False
+    if ctx.is_plan:
+        log.info(f"Would extract {entry} to where it came from", target=str(original))
+        return False
+    try:
+        archive.extract_entry(entry, zip_file, original)
+    except OSError as exc:
+        log.warning(f"Could not extract {entry}: {exc}", target=str(original))
+        return False
+    log.info(f"Extracted {entry} back where it came from; its backup copy was cleared", target=str(original))
+    return True
+
+
+def _entry_named(name: str, zip_file: Path) -> str | None:
+    """The one entry this base name names, or None when it does not name one.
+
+    Two entries sharing a base name cannot say which one the carried file
+    became, so the answer is none rather than the wrong one.
+    """
+    with zipfile.ZipFile(zip_file) as zf:
+        matches = [info.filename for info in zf.infolist() if Path(info.filename).name == name]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _drop(path: Path) -> None:

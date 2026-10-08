@@ -380,7 +380,7 @@ def pop_zip_entry(entry_name: str, zip_path: Path, output_directory: Path = Path
         log.info(f"Would extract {entry_name} and remove it from the ZIP", target=str(zip_path))
         return None
 
-    _extract_entry(entry_name, zip_path, target_path)
+    extract_entry(entry_name, zip_path, target_path)
     log.info(f"Extracted from ZIP: {entry_name}", target=str(zip_path))
     remove_zip_entries([entry_name], zip_path)
     return target_path.resolve()
@@ -397,8 +397,14 @@ def entry_metadata(entry_name: str, zip_path: Path) -> tuple[int, int]:
         return info.file_size, info.CRC
 
 
-def _extract_entry(entry_name: str, zip_path: Path, target_path: Path) -> None:
-    """Write one entry out durably, before anything removes it from the ZIP."""
+def extract_entry(entry_name: str, zip_path: Path, target_path: Path) -> None:
+    """Write one entry out durably, before anything removes it from the ZIP.
+
+    Two readers hand it the entry and then go on to consume it: a restore
+    extracts and removes, and an undo whose backup copy has been cleared
+    extracts the entry to where the file was carried away from — it holds the
+    very bytes that push filed.
+    """
     with zipfile.ZipFile(zip_path) as zf, zf.open(entry_name) as src, open(target_path, "wb") as dst:
         shutil.copyfileobj(src, dst)
         dst.flush()
