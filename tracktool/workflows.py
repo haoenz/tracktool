@@ -136,7 +136,7 @@ def push_tracks(
     paths: list[Path],
     zip_path: str | None = None,
     type_: TrackKind | None = None,
-    move: bool = False,
+    move: bool = True,
     *,
     tag_map: Mapping[str, str] | None = None,
 ) -> BatchResult[list[Action]]:
@@ -146,17 +146,17 @@ def push_tracks(
     every track of the batch that belongs in it, and the archive once for all
     of them, so N tracks are one read and one write of the archive rather than
     N. A track that cannot be filed (unreadable, undated, unknown type) is
-    counted as failed and the rest of the batch goes on. Source files stay
-    where they are unless `move` is set — then every track the batch filed is
-    moved into the backup folder, the ones the archive already held included:
-    all three stores skip a duplicate by name, so a second filing of a track
-    touches nothing, and --move turns the same run into a sweep that also
-    collects the stray copy. A stray copy whose content the backup folder
-    already holds is dropped instead of being kept twice; one whose content
-    differs stays where it is, with a warning. Either way the record is about
-    the source: a file the run carried away — including one it dropped as the
-    backup folder's duplicate — is logged as a backup move, and one it left in
-    place is not.
+    counted as failed and the rest of the batch goes on. Filing a track means
+    consuming it: every track the batch filed is moved into the backup folder,
+    the ones the archive already held included — all three stores skip a
+    duplicate by name, so a second filing of a track touches nothing, and the
+    move turns the same run into a sweep that also collects the stray copy.
+    A stray copy whose content the backup folder already holds is dropped
+    instead of being kept twice; one whose content differs stays where it is,
+    with a warning. Either way the record is about the source: a file the run
+    carried away — including one it dropped as the backup folder's duplicate —
+    is logged as a backup move, and one it left in place is not. `move` is off
+    when the caller keeps its sources (--keep).
 
     What the run did to the archive is recorded as it goes, and the record is
     written even when a step fails: entries an earlier step already added are

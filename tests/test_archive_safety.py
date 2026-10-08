@@ -199,7 +199,7 @@ def test_append_publishes_complete_batch_preserving_zip_metadata(tmp_path, monke
 def test_failed_push_does_not_move_sources_or_advance_hash(tmp_path, monkeypatch):
     zip_path = make_archive(tmp_path / "archive")
     old = track(tmp_path / "sources")
-    workflows.push_tracks([old], str(zip_path))
+    workflows.push_tracks([old], str(zip_path), move=False)
     stored = archive.read_views_hash(zip_path)
     before = zip_path.read_bytes()
     new = track(old.parent, "2024-05-02 new.kml")
@@ -334,7 +334,7 @@ def test_pop_rejects_ambiguous_entries_even_when_forced(tmp_path, monkeypatch, f
 
     zip_path = make_archive(tmp_path / "archive")
     source = track(tmp_path / "sources")
-    workflows.push_tracks([source], str(zip_path))
+    workflows.push_tracks([source], str(zip_path), move=False)
     with zipfile.ZipFile(zip_path, "a") as zf:
         zf.writestr("Default/2024-06/" + source.name, source.read_bytes())
     before = {p: p.read_bytes() for p in zip_path.parent.iterdir()}
@@ -405,7 +405,7 @@ def test_pop_without_type_refuses_a_name_two_types_hold(tmp_path, monkeypatch):
     zip_path = make_archive(tmp_path / "archive")
     flight = track(tmp_path / "flight", kind=TrackKind.FLIGHT)
     train = track(tmp_path / "train", kind=TrackKind.TRAIN)
-    assert workflows.push_tracks([flight, train], str(zip_path)).ok
+    assert workflows.push_tracks([flight, train], str(zip_path), move=False).ok
     before = {p: p.read_bytes() for p in zip_path.parent.iterdir()}
     output = tmp_path / "output"
     output.mkdir()
@@ -490,7 +490,7 @@ def test_pop_refuses_ambiguous_view_before_extracting(tmp_path, monkeypatch, col
 
     zip_path = make_archive(tmp_path / "archive")
     source = track(tmp_path / "sources")
-    workflows.push_tracks([source], str(zip_path))
+    workflows.push_tracks([source], str(zip_path), move=False)
     desktop, mobile = collections.collection_paths(TrackKind.DEFAULT, zip_path.parent)
     view = desktop if collection == "desktop" else mobile
     tree = xmlutil.parse_file(view)
@@ -513,7 +513,7 @@ def test_pop_preview_validates_type_but_changes_nothing(tmp_path, monkeypatch, p
     zip_path = make_archive(tmp_path / "archive")
     source = track(tmp_path / "sources")
     monkeypatch.setattr(ctx, "mode", RunMode.APPLY)
-    workflows.push_tracks([source], str(zip_path))
+    workflows.push_tracks([source], str(zip_path), move=False)
     monkeypatch.setattr(ctx, "mode", RunMode.PLAN)
     before = {p: p.read_bytes() for p in zip_path.parent.iterdir()}
     output = tmp_path / "output"
@@ -527,7 +527,7 @@ def test_pop_preview_validates_type_but_changes_nothing(tmp_path, monkeypatch, p
 def test_pop_rejects_substring_query_without_changing_archive(tmp_path, monkeypatch):
     zip_path = make_archive(tmp_path / "archive")
     source = track(tmp_path / "sources")
-    workflows.push_tracks([source], str(zip_path))
+    workflows.push_tracks([source], str(zip_path), move=False)
     before = {p: p.read_bytes() for p in zip_path.parent.iterdir()}
     monkeypatch.chdir(tmp_path)
     with pytest.raises(UserInputError, match="Track not found in ZIP"):

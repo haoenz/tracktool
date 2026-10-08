@@ -348,11 +348,11 @@ def kml_push(
     paths: Annotated[list[Path], typer.Argument(help="KML file(s) to archive, wildcards allowed")],
     track_type: Annotated[TrackKind | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
     zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
-    move: Annotated[bool, typer.Option("--move", help="Also move the source files into the backup folder")] = False,
+    keep: Annotated[bool, typer.Option("--keep", help="Leave the source files where they are")] = False,
 ) -> None:
-    """Archive KMLs: add to both collections, compress into ZIP; sources stay put unless --move."""
+    """Archive KMLs: add to both collections, compress into ZIP, and collect the sources into the backup folder."""
     files = _expand_paths(paths)
-    _finish(workflows.push_tracks(files, zip_path, track_type, move, tag_map=ctx.config.track_tag_map))
+    _finish(workflows.push_tracks(files, zip_path, track_type, move=not keep, tag_map=ctx.config.track_tag_map))
 
 
 @kml_app.command("pop")
@@ -436,11 +436,13 @@ def kml_merge(
     paths: Annotated[list[Path], typer.Argument(help="KML files to merge, wildcards allowed")],
     output_path: Annotated[Path, typer.Option("--output", "-o", help="New output KML path (must not exist)")],
     connected: Annotated[bool, typer.Option("--connected", help="Concatenate into one LineString")] = False,
-    move: Annotated[bool, typer.Option("--move", help="Also move the source files into the backup folder")] = False,
+    keep: Annotated[bool, typer.Option("--keep", help="Leave the source files where they are")] = False,
 ) -> None:
     """Merge multiple KMLs into one file."""
     paths = _expand_paths(paths)
-    kml_edit.merge_kml(paths, output_path.expanduser().absolute(), connected, move, tag_map=ctx.config.track_tag_map)
+    kml_edit.merge_kml(
+        paths, output_path.expanduser().absolute(), connected, move=not keep, tag_map=ctx.config.track_tag_map
+    )
 
 
 @kml_app.command("to-multigeom")

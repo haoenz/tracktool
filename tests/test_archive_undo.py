@@ -144,7 +144,7 @@ def test_a_push_with_move_records_every_file_it_carried_away(archive_zip, tmp_pa
 
 def test_a_restore_records_the_entry_and_the_file_it_wrote(archive_zip, tmp_path, monkeypatch):
     source = track(tmp_path / "sources")
-    workflows.push_tracks([source], str(archive_zip))
+    workflows.push_tracks([source], str(archive_zip), move=False)
     entry = archive.zip_entry_name(source, "Default")
     output = tmp_path / "output"
     output.mkdir()
@@ -193,7 +193,7 @@ def test_each_command_that_moves_the_archive_records_one_line(archive_zip, tmp_p
     output = tmp_path / "output"
     output.mkdir()
 
-    workflows.push_tracks([first, second], str(archive_zip))
+    workflows.push_tracks([first, second], str(archive_zip), move=False)
     monkeypatch.chdir(output)
     archive.pop_kml_archive(second.stem, TrackKind.DEFAULT, str(archive_zip))
     edit.merge_kml([first], tmp_path / "merged.kml")
@@ -239,7 +239,7 @@ def test_undoing_a_push_with_move_puts_the_sources_back(archive_zip, tmp_path):
 def test_an_all_duplicate_push_is_recorded_as_no_change_and_still_consumed(archive_zip, tmp_path):
     """空操作也占一条记录：否则下次 undo 会跳过它去撤更早的改动。"""
     source = track(tmp_path / "sources")
-    workflows.push_tracks([source], str(archive_zip))
+    workflows.push_tracks([source], str(archive_zip), move=False)
     entry = archive.zip_entry_name(source, "Default")
 
     workflows.push_tracks([source], str(archive_zip))
@@ -344,7 +344,7 @@ def test_stepping_back_two_changes_rebuilds_the_views_once(archive_zip, tmp_path
 
 
 def test_a_push_with_move_does_not_warn_about_the_sources_it_carried_away(archive_zip, tmp_path, caplog):
-    """--move 让源文件离开原位是它的本分，不是「源文件不见了」。"""
+    """搬移（默认，`--keep` 时无）让源文件离开原位是它的本分，不是「源文件不见了」。"""
     source = track(tmp_path / "sources")
     workflows.push_tracks([source], str(archive_zip), move=True)
 
@@ -356,7 +356,7 @@ def test_a_push_with_move_does_not_warn_about_the_sources_it_carried_away(archiv
 def test_a_source_the_user_deleted_is_warned_about_but_not_refused(archive_zip, tmp_path, caplog):
     """用户自己删的源文件不构成拒绝，但撤完这条轨迹就没有别处了，得先说一句。"""
     source = track(tmp_path / "sources")
-    workflows.push_tracks([source], str(archive_zip))
+    workflows.push_tracks([source], str(archive_zip), move=False)
     source.unlink()
 
     outcome = undo.undo_last(str(archive_zip))
@@ -371,7 +371,7 @@ def test_a_source_the_user_deleted_is_warned_about_but_not_refused(archive_zip, 
 
 def test_an_unrecorded_change_to_the_zip_refuses_the_undo(archive_zip, tmp_path):
     source = track(tmp_path / "sources")
-    workflows.push_tracks([source], str(archive_zip))
+    workflows.push_tracks([source], str(archive_zip), move=False)
     with zipfile.ZipFile(archive_zip, "a") as zf:
         zf.writestr("Default/2024-06/2024-06-01 stray.kml", TRACK_KML)
     before = entries(archive_zip)
@@ -385,7 +385,7 @@ def test_an_unrecorded_change_to_the_zip_refuses_the_undo(archive_zip, tmp_path)
 
 def test_a_missing_zip_refuses_the_undo_without_a_traceback(archive_zip, tmp_path):
     source = track(tmp_path / "sources")
-    workflows.push_tracks([source], str(archive_zip))
+    workflows.push_tracks([source], str(archive_zip), move=False)
     archive_zip.unlink()
 
     result = runner.invoke(app, ["archive", "undo", "--zip", str(archive_zip)])

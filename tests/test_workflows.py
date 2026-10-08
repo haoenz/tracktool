@@ -1,10 +1,10 @@
 """Workflows: a multi-step command is a plan, and its steps are the batch.
 
 Filing N tracks is a sequence of steps — one collection each, then the ZIP,
-then the backup folder when --move says so — and each step works on the whole
-batch, so the archive is read and written once instead of once per track.
-These tests pin both halves: the sequence a preview shows, and the single
-read/write that makes the batch worth having.
+then the backup folder that collects the sources, skipped by --keep — and each
+step works on the whole batch, so the archive is read and written once instead
+of once per track. These tests pin both halves: the sequence a preview shows,
+and the single read/write that makes the batch worth having.
 """
 
 import zipfile
@@ -71,8 +71,9 @@ class TestPushBatch:
             "2024-05-02 t2",
             "2024-05-03 t3",
         ]
-        # 默认不动源文件；--move 的搬移见 TestMoveFiling
-        assert all(track.exists() for track in tracks)
+        # 默认即消耗：源件收进 Backup（2026-10-08 翻回原始语义）；保留源件用 --keep
+        assert all(not track.exists() for track in tracks)
+        assert all((zip_path.parent / "Backup" / t.name).is_file() for t in tracks)
 
     def test_the_collection_is_read_and_written_once_for_the_whole_batch(self, tmp_path: Path, monkeypatch):
         zip_path = _archive(tmp_path)
@@ -105,22 +106,33 @@ class TestPushBatch:
         assert len(xmlutil.findall(xmlutil.parse_file(zip_path.parent / "Train.kml"), "//kml:Placemark")) == 1
         assert (zip_path.parent / "Train.Mobile.kml").is_file()
 
-    def test_move_filing_moves_the_sources_into_the_backup_folder(self, tmp_path: Path):
+    def test_filing_collects_the_sources_into_the_backup_folder(self, tmp_path: Path):
         zip_path = _archive(tmp_path)
         track = _track(tmp_path, "2024-05-01 a.kml")
 
-        workflows.push_tracks([track], str(zip_path), TrackKind.DEFAULT, move=True)
+        workflows.push_tracks([track], str(zip_path), TrackKind.DEFAULT)
 
         assert zipfile.ZipFile(zip_path).namelist() == [zip_entry_name(track, "Default")]
         assert (zip_path.parent / "Backup" / track.name).is_file()
         assert not track.exists()
+
+    def test_keep_leaves_the_sources_where_they_are(self, tmp_path: Path):
+        """--keep（move=False）：登记照常，源件原地不动，Backup/ 也不建。"""
+        zip_path = _archive(tmp_path)
+        track = _track(tmp_path, "2024-05-01 a.kml")
+
+        workflows.push_tracks([track], str(zip_path), TrackKind.DEFAULT, move=False)
+
+        assert zipfile.ZipFile(zip_path).namelist() == [zip_entry_name(track, "Default")]
+        assert track.is_file()
+        assert not (zip_path.parent / "Backup").exists()
 
     def test_move_collects_tracks_the_archive_already_holds(self, tmp_path: Path):
         """--move 的搬移对象是本次识别成功的全部轨迹：已在归档里的（ZIP 与
         聚合都按名判重跳过）也照搬——第二次 push 兼任把散落副本收纳进 Backup。"""
         zip_path = _archive(tmp_path)
         track = _track(tmp_path, "2024-05-01 a.kml")
-        workflows.push_tracks([track], str(zip_path), TrackKind.DEFAULT)
+        workflows.push_tracks([track], str(zip_path), TrackKind.DEFAULT, move=False)
         track.unlink()  # 归档已有它而原件不在：同名副本散落在外是 --move 要收的
 
         stray = _track(tmp_path, "2024-05-01 a.kml")
@@ -154,17 +166,11 @@ class TestPushBatch:
         assert other.is_file()  # 源件留下
         assert backup.read_text(encoding="utf-8") == TRACK_KML  # Backup 那份也没被动
 
-    def test_the_plan_names_the_move_step_only_when_moving(self, tmp_path: Path, plan_mode):
+    def test_the_plan_omits_the_move_step_when_keeping(self, tmp_path: Path, plan_mode):
         zip_path = _archive(tmp_path)
         track = _track(tmp_path, "2024-05-01 a.kml")
 
         result = workflows.push_tracks([track], str(zip_path), TrackKind.DEFAULT)
-
-        assert _kinds(result) == ["add to collection", "add to mobile collection", "append to ZIP"]
-
-        result = workflows.push_tracks(
-            [_track(tmp_path, "2024-05-02 b.kml")], str(zip_path), TrackKind.DEFAULT, move=True
-        )
 
         assert _kinds(result) == [
             "add to collection",
@@ -172,6 +178,12 @@ class TestPushBatch:
             "append to ZIP",
             "move to backup folder",
         ]
+
+        result = workflows.push_tracks(
+            [_track(tmp_path, "2024-05-02 b.kml")], str(zip_path), TrackKind.DEFAULT, move=False
+        )
+
+        assert _kinds(result) == ["add to collection", "add to mobile collection", "append to ZIP"]
         # 计划只是计划：除了建档时的身份与空 ZIP，什么都没写
         assert sorted(p.name for p in zip_path.parent.iterdir()) == ["Archive.zip", "archive.json"]
 
@@ -186,8 +198,9 @@ class TestATrackThatCannotBeFiled:
 
         assert [p.name for p in result.failed] == [untagged.name]
         assert zipfile.ZipFile(zip_path).namelist() == [zip_entry_name(good, "Default")]
-        assert good.is_file()  # 默认不动源文件
-        assert untagged.is_file()  # 没进档，也没被塞进聚合
+        assert not good.exists()  # 登记成功即消耗：源件收进 Backup
+        assert (zip_path.parent / "Backup" / good.name).is_file()
+        assert untagged.is_file()  # 没进档：既不搬进 Backup，也没塞进聚合
 
     def test_an_undated_filename_is_a_failure(self, tmp_path: Path):
         zip_path = _archive(tmp_path)
@@ -243,6 +256,18 @@ class TestTheCommand:
         assert result.exit_code == 3, result.output
         assert zipfile.ZipFile(zip_path).namelist() == [zip_entry_name(good, "Default")]
         assert bad.is_file()
+
+    def test_keep_leaves_the_sources_where_they_are(self, tmp_path: Path, monkeypatch):
+        zip_path = _archive(tmp_path)
+        track = _track(tmp_path, "2024-05-01 a.kml")
+        monkeypatch.setattr(ctx, "config", Config(path=tmp_path / "config.json").load())
+
+        result = runner.invoke(app, ["kml", "push", str(track), "--zip", str(zip_path), "--type", "Default", "--keep"])
+
+        assert result.exit_code == 0, result.output
+        assert zipfile.ZipFile(zip_path).namelist() == [zip_entry_name(track, "Default")]
+        assert track.is_file()  # --keep：登记照常，源件不动
+        assert not (zip_path.parent / "Backup").exists()
 
     def test_a_preview_names_the_steps_and_the_tracks(self, tmp_path: Path, plan_mode):
         zip_path = _archive(tmp_path)

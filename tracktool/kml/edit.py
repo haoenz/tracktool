@@ -346,15 +346,15 @@ def merge_kml(
     paths: list[Path],
     output_path: Path,
     connected: bool = False,
-    move: bool = False,
+    move: bool = True,
     *,
     tag_map: Mapping[str, str] | None = None,
 ) -> None:
     """Merge multiple KMLs into one LineString (-Connected) or MultiGeometry.
 
     The merged output stays where --output puts it; the source files are
-    filed into the ZIP — the archive's truth — and stay put unless `move`
-    collects them into the backup folder. A source listed twice is filed
+    filed into the ZIP — the archive's truth — and collected into the backup
+    folder, unless `move` is off (--keep). A source listed twice is filed
     once and moved once: the ZIP skips the duplicate by entry path, and the
     dedup below keeps the move from chasing a file already carried away.
 
