@@ -373,7 +373,7 @@ def kml_pop(
 def kml_split(
     path: Annotated[Path, typer.Argument(help="KML file to split")],
     split_points: Annotated[
-        list[str] | None, typer.Argument(help="Timestamps or coordinates to split at (omit with --auto)")
+        list[str] | None, typer.Argument(help="Nearest timestamps or exact coordinates to split at (omit with --auto)")
     ] = None,
     auto: Annotated[
         bool, typer.Option("--auto", help="Split at detected recording gaps instead of given points")
@@ -381,7 +381,7 @@ def kml_split(
     gap_seconds: Annotated[float, typer.Option(min=0, help="--auto: minimum time jump (seconds)")] = 300.0,
     gap_meters: Annotated[float, typer.Option(min=0, help="--auto: minimum distance jump (meters)")] = 500.0,
 ) -> None:
-    """Split a track at the given timestamps/coordinates, or at recording gaps with --auto."""
+    """Split at the nearest track times (earlier on ties), exact coordinates, or gaps with --auto."""
     path = _resolve_path(path)
     if auto and split_points:
         raise UserInputError("Pass either split points or --auto, not both")

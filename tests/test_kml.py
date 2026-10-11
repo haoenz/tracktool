@@ -87,6 +87,68 @@ class TestSplitKml:
         edit.split_kml(track_file, ["116.1 39.1 110"])
         assert (track_file.parent / "2024-05-01 test-Splited-1.kml").is_file()
 
+    @pytest.mark.parametrize(
+        ("requested", "first_count"),
+        [
+            ("2024-05-01T00:01:20Z", 2),
+            ("2024-05-01T00:01:40Z", 3),
+            ("2024-05-01T00:01:30Z", 2),  # Equal distance chooses the earlier time.
+            ("2024-05-01T00:01:30.001Z", 3),
+            ("2024-05-01T08:01:20+08:00", 2),
+            ("2024-04-30T19:01:20-05:00", 2),
+            ("2024-05-01T00:01:20", 2),  # No offset means UTC.
+            ("2024-04-30T23:59:00Z", 1),  # Before the track selects its first point.
+        ],
+    )
+    def test_cli_split_at_nearest_time(self, track_file: Path, requested: str, first_count: int):
+        original = track_file.read_bytes()
+        result = runner.invoke(app, ["kml", "split", str(track_file), requested])
+        assert result.exit_code == 0, result.output
+        source = xmlutil.parse_file(track_file)
+        parts = [xmlutil.parse_file(track_file.with_stem(f"{track_file.stem}-Splited-{i}")) for i in (1, 2)]
+        for selector in ("//gx:coord", "//kml:when"):
+            expected = [node.text for node in xmlutil.findall(source, selector)]
+            actual = [[node.text for node in xmlutil.findall(part, selector)] for part in parts]
+            assert actual == [expected[:first_count], expected[first_count:]]
+        assert track_file.read_bytes() == original
+
+    def test_split_compares_track_timezone_offsets(self, track_file: Path):
+        raw = track_file.read_text(encoding="utf-8")
+        track_file.write_text(raw.replace("2024-05-01T00:01:00Z", "2024-05-01T08:01:00+08:00"), encoding="utf-8")
+        edit.split_kml(track_file, ["2024-05-01T00:01:20Z"])
+        first = xmlutil.parse_file(track_file.with_stem(f"{track_file.stem}-Splited-1"))
+        assert [node.text for node in xmlutil.findall(first, "//kml:when")] == [
+            "2024-05-01T00:00:00Z",
+            "2024-05-01T08:01:00+08:00",
+        ]
+
+    def test_split_merges_requests_for_the_same_point(self, track_file: Path):
+        edit.split_kml(track_file, ["2024-05-01T00:00:50Z", "2024-05-01T00:01:20Z"])
+        parts = sorted(track_file.parent.glob("*-Splited-*.kml"))
+        assert len(parts) == 2
+        assert [len(xmlutil.findall(xmlutil.parse_file(part), "//gx:coord")) for part in parts] == [2, 2]
+
+    @pytest.mark.parametrize("requested", ["2024-05-01T00:02:50Z", "2024-05-01T00:03:00Z", "2024-05-02T00:00:00Z"])
+    def test_split_at_last_point_fails_without_output(self, track_file: Path, requested: str):
+        # Validate every cut before writing, even if an earlier cut is valid.
+        with pytest.raises(UserInputError, match="last track point"):
+            edit.split_kml(track_file, ["2024-05-01T00:01:00Z", requested])
+        assert not list(track_file.parent.glob("*-Splited-*.kml"))
+
+    @pytest.mark.parametrize("requested", ["not-a-time", "2024-02-30T00:01:00Z"])
+    def test_cli_split_rejects_invalid_time(self, track_file: Path, requested: str):
+        result = runner.invoke(app, ["kml", "split", str(track_file), requested])
+        assert result.exit_code != 0
+        assert not list(track_file.parent.glob("*-Splited-*.kml"))
+
+    @pytest.mark.parametrize("replacement", ["", "<when>bad-time</when>"])
+    def test_split_rejects_missing_or_invalid_track_times(self, track_file: Path, replacement: str):
+        raw = track_file.read_text(encoding="utf-8")
+        track_file.write_text(raw.replace("<when>2024-05-01T00:01:00Z</when>", replacement), encoding="utf-8")
+        with pytest.raises(UserInputError):
+            edit.split_kml(track_file, ["2024-05-01T00:01:20Z"])
+        assert not list(track_file.parent.glob("*-Splited-*.kml"))
+
     def test_detect_gap_and_split(self, gapped_track_file: Path):
         points = edit.detect_gap_points(gapped_track_file, gap_seconds=300, gap_meters=500)
         assert points == ["2024-05-01T00:01:00Z"]  # 中断前最后一个点
@@ -150,6 +212,10 @@ class TestSplitKml:
 
 
 class TestRemoveBadPoints:
+    def test_prune_still_requires_an_exact_time(self, track_file: Path):
+        edit.prune_points(track_file, ["2024-05-01T00:01:20Z"])
+        assert not track_file.with_stem(f"{track_file.stem}-Fixed").exists()
+
     def test_remove_single(self, track_file: Path):
         edit.prune_points(track_file, ["116.1 39.1 110"])
         fixed = track_file.parent / "2024-05-01 test-Fixed.kml"

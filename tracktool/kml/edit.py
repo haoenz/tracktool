@@ -62,7 +62,7 @@ def _track_series(track: xmlutil.etree._Element) -> tuple[list[str], list[str], 
     coords = [c.text or "" for c in track.findall(f"{{{xmlutil.GX_NS}}}coord")]
     whens = [w.text or "" for w in track.findall(f"{{{xmlutil.KML_NS}}}when")]
     if not whens or len(whens) != len(coords):
-        raise UserInputError("Track points must carry timestamps to detect gaps")
+        raise UserInputError("Track points must carry matching timestamps")
     try:
         times = []
         for w in whens:
@@ -217,8 +217,24 @@ def _save_fixed(tree: xmlutil.etree._ElementTree, path: Path) -> None:
         log.info("Created cleaned track file", target=str(new_kml_path))
 
 
+def _split_location_index(track: xmlutil.etree._Element, location: str) -> int:
+    """Match coordinates exactly, or choose the closest time (earlier on ties)."""
+    if _COORDINATE_PATTERN.fullmatch(location):
+        return _track_location_index(track, location)
+    try:
+        requested = datetime.fromisoformat(location.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise UserInputError(f"Invalid split timestamp or coordinate: {location}") from exc
+    requested = requested.astimezone(UTC) if requested.tzinfo else requested.replace(tzinfo=UTC)
+    _, whens, times = _track_series(track)
+    times = [time.astimezone(UTC) for time in times]
+    index = min(range(len(times)), key=lambda i: (abs(times[i] - requested), times[i]))
+    log.info(f"Selected split timestamp: {whens[index]} (requested {location})")
+    return index
+
+
 def split_kml(path: Path, split_points: list[str]) -> None:
-    """Split the track at timestamps/coordinates into <name>-Splited-N.kml files."""
+    """Split at nearest timestamps/exact coordinates into <name>-Splited-N.kml files."""
     tree = xmlutil.parse_file(path)
     track = _get_track(tree)
     coords = [c.text or "" for c in track.findall(f"{{{xmlutil.GX_NS}}}coord")]
@@ -226,12 +242,14 @@ def split_kml(path: Path, split_points: list[str]) -> None:
 
     indices = [-1]
     for loc in split_points:
-        index = _track_location_index(track, loc)
+        index = _split_location_index(track, loc)
         if index == -1:
             return
+        if index == len(coords) - 1:
+            raise UserInputError("Cannot split at the last track point: the second segment would be empty")
         indices.append(index)
     indices.append(len(coords) - 1)
-    indices = sorted(indices)
+    indices = sorted(set(indices))
 
     ns = xmlutil.doc_ns(tree)
     for i in range(1, len(indices)):

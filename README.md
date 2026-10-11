@@ -33,6 +33,9 @@ tracktool kml push ./2024-05-01\ 徒步.kml ./2024-05-02\ 徒步.kml
 # 通配符由工具自己展开（只作用于最后一段路径，按路径序入库），PowerShell 里也能直接用
 tracktool kml push "./tracks/2024-05-*.kml"
 
+# 按最近的轨迹时间点拆成两段（这里是北京时间 14:30:00，不必与 when 完全一致）
+tracktool kml split "./2024-05-01 徒步.kml" "2024-05-01T14:30:00+08:00"
+
 # kml set-tag 同样吃通配符：整批交给批量入口，坏文件与没有 TrackTags 节点的派生文件计入失败，命令退 3
 tracktool kml set-tag "./tracks/2024-05-*.kml" --tag 地铁
 
@@ -61,6 +64,11 @@ tracktool kml push ./2024-05-03\ 徒步.kml --keep
 tracktool archive log
 tracktool archive undo
 ```
+
+`kml split` 按时间差选最近的轨迹点，距离相同时选较早的时间；支持 `Z` 和时区偏移，
+不带时区时按 UTC 解释。选中的点归前一段，原文件保留，结果写入同目录的
+`原名-Splited-1.kml`、`原名-Splited-2.kml`。多个切分时间落在同一点时只切一次；
+如果最近的是最后一个轨迹点，会报错，避免生成空的后一段。
 
 ## 目录比较与重复文件查找：使用 fclones
 
