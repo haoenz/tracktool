@@ -6,11 +6,16 @@ What progress looks like is the caller's business: run_parallel fires an
 `on_progress(done, total)` callback and never touches a console.
 """
 
-import itertools
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from threading import Lock
+from typing import TYPE_CHECKING
 
 from rich.console import Console
+
+if TYPE_CHECKING:
+    from rich.progress import Progress, TaskID
 
 DEFAULT_WORKERS = 5
 
@@ -25,40 +30,60 @@ def run_parallel[T, R](
     """Apply fn to every item, in parallel when beneficial.
 
     Returns results in input order. `parallel` selects DEFAULT_WORKERS threads
-    over a single worker. `on_progress(done, total)` fires once per completed
+    over a single worker. `on_progress(done, total)` fires at zero and per completed
     item (and a single-item fast path reports nothing at all).
     """
-    workers = DEFAULT_WORKERS if parallel else 1
     if not items:
         return []
+    if len(items) == 1:
+        return [fn(items[0])]
 
-    def sequential() -> list[R]:
-        if len(items) == 1:
-            return [fn(items[0])]
-        results = []
-        for done, item in enumerate(items, 1):
-            results.append(fn(item))
-            if on_progress is not None:
-                on_progress(done, len(items))
-        return results
+    with batch_progress(len(items), on_progress) as advance:
 
-    if workers <= 1 or len(items) == 1:
-        return sequential()
+        def wrapped(item: T) -> R:
+            result = fn(item)
+            advance()
+            return result
 
-    # itertools.count 的 __next__ 是 C 实现，线程安全，足够当完成计数用
-    completed = itertools.count(1)
-
-    def wrapped(item: T) -> R:
-        result = fn(item)
-        if on_progress is not None:
-            on_progress(next(completed), len(items))
-        return result
-
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(wrapped, items))
+        if not parallel:
+            return [wrapped(item) for item in items]
+        with ThreadPoolExecutor(max_workers=DEFAULT_WORKERS) as pool:
+            return list(pool.map(wrapped, items))
 
 
-def rich_reporter(activity: str, *, console: Console) -> Callable[[int, int], None]:
+@contextmanager
+def batch_progress(total: int, on_progress: Callable[[int, int], None] | None) -> Iterator[Callable[[], None]]:
+    """Show a batch before work starts, and finish only after it is committed.
+
+    Call advance after each item. The final completion is held until the
+    scope exits successfully, keeping the display alive during batch saves,
+    ZIP validation and publication. Close live reporters even on interruption;
+    ordinary callback reporters need no cleanup. Serialize worker reports so
+    completion counts cannot arrive out of order.
+    """
+    done = 0
+    lock = Lock()
+
+    def advance() -> None:
+        nonlocal done
+        with lock:
+            done += 1
+            if on_progress is not None and done < total:
+                on_progress(done, total)
+
+    try:
+        if on_progress is not None and total:
+            on_progress(0, total)
+        yield advance
+        if on_progress is not None and total:
+            on_progress(total, total)
+    finally:
+        close = getattr(on_progress, "close", None)
+        if close is not None:
+            close()
+
+
+def rich_reporter(activity: str, *, console: Console) -> _RichReporter:
     """A progress display for one batch: starts on the first report, clears
     itself once the count reaches its total (transient, so nothing lingers).
 
@@ -91,18 +116,26 @@ def rich_reporter(activity: str, *, console: Console) -> Callable[[int, int], No
         console=console,
         transient=True,
     )
-    task_id = None
+    return _RichReporter(progress, activity)
 
-    def report(done: int, total: int) -> None:
-        nonlocal task_id
-        if task_id is None:
-            # 首次报告是在第 1 个文件处理完之后才来的：先把数据补齐再起 Live，
-            # 否则第一帧写着 0/N，和上面刚打出的那行日志自相矛盾
-            task_id = progress.add_task(activity, total=total, completed=done)
-            progress.start()
+
+class _RichReporter:
+    def __init__(self, progress: Progress, activity: str) -> None:
+        self.progress = progress
+        self.activity = activity
+        self.task_id: TaskID | None = None
+        self.closed = False
+
+    def __call__(self, done: int, total: int) -> None:
+        if self.task_id is None:
+            self.task_id = self.progress.add_task(self.activity, total=total, completed=done)
+            self.progress.start()
         else:
-            progress.update(task_id, completed=done)
+            self.progress.update(self.task_id, completed=done)
         if done >= total:
-            progress.stop()
+            self.close()
 
-    return report
+    def close(self) -> None:
+        if self.task_id is not None and not self.closed:
+            self.progress.stop()
+            self.closed = True

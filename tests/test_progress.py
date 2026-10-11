@@ -1,6 +1,10 @@
 """The progress seam: the batch reports numbers, someone else decides the look."""
 
+from io import StringIO
 from pathlib import Path
+
+import pytest
+from rich.console import Console
 
 from tracktool import progress
 from tracktool.context import ctx
@@ -16,7 +20,7 @@ class TestRunParallel:
         )
 
         assert result == ["A", "B", "C"]
-        assert seen == [(1, 3), (2, 3), (3, 3)]
+        assert seen == [(0, 3), (1, 3), (2, 3), (3, 3)]
 
     def test_no_reporter_no_calls(self):
         results: list[object] = []
@@ -48,7 +52,7 @@ class TestBatchReportsThroughContext:
 
         run_per_file(files, lambda file: file.read_bytes(), activity="Testing")
 
-        assert seen == [(1, 3), (2, 3), (3, 3)]
+        assert seen == [(0, 3), (1, 3), (2, 3), (3, 3)]
 
     def test_the_default_reporter_is_the_rich_one(self):
         from functools import partial
@@ -98,3 +102,43 @@ class TestRichReporter:
 
         # 起画前数据就已补齐（0/N 那一帧不会出现），此后每完成一个只是更新
         assert events == [("add", 1), ("start", None), ("update", 2), ("update", 3), ("stop", None)]
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_progress_starts_before_work_and_reports_monotonically(parallel):
+    seen = []
+
+    def work(item):
+        assert seen[0] == (0, 20)
+        return item * 2
+
+    result = progress.run_parallel(
+        list(range(20)), work, parallel=parallel, on_progress=lambda done, total: seen.append((done, total))
+    )
+    assert result == [n * 2 for n in range(20)]
+    assert seen == [(n, 20) for n in range(21)]
+
+
+@pytest.mark.parametrize("error", [RuntimeError, KeyboardInterrupt])
+def test_failed_batch_closes_live_display_without_reporting_success(error):
+    console = Console(file=StringIO(), force_terminal=True)
+    report = progress.rich_reporter("Testing", console=console)
+    with pytest.raises(error), progress.batch_progress(2, report) as advance:
+        assert report.progress.live.is_started
+        advance()
+        raise error()
+    assert not report.progress.live.is_started
+    assert report.progress.tasks[0].completed == 1
+
+
+def test_progress_stays_visible_until_batch_publication():
+    console = Console(file=StringIO(), force_terminal=True)
+    report = progress.rich_reporter("Testing", console=console)
+    with progress.batch_progress(2, report) as advance:
+        advance()
+        advance()
+        # All items prepared; a collection save or ZIP publication still follows.
+        assert report.progress.live.is_started
+        assert report.progress.tasks[0].completed < 2
+    assert not report.progress.live.is_started
+    assert report.progress.tasks[0].completed == 2

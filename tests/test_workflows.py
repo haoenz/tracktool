@@ -377,3 +377,115 @@ class TestResolveVidResumes:
         # 两个目录都在：产物已经落盘，这一步的预览是真的，不是一句「会做」
         assert calls["convert"] == ((tmp_path / "VID_original").resolve(), (tmp_path / "VID").resolve())
         assert calls["repair"] == (tmp_path / "VID").resolve()
+
+
+class TestPushProgress:
+    @pytest.mark.parametrize("move", [False, True])
+    def test_progress_surrounds_real_read_write_and_publication(self, tmp_path, monkeypatch, move):
+        zip_path = _archive(tmp_path)
+        tracks = [_track(tmp_path, f"2024-05-0{i} track.kml") for i in (1, 2)]
+        reports = {}
+        monkeypatch.setattr(
+            ctx, "reporter", lambda activity: lambda done, total: reports.setdefault(activity, []).append((done, total))
+        )
+
+        read_track = workflows._read_track
+        reads = 0
+
+        def read(*args):
+            nonlocal reads
+            assert reports["Reading KMLs"][-1] == (reads, 2)
+            reads += 1
+            return read_track(*args)
+
+        monkeypatch.setattr(workflows, "_read_track", read)
+        save = workflows.collections.TrackCollection.save
+
+        def save_collection(collection):
+            activity = (
+                "Updating mobile collection" if ".Mobile." in collection.path.name else "Updating desktop collection"
+            )
+            assert reports[activity][-1] == (1, 2)
+            save(collection)
+
+        monkeypatch.setattr(workflows.collections.TrackCollection, "save", save_collection)
+        write = zipfile.ZipFile.write
+        writes = 0
+
+        def write_entry(zf, *args, **kwargs):
+            nonlocal writes
+            assert reports["Writing ZIP"][-1] == (writes, 2)
+            writes += 1
+            return write(zf, *args, **kwargs)
+
+        monkeypatch.setattr(zipfile.ZipFile, "write", write_entry)
+        replace = workflows.archive.os.replace
+        publications = 0
+
+        def publish(source, destination):
+            nonlocal publications
+            if Path(destination) == zip_path:
+                assert reports["Writing ZIP"][-1] == (1, 2)
+                publications += 1
+            return replace(source, destination)
+
+        monkeypatch.setattr(workflows.archive.os, "replace", publish)
+        result = workflows.push_tracks(tracks, str(zip_path), TrackKind.DEFAULT, move=move)
+
+        assert result.ok
+        assert reads == writes == 2
+        assert publications == 1
+        for activity in ("Reading KMLs", "Updating desktop collection", "Updating mobile collection", "Writing ZIP"):
+            assert reports[activity] == [(0, 2), (1, 2), (2, 2)]
+        assert ("Moving to backup" in reports) == move
+        if move:
+            assert reports["Moving to backup"] == [(0, 2), (1, 2), (2, 2)]
+        assert reports["Recording push"] == [(0, 1), (1, 1)]
+
+    def test_duplicate_entries_still_advance_progress(self, tmp_path, monkeypatch):
+        zip_path = _archive(tmp_path)
+        tracks = [_track(tmp_path, f"2024-05-0{i} track.kml") for i in (1, 2, 3)]
+        workflows.push_tracks(tracks[:2], str(zip_path), TrackKind.DEFAULT, move=False)
+        reports = {}
+        monkeypatch.setattr(
+            ctx, "reporter", lambda activity: lambda done, total: reports.setdefault(activity, []).append((done, total))
+        )
+        result = workflows.push_tracks(tracks, str(zip_path), TrackKind.DEFAULT, move=False)
+        assert result.ok
+        assert reports["Writing ZIP"] == [(0, 3), (1, 3), (2, 3), (3, 3)]
+
+    @pytest.mark.parametrize("error", [OSError, KeyboardInterrupt])
+    def test_failed_publication_cleans_up_progress_without_completing_zip(self, tmp_path, monkeypatch, error):
+        from io import StringIO
+
+        from rich.console import Console
+
+        from tracktool.progress import rich_reporter
+
+        zip_path = _archive(tmp_path)
+        before = zip_path.read_bytes()
+        tracks = [_track(tmp_path, f"2024-05-0{i} track.kml") for i in (1, 2)]
+        console = Console(file=StringIO(), force_terminal=True)
+        reports = {}
+
+        def reporter(activity):
+            reports[activity] = rich_reporter(activity, console=console)
+            return reports[activity]
+
+        monkeypatch.setattr(ctx, "reporter", reporter)
+        replace = workflows.archive.os.replace
+
+        def fail_publication(source, destination):
+            if Path(destination) == zip_path:
+                assert reports["Writing ZIP"].progress.live.is_started
+                raise error("publication interrupted")
+            return replace(source, destination)
+
+        monkeypatch.setattr(workflows.archive.os, "replace", fail_publication)
+        with pytest.raises(error):
+            workflows.push_tracks(tracks, str(zip_path), TrackKind.DEFAULT)
+
+        assert zip_path.read_bytes() == before
+        assert all(track.is_file() for track in tracks)
+        assert reports["Writing ZIP"].progress.tasks[0].completed < 2
+        assert all(not report.progress.live.is_started for report in reports.values())

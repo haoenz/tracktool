@@ -49,6 +49,7 @@ from .fileutil import BatchResult, folder_target, move_to_folder
 from .kml import archive, collections, history, kmlfile
 from .kml.kmlfile import KmlContent, TrackKind
 from .paths import display_path
+from .progress import batch_progress
 from .tags import ALTITUDE, POSITION
 from .workspace import resolve_archive
 
@@ -92,44 +93,53 @@ def _names(tracks: list[_Track]) -> str:
 
 def _file_desktop(collection_path: Path, type_: TrackKind, tracks: list[_Track]) -> None:
     """File the batch's tracks of one type into their desktop collection."""
-    archive.ensure_archive_directory(collection_path.parent)
-    collection = collections.DesktopCollection.open(collection_path, type_)
-    for track in tracks:
-        collection.add(track.path, track.content)
-    collection.save()
+    with batch_progress(len(tracks), ctx.reporter("Updating desktop collection")) as advance:
+        archive.ensure_archive_directory(collection_path.parent)
+        collection = collections.DesktopCollection.open(collection_path, type_)
+        for track in tracks:
+            collection.add(track.path, track.content)
+            advance()
+        collection.save()
 
 
 def _file_mobile(collection_path: Path, tracks: list[_Track]) -> None:
     """File the batch's tracks of one type into their mobile collection."""
-    archive.ensure_archive_directory(collection_path.parent)
-    collection = collections.MobileCollection.open(collection_path)
-    for track in tracks:
-        collection.add(track.path, track.content)
-    collection.save()
+    with batch_progress(len(tracks), ctx.reporter("Updating mobile collection")) as advance:
+        archive.ensure_archive_directory(collection_path.parent)
+        collection = collections.MobileCollection.open(collection_path)
+        for track in tracks:
+            collection.add(track.path, track.content)
+            advance()
+        collection.save()
 
 
 def _append_to_zip(tracks: list[_Track], zip_file: Path, change: history.Change) -> None:
-    archive.ensure_zip_file(zip_file)
-    # 前移哈希的判据归 archive 所有（与 pop 共用一处）：它要的是推之前的真值哈希
-    zip_hash_before = archive.current_hash(zip_file)
-    stored_views_hash = archive.read_views_hash(zip_file)
-    change.added_entries = archive.push_compressed_kmls([(track.path, track.type_.value) for track in tracks], zip_file)
-    archive.advance_views_hash(zip_file, zip_hash_before=zip_hash_before, stored_views_hash=stored_views_hash)
+    with batch_progress(len(tracks), ctx.reporter("Writing ZIP")) as advance:
+        archive.ensure_zip_file(zip_file)
+        # 前移哈希的判据归 archive 所有（与 pop 共用一处）：它要的是推之前的真值哈希
+        zip_hash_before = archive.current_hash(zip_file)
+        stored_views_hash = archive.read_views_hash(zip_file)
+        change.added_entries = archive.push_compressed_kmls(
+            [(track.path, track.type_.value) for track in tracks], zip_file, on_entry=advance
+        )
+        archive.advance_views_hash(zip_file, zip_hash_before=zip_hash_before, stored_views_hash=stored_views_hash)
 
 
 def _move_to_backup(tracks: list[_Track], archive_dir: Path, change: history.Change) -> None:
-    archive.ensure_archive_directory(archive_dir)
-    backup_folder = ctx.config.kml_backup_dir_name
-    for track in tracks:
-        if move_to_folder(track.path, backup_folder, archive_dir):
-            # 只记源文件真的离开了原位的：搬走的，和 Backup 里已有同内容副本而被清掉的
-            # 都算；同名而内容不同时两处都留着，那一对与「没带 --move」同义，不记
-            change.backup_moves.append(
-                history.BackupMove(
-                    original_path=str(track.path),
-                    backup_path=str(folder_target(track.path, backup_folder, archive_dir)),
+    with batch_progress(len(tracks), ctx.reporter("Moving to backup")) as advance:
+        archive.ensure_archive_directory(archive_dir)
+        backup_folder = ctx.config.kml_backup_dir_name
+        for track in tracks:
+            if move_to_folder(track.path, backup_folder, archive_dir):
+                # 只记源文件真的离开了原位的：搬走的，和 Backup 里已有同内容副本而被清掉的
+                # 都算；同名而内容不同时两处都留着，那一对与「没带 --move」同义，不记
+                change.backup_moves.append(
+                    history.BackupMove(
+                        original_path=str(track.path),
+                        backup_path=str(folder_target(track.path, backup_folder, archive_dir)),
+                    )
                 )
-            )
+            advance()
 
 
 def push_tracks(
@@ -165,15 +175,17 @@ def push_tracks(
     """
     archive_dir, zip_file = resolve_archive(zip_path)
     result: BatchResult[list[Action]] = BatchResult()
-    change = history.start(history.PUSH, zip_hash_before=archive.current_hash(zip_file))
+    with batch_progress(len(paths), ctx.reporter("Reading KMLs")) as advance:
+        change = history.start(history.PUSH, zip_hash_before=archive.current_hash(zip_file))
 
-    pending: list[_Track] = []
-    for path in paths:
-        track = _read_track(path, type_, tag_map)
-        if track is None:
-            result.failed.append(path)
-        else:
-            pending.append(track)
+        pending: list[_Track] = []
+        for path in paths:
+            track = _read_track(path, type_, tag_map)
+            if track is None:
+                result.failed.append(path)
+            else:
+                pending.append(track)
+            advance()
     # 记下用到的源文件：归档里那份不是它们的副本，源件被清掉时只有日志知道
     change.source_paths = [str(track.path) for track in pending]
 
@@ -225,7 +237,8 @@ def push_tracks(
         # 落盘的那部分照记：一次失败的 push 也可能已经加进几条，那些同样要撤得回来。
         # 一条都没读出来时不记：没有步骤，也就没有动过归档的东西
         if pending:
-            history.commit(archive_dir, change, zip_hash_after=archive.current_hash(zip_file))
+            with batch_progress(1, ctx.reporter("Recording push")):
+                history.commit(archive_dir, change, zip_hash_after=archive.current_hash(zip_file))
     return result
 
 

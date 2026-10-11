@@ -28,7 +28,7 @@ import shutil
 import tempfile
 import zipfile
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -194,7 +194,9 @@ def push_compressed_kml(kml_path: Path, zip_path: Path, *, tag_map: Mapping[str,
     push_compressed_kmls([(kml_path, kind.value if kind else UNCLASSIFIED)], zip_path)
 
 
-def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) -> list[str]:
+def push_compressed_kmls(
+    entries: Sequence[tuple[Path, str]], zip_path: Path, *, on_entry: Callable[[], None] | None = None
+) -> list[str]:
     """Stage a whole batch beside the ZIP, then atomically publish it.
 
     The caller recognizes the tracks and hands in each kind, so nothing is
@@ -205,6 +207,8 @@ def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) ->
     Returns the entries that were added, in the order they landed — the
     entries, never the command line: a name already filed is skipped, and the
     change log has to record what happened rather than what was asked for.
+    `on_entry` reports each staged or skipped input; publication and validation
+    still follow, so only a successful return means the batch is committed.
     """
     exists = zip_path.is_file()
     names: set[str] = set()
@@ -216,6 +220,8 @@ def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) ->
         entry = zip_entry_name(kml_path, kind)
         if entry in names:
             log.warning(f"Already exists in ZIP: {entry}", target=str(zip_path))
+            if on_entry is not None:
+                on_entry()
             continue
         pending.append((kml_path, entry))
         names.add(entry)
@@ -223,9 +229,11 @@ def push_compressed_kmls(entries: Sequence[tuple[Path, str]], zip_path: Path) ->
         # 提前返回还有一层理由：ZipFile 的 "a" 模式会把不存在的压缩包建出来
         for _, entry in pending:
             log.info(f"Would add to ZIP: {entry}", target=str(zip_path))
+            if on_entry is not None:
+                on_entry()
         return [entry for _, entry in pending]
     if pending:
-        _publish_appended(pending, zip_path)
+        _publish_appended(pending, zip_path, on_entry=on_entry)
     return [entry for _, entry in pending]
 
 
@@ -247,7 +255,9 @@ def push_zip_entry(source: Path, entry: str, zip_path: Path) -> bool:
     return True
 
 
-def _publish_appended(pending: Sequence[tuple[Path, str]], zip_path: Path) -> None:
+def _publish_appended(
+    pending: Sequence[tuple[Path, str]], zip_path: Path, *, on_entry: Callable[[], None] | None = None
+) -> None:
     """Publish staged entries: copy the ZIP, append them, replace atomically.
 
     Copy compressed bytes, preserving entry metadata without recompression.
@@ -264,6 +274,8 @@ def _publish_appended(pending: Sequence[tuple[Path, str]], zip_path: Path) -> No
         with zipfile.ZipFile(temporary, "a", zipfile.ZIP_DEFLATED) as replacement:
             for kml_path, entry in pending:
                 replacement.write(kml_path, entry)
+                if on_entry is not None:
+                    on_entry()
         temporary.flush()
         with zipfile.ZipFile(temporary) as replacement:
             bad_entry = replacement.testzip()
