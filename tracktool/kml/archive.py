@@ -128,13 +128,27 @@ def require_zip_file(zip_file: Path) -> None:
 class ZipEntry:
     """One resolved archive identity: the entry's path, and the kind it files under.
 
-    kind is None where no view can hold the entry — `_unclassified` ones, and
-    legacy flat ones no table classifies — which is the same None rebuild files
-    nothing under, not a kind to guess.
+    kind is None when unclassified or unknown. A directory-only listing leaves
+    legacy flat entries unknown; restore may resolve them from their TrackTags.
     """
 
     path: str
     kind: TrackKind | None
+
+    @property
+    def name(self) -> str:
+        """Display filename; path remains the complete, exact selection key."""
+        return self.path.rsplit("/", 1)[-1]
+
+
+def entry_kind_from_path(entry_name: str) -> TrackKind | None:
+    """Directory category only; flat/unknown/_unclassified paths return None."""
+    if "/" not in entry_name:
+        return None
+    try:
+        return TrackKind(entry_name.split("/", 1)[0])
+    except ValueError:
+        return None
 
 
 def find_zip_entry(
@@ -609,10 +623,7 @@ def _entry_kind(
     one, whose folder settles the kind before anything is decompressed.
     """
     if "/" in entry_name:
-        try:
-            return TrackKind(entry_name.split("/", 1)[0])
-        except ValueError:
-            return None
+        return entry_kind_from_path(entry_name)
     assert tree is not None  # 扁平条目的类别只在 TrackTags 里，调用方必须先解压解析
     return kmlfile.kind_from_tree(tree, tag_map=tag_map)
 

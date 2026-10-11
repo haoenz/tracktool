@@ -233,6 +233,69 @@ tracktool --dry-run archive undo   # 预演：逐条报出要动的每一步，�
 
 日志是撤回的能力，不是备份：`history.jsonl` 丢了等于没有可撤的记录（不报错）。ZIP 丢了 `undo` 救不回来——那要靠归档目录自己的备份；`Backup/` 清空则不碍撤回，条目本身就是还原材料。
 
+## Python 只读轨迹数据接口
+
+`tracktool.kml.trackdata` 提供数值数据提取，供后续绘图使用：
+
+```python
+from pathlib import Path
+from tracktool.kml.trackdata import read_track_data, track_data_from_tree
+from tracktool.kml import xmlutil
+
+data = read_track_data(Path("2024-05-01 徒步.kml"))
+# 也可复用已解析的 lxml ElementTree；source 是可选的来源/错误定位标签
+tree = xmlutil.parse_file(Path("2024-05-01 徒步.kml"))
+data = track_data_from_tree(tree, source="2024-05-01 徒步.kml")
+
+print(data.source, data.name, data.track_tags, data.start_name, data.end_name)
+for track in data.tracks:
+    print(track.index, track.placemark_id, track.name)
+    for segment in track.segments:
+        longitude, latitude = segment.longitude, segment.latitude
+        print(segment.kind, len(longitude), longitude[0], latitude[0])
+        # longitude[i] / latitude[i] / altitude[i] / time_us[i] 对应同一点
+        # 每个 segment 是独立线段，遍历时保留边界
+```
+
+返回 `KmlTrackData → TrackFeature → TrackSegment`。每个含线状几何的 Placemark 对应一个 feature，`index` 是它在全部 Placemark 中从 1 开始的序号，名称/ID 缺失或重名时也能定位；每个 `gx:Track` 或 `LineString` 对应一个 segment，保留 `kind` 和原几何的 `geometry_id`。支持多 Placemark、多 Track，以及嵌套 `MultiGeometry` / `gx:MultiTrack`；即使启用了 `gx:interpolate` 也保留段边界。文件名/来源保存在 `source`，Document 名称保存在 `name`；`track_tags`、`start_name`、`end_name` 沿用 Document/ExtendedData 中 `TrackTags`、`PosStartName`、`PosEndName` 的读取规则（去掉首尾空白），缺失为 `""`。活动标签保留原值，不映射归档类别。
+
+- 经纬度是 64 位浮点 `array('d')`；海拔存在时也使用 `array('d')`，保留原始数值。整段没有海拔时 `altitude is None`；部分点缺失时对应值为 NaN，可用 `math.isnan(segment.altitude[i])` 判断，显式 `0`（含 `-0.0`）保留为零。
+- 整段没有时间时 `time_us is None`；否则为有符号 64 位整数 `array('q')`，单位为自 **1970-01-01 00:00:00 UTC** 起的微秒。接受完整的 `YYYY-MM-DDTHH:MM:SS[.fraction]Z` 或带 `±HH:MM` 偏移的时间，按 UTC 换算；不猜测缺失时区，超过 6 位的小数秒截掉尾数、不四舍五入。逐点 datetime 仅在转换时临时使用，不留在结果中。
+- 坐标和时间仅在各自 `gx:Track` 内按下标对应（也兼容历史 `gx:when`）。无时间路线正常返回；只要有时间节点，其数量必须等于本段坐标数，每个时间都必须有效。空时间、格式错误、数量不符、非法/非有限数值、越界经纬度、空线段或没有线状轨迹都抛出 `UserInputError`，尽可能给出来源、Placemark、线段和从 1 开始的点序号。
+
+输入使用带命名空间的 KML XML 树；Point、Polygon 等非线状几何不提取，单点线段照原样保留。接口不排序、去重、清漂移、连接线段、简化、转换坐标系，也不要求时间单调。不修改源文件或 XML 树，不写配置、归档或隐式缓存；返回数组归调用方所有，可以修改。此接口不提供绘图、GeoJSON、CLI 或归档读取功能，现有照片定位、合并和集合生成仍使用原逻辑。
+
+每点数组数据区仅经纬度占 16 字节，加海拔占 24 字节，再加时间占 32 字节：10,000 点分别为 160,000 / 240,000 / 320,000 字节（不含数组容量余量、容器和 XML 树）。解析仍使用现有完整 XML 树；提取时逐点追加数组，不先建立全量逐点字典/对象列表。
+
+## Python 只读归档访问接口
+
+`tracktool.kml.archive_reader.open_archive` 接受显式 **ZIP 文件路径**（`str` 或 `Path`，不是归档目录），沿用现有 `--zip` 路径规则：展开 `~`、解析相对路径，其父目录必须有 `archive.json` 身份文件。显式 ZIP 路径优先于 manifest 中的 ZIP 名称，只检查身份文件存在，不读取配置，也不初始化归档。
+
+```python
+from pathlib import Path
+from tracktool.kml.archive_reader import open_archive
+
+with open_archive(Path("/path/to/archive/Archive.zip")) as archive:
+    entries = archive.list_entries()
+    for entry in entries:
+        print(entry.path, entry.name, entry.kind)
+
+    # 使用列表中的完整路径精确选择；同名文件可按不同目录分别读取
+    data = archive.read_track_data("Default/2026-05/2026-05-01 徒步.kml")
+    print(data.source, data.track_tags)
+    for track in data.tracks:
+        for segment in track.segments:
+            print(segment.longitude[0], segment.latitude[0], len(segment.longitude))
+```
+
+`list_entries()` 返回现有的 `ZipEntry` 列表，按完整路径的大小写敏感字符串顺序排列。`path` 是原始 ZIP 条目路径，`name` 是显示文件名；扩展名 `.kml` 不区分大小写，目录项和其他文件忽略，空归档返回 `[]`。列表只读 ZIP 目录信息，不解压或解析 KML。`kind` 仅根据首层目录识别 `Default` / `Train` / `Flight`；旧扁平条目、未知目录和 `_unclassified` 都返回 `None`，不猜测类别。原始活动名在读取后的 `data.track_tags` 中，与目录类别不同。
+
+`read_track_data(entry.path)` 按完整路径逐字匹配，不按文件名或片段查找，也不规范化条目路径或忽略大小写。每次只解压、校验并解析选中条目，直接返回现有 `KmlTrackData`，数组、分段和缺失值约定同上。没有全归档几何缓存，也没有临时 KML 文件；再次读取会重新解析。未知类别或缺少活动标签不妨碍读取有效几何。
+
+`with` 进入时打开 ZIP，正常或异常退出都会关闭；返回的数据和条目列表可在退出后继续使用，但归档对象的方法会报告已关闭。`data.source` 为 `<解析后的绝对 ZIP 路径>!/<完整条目路径>`，是来源位置标签，改名或移动后会变化，不是永久 ID。接口不提供并发写入期间的快照或锁定保证。
+
+路径/身份错误、无效 ZIP、缺失条目、重复路径歧义、CRC/解压损坏、XML 或轨迹数据无效都抛出 `UserInputError`，错误带归档来源，条目错误还带完整条目路径。目录列表遇到重复 KML 路径会报错；精确读取也拒绝有重复路径的目标，但仍可读取其他唯一条目。未选中的坏 KML 不影响列目录和读取其他条目；不会静默跳过明确选中的坏轨迹，调用方可捕获错误后继续。读取不修改归档、源文件、配置、集合、备份或撤销历史。
+
 ## 实现说明
 
 - exiftool 以 `-stay_open` 常驻进程通信（每线程一个），批量处理不必为每个文件启动一次进程

@@ -30,9 +30,10 @@ def parse_file(path: Path) -> etree._ElementTree:
         raise UserInputError(f"Cannot read KML file {display_path(path)}: {exc}") from exc
 
 
-def parse_string(text: str) -> etree._ElementTree:
+def parse_string(text: str | bytes) -> etree._ElementTree:
+    """Parse XML in memory; bytes preserve the input's declared XML encoding."""
     try:
-        return etree.fromstring(text.encode("utf-8")).getroottree()
+        return etree.fromstring(text.encode("utf-8") if isinstance(text, str) else text).getroottree()
     except etree.XMLSyntaxError as exc:
         raise UserInputError(f"Cannot parse KML: {exc}") from exc
 
@@ -81,7 +82,14 @@ def sub(parent: etree._Element, tag: str, text: str | None = None, ns: str | Non
 
 
 def element_text(node: etree._Element | None) -> str:
-    return (node.text or "").strip() if node is not None else ""
+    """Read all element text, excluding comments/PIs and the element's own tail."""
+    if node is None:
+        return ""
+    # Comments and processing instructions split text into .text and child
+    # .tail fragments. Join without separators: a split may be inside a number
+    # or timestamp. Keep the common childless case free of a joined copy.
+    text = "".join(node.itertext()) if len(node) else (node.text or "")
+    return text.strip()
 
 
 def extended_data_value(tree: etree._ElementTree, name: str) -> str:
