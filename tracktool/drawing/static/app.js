@@ -15,7 +15,10 @@ let state,
   lastBlobUrl,
   creditObserver,
   styleRequest = 0,
-  basemapRequest = 0;
+  basemapRequest = 0,
+  candidate,
+  switching = false,
+  failedBasemap;
 const names = {
   Default: "普通",
   Train: "火车",
@@ -23,6 +26,10 @@ const names = {
   Unknown: "未分类",
 };
 function status(message, kind = "") {
+  if (switching && kind !== "error") {
+    message = "正在加载所选底图，原地图仍可浏览…";
+    kind = "busy";
+  }
   $("status").textContent = message;
   $("status").className = kind;
 }
@@ -33,6 +40,7 @@ function dirty() {
   $("dirty").textContent = "有未保存的编辑";
 }
 function controls() {
+  $("stage").setAttribute("aria-busy", String(switching));
   $("basemap").disabled = !state || pending > 0 || exporting;
   for (const id of ["save-project", "export"])
     $(id).disabled =
@@ -40,6 +48,7 @@ function controls() {
       pending > 0 ||
       selectionErrors.length > 0 ||
       versionsChanged ||
+      switching ||
       exporting;
 }
 function resize() {
@@ -61,6 +70,10 @@ function resize() {
     stage.clientHeight / scale,
     scale,
   );
+  if (candidate) {
+    candidate.frame.style.transform = $("frame").style.transform;
+    candidate.setSurround(...renderer.surroundSize);
+  }
   $("preview-scale").textContent = `预览 ${Math.round(scale * 100)}%`;
 }
 new ResizeObserver(resize).observe($("stage"));
@@ -75,6 +88,7 @@ function syncPreview() {
   if (!renderer) return;
   const show = !$("export-boundary").hidden;
   renderer.setExportPreview(show);
+  candidate?.setExportPreview(show);
   renderer.credit.classList.toggle("viewport-credit", !show);
   (show ? $("frame") : $("stage")).append(renderer.credit);
   reserveCreditSpace();
@@ -105,6 +119,7 @@ for (const name of ["library", "inspector"]) {
 }
 if (matchMedia("(max-width: 900px)").matches) showPanel("inspector", false);
 function makeRenderer() {
+  cancelSwitch();
   creditObserver?.disconnect();
   renderer?.destroy();
   renderer = new MapCanvas(
@@ -114,6 +129,7 @@ function makeRenderer() {
     cityData.labels,
     (camera) => {
       state.camera = camera;
+      candidate?.setCamera(camera);
       dirty();
     },
     (message) =>
@@ -138,7 +154,7 @@ function makeRenderer() {
 }
 function syncFields() {
   for (const key of ["basemap", "color", "width", "cities"])
-    $(key).value = state.style[key];
+    if (key !== "basemap" || !switching) $(key).value = state.style[key];
   $("width-value").value = state.style.width;
   const source = config.basemaps?.find(
     (item) => item.id === state.style.basemap,
@@ -170,6 +186,11 @@ function syncFields() {
 }
 function apply() {
   renderer.apply(structuredClone(state));
+  if (candidate) {
+    const staged = structuredClone(state);
+    staged.style.basemap = candidate.state.style.basemap;
+    candidate.apply(staged);
+  }
   syncFields();
   resize();
   dirty();
@@ -249,6 +270,7 @@ async function loadSelection() {
     selectionErrors = result.errors;
     state.tracks = tracks.map(({ entry, sha256 }) => ({ entry, sha256 }));
     renderer.setTracks(tracks);
+    candidate?.setTracks(tracks);
     dirty();
     list();
     if (selectionErrors.length)
@@ -288,6 +310,7 @@ async function openArchive(path) {
     selectionErrors = [];
     chosen = new Set();
     renderer.setTracks([]);
+    candidate?.setTracks([]);
     syncFields();
     list();
     dirty();
@@ -364,41 +387,82 @@ $("fit").onclick = () => {
 };
 $("zoom-in").onclick = () => renderer?.map.zoomIn({ duration: 0 });
 $("zoom-out").onclick = () => renderer?.map.zoomOut({ duration: 0 });
-$("basemap").oninput = async () => {
+function cancelSwitch() {
+  basemapRequest++;
+  if (candidate) {
+    candidate.destroy();
+    candidate.frame.remove();
+    candidate = undefined;
+  }
+  switching = false;
+}
+async function switchBasemap(id) {
   if (!state) return;
-  const id = $("basemap").value;
-  const request = ++basemapRequest;
-  let switched = false;
-  pending++;
+  cancelSwitch();
+  const request = basemapRequest;
+  switching = true;
+  failedBasemap = undefined;
   controls();
-  status("正在检查并加载所选底图…", "busy");
+  status("正在加载所选底图，原地图仍可浏览…", "busy");
+  const frame = document.createElement("div");
+  frame.className = "frame staging-frame";
+  frame.setAttribute("aria-hidden", "true");
+  $("frame-holder").append(frame);
+  let staged;
   try {
-    if (config.basemaps?.some((source) => source.id === id))
-      await api("/api/basemap-check", { id });
-    if (request !== basemapRequest) return;
+    const next = structuredClone(state);
+    next.style.basemap = id;
+    staged = candidate = new MapCanvas(frame, next, config, cityData.labels);
+    staged.setTracks(tracks);
+    staged.setExportPreview(renderer.exportPreview);
+    resize();
+    const deadline = performance.now() + 65000;
+    while (true) {
+      await staged.ready(deadline);
+      if (request !== basemapRequest || staged.destroyed) return;
+      if (!renderer.map.isMoving()) break;
+      // Preserve an in-progress gesture on the old map. Its moveend callback
+      // sends the final WGS84 camera to the candidate before we try again.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    // Adopt camera, source, geometry, labels and attribution in one JS turn.
+    // The committed project remains untouched until the whole candidate is ready.
+    creditObserver?.disconnect();
+    const previous = renderer;
     state.style.basemap = id;
-    switched = true;
-    makeRenderer();
+    staged.onCamera = (camera) => {
+      state.camera = camera;
+      candidate?.setCamera(camera);
+      dirty();
+    };
+    staged.onError = (message) => status("地图资源加载失败：" + message + "；请重试资源。", "error");
+    previous.destroy();
+    $("frame").replaceChildren(...frame.childNodes);
+    staged.frame = $("frame");
+    frame.remove();
+    renderer = staged;
+    candidate = undefined;
+    switching = false;
+    syncPreview();
+    creditObserver = new ResizeObserver(reserveCreditSpace);
+    creditObserver.observe(renderer.credit);
     syncFields();
     dirty();
-    const current = renderer;
-    await current.ready();
-    if (request === basemapRequest && current === renderer)
-      status("地图样式已更新。");
+    status("地图样式已更新。");
   } catch (e) {
     if (request === basemapRequest) {
+      failedBasemap = id;
+      cancelSwitch();
+      frame.remove();
       $("basemap").value = state.style.basemap;
-      error(
-        switched
-          ? e
-          : new Error(e.message + "；保留原底图，可重新选择以重试。"),
-      );
+      error(new Error(e.message + "；保留原底图，点击「重试资源」或重新选择以重试。"));
     }
   } finally {
-    pending--;
+    if (request === basemapRequest) switching = false;
     controls();
   }
-};
+}
+$("basemap").oninput = () => switchBasemap($("basemap").value);
 for (const key of ["color", "width", "cities"])
   $(key).addEventListener("input", () => {
     if (!state) return;
@@ -481,7 +545,8 @@ $("project-file").onchange = async (e) => {
   const file = e.target.files[0];
   e.target.value = "";
   if (!file) return;
-  basemapRequest++;
+  cancelSwitch();
+  failedBasemap = undefined;
   styleRequest++;
   pending++;
   controls();
@@ -617,11 +682,8 @@ async function boot() {
 $("retry").onclick = async () => {
   try {
     if (!config || !renderer) return await boot();
-    status("正在重新加载地图资源…", "busy");
-    makeRenderer();
-    await renderer.ready();
-    if (selectionErrors.length && state.archive) await loadSelection();
-    else status("地图资源已重新加载，可以继续编辑或导出。");
+    await switchBasemap(failedBasemap || state.style.basemap);
+    if (!failedBasemap && selectionErrors.length && state.archive) await loadSelection();
   } catch (e) {
     error(e);
   }

@@ -74,6 +74,8 @@ export class MapCanvas {
       fadeDuration: 0,
       preserveDrawingBuffer: true,
       trackResize: false,
+      // MapLibre owns visible-tile ordering and aborts obsolete source requests.
+      cancelPendingTileRequestsWhileZooming: true,
       pixelRatio: devicePixelRatio,
     });
     this.map.touchZoomRotate.disableRotation();
@@ -94,6 +96,9 @@ export class MapCanvas {
         ],
         zoom: this.map.getZoom(),
       };
+      // GCJ inverse has a tiny numerical residual. Canonicalize the displayed
+      // camera to the saved WGS84 camera so preview and fresh export agree.
+      if (this.crs === "gcj02") this.setCamera(this.state.camera);
       this.onCamera?.(this.state.camera);
       if (this.surroundSize) this.setSurround(...this.surroundSize);
       this.draw();
@@ -104,7 +109,7 @@ export class MapCanvas {
         if (!fonts.length)
           throw new Error("中文字体加载失败，请重新安装前端资源");
         this.loadedFont = true;
-        this.draw();
+        if (!this.destroyed) this.draw();
       })
       .catch((error) => {
         this.errors.push(error.message);
@@ -153,6 +158,18 @@ export class MapCanvas {
   setExportPreview(show) {
     this.exportPreview = show;
     this.draw();
+  }
+  setCamera(camera) {
+    this.resizing = true;
+    try {
+      this.state.camera = structuredClone(camera);
+      this.map.jumpTo({
+        center: displayCoordinate(camera.center, this.crs),
+        zoom: camera.zoom,
+      });
+    } finally {
+      this.resizing = false;
+    }
   }
   updateCredit() {
     this.credit.replaceChildren();
@@ -402,16 +419,18 @@ export class MapCanvas {
       });
     }
   }
-  async ready() {
+  async ready(deadline = performance.now() + 65000) {
     await this.fontReady;
     if (this.destroyed) return;
+    if (performance.now() >= deadline)
+      throw new Error("地图资源等待超时；请检查网络并重试");
     // Idle includes pending tile loads and source workers; two render frames
     // flush our canvas labels after the idle event. No sleep-based screenshot.
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();
         reject(new Error("地图资源等待超时；请检查网络并重试"));
-      }, 65000);
+      }, Math.max(0, deadline - performance.now()));
       const cleanup = () => {
         clearTimeout(timer);
         this.map.off("idle", check);
@@ -447,6 +466,10 @@ export class MapCanvas {
       requestAnimationFrame(() => requestAnimationFrame(resolve)),
     );
     if (this.destroyed) return;
+    // A candidate can follow a camera/style edit during the two frame flush.
+    // Recheck readiness against that final extent before allowing adoption.
+    if (!this.map.loaded() || !this.map.areTilesLoaded() || this.map.isMoving())
+      return this.ready(deadline);
     this.draw();
     if (this.errors.length) throw new Error(this.errors.join("; "));
     return { labels: this.labels, camera: this.state.camera };

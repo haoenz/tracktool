@@ -9,7 +9,7 @@ import json
 import re
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--archive", type=Path, required=True)
@@ -88,6 +88,7 @@ with sync_playwright() as p:
     print("padding", page.evaluate("window.tracktool.renderer.map.getPadding()"), flush=True)
     before = len([u for u in requests if "/api/selection" in u])
     page.locator("#basemap").select_option("dark")
+    expect(page.locator("#stage")).to_have_attribute("aria-busy", "false", timeout=90000)
     page.locator("#color").fill("#ffb35c")
     page.locator("#width").fill("4.5")
     page.locator("#width").dispatch_event("input")
@@ -153,6 +154,7 @@ with sync_playwright() as p:
     saved = json.loads((OUT / "map-project.json").read_text())
     assert saved == state
     page.locator("#basemap").select_option("light")
+    expect(page.locator("#stage")).to_have_attribute("aria-busy", "false", timeout=90000)
     page.locator("#title").fill("临时改动")
     page.locator("#ratio").select_option("1:1")
     page.locator("#project-file").set_input_files(OUT / "map-project.json")
@@ -188,6 +190,7 @@ with sync_playwright() as p:
     for panel in ("library", "inspector"):
         page.locator(f"#toggle-{panel}").click()
     page.locator("#basemap").select_option("light")
+    expect(page.locator("#stage")).to_have_attribute("aria-busy", "false", timeout=90000)
     page.locator("#color").fill("#d65338")
     page.locator("#ratio").select_option("3:4")
     page.locator("#fit").click()

@@ -369,6 +369,13 @@ input[type="color"] {
   overflow: visible;
   transform-origin: top left;
 }
+.stage .staging-frame {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  pointer-events: none;
+}
 #frame-holder {
   position: relative;
   flex: none;

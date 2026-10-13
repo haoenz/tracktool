@@ -4,10 +4,12 @@ import argparse
 import json
 import mimetypes
 import secrets
+import select
+import socket
 import threading
 import time
 import webbrowser
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import IPv4Address
 from pathlib import Path
@@ -34,7 +36,12 @@ class EditorServer(ThreadingHTTPServer):
         self.jobs: dict[str, dict] = {}
         self.jobs_lock = threading.Lock()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="map-export")
-        super().__init__((self.host, port), Handler)
+        try:
+            super().__init__((self.host, port), Handler)
+        except BaseException:
+            self.executor.shutdown(wait=True, cancel_futures=True)
+            self.resources.close()
+            raise
 
     @property
     def origin(self) -> str:
@@ -72,6 +79,7 @@ class EditorServer(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.executor.shutdown(wait=True, cancel_futures=True)
+        self.resources.close()
         super().server_close()
 
 
@@ -80,6 +88,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         pass  # Requests contain local paths. Keep those out of routine logs.
+
+    def _disconnected(self) -> bool:
+        # Native MapLibre fetch abort closes this HTTP/1.0 connection. Poll only
+        # while waiting; peeking must not consume the next request's bytes.
+        try:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            return bool(readable) and self.connection.recv(1, socket.MSG_PEEK) == b""
+        except OSError, ValueError:
+            return True
 
     def _send(self, body: bytes, content_type: str, status: int = 200) -> None:
         self.send_response(status)
@@ -138,7 +155,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._get(url.path, parse_qs(url.query))
         except PermissionError as exc:
             self._json({"error": str(exc)}, 403)
-        except BrokenPipeError, ConnectionResetError:
+        except BrokenPipeError, ConnectionResetError, CancelledError:
             pass
         except (UserInputError, OSError, ValueError, KeyError, TypeError) as exc:
             self._json({"error": str(exc)}, 400)
@@ -190,7 +207,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"state": job["state"], "tracks": job["tracks"], "config": app.resources.public_config()})
         elif path.startswith("/tiles/"):
             _, _, source, z, x, y = path.split("/")
-            body, mime = app.resources.tile(source, int(z), int(x), int(y.split(".")[0]))
+            body, mime = app.resources.tile(
+                source,
+                int(z),
+                int(x),
+                int(y.split(".")[0]),
+                cancelled=self._disconnected,
+                export=self.headers.get("X-Tracktool-Render") == app.token,
+            )
             self._send(body, mime)
         elif path.startswith("/static/"):
             file = (STATIC / path.removeprefix("/static/")).resolve()

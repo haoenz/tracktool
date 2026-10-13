@@ -42,7 +42,7 @@ with sync_playwright() as p:
             results.append({"id": identity, "error": "missing credentials"})
             continue
         page.locator("#basemap").select_option(identity)
-        expect(page.locator("#basemap")).to_be_enabled(timeout=120000)
+        expect(page.locator("#stage")).to_have_attribute("aria-busy", "false", timeout=120000)
         if page.evaluate("window.tracktool.state.style.basemap") != identity:
             message = page.locator("#status").inner_text()
             assert "保留原底图" in message
@@ -74,15 +74,20 @@ with sync_playwright() as p:
         if identity in ("bing-satellite", "google-satellite", "google-hybrid-large"):
             labels = page.evaluate("window.tracktool.renderer.labels")
             with page.expect_download(timeout=180000) as download:
-                page.locator("#export").click()
+                with page.expect_response("**/api/export") as submitted:
+                    page.locator("#export").click()
             download.value.save_as(args.output / f"{identity}.png")
-            report = page.evaluate(r"""async () => {
+            report = page.evaluate(
+                """async (job) => {
               const token=document.querySelector('meta[name=session-token]').content;
-              const paths=performance.getEntriesByType('resource').map(r=>r.name)
-                .filter(n=>/api\/jobs\//.test(n)&&!n.endsWith('/png'));
-              return (await fetch(paths.at(-1),{headers:{'X-Tracktool-Token':token}})).json();
-            }""")
+              return (await fetch(`/api/jobs/${job}`,{headers:{'X-Tracktool-Token':token}})).json();
+            }""",
+                submitted.value.json()["job"],
+            )
             assert report["report"]["camera"] == original_camera
+            (args.output / f"{identity}-labels.json").write_text(
+                json.dumps({"preview": labels, "export": report["report"]["labels"]}, ensure_ascii=False, indent=2)
+            )
             assert report["report"]["labels"] == labels
             result["export"] = report
         results.append(result)
@@ -107,7 +112,7 @@ with sync_playwright() as p:
     download.value.save_as(saved_path)
     saved = page.evaluate("window.tracktool.state")
     page.locator("#basemap").select_option("light")
-    expect(page.locator("#basemap")).to_be_enabled(timeout=90000)
+    expect(page.locator("#stage")).to_have_attribute("aria-busy", "false", timeout=90000)
     page.locator("#project-file").set_input_files(saved_path)
     page.locator("#status").filter(has_text="项目已恢复").wait_for(timeout=90000)
     assert page.evaluate("window.tracktool.state") == saved

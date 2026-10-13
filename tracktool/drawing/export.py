@@ -18,7 +18,7 @@ def render_png(url: str, token: str, state: dict) -> tuple[bytes, dict]:
             context = browser.new_context(
                 viewport={"width": frame["width"], "height": frame["height"]},
                 device_scale_factor=output["width"] / frame["width"],
-                extra_http_headers={"X-Tracktool-Token": token},
+                extra_http_headers={"X-Tracktool-Token": token, "X-Tracktool-Render": token},
             )
             page = context.new_page()
             page.on("pageerror", lambda error: failures.append(str(error)))

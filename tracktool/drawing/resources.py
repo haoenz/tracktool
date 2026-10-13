@@ -3,17 +3,20 @@
 import hashlib
 import json
 import os
+import tempfile
 import threading
 import time
+from collections.abc import Callable
 from importlib.metadata import version
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
 
-import requests
-
 from ..errors import UserInputError
 from .basemaps import CATALOG_PATH, PRESETS, public_presets, tile_url
+from .downloads import Downloads
+from .tilecache import TileCache
+from .transport import Transport
 
 ROOT = Path(__file__).parent
 STATIC = ROOT / "static"
@@ -25,7 +28,6 @@ class Resources:
         self.cache = cache
         self.cache.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
-        self.downloads = threading.BoundedSemaphore(6)
         self.cities = json.loads((ROOT / "data/cities-cn.json").read_text())
         self.assets = json.loads((ROOT / "data/assets.json").read_text())
         self.vector: dict = {}
@@ -39,32 +41,44 @@ class Resources:
             raise UserInputError("卫星数据源需同时配置 URL、ATTRIBUTION 和 VERSION")
         self._cmap: set[int] | None = None
 
-    @staticmethod
-    def fetch(url: str) -> bytes:
-        if urlparse(url).scheme != "https":
-            raise UserInputError("地图数据源必须使用 HTTPS")
+        def setting(name: str, default: int, low: int, high: int) -> int:
+            try:
+                value = int(os.environ.get(name, default))
+                if not low <= value <= high:
+                    raise ValueError()
+                return value
+            except ValueError:
+                raise UserInputError(f"{name} 需为 {low}–{high} 的整数") from None
+
+        concurrency = setting("TRACKTOOL_MAP_DOWNLOADS", 8, 1, 32)
+        capacity = setting("TRACKTOOL_MAP_CACHE_MIB", 1024, 1, 16384) * 1024 * 1024
+        limits = {"google": 8, "bing": 4, "vector": 6, "custom": 4}
         try:
-            with requests.get(
-                url,
-                timeout=(10, 30),
-                stream=True,
-                headers={"User-Agent": "tracktool-map/1.0 (local interactive map editor)"},
-            ) as response:
-                response.raise_for_status()
-                if 300 <= response.status_code < 400:
-                    raise UserInputError("地图服务要求重定向；为避免转发地图凭据，本次请求已停止")
-                data = bytearray()
-                for chunk in response.iter_content(65536):
-                    data.extend(chunk)
-                    if len(data) > 16 * 1024 * 1024:
-                        raise UserInputError("地图资源超过单文件 16 MiB 限制")
-                return bytes(data)
-        except requests.HTTPError as exc:
-            code = exc.response.status_code if exc.response is not None else "未知"
-            raise UserInputError(f"地图服务返回 HTTP {code}；请重试或更换底图") from None
-        except requests.RequestException as exc:
-            # Do not leak credential-bearing satellite URLs into logs/projects.
-            raise UserInputError(f"地图资源下载失败（{type(exc).__name__}），检查网络和数据源配置后重试") from exc
+            configured = json.loads(os.environ.get("TRACKTOOL_MAP_PROVIDER_LIMITS", "{}"))
+            if not isinstance(configured, dict) or any(
+                k not in limits or type(v) is not int or not 1 <= v <= 32 for k, v in configured.items()
+            ):
+                raise ValueError()
+            limits.update(configured)
+        except ValueError, TypeError:
+            raise UserInputError(
+                "TRACKTOOL_MAP_PROVIDER_LIMITS 需为 google/bing/vector/custom 到 1–32 整数的 JSON"
+            ) from None
+        self.tiles = TileCache(cache, capacity)
+        self.transport = Transport(concurrency)
+        self.downloads = Downloads(concurrency, limits)
+        self.closed = False
+
+    def fetch(self, url: str) -> bytes:
+        return self.transport.fetch(url)
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        self.downloads.close()
+        self.transport.close()
+        self.tiles.close()
 
     def prepare(self, refresh: bool = False) -> None:
         with self.lock:
@@ -72,9 +86,14 @@ class Resources:
                 path = ROOT / name
                 if not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != info["sha256"]:
                     raise UserInputError(f"前端或字体文件缺失/校验失败：{name}；请重新安装 tracktool")
-            metadata = self.cache / "basemap.json"
+            url = os.environ.get("TRACKTOOL_MAP_TILEJSON", "https://tiles.openfreemap.org/planet")
+            metadata = self.cache / ("basemap-" + hashlib.sha256(url.encode()).hexdigest() + ".json")
+            legacy = self.cache / "basemap.json"
+            if not metadata.exists() and legacy.exists() and not os.environ.get("TRACKTOOL_MAP_TILEJSON"):
+                value = json.loads(legacy.read_text())
+                if all(urlparse(u).netloc == "tiles.openfreemap.org" for u in value.get("tiles", [])):
+                    self._atomic(metadata, legacy.read_bytes())
             if refresh or not metadata.exists():
-                url = os.environ.get("TRACKTOOL_MAP_TILEJSON", "https://tiles.openfreemap.org/planet")
                 value = json.loads(self.fetch(url))
                 if not value.get("tiles") or not value.get("vector_layers"):
                     raise UserInputError("底图 TileJSON 必须符合 OpenMapTiles 矢量 schema")
@@ -83,9 +102,19 @@ class Resources:
 
     @staticmethod
     def _atomic(path: Path, data: bytes) -> None:
-        temporary = path.with_suffix(f".{threading.get_ident()}.tmp")
-        temporary.write_bytes(data)
-        temporary.replace(path)
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=path.name, suffix=".tmp", delete=False) as handle:
+            temporary = Path(handle.name)
+            try:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
+        try:
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def versions(self) -> dict:
         templates = self.vector.get("tiles", [])
@@ -105,7 +134,14 @@ class Resources:
             "font_sha256": self.assets["files"]["static/vendor/NotoSansCJKsc-Regular.otf"]["sha256"],
             "cities_sha256": hashlib.sha256((ROOT / "data/cities-cn.json").read_bytes()).hexdigest(),
             "basemap": {
-                "templates": [u if urlparse(u).netloc == "tiles.openfreemap.org" else "custom" for u in templates],
+                "templates": [
+                    u
+                    if urlparse(u).netloc == "tiles.openfreemap.org"
+                    and not urlparse(u).query
+                    and not urlparse(u).fragment
+                    else "custom"
+                    for u in templates
+                ],
                 "sha256": hashlib.sha256(json.dumps(templates).encode()).hexdigest(),
             },
             "satellite": self.satellite_version,
@@ -124,7 +160,16 @@ class Resources:
         if missing:
             raise UserInputError(f"固定字体缺少字符：{''.join(missing[:20])}；请修改标题，不能用缺字方框导出")
 
-    def tile(self, source: str, z: int, x: int, y: int) -> tuple[bytes, str]:
+    def tile(
+        self,
+        source: str,
+        z: int,
+        x: int,
+        y: int,
+        *,
+        cancelled: Callable[[], bool] = lambda: False,
+        export: bool = False,
+    ) -> tuple[bytes, str]:
         if source not in {"vector", "satellite", *PRESETS} or not (0 <= z <= 18 and 0 <= x < 2**z and 0 <= y < 2**z):
             raise UserInputError("无效瓦片坐标")
         if source in PRESETS:
@@ -136,40 +181,122 @@ class Resources:
             if not template:
                 raise UserInputError("卫星底图尚未配置")
             url = template.replace("{z}", str(z)).replace("{x}", str(x)).replace("{y}", str(y))
-        identity = hashlib.sha256((self.satellite_version + url).encode()).hexdigest()
-        path = self.cache / f"{identity}.tile"
-        # Lock per cache lookup/write, never hold it over network requests.
-        with self.lock:
-            if path.exists():
-                data = path.read_bytes()
-                os.utime(path, None)
-                return data, self._mime(source, data)
-        with self.downloads:
-            data = self.fetch(url)
+        expected = PRESETS[source]["tile_size"] if source in PRESETS else 256
+        identity = hashlib.sha256(
+            json.dumps(
+                [
+                    "tile-v2",
+                    source,
+                    url,
+                    expected,
+                    PRESETS[source]
+                    if source in PRESETS
+                    else self.vector
+                    if source == "vector"
+                    else self.satellite_version,
+                ],
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        legacy = hashlib.sha256((self.satellite_version + url).encode()).hexdigest()
+
+        def cached() -> bytes | None:
+            data = self.tiles.get(identity)
+            if data is not None:
+                try:
+                    self._validate(source, data)
+                    return data
+                except UserInputError:
+                    self.tiles.delete(identity)
+            old = self.tiles.get("legacy:" + legacy)
+            if old is not None:
+                try:
+                    self._validate(source, old)
+                    self.tiles.put(identity, old)
+                    return old
+                except UserInputError:
+                    pass
+                finally:
+                    self.tiles.delete("legacy:" + legacy)
+            return None
+
+        data = cached()
+        if data is None:
+
+            def download() -> bytes:
+                # A preceding flight/process may have filled the cache while queued.
+                hit = cached()
+                if hit is not None:
+                    return hit
+                result = self.fetch(url)
+                self._validate(source, result)
+                self.tiles.put(identity, result)
+                return result
+
+            provider = source.split("-")[0] if source in PRESETS else "vector" if source == "vector" else "custom"
+            data = self.downloads.load(identity, provider, download, cancelled, export)
+        return data, self._mime(source, data)
+
+    @staticmethod
+    def _validate(source: str, data: bytes) -> None:
         if not data:
             raise UserInputError("数据源返回空瓦片")
-        if source != "vector":
-            from PIL import Image
+        if source == "vector":
+            # Validate protobuf wire bounds and the MVT layer envelope before caching.
+            # MapLibre performs full geometry decoding and export rejects its errors.
+            def fields(payload: bytes):
+                i = 0
+
+                def varint():
+                    nonlocal i
+                    result = 0
+                    for shift in range(0, 70, 7):
+                        byte = payload[i]
+                        i += 1
+                        result |= (byte & 127) << shift
+                        if byte < 128:
+                            return result
+                    raise ValueError()
+
+                while i < len(payload):
+                    tag = varint()
+                    if tag >> 3 == 0:
+                        raise ValueError()
+                    wire = tag & 7
+                    if wire == 0:
+                        value = varint()
+                    elif wire in (1, 2, 5):
+                        length = varint() if wire == 2 else 8 if wire == 1 else 4
+                        if i + length > len(payload):
+                            raise ValueError()
+                        value = payload[i : i + length]
+                        i += length
+                    else:
+                        raise ValueError()
+                    yield tag >> 3, value
 
             try:
-                with Image.open(BytesIO(data)) as raster:
-                    expected = PRESETS[source]["tile_size"] if source in PRESETS else 256
-                    if raster.format not in ("PNG", "JPEG", "WEBP") or raster.size != (expected, expected):
-                        raise ValueError("unexpected tile dimensions or format")
-                    raster.verify()
-            except (OSError, ValueError) as exc:
-                raise UserInputError("地图源返回无效图片或错误瓦片尺寸，不能导出；请更换底图") from exc
-        with self.lock:
-            self._atomic(path, data)
-            files = list(self.cache.glob("*.tile"))
-            sizes = [(p.stat().st_mtime, p.stat().st_size, p) for p in files]
-            total = sum(size for _, size, _ in sizes)
-            for _, size, old in sorted(sizes):
-                if total <= 256 * 1024 * 1024:
-                    break
-                old.unlink(missing_ok=True)
-                total -= size
-        return data, self._mime(source, data)
+                layers = [v for k, v in fields(data) if k == 3]
+                if not layers:
+                    raise ValueError()
+                for layer in layers:
+                    values = dict(fields(layer))
+                    if not isinstance(values.get(1), bytes) or values.get(15) not in (1, 2):
+                        raise ValueError()
+                    values[1].decode("utf-8")
+            except ValueError, IndexError, TypeError, UnicodeError:
+                raise UserInputError("地图源返回无效矢量瓦片，请重试或更换底图") from None
+            return
+        from PIL import Image
+
+        try:
+            with Image.open(BytesIO(data)) as raster:
+                expected = PRESETS[source]["tile_size"] if source in PRESETS else 256
+                if raster.format not in ("PNG", "JPEG", "WEBP") or raster.size != (expected, expected):
+                    raise ValueError("unexpected tile dimensions or format")
+                raster.verify()
+        except (OSError, ValueError) as exc:
+            raise UserInputError("地图源返回无效图片或错误瓦片尺寸，不能导出；请更换底图") from exc
 
     @staticmethod
     def _mime(source: str, data: bytes) -> str:

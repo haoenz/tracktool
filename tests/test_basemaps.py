@@ -30,9 +30,10 @@ def test_quadkey_and_large_tile_addressing():
     assert "x=3&y=5&z=7" in tile_url(large, 7, 3, 5)
 
 
-def test_raster_validation_mime_cache_and_source_identity(tmp_path, monkeypatch):
+def test_raster_validation_mime_cache_and_source_identity(tmp_path, monkeypatch, request):
     image = pytest.importorskip("PIL.Image", reason="requires optional maps dependencies")
     resources = Resources(tmp_path)
+    request.addfinalizer(resources.close)
     output = BytesIO()
     image.new("RGB", (256, 256), "green").save(output, format="JPEG")
     data = output.getvalue()
@@ -47,4 +48,4 @@ def test_raster_validation_mime_cache_and_source_identity(tmp_path, monkeypatch)
     monkeypatch.setattr(resources, "fetch", lambda url: b"<html>upstream failure</html>")
     with pytest.raises(UserInputError, match="无效图片"):
         resources.tile("google-road", 3, 3, 5)
-    assert len(list(tmp_path.glob("*.tile"))) == 2
+    assert resources.tiles.db.execute("SELECT COUNT(*) FROM tiles").fetchone()[0] == 2
