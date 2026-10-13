@@ -1,4 +1,11 @@
 import { api, MapCanvas, frames } from "./core.js";
+import {
+  featureControls,
+  featureReason,
+  overlayReason,
+  cityReason,
+  reconcileOverlays,
+} from "./layers.js";
 const $ = (id) => document.getElementById(id);
 let state,
   config,
@@ -19,6 +26,7 @@ let state,
   candidate,
   switching = false,
   failedBasemap,
+  failedProject,
   statusTimer,
   activeTool = "library",
   previousTool = "library",
@@ -36,7 +44,7 @@ const names = {
 };
 function status(message, kind = "") {
   if (switching && kind !== "error") {
-    message = "正在加载所选底图，原地图仍可浏览…";
+    message = "正在加载地图组合，原地图仍可浏览…";
     kind = "busy";
   }
   if (!kind && versionsChanged) {
@@ -100,6 +108,9 @@ function controls() {
   for (const id of ["new-project", "open-project", "browse"])
     $(id).disabled = !state || pending > 0 || switching || exporting;
   $("open-export").disabled = !state;
+  for (const field of document.querySelectorAll("[data-layer-control]"))
+    field.disabled =
+      !state || pending > 0 || exporting || field.dataset.blocked === "true";
 }
 function resize() {
   if (!state) return;
@@ -117,8 +128,8 @@ function resize() {
   $("frame-holder").style.width = state.frame.width * scale + "px";
   $("frame-holder").style.height = state.frame.height * scale + "px";
   renderer?.setSurround(
-    stage.clientWidth / scale,
-    stage.clientHeight / scale,
+    renderer?.exportPreview ? state.frame.width : stage.clientWidth / scale,
+    renderer?.exportPreview ? state.frame.height : stage.clientHeight / scale,
     scale,
   );
   if (candidate) {
@@ -143,6 +154,7 @@ function syncPreview() {
   renderer.credit.classList.toggle("viewport-credit", !show);
   (show ? $("frame") : $("stage")).append(renderer.credit);
   reserveCreditSpace();
+  resize();
 }
 function showTools(show) {
   $("tool-panel").hidden = !show;
@@ -250,6 +262,133 @@ function makeRenderer() {
   creditObserver = new ResizeObserver(reserveCreditSpace);
   creditObserver.observe(renderer.credit);
 }
+function layerDraft() {
+  return structuredClone(candidate?.state.style || state.style);
+}
+function updateLayerStyle(style) {
+  return switchBasemap(style.basemap, style);
+}
+function buildLayerControls() {
+  $("feature-controls").replaceChildren();
+  const extra = document.createElement("details"),
+    summary = document.createElement("summary");
+  summary.textContent = "更多要素：兴趣点、建筑、自然地名";
+  extra.append(summary);
+  for (const [key, [title, options]] of Object.entries(featureControls)) {
+    const label = document.createElement("label");
+    label.textContent = title;
+    const select = document.createElement("select");
+    select.id = `feature-${key}`;
+    select.dataset.layerControl = "";
+    for (const [value, text] of Object.entries(options))
+      select.add(new Option(text, value));
+    select.onchange = () => {
+      const style = layerDraft();
+      style.features[key] = select.value;
+      updateLayerStyle(style);
+    };
+    const hint = document.createElement("small");
+    hint.id = `feature-${key}-note`;
+    hint.className = "hint";
+    label.append(select, hint);
+    (["places", "roads", "road_names", "boundaries"].includes(key)
+      ? $("feature-controls")
+      : extra
+    ).append(label);
+  }
+  $("feature-controls").append(extra);
+  $("overlay-controls").replaceChildren();
+  const groups = new Map();
+  for (const source of config.overlays) {
+    if (!groups.has(source.group)) {
+      const group = document.createElement("fieldset"),
+        legend = document.createElement("legend");
+      legend.textContent = source.group;
+      group.append(legend);
+      groups.set(source.group, group);
+      $("overlay-controls").append(group);
+    }
+    const row = document.createElement("div");
+    row.className = "overlay-row";
+    const label = document.createElement("label"),
+      check = document.createElement("input");
+    check.type = "checkbox";
+    check.id = `overlay-${source.id}`;
+    check.dataset.layerControl = "";
+    label.append(check, document.createTextNode(source.name));
+    check.onchange = () => {
+      const style = layerDraft();
+      let entry = style.overlays.find((o) => o.id === source.id);
+      if (!entry) {
+        entry = { id: source.id, enabled: false, opacity: 1 };
+        style.overlays.push(entry);
+      }
+      entry.enabled = check.checked;
+      updateLayerStyle(style);
+    };
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = 0.1;
+    slider.max = 1;
+    slider.step = 0.1;
+    slider.id = `opacity-${source.id}`;
+    slider.dataset.layerControl = "";
+    slider.setAttribute("aria-label", `${source.name}不透明度`);
+    slider.onchange = () => {
+      const style = layerDraft();
+      const entry = style.overlays.find((o) => o.id === source.id);
+      if (entry) {
+        entry.opacity = Number(slider.value);
+        updateLayerStyle(style);
+      }
+    };
+    const note = document.createElement("small");
+    note.id = `overlay-${source.id}-note`;
+    note.className = "hint";
+    row.append(label, slider, note);
+    groups.get(source.group).append(row);
+  }
+  $("power-voltage").onchange = () => {
+    const s = layerDraft();
+    s.power.min_voltage = Number($("power-voltage").value);
+    updateLayerStyle(s);
+  };
+  $("power-facilities").onchange = () => {
+    const s = layerDraft();
+    s.power.facilities = $("power-facilities").value;
+    updateLayerStyle(s);
+  };
+}
+function syncLayers() {
+  if (!config || !state || !$("feature-roads")) return;
+  for (const key of Object.keys(featureControls)) {
+    const field = $("feature-" + key),
+      reason = featureReason(state, config, key);
+    field.value = state.style.features[key];
+    field.dataset.blocked = String(!!reason);
+    $("feature-" + key + "-note").textContent = reason;
+  }
+  for (const source of config.overlays) {
+    const entry = state.style.overlays.find((o) => o.id === source.id),
+      check = $("overlay-" + source.id),
+      slider = $("opacity-" + source.id);
+    const reason = overlayReason(state, config, source);
+    check.checked = !!entry?.enabled;
+    check.dataset.blocked = String(!!reason && !entry?.enabled);
+    slider.value = entry?.opacity || 1;
+    slider.hidden = !entry?.enabled;
+    slider.dataset.blocked = String(!entry?.enabled);
+    $("overlay-" + source.id + "-note").textContent =
+      reason ||
+      `${source.crs.toUpperCase()} · ${source.format === "vector" ? "矢量" : source.tile_size + "px"} · ${source.minzoom}–${source.maxzoom} 级${entry?.enabled ? " · 不透明度 " + Math.round(entry.opacity * 100) + "%" : ""}`;
+  }
+  $("power-controls").hidden = !state.style.overlays.some(
+    (o) => o.id === "openinframap-power" && o.enabled,
+  );
+  $("power-voltage").value = state.style.power.min_voltage;
+  $("power-facilities").value = state.style.power.facilities;
+  $("cities-note").textContent = cityReason(state, config);
+}
 function syncFields() {
   for (const key of ["basemap", "color", "width", "cities"])
     if (key !== "basemap" || !switching) $(key).value = state.style[key];
@@ -258,19 +397,11 @@ function syncFields() {
     (item) => item.id === state.style.basemap,
   );
   $("basemap-note").textContent = source
-    ? [
-        source.has_text
-          ? "底图自带文字、道路名或景点；地名开关只控制叠加城市文字。"
-          : "无文字影像，可独立叠加城市地名。",
-        source.overlay_only ? "此选项只显示透明路网，背景为纯色。" : "",
-        source.crs === "gcj02"
-          ? "已适配 Google 中国地图坐标；原始轨迹不变。"
-          : "",
-        source.available ? "" : "缺少本机地图凭据，暂不可用。",
-      ]
-        .filter(Boolean)
-        .join(" ")
-    : "";
+    ? `${source.content_note} ${source.crs.toUpperCase()} · ${source.addressing} · ${source.tile_size}px · 原生 ${source.minzoom}–${source.maxzoom} 级。${source.coverage}`
+    : state.style.basemap === "satellite"
+      ? "自定义无字影像 · WGS84 · XYZ · 256px · 0–18 级；覆盖由配置的服务决定。"
+      : "WGS84 · OpenFreeMap / OpenMapTiles 矢量数据；要素可独立控制。";
+  syncLayers();
   $("ratio").value = state.frame.ratio;
   $("pixels").value = Math.max(state.output.width, state.output.height);
   $("title").value = state.title;
@@ -290,7 +421,12 @@ function apply() {
   renderer.apply(structuredClone(state));
   if (candidate) {
     const staged = structuredClone(state);
-    staged.style.basemap = candidate.state.style.basemap;
+    staged.style = {
+      ...candidate.state.style,
+      color: state.style.color,
+      width: state.style.width,
+      cities: state.style.cities,
+    };
     candidate.apply(staged);
   }
   syncFields();
@@ -595,14 +731,18 @@ function cancelSwitch() {
   }
   switching = false;
 }
-async function switchBasemap(id) {
+async function switchBasemap(id, requestedStyle) {
   if (!state) return;
+  failedProject = undefined;
+  requestedStyle = structuredClone(
+    requestedStyle || candidate?.state.style || state.style,
+  );
   cancelSwitch();
   const request = basemapRequest;
   switching = true;
   failedBasemap = undefined;
   controls();
-  status("正在加载所选底图，原地图仍可浏览…", "busy");
+  status("正在加载地图组合，原地图仍可浏览…", "busy");
   const frame = document.createElement("div");
   frame.className = "frame staging-frame";
   frame.setAttribute("aria-hidden", "true");
@@ -610,7 +750,11 @@ async function switchBasemap(id) {
   let staged;
   try {
     const next = structuredClone(state);
+    next.style = structuredClone(
+      requestedStyle || candidate?.state.style || state.style,
+    );
     next.style.basemap = id;
+    const notes = reconcileOverlays(next, config);
     staged = candidate = new MapCanvas(frame, next, config, cityData.labels);
     staged.setTracks(tracks);
     staged.setExportPreview(renderer.exportPreview);
@@ -628,7 +772,7 @@ async function switchBasemap(id) {
     // The committed project remains untouched until the whole candidate is ready.
     creditObserver?.disconnect();
     const previous = renderer;
-    state.style.basemap = id;
+    state.style = structuredClone(staged.state.style);
     staged.onCamera = (camera) => {
       state.camera = camera;
       candidate?.setCamera(camera);
@@ -648,21 +792,29 @@ async function switchBasemap(id) {
     creditObserver.observe(renderer.credit);
     syncFields();
     dirty();
-    status("地图样式已更新。");
+    $("layer-notice").textContent = notes.join("；");
+    status(notes.length ? notes.join("；") : "地图样式已更新。");
   } catch (e) {
     if (request === basemapRequest) {
-      failedBasemap = id;
+      failedBasemap = {
+        id,
+        style: structuredClone(
+          staged?.state.style || requestedStyle || state.style,
+        ),
+      };
       cancelSwitch();
       frame.remove();
       $("basemap").value = state.style.basemap;
       error(
         new Error(
-          e.message + "；保留原底图，点击「重试资源」或重新选择以重试。",
+          e.message +
+            "；保留原底图与叠加层，点击「重试资源」或重新选择以重试。",
         ),
       );
     }
   } finally {
     if (request === basemapRequest) switching = false;
+    syncLayers();
     controls();
   }
 }
@@ -761,6 +913,7 @@ $("project-file").onchange = async (e) => {
   styleRequest++;
   pending++;
   controls();
+  status("正在加载项目，原地图仍可浏览…", "busy");
   try {
     if (file.size > 2 * 1024 * 1024) throw new Error("项目文件超过 2 MiB");
     const imported = JSON.parse(await file.text());
@@ -780,9 +933,54 @@ $("project-file").onchange = async (e) => {
   }
 };
 async function restoreProject(result, name, fromDatabase = false) {
+  failedProject = undefined;
+  status("正在加载项目，原地图仍可浏览…", "busy");
   const catalog = result.state.archive
     ? await api("/api/archive", { path: result.state.archive })
     : { entries: [] };
+  const frame = document.createElement("div");
+  frame.className = "frame staging-frame";
+  frame.setAttribute("aria-hidden", "true");
+  $("frame-holder").append(frame);
+  let staged;
+  try {
+    staged = new MapCanvas(
+      frame,
+      structuredClone(result.state),
+      config,
+      cityData.labels,
+    );
+    staged.setTracks(result.tracks);
+    staged.setExportPreview(renderer.exportPreview);
+    const scale = Math.max(
+      0.1,
+      Math.min(
+        (stage.clientWidth - (stage.clientWidth > 900 ? 680 : 48)) /
+          result.state.frame.width,
+        (stage.clientHeight - 200) / result.state.frame.height,
+        1,
+      ),
+    );
+    frame.style.transform = `scale(${scale})`;
+    staged.setSurround(
+      staged.exportPreview
+        ? result.state.frame.width
+        : stage.clientWidth / scale,
+      staged.exportPreview
+        ? result.state.frame.height
+        : stage.clientHeight / scale,
+      scale,
+    );
+    await staged.ready();
+  } catch (e) {
+    staged?.destroy();
+    frame.remove();
+    failedProject = { result, name, fromDatabase };
+    throw new Error(
+      e.message + "；保留原项目和地图，点击「重试资源」重新打开目标项目。",
+    );
+  }
+  failedProject = undefined;
   requestId++;
   state = result.state;
   tracks = result.tracks;
@@ -793,7 +991,25 @@ async function restoreProject(result, name, fromDatabase = false) {
   selectedOnly = false;
   projectName = name;
   savedProjectName = fromDatabase ? name : "";
-  makeRenderer();
+  creditObserver?.disconnect();
+  renderer.destroy();
+  $("frame").replaceChildren(...frame.childNodes);
+  staged.frame = $("frame");
+  staged.frame.style.width = state.frame.width + "px";
+  staged.frame.style.height = state.frame.height + "px";
+  frame.remove();
+  renderer = staged;
+  staged.onCamera = (camera) => {
+    state.camera = camera;
+    candidate?.setCamera(camera);
+    dirty();
+  };
+  staged.onError = (message) =>
+    status("地图资源加载失败：" + message + "；请重试资源。", "error");
+  creditObserver = new ResizeObserver(reserveCreditSpace);
+  creditObserver.observe(renderer.credit);
+  resize();
+  syncPreview();
   syncFields();
   list();
   hasChanges = false;
@@ -814,7 +1030,11 @@ async function restoreProject(result, name, fromDatabase = false) {
       "项目记录的资源版本与当前版本不同。请检查预览，确认使用当前资源后另存项目。",
       "error",
     );
-  else status("项目已恢复：轨迹、样式、视野、画框和标题。");
+  else
+    status(
+      "项目已恢复：轨迹、样式、视野、画框和标题。" + (state.migration || ""),
+    );
+  $("layer-notice").textContent = state.migration || "";
 }
 async function saveNamedProject(name) {
   const revision = editRevision;
@@ -1034,21 +1254,38 @@ async function boot() {
     const option = $("basemap").querySelector("[value=satellite]");
     option.disabled = !config.satellite;
     option.hidden = !config.satellite;
+    $("custom-basemaps").hidden = !config.satellite;
     option.textContent = config.satellite
       ? "卫星 · 自定义数据源"
       : "卫星 · 尚未配置";
-    $("preset-basemaps")?.remove();
-    const group = document.createElement("optgroup");
-    group.id = "preset-basemaps";
-    group.label = "内置地图源";
+    $("basemap")
+      .querySelectorAll("[data-preset-basemap]")
+      .forEach((entry) => entry.remove());
+    const groups = new Map(
+      Array.from($("basemap").querySelectorAll("optgroup"), (group) => [
+        group.label,
+        group,
+      ]),
+    );
     for (const source of config.basemaps || []) {
+      let group = groups.get(source.group);
+      if (!group) {
+        group = document.createElement("optgroup");
+        group.label = source.group;
+        groups.set(source.group, group);
+        $("basemap").insertBefore(group, $("custom-basemaps"));
+      }
       const entry = document.createElement("option");
+      entry.dataset.presetBasemap = "";
       entry.value = source.id;
       entry.textContent = source.name + (source.available ? "" : " · 缺少凭据");
       entry.disabled = !source.available;
       group.append(entry);
     }
-    $("basemap").append(group);
+    for (const group of $("basemap").querySelectorAll("optgroup"))
+      if (!group.children.length) group.remove();
+    buildLayerControls();
+    await document.fonts.load("16px MapNoto", "中文地图");
     makeRenderer();
     syncFields();
     list();
@@ -1067,7 +1304,22 @@ async function boot() {
 $("retry").onclick = async () => {
   try {
     if (!config || !renderer) return await boot();
-    await switchBasemap(failedBasemap || state.style.basemap);
+    if (failedProject) {
+      const target = failedProject;
+      pending++;
+      controls();
+      try {
+        await restoreProject(target.result, target.name, target.fromDatabase);
+      } finally {
+        pending--;
+        controls();
+      }
+      return;
+    }
+    await switchBasemap(
+      failedBasemap?.id || state.style.basemap,
+      failedBasemap?.style,
+    );
     if (!failedBasemap && selectionErrors.length && state.archive)
       await loadSelection();
   } catch (e) {

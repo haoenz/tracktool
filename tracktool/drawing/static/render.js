@@ -6,6 +6,7 @@ try {
     api(`/api/render/${encodeURIComponent(job)}`),
     api("/api/cities"),
   ]);
+  await document.fonts.load("16px MapNoto", "中文地图");
   const renderer = new MapCanvas(
     document.getElementById("frame"),
     payload.state,

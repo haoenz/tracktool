@@ -6,9 +6,39 @@ import re
 from typing import Any
 
 from ..errors import UserInputError
-from .basemaps import BASEMAP_IDS
+from .basemaps import BASEMAP_IDS, LEGACY_BASEMAPS, OVERLAYS, PRESETS
 
-SCHEMA = 1
+SCHEMA = 2
+FEATURE_OPTIONS = {
+    "places": ("none", "major", "all"),
+    "roads": ("none", "major", "all"),
+    "road_names": ("none", "major", "all"),
+    "boundaries": ("none", "country", "region", "local"),
+    "poi": ("none", "major", "all"),
+    "buildings": ("none", "all"),
+    "housenumbers": ("none", "all"),
+    "peaks": ("none", "name", "elevation"),
+    "water_names": ("none", "all"),
+}
+DEFAULT_FEATURES = {key: "none" for key in FEATURE_OPTIONS} | {
+    "roads": "all",
+    "boundaries": "region",
+    "buildings": "all",
+}
+
+
+def overlay_reason(basemap: str, identity: str, active: list[str]) -> str:
+    source = OVERLAYS[identity]
+    base = PRESETS.get(basemap, {})
+    if source["crs"] != base.get("crs", "wgs84"):
+        return "坐标系不兼容，尚未实现瓦片重投影"
+    if set(source["content"]) & set(base.get("content", [])):
+        return "底图已含同类内容，透明图片不能拆分"
+    if any(set(source["content"]) & set(OVERLAYS[key]["content"]) for key in active):
+        return "已启用同类叠加层"
+    return ""
+
+
 FRAMES = {
     "4:3": (960, 720),
     "3:2": (960, 640),
@@ -25,7 +55,15 @@ def default_state(versions: dict) -> dict:
         "archive": "",
         "tracks": [],
         "camera": {"center": [105, 35], "zoom": 3.5},
-        "style": {"basemap": "light", "color": "#e05240", "width": 3, "cities": "county"},
+        "style": {
+            "basemap": "light",
+            "color": "#e05240",
+            "width": 3,
+            "cities": "county",
+            "features": dict(DEFAULT_FEATURES),
+            "overlays": [],
+            "power": {"min_voltage": 0, "facilities": "all"},
+        },
         "frame": {"ratio": "4:3", "width": 960, "height": 720},
         "output": {"width": 1920, "height": 1440},
         "title": "",
@@ -40,6 +78,21 @@ def number(value: Any, low: float, high: float) -> bool:
 def validate_state(value: Any) -> dict:
     """Reject invalid projects before opening sources or starting a browser."""
     try:
+        value = copy.deepcopy(value)
+        if value["schema"] == 1:
+            value["schema"] = SCHEMA
+            style = value["style"]
+            style.setdefault("features", dict(DEFAULT_FEATURES))
+            style.setdefault("overlays", [])
+            style.setdefault("power", {"min_voltage": 0, "facilities": "all"})
+            old = style["basemap"]
+            if old in LEGACY_BASEMAPS:
+                style["basemap"] = LEGACY_BASEMAPS[old]
+                style["overlays"] = [{"id": old, "enabled": True, "opacity": 1}]
+                base_name = PRESETS.get(style["basemap"], {}).get("name", "默认浅色")
+                value["migration"] = (
+                    f"旧透明底图「{PRESETS[old]['name']}」已迁为叠加层，搭配「{base_name}」；轨迹和视野不变。"
+                )
         if value["schema"] != SCHEMA:
             raise ValueError("不支持的项目版本")
         if not isinstance(value["archive"], str) or len(value["archive"]) > 4096:
@@ -64,6 +117,34 @@ def validate_state(value: Any) -> dict:
             raise ValueError("未知地图样式")
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", style["color"]) or not number(style["width"], 0.5, 12):
             raise ValueError("轨迹颜色或线宽无效")
+        if set(style["features"]) != set(FEATURE_OPTIONS) or any(
+            style["features"][key] not in options for key, options in FEATURE_OPTIONS.items()
+        ):
+            raise ValueError("地图要素设置无效")
+        overlays = style["overlays"]
+        if not isinstance(overlays, list) or len(overlays) > len(OVERLAYS):
+            raise ValueError("叠加层列表无效")
+        seen: set[str] = set()
+        active: list[str] = []
+        for overlay in overlays:
+            identity = overlay["id"]
+            if identity not in OVERLAYS or identity in seen or type(overlay["enabled"]) is not bool:
+                raise ValueError("未知或重复叠加层")
+            seen.add(identity)
+            if not number(overlay["opacity"], 0.1, 1):
+                raise ValueError("叠加层透明度应为 0.1–1")
+            if overlay["enabled"]:
+                reason = overlay_reason(style["basemap"], identity, active)
+                if reason:
+                    raise ValueError(f"{identity}：{reason}")
+                active.append(identity)
+        if style["power"]["min_voltage"] not in (0, 110, 220, 500) or style["power"]["facilities"] not in (
+            "none",
+            "substations",
+            "generation",
+            "all",
+        ):
+            raise ValueError("电网过滤设置无效")
         frame = value["frame"]
         if (frame["width"], frame["height"]) != FRAMES[frame["ratio"]]:
             raise ValueError("画框逻辑尺寸与比例不一致")

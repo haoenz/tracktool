@@ -1,169 +1,331 @@
-// OpenMapTiles geometry-only style, independent of UI and label layout.
+import { presetFor, activeOverlays, effectiveFeatures } from "./layers.js";
+export const basemapPreset = presetFor;
 const empty = { type: "FeatureCollection", features: [] };
-const palettes = {
-  light: {
-    ground: "#eeeae2",
-    land: "#e2e8d7",
-    water: "#b9d5de",
-    road: "#ffffff",
-    minor: "#d3cdc1",
-    border: "#b9b0a2",
-    building: "#d9d2c5",
-  },
-  dark: {
-    ground: "#202c33",
-    land: "#283b3c",
-    water: "#14242e",
-    road: "#516268",
-    minor: "#37474e",
-    border: "#718084",
-    building: "#334149",
-  },
-};
-export function basemapPreset(state, config) {
-  return config.basemaps?.find((source) => source.id === state.style.basemap);
-}
+const name = [
+  "coalesce",
+  ["get", "name:zh"],
+  ["get", "name"],
+  ["get", "name:latin"],
+  "",
+];
+const major = [
+  "in",
+  ["get", "class"],
+  ["literal", ["motorway", "trunk", "primary", "secondary", "tertiary"]],
+];
+const roadClasses = [
+  "in",
+  ["get", "class"],
+  [
+    "literal",
+    [
+      "motorway",
+      "trunk",
+      "primary",
+      "secondary",
+      "tertiary",
+      "minor",
+      "service",
+      "track",
+      "path",
+      "pedestrian",
+      "construction",
+    ],
+  ],
+];
 export function mapStyle(state, config, data) {
-  const preset = basemapPreset(state, config);
-  const raster = preset || state.style.basemap === "satellite";
-  const p =
-    palettes[state.style.basemap] ||
-    (preset?.imagery || state.style.basemap === "satellite"
-      ? palettes.dark
-      : palettes.light);
-  const base = raster
-    ? [
+  const preset = presetFor(state, config),
+    raster = !!preset || state.style.basemap === "satellite";
+  const dark =
+    state.style.basemap === "dark" ||
+    preset?.imagery ||
+    state.style.basemap === "satellite";
+  const p = dark
+    ? {
+        ground: "#202c33",
+        land: "#283b3c",
+        water: "#14242e",
+        road: "#849399",
+        minor: "#526970",
+        border: "#d0bd99",
+        building: "#637774",
+        text: "#f1f0e8",
+        halo: "#18242c",
+      }
+    : {
+        ground: "#eeeae2",
+        land: "#e2e8d7",
+        water: "#b9d5de",
+        road: "#ffffff",
+        minor: "#b5aca0",
+        border: "#998570",
+        building: "#c6baaa",
+        text: "#273b43",
+        halo: "#faf8f2",
+      };
+  const sources = {
+    tracks: { type: "geojson", data: data || empty, tolerance: 0 },
+  };
+  const base = [
+      {
+        id: "background",
+        type: "background",
+        paint: { "background-color": p.ground },
+      },
+    ],
+    geometry = [],
+    labels = [],
+    themes = [];
+  const f = effectiveFeatures(state, config);
+  const vector = !raster || Object.values(f).some((v) => v !== "none");
+  if (vector)
+    sources.base = {
+      type: "vector",
+      tiles: [`${location.origin}/tiles/vector/{z}/{x}/{y}.pbf`],
+      maxzoom: config.vectorMaxZoom,
+    };
+  const rasterSource = (s, id) => ({
+    type: "raster",
+    tiles: [`${location.origin}/tiles/${id}/{z}/{x}/{y}.png`],
+    tileSize: s?.tile_display_size || s?.tile_size || 256,
+    minzoom: s?.minzoom || 0,
+    maxzoom: s?.maxzoom || 18,
+    scheme: "xyz",
+  });
+  if (raster) {
+    sources.satellite = rasterSource(preset, preset?.id || "satellite");
+    base.push({
+      id: "satellite",
+      type: "raster",
+      source: "satellite",
+      paint: { "raster-fade-duration": 0 },
+    });
+  } else {
+    for (const [id, type, paint] of [
+      ["landcover", "fill", { "fill-color": p.land, "fill-opacity": 0.55 }],
+      ["landuse", "fill", { "fill-color": p.land, "fill-opacity": 0.35 }],
+      ["water", "fill", { "fill-color": p.water }],
+      [
+        "waterway",
+        "line",
         {
-          id: "background",
-          type: "background",
-          paint: { "background-color": p.ground },
+          "line-color": p.water,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.5, 14, 2],
         },
+      ],
+    ])
+      if (config.vectorLayers?.[id])
+        base.push({ id, type, source: "base", "source-layer": id, paint });
+  }
+  const geom = (id, layer, type, paint, extra = {}) =>
+    geometry.push({
+      id,
+      source: "base",
+      "source-layer": layer,
+      type,
+      paint,
+      ...extra,
+    });
+  if (f.boundaries !== "none")
+    geom(
+      "boundary",
+      "boundary",
+      "line",
+      { "line-color": p.border, "line-width": 1, "line-dasharray": [3, 3] },
+      {
+        filter: [
+          "<=",
+          ["get", "admin_level"],
+          { country: 2, region: 6, local: 10 }[f.boundaries],
+        ],
+      },
+    );
+  if (f.buildings !== "none")
+    geom(
+      "buildings",
+      "building",
+      "fill",
+      {
+        "fill-color": p.building,
+        "fill-opacity": 0.45,
+        "fill-outline-color": p.border,
+      },
+      { minzoom: 13 },
+    );
+  if (f.roads !== "none") {
+    if (f.roads === "all")
+      geom(
+        "roads-minor",
+        "transportation",
+        "line",
         {
-          id: "satellite",
-          type: "raster",
-          source: "satellite",
-          paint: { "raster-fade-duration": 0 },
+          "line-color": p.minor,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.5, 16, 3],
         },
-      ]
-    : [
-        {
-          id: "background",
-          type: "background",
-          paint: { "background-color": p.ground },
-        },
-        {
-          id: "landcover",
-          type: "fill",
-          source: "base",
-          "source-layer": "landcover",
-          paint: { "fill-color": p.land, "fill-opacity": 0.55 },
-        },
-        {
-          id: "landuse",
-          type: "fill",
-          source: "base",
-          "source-layer": "landuse",
-          paint: { "fill-color": p.land, "fill-opacity": 0.35 },
-        },
-        {
-          id: "water",
-          type: "fill",
-          source: "base",
-          "source-layer": "water",
-          paint: { "fill-color": p.water },
-        },
-        {
-          id: "waterway",
-          type: "line",
-          source: "base",
-          "source-layer": "waterway",
-          paint: {
-            "line-color": p.water,
-            "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.5, 14, 2],
-          },
-        },
-        {
-          id: "boundary",
-          type: "line",
-          source: "base",
-          "source-layer": "boundary",
-          filter: ["<=", ["get", "admin_level"], 6],
-          paint: {
-            "line-color": p.border,
-            "line-width": 0.6,
-            "line-dasharray": [3, 3],
-          },
-        },
-        {
-          id: "buildings",
-          type: "fill",
-          source: "base",
-          "source-layer": "building",
-          minzoom: 13,
-          paint: { "fill-color": p.building },
-        },
-        {
-          id: "roads-minor",
-          type: "line",
-          source: "base",
-          "source-layer": "transportation",
-          minzoom: 9,
-          paint: {
-            "line-color": p.minor,
-            "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.5, 16, 3],
-          },
-        },
-        {
-          id: "roads-major",
-          type: "line",
-          source: "base",
-          "source-layer": "transportation",
-          filter: [
-            "in",
-            ["get", "class"],
-            ["literal", ["motorway", "trunk", "primary", "secondary"]],
-          ],
-          paint: {
-            "line-color": p.road,
-            "line-width": [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              5,
-              0.4,
-              10,
-              1.2,
-              16,
-              5,
+        { minzoom: 9, filter: ["all", roadClasses, ["!", major]] },
+      );
+    geom(
+      "roads-major",
+      "transportation",
+      "line",
+      {
+        "line-color": p.road,
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          5,
+          0.4,
+          10,
+          1.2,
+          16,
+          5,
+        ],
+      },
+      { filter: major },
+    );
+  }
+  const symbol = (id, layer, minzoom, filter, field = name, layout = {}) =>
+    labels.push({
+      id,
+      type: "symbol",
+      source: "base",
+      "source-layer": layer,
+      minzoom,
+      ...(filter ? { filter } : {}),
+      layout: {
+        "text-field": field,
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 12,
+        "text-padding": 5,
+        "text-max-width": 10,
+        ...layout,
+      },
+      paint: {
+        "text-color": p.text,
+        "text-halo-color": p.halo,
+        "text-halo-width": 1.5,
+      },
+    });
+  if (f.places !== "none") {
+    symbol(
+      "place-country",
+      "place",
+      0,
+      ["==", ["get", "class"], "country"],
+      name,
+      { "text-size": 16 },
+    );
+    symbol(
+      "place-city",
+      "place",
+      3,
+      ["in", ["get", "class"], ["literal", ["city", "state"]]],
+      name,
+      { "text-size": 15 },
+    );
+    if (f.places === "all")
+      symbol(
+        "place-local",
+        "place",
+        9,
+        [
+          "in",
+          ["get", "class"],
+          ["literal", ["town", "village", "hamlet", "suburb", "neighbourhood"]],
+        ],
+        name,
+        { "text-size": 12 },
+      );
+  }
+  if (f.road_names !== "none")
+    symbol(
+      "road-names",
+      "transportation_name",
+      f.road_names === "major" ? 10 : 12,
+      f.road_names === "major" ? major : roadClasses,
+      name,
+      { "symbol-placement": "line", "symbol-spacing": 300, "text-size": 11 },
+    );
+  if (f.poi !== "none")
+    symbol("poi", "poi", f.poi === "major" ? 12 : 14, [
+      "<=",
+      ["coalesce", ["get", "rank"], 100],
+      f.poi === "major" ? 3 : 15,
+    ]);
+  if (f.housenumbers !== "none")
+    symbol(
+      "housenumbers",
+      "housenumber",
+      16,
+      null,
+      ["to-string", ["get", "housenumber"]],
+      { "text-size": 10 },
+    );
+  if (f.peaks !== "none")
+    symbol(
+      "peaks",
+      "mountain_peak",
+      9,
+      null,
+      f.peaks === "elevation"
+        ? [
+            "concat",
+            name,
+            [
+              "case",
+              ["has", "ele"],
+              ["concat", " · ", ["to-string", ["get", "ele"]], " m"],
+              "",
             ],
-          },
-        },
-      ];
+          ]
+        : name,
+    );
+  if (f.water_names !== "none")
+    symbol("water-names", "water_name", 4, null, name, { "text-size": 13 });
+  const annotations = [];
+  for (const o of activeOverlays(state, config)) {
+    if (o.format === "vector") {
+      sources[o.id] = {
+        type: "vector",
+        tiles: [`${location.origin}/tiles/${o.id}/{z}/{x}/{y}.pbf`],
+        minzoom: o.minzoom,
+        maxzoom: o.maxzoom,
+      };
+      themes.push(...powerLayers(state, o));
+    } else {
+      sources[o.id] = rasterSource(o, o.id);
+      (o.category === "annotation" ? annotations : themes).push({
+        id: o.id,
+        type: "raster",
+        source: o.id,
+        paint: { "raster-opacity": o.opacity, "raster-fade-duration": 0 },
+      });
+    }
+  }
+  // Fixed order: foundation, optional geometry, ordinary annotation, themes, user tracks.
   return {
     version: 8,
-    sources: {
-      ...(raster
-        ? {
-            satellite: {
-              type: "raster",
-              tiles: [
-                `${location.origin}/tiles/${preset?.id || "satellite"}/{z}/{x}/{y}.png`,
-              ],
-              tileSize: preset?.tile_size || 256,
-              maxzoom: preset?.maxzoom || 18,
-            },
-          }
-        : {
-            base: {
-              type: "vector",
-              tiles: [`${location.origin}/tiles/vector/{z}/{x}/{y}.pbf`],
-              maxzoom: config.vectorMaxZoom,
-            },
-          }),
-      tracks: { type: "geojson", data: data || empty, tolerance: 0 },
-    },
+    glyphs: `${location.origin}/glyphs/{fontstack}/{range}.pbf`,
+    sources,
     layers: [
       ...base,
+      ...geometry,
+      ...labels,
+      ...annotations,
+      ...themes,
+      {
+        id: "track-halo",
+        type: "line",
+        source: "tracks",
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": p.halo,
+          "line-opacity": 0.8,
+          "line-width": state.style.width + 2,
+        },
+      },
       {
         id: "track-lines",
         type: "line",
@@ -183,8 +345,140 @@ export function mapStyle(state, config, data) {
         paint: {
           "circle-color": state.style.color,
           "circle-radius": state.style.width / 2,
+          "circle-stroke-color": p.halo,
+          "circle-stroke-width": 1,
         },
       },
     ],
   };
+}
+function powerLayers(state, o) {
+  const v = ["to-number", ["get", "voltage"], 0];
+  const color = [
+    "step",
+    v,
+    "#777782",
+    10,
+    "#6e97b8",
+    25,
+    "#55b555",
+    52,
+    "#b59f10",
+    132,
+    "#b55d00",
+    220,
+    "#c73030",
+    310,
+    "#b54eb2",
+    550,
+    "#00c1cf",
+  ];
+  const filter = [
+    ">=",
+    [
+      "max",
+      v,
+      ...[2, 3, 4].map((n) => ["to-number", ["get", `voltage_${n}`], 0]),
+    ],
+    state.style.power.min_voltage,
+  ];
+  const make = (id, layer, type, paint, extra = {}) => ({
+    id: `power-${id}`,
+    source: o.id,
+    "source-layer": layer,
+    type,
+    paint,
+    ...extra,
+  });
+  const layers = [
+    make(
+      "lines",
+      "power_line",
+      "line",
+      {
+        "line-color": color,
+        "line-opacity": o.opacity,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 3, 1, 14, 3],
+      },
+      { filter },
+    ),
+  ];
+  const facilities = state.style.power.facilities;
+  if (["all", "substations"].includes(facilities)) {
+    layers.push(
+      make(
+        "substation-area",
+        "power_substation",
+        "fill",
+        {
+          "fill-color": color,
+          "fill-opacity": o.opacity * 0.3,
+          "fill-outline-color": "#ba527b",
+        },
+        { minzoom: 13, filter },
+      ),
+    );
+    layers.push(
+      make(
+        "substation",
+        "power_substation_point",
+        "circle",
+        {
+          "circle-color": color,
+          "circle-radius": 4,
+          "circle-opacity": o.opacity,
+          "circle-stroke-width": 1,
+          "circle-stroke-color": "#fff",
+          "circle-stroke-opacity": o.opacity,
+        },
+        { minzoom: 5, filter },
+      ),
+    );
+  }
+  if (["all", "generation"].includes(facilities)) {
+    const energy = [
+      "match",
+      ["get", "source"],
+      "solar",
+      "#e5ae28",
+      "wind",
+      "#369bac",
+      "hydro",
+      "#477bd1",
+      "nuclear",
+      "#bd45cc",
+      "#d75d41",
+    ];
+    layers.push(
+      make(
+        "plant-area",
+        "power_plant",
+        "fill",
+        {
+          "fill-color": energy,
+          "fill-opacity": o.opacity * 0.25,
+          "fill-outline-color": "#e07825",
+        },
+        { minzoom: 5 },
+      ),
+    );
+    for (const layer of ["power_plant_point", "power_generator"])
+      layers.push(
+        make(
+          layer,
+          layer,
+          "circle",
+          {
+            "circle-color": energy,
+            "circle-radius": layer === "power_generator" ? 3 : 6,
+            "circle-opacity": o.opacity,
+            "circle-stroke-color": "#fff",
+            "circle-stroke-width": 1,
+            "circle-stroke-opacity": o.opacity,
+          },
+          { minzoom: layer === "power_generator" ? 12 : 5 },
+        ),
+      );
+  }
+  return layers;
 }

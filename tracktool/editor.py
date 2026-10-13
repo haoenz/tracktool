@@ -206,6 +206,13 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith("/api/render/"):
             job = app.jobs[path.removeprefix("/api/render/")]
             self._json({"state": job["state"], "tracks": job["tracks"], "config": app.resources.public_config()})
+        elif path.startswith("/glyphs/Noto%20Sans%20Regular/") or path.startswith("/glyphs/Noto Sans Regular/"):
+            body = app.resources.glyph(
+                path.rsplit("/", 1)[1].removesuffix(".pbf"),
+                cancelled=self._disconnected,
+                export=self.headers.get("X-Tracktool-Render") == app.token,
+            )
+            self._send(body, "application/x-protobuf")
         elif path.startswith("/tiles/"):
             _, _, source, z, x, y = path.split("/")
             body, mime = app.resources.tile(

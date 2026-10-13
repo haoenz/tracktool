@@ -1,5 +1,6 @@
 import { mapStyle, basemapPreset } from "./styles.js";
 import { displayCoordinate, displayGeometry } from "./coordinates.js";
+import { activeOverlays, cityReason, effectiveFeatures } from "./layers.js";
 /* Shared deterministic map renderer: fixed CSS-pixel frame, output DPR only. */
 export const token = document.querySelector(
   'meta[name="session-token"]',
@@ -73,6 +74,7 @@ export class MapCanvas {
       renderWorldCopies: true,
       fadeDuration: 0,
       preserveDrawingBuffer: true,
+      localIdeographFontFamily: "MapNoto",
       trackResize: false,
       // MapLibre owns visible-tile ordering and aborts obsolete source requests.
       cancelPendingTileRequestsWhileZooming: true,
@@ -201,7 +203,31 @@ export class MapCanvas {
         "https://www.openstreetmap.org/copyright",
       );
     }
-    if (this.state.style.cities === "county")
+    if (
+      (this.preset || this.state.style.basemap === "satellite") &&
+      Object.values(effectiveFeatures(this.state, this.config)).some(
+        (value) => value !== "none",
+      )
+    )
+      add(
+        this.config.customVectorAttribution || this.config.attribution,
+        "https://openfreemap.org/",
+      );
+    for (const overlay of activeOverlays(this.state, this.config))
+      add(
+        overlay.attribution,
+        overlay.group === "OpenInfraMap"
+          ? "https://openinframap.org/"
+          : overlay.group === "OpenSeaMap"
+            ? "https://openseamap.org/"
+            : overlay.group === "OpenRailwayMap"
+              ? "https://openrailwaymap.org/"
+              : "https://www.openstreetmap.org/copyright",
+      );
+    if (
+      this.state.style.cities === "county" &&
+      !cityReason(this.state, this.config)
+    )
       add("GeoNames · CC BY 4.0", "https://www.geonames.org/");
   }
   setTracks(tracks) {
@@ -217,7 +243,19 @@ export class MapCanvas {
   apply(state) {
     const old = this.state;
     this.state = state;
-    if (old.style.basemap !== state.style.basemap) {
+    if (
+      old.style.basemap !== state.style.basemap ||
+      JSON.stringify([
+        old.style.features,
+        old.style.overlays,
+        old.style.power,
+      ]) !==
+        JSON.stringify([
+          state.style.features,
+          state.style.overlays,
+          state.style.power,
+        ])
+    ) {
       this.preset = basemapPreset(state, this.config);
       this.crs = this.preset?.crs || "wgs84";
       this.displayData = displayGeometry(this.data, this.crs);
@@ -234,6 +272,11 @@ export class MapCanvas {
     } else if (this.map.getLayer("track-lines")) {
       this.map.setPaintProperty("track-lines", "line-color", state.style.color);
       this.map.setPaintProperty("track-lines", "line-width", state.style.width);
+      this.map.setPaintProperty(
+        "track-halo",
+        "line-width",
+        state.style.width + 2,
+      );
       this.map.setPaintProperty(
         "track-points",
         "circle-color",
@@ -368,7 +411,11 @@ export class MapCanvas {
       ctx.fillText(this.state.title, w / 2, 38);
       boxes.push([0, 0, w, 72]);
     }
-    if (this.state.style.cities === "none") return;
+    if (
+      this.state.style.cities === "none" ||
+      cityReason(this.state, this.config)
+    )
+      return;
     const zoom = this.map.getZoom() + Math.log2(scale),
       center = this.map.getCenter().lng;
     for (const city of this.cities) {

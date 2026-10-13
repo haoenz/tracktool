@@ -352,3 +352,39 @@ def test_transport_bounded_retry_redirect_and_session_reuse(monkeypatch):
         assert transport.sessions.queue[0] is session
     finally:
         transport.close()
+
+
+def test_railway_rate_limit_stops_retries_and_queued_network(monkeypatch):
+    from requests import Response
+
+    transport = Transport(1)
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(kwargs)
+        response = Response()
+        response.status_code = 429
+        response.headers["Retry-After"] = "120"
+        response._content = b"busy"
+        response._content_consumed = True
+        return response
+
+    monkeypatch.setattr(transport.sessions.queue[0], "get", get)
+    try:
+        with pytest.raises(UserInputError, match="限流"):
+            transport.fetch("https://tiles.openrailwaymap.org/standard/0/0/0.png")
+        with pytest.raises(UserInputError, match="冷却"):
+            transport.fetch("https://tiles.openrailwaymap.org/signals/0/0/0.png")
+        assert len(calls) == 1 and calls[0]["timeout"] == (5, 5)
+    finally:
+        transport.close()
+
+
+def test_empty_power_tile_is_cached_but_other_empty_sources_are_rejected(resources, monkeypatch):
+    calls = []
+    monkeypatch.setattr(resources, "fetch", lambda url: calls.append(url) or b"")
+    assert resources.tile("openinframap-power", 8, 106, 128) == (b"", "application/x-protobuf")
+    assert resources.tile("openinframap-power", 8, 106, 128) == (b"", "application/x-protobuf")
+    assert len(calls) == 1
+    with pytest.raises(UserInputError, match="空瓦片"):
+        resources.tile("openseamap-seamarks", 8, 106, 128)

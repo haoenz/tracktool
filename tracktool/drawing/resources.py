@@ -52,7 +52,15 @@ class Resources:
 
         concurrency = setting("TRACKTOOL_MAP_DOWNLOADS", 8, 1, 32)
         capacity = setting("TRACKTOOL_MAP_CACHE_MIB", 1024, 1, 16384) * 1024 * 1024
-        limits = {"google": 8, "bing": 4, "vector": 6, "custom": 4}
+        limits = {
+            "google": 8,
+            "bing": 4,
+            "vector": 6,
+            "custom": 4,
+            "openrailwaymap": 2,
+            "openseamap": 2,
+            "openinframap": 2,
+        }
         try:
             configured = json.loads(os.environ.get("TRACKTOOL_MAP_PROVIDER_LIMITS", "{}"))
             if not isinstance(configured, dict) or any(
@@ -62,7 +70,8 @@ class Resources:
             limits.update(configured)
         except ValueError, TypeError:
             raise UserInputError(
-                "TRACKTOOL_MAP_PROVIDER_LIMITS 需为 google/bing/vector/custom 到 1–32 整数的 JSON"
+                "TRACKTOOL_MAP_PROVIDER_LIMITS 需为已知提供方到 1–32 整数的 JSON，"
+                "专题提供方为 openrailwaymap/openseamap/openinframap"
             ) from None
         self.tiles = TileCache(cache, capacity)
         self.transport = Transport(concurrency)
@@ -99,6 +108,9 @@ class Resources:
                     raise UserInputError("底图 TileJSON 必须符合 OpenMapTiles 矢量 schema")
                 self._atomic(metadata, json.dumps(value).encode())
             self.vector = json.loads(metadata.read_text())
+            layers = {layer["id"] for layer in self.vector.get("vector_layers", [])}
+            if not {"transportation", "water", "landcover"} <= layers:
+                raise UserInputError("需要 OpenMapTiles schema；Shortbread 不能直接替换，尚无适配器")
 
     @staticmethod
     def _atomic(path: Path, data: bytes) -> None:
@@ -123,7 +135,15 @@ class Resources:
             "renderer_sha256": hashlib.sha256(
                 b"".join(
                     (STATIC / name).read_bytes()
-                    for name in ("core.js", "styles.js", "coordinates.js", "render.js", "style.css", "fonts.css")
+                    for name in (
+                        "core.js",
+                        "styles.js",
+                        "layers.js",
+                        "coordinates.js",
+                        "render.js",
+                        "style.css",
+                        "fonts.css",
+                    )
                 )
             ).hexdigest(),
             "playwright": version("playwright"),
@@ -160,6 +180,29 @@ class Resources:
         if missing:
             raise UserInputError(f"固定字体缺少字符：{''.join(missing[:20])}；请修改标题，不能用缺字方框导出")
 
+    def glyph(self, span: str, *, cancelled=lambda: False, export: bool = False) -> bytes:
+        """One fixed public font, bounded ranges, shared scheduler and disk LRU."""
+        try:
+            start, end = map(int, span.split("-"))
+            if start % 256 or end != start + 255 or not 0 <= start <= 65280:
+                raise ValueError()
+        except ValueError:
+            raise UserInputError("无效字体范围") from None
+        url = f"https://tiles.openfreemap.org/fonts/Noto%20Sans%20Regular/{span}.pbf"
+        key = hashlib.sha256(("glyph-v1:" + url).encode()).hexdigest()
+
+        def download():
+            cached = self.tiles.get(key)
+            if cached is not None:
+                return cached
+            data = self.fetch(url)
+            if not data.startswith(b"\x0a"):
+                raise UserInputError("地图字体返回无效数据")
+            self.tiles.put(key, data)
+            return data
+
+        return self.downloads.load(key, "vector", download, cancelled, export)
+
     def tile(
         self,
         source: str,
@@ -173,7 +216,7 @@ class Resources:
         if source not in {"vector", "satellite", *PRESETS} or not (0 <= z <= 18 and 0 <= x < 2**z and 0 <= y < 2**z):
             raise UserInputError("无效瓦片坐标")
         if source in PRESETS:
-            if z > PRESETS[source]["maxzoom"]:
+            if not PRESETS[source].get("minzoom", 0) <= z <= PRESETS[source]["maxzoom"]:
                 raise UserInputError("地图源不支持该瓦片级别")
             url = tile_url(PRESETS[source], z, x, y)
         else:
@@ -239,9 +282,15 @@ class Resources:
 
     @staticmethod
     def _validate(source: str, data: bytes) -> None:
+        # Tegola's documented empty MVT is a zero-layer protobuf (zero bytes).
+        # Only this verified thematic service gets this exception, never HTTP errors.
+        if not data and source == "openinframap-power":
+            return
         if not data:
             raise UserInputError("数据源返回空瓦片")
-        if source == "vector":
+        if hashlib.sha256(data).hexdigest() in PRESETS.get(source, {}).get("invalid_tile_sha256", []):
+            raise UserInputError("地图源返回暂无地图的占位图片，不能导出；请更换底图")
+        if source == "vector" or PRESETS.get(source, {}).get("format") == "vector":
             # Validate protobuf wire bounds and the MVT layer envelope before caching.
             # MapLibre performs full geometry decoding and export rejects its errors.
             def fields(payload: bytes):
@@ -300,7 +349,7 @@ class Resources:
 
     @staticmethod
     def _mime(source: str, data: bytes) -> str:
-        if source == "vector":
+        if source == "vector" or PRESETS.get(source, {}).get("format") == "vector":
             return "application/x-protobuf"
         if data.startswith(b"\xff\xd8"):
             return "image/jpeg"
@@ -313,7 +362,9 @@ class Resources:
             "versions": self.versions(),
             "vectorMaxZoom": min(14, self.vector.get("maxzoom", 14)),
             "satellite": bool(self.satellite),
-            "basemaps": public_presets(),
+            "basemaps": [s for s in public_presets() if s["kind"] == "basemap"],
+            "overlays": [s for s in public_presets() if s["kind"] == "overlay"],
+            "vectorLayers": {s["id"]: s.get("fields", {}) for s in self.vector.get("vector_layers", [])},
             "attribution": ATTRIBUTION,
             "customVectorAttribution": self.vector_credit,
             "satelliteAttribution": self.satellite_credit,

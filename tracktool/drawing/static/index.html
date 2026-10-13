@@ -186,14 +186,64 @@
           <h2>地图样式</h2>
           <label
             >底图<select id="basemap">
-              <option value="light">浅色 · 纸白</option>
-              <option value="dark">深色 · 夜航</option>
-              <option value="satellite" disabled>卫星 · 尚未配置</option>
+              <optgroup label="OSM">
+                <option value="light">浅色 · 纸白</option>
+                <option value="dark">深色 · 夜航</option>
+              </optgroup>
+              <optgroup label="高德"></optgroup>
+              <optgroup label="谷歌"></optgroup>
+              <optgroup label="腾讯"></optgroup>
+              <optgroup label="Bing"></optgroup>
+              <optgroup label="天地图"></optgroup>
+              <optgroup label="ArcGIS / Esri"></optgroup>
+              <optgroup label="360"></optgroup>
+              <optgroup label="自定义" id="custom-basemaps" hidden>
+                <option value="satellite" disabled>卫星 · 尚未配置</option>
+              </optgroup>
             </select></label
           >
           <details class="help">
             <summary>关于当前底图</summary>
             <p id="basemap-note" class="hint"></p>
+          </details>
+          <p id="layer-notice" class="hint" aria-live="polite"></p>
+          <details open class="layer-section">
+            <summary>OSM 独立要素</summary>
+            <p class="hint">
+              复用同一份矢量数据。已含内容自动暂停；设置保留。详细要素随缩放显示。
+            </p>
+            <div id="feature-controls"></div>
+          </details>
+          <details open class="layer-section">
+            <summary>叠加层</summary>
+            <p class="hint">
+              按来源分组。道路和文字在同一张图片内时整体控制；同类图层互斥。
+            </p>
+            <div id="overlay-controls"></div>
+            <details id="power-controls" hidden>
+              <summary>电网范围与图例</summary>
+              <label
+                >线路 / 变电站电压<select id="power-voltage" data-layer-control>
+                  <option value="0">全部（含未知）</option>
+                  <option value="110">≥ 110 kV</option>
+                  <option value="220">≥ 220 kV</option>
+                  <option value="500">≥ 500 kV</option>
+                </select></label
+              >
+              <label
+                >设施<select id="power-facilities" data-layer-control>
+                  <option value="all">变电站与发电设施</option>
+                  <option value="substations">仅变电站</option>
+                  <option value="generation">仅发电设施</option>
+                  <option value="none">仅线路</option>
+                </select></label
+              >
+              <p class="hint">
+                线路按首个电压着色：灰 &lt;10 / 未知、蓝 ≥10、绿 ≥25、黄 ≥52、橙
+                ≥132、红 ≥220、紫 ≥310、青 ≥550
+                kV。过滤使用最多四个电压中的最大值。发电：太阳能黄、风能青、水电蓝、核能紫、其他红；电压筛选不限制发电设施。
+              </p>
+            </details>
           </details>
           <div class="section-label">轨迹</div>
           <div class="color-row">
@@ -219,8 +269,10 @@
           <details class="help">
             <summary>地名显示说明</summary>
             <p class="hint">
-              叠加中国县级及以上城市，不包含乡镇与景点。底图自带文字由地图源决定。
+              叠加中国县级及以上城市，不包含乡镇与景点。OSM
+              地名或地图自带地名启用时自动暂停，避免重复。
             </p>
+            <p id="cities-note" class="hint"></p>
           </details>
         </section>
         <section

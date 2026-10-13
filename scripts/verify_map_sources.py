@@ -9,10 +9,32 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
+from tracktool.drawing.basemaps import PRESETS
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--project", type=Path, required=True)
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--url", default="http://127.0.0.1:8765")
+parser.add_argument(
+    "--presets",
+    nargs="+",
+    choices=sorted(k for k, v in PRESETS.items() if v["kind"] == "basemap"),
+    help="Only verify these presets",
+)
+parser.add_argument(
+    "--export-presets",
+    nargs="+",
+    choices=sorted(k for k, v in PRESETS.items() if v["kind"] == "basemap"),
+    default=[
+        "bing-satellite",
+        "google-satellite",
+        "google-hybrid-large",
+        "amap-satellite",
+        "tencent-satellite",
+        "esri-topo",
+        "esri-satellite",
+    ],
+)
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
 results = []
@@ -24,7 +46,8 @@ with sync_playwright() as p:
     page.on("dialog", lambda d: d.accept())
     page.on("request", lambda r: reads.append(r.url) if "/api/selection" in r.url else None)
     page.goto(args.url)
-    page.locator("#status").filter(has_text="地图已就绪").wait_for(timeout=90000)
+    page.locator("#basemap [data-preset-basemap]").first.wait_for(state="attached", timeout=90000)
+    expect(page.locator("#stage")).to_have_attribute("aria-busy", "false", timeout=90000)
     state = json.loads(args.project.read_text())
     state["versions"] = page.evaluate("window.tracktool.state.versions")
     state["output"] = {"width": state["frame"]["width"] * 2, "height": state["frame"]["height"] * 2}
@@ -32,11 +55,14 @@ with sync_playwright() as p:
     test_project.write_text(json.dumps(state, ensure_ascii=False))
     page.locator("#project-file").set_input_files(test_project)
     page.locator("#status").filter(has_text="项目已恢复").wait_for(timeout=90000)
+    reads.clear()
     page.locator("#toggle-inspector").click()
     original_camera = page.evaluate("window.tracktool.state.camera")
     original_tracks = page.evaluate("window.tracktool.state.tracks")
-    ids = page.locator("#preset-basemaps option").evaluate_all("els => els.map(e => e.value)")
-    assert len(ids) == 10
+    ids = page.locator("#basemap [data-preset-basemap]").evaluate_all("els => els.map(e => e.value)")
+    assert set(ids) == {k for k, v in PRESETS.items() if v["kind"] == "basemap"}
+    if args.presets:
+        ids = args.presets
     for identity in ids:
         old = page.evaluate("window.tracktool.state.style.basemap")
         if page.locator(f'option[value="{identity}"]').is_disabled():
@@ -74,7 +100,7 @@ with sync_playwright() as p:
         assert geometry["roundtrip"] < 0.000002
         page.screenshot(path=str(args.output / f"{identity}-editor.png"))
         result = {"id": identity, "ok": True, "geometry": geometry}
-        if identity in ("bing-satellite", "google-satellite", "google-hybrid-large"):
+        if identity in args.export_presets:
             page.locator("#open-export").click()
             labels = page.evaluate("window.tracktool.renderer.labels")
             with page.expect_download(timeout=180000) as download:
@@ -97,7 +123,13 @@ with sync_playwright() as p:
         results.append(result)
         print(identity, "PASS", flush=True)
     assert not reads, "source switch re-read KML"
-    # The final Google layer uses GCJ-02; a real drag must persist WGS84.
+    (args.output / "report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
+    # Exercise inverse projection with a known GCJ-02 layer, independent of menu order.
+    if page.locator("#output-panel").is_visible():
+        page.locator("#leave-export").click()
+    page.locator("#basemap").select_option("amap-road")
+    expect(page.locator("#stage")).to_have_attribute("aria-busy", "false", timeout=120000)
+    assert page.evaluate("window.tracktool.state.style.basemap") == "amap-road"
     page.mouse.move(700, 500)
     page.mouse.down()
     page.mouse.move(735, 525, steps=8)
@@ -126,3 +158,4 @@ with sync_playwright() as p:
     assert not errors, errors
     (args.output / "report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     browser.close()
+    assert all(result.get("ok") for result in results), "Some presets failed; see report.json"
