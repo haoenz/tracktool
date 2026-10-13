@@ -14,6 +14,14 @@ dependencies = [
 
 [project.scripts]
 tracktool = "tracktool.cli:cli_main"
+tracktool-map = "tracktool.editor:main"
+
+[project.optional-dependencies]
+maps = [
+    "pillow==12.3.0",
+    "fonttools==4.62.1",
+    "playwright==1.61.0",
+]
 
 [dependency-groups]
 dev = [
@@ -52,7 +60,7 @@ warn_unused_ignores = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-module = ["geopy.*", "lxml.*"]
+module = ["geopy.*", "lxml.*", "fontTools.*", "playwright.*"]
 ignore_missing_imports = true
 
 [tool.importlinter]
@@ -68,9 +76,9 @@ root_packages = ["tracktool"]
 name = "cli on top, features in the middle, plumbing below"
 type = "layers"
 layers = [
-    "tracktool.cli",
-    "tracktool.workflows",
-    "tracktool.exif",
+    "tracktool.cli | tracktool.editor",
+    "tracktool.workflows | tracktool.map_workflow",
+    "tracktool.exif | tracktool.drawing",
     "tracktool.kml",
     "tracktool.actions | tracktool.workspace | tracktool.discover | tracktool.googleapi | tracktool.mediatime",
     "tracktool.fileutil",
@@ -88,3 +96,17 @@ name = "exif geotags against the track model, not the archive orchestration"
 type = "forbidden"
 source_modules = ["tracktool.exif"]
 forbidden_modules = ["tracktool.kml.archive", "tracktool.kml.collections", "tracktool.kml.kmlfile"]
+
+# 绘图只接受状态与边界几何；不认识 KML、归档、编排或入口。
+[[tool.importlinter.contracts]]
+name = "drawing is independent of archive and orchestration"
+type = "forbidden"
+source_modules = ["tracktool.drawing"]
+forbidden_modules = ["tracktool.kml", "tracktool.workflows", "tracktool.map_workflow", "tracktool.editor"]
+
+[[tool.importlinter.contracts]]
+name = "map orchestration only uses the read-only archive interface"
+type = "forbidden"
+source_modules = ["tracktool.map_workflow"]
+forbidden_modules = ["tracktool.kml.archive", "tracktool.kml.collections", "tracktool.kml.kmlfile", "tracktool.workflows"]
+allow_indirect_imports = true

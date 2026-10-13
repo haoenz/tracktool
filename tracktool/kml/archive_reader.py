@@ -5,6 +5,7 @@ Open via open_archive(zip_path); the context owns the ZIP handle, while returned
 ZipEntry metadata and KmlTrackData arrays can outlive it.
 """
 
+import hashlib
 import lzma
 import zipfile
 import zlib
@@ -76,6 +77,17 @@ class TrackArchive:
         '<absolute ZIP path>!/<exact entry path>', positions rather than stable
         IDs. Only this entry is decompressed, CRC-checked and parsed, each call.
         """
+        return self.read_track_data_with_fingerprint(entry_path)[0]
+
+    def read_track_data_with_fingerprint(
+        self, entry_path: str, *, max_bytes: int | None = None
+    ) -> tuple[trackdata.KmlTrackData, str]:
+        """Read once and return geometry plus SHA-256 of the exact KML bytes.
+
+        The fingerprint describes the same bytes that were parsed, including
+        metadata. It is independent of ZIP compression, timestamps and order.
+        max_bytes optionally bounds the uncompressed entry before allocation.
+        """
         self._require_open()
         source = f"{self._zip_path}!/{entry_path}"
         matches = [
@@ -87,6 +99,8 @@ class TrackArchive:
             raise UserInputError(f"{source}: KML entry not found; use a complete ZIP entry path from list_entries()")
         if len(matches) != 1:
             raise UserInputError(f"{source}: Ambiguous KML entry ({len(matches)} entries have the same ZIP path)")
+        if max_bytes is not None and matches[0].file_size > max_bytes:
+            raise UserInputError(f"{source}: KML entry exceeds the {max_bytes} byte read limit")
         try:
             content = self._archive.read(matches[0])
         except _ZIP_READ_ERRORS as exc:
@@ -95,7 +109,7 @@ class TrackArchive:
             tree = xmlutil.parse_string(content)
         except UserInputError as exc:
             raise UserInputError(f"{source}: {exc}") from exc
-        return trackdata.track_data_from_tree(tree, source=source)
+        return trackdata.track_data_from_tree(tree, source=source), hashlib.sha256(content).hexdigest()
 
 
 @contextmanager

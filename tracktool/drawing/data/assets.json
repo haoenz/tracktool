@@ -1,0 +1,35 @@
+{
+  "maplibre": "5.6.1",
+  "font": "Noto Sans CJK SC 2.004",
+  "files": {
+    "static/vendor/maplibre-gl.js": {
+      "url": "https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js",
+      "sha256": "b5a34e6930ff937dbbb9eec8892cffb80ba473cce88ae5ca8c4654432f5f0ebc"
+    },
+    "static/vendor/maplibre-gl.css": {
+      "url": "https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css",
+      "sha256": "792ac997dcf6ae6f643eb4e2dee4630c85e7056526bd8fb85ffe83c67d6c41b4"
+    },
+    "static/vendor/maplibre-LICENSE.txt": {
+      "url": "https://unpkg.com/maplibre-gl@5.6.1/LICENSE.txt",
+      "sha256": "ee5fc05a0677eaf69601d2c7db0d9ecd6cc27c3abc1d0733bc9ed34707cf8ef2"
+    },
+    "static/vendor/NotoSansCJKsc-Regular.otf": {
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+      "sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b"
+    },
+    "static/vendor/Noto-LICENSE.txt": {
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/LICENSE",
+      "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+    },
+    "static/vendor/gcoord.js": {
+      "url": "https://unpkg.com/gcoord@1.0.7/dist/gcoord.esm-bundler.js",
+      "sha256": "32a9457ec2f3dde174998e34d17261da108f43b79a4f0361c834b0138fc87c67"
+    },
+    "static/vendor/gcoord-LICENSE.txt": {
+      "url": "https://unpkg.com/gcoord@1.0.7/LICENSE",
+      "sha256": "5cfdf4672bf208d3a470099e72b98e3c39b7adbd30e4e2bcd5d1b3011e516e47"
+    }
+  },
+  "gcoord": "1.0.7"
+}

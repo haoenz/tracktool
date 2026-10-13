@@ -12,3 +12,4 @@ ai-notes/
 .workbuddy/
 /config.json
 /sandbox/
+/.tracktool-map-secrets.json

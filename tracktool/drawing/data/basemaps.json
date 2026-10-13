@@ -1,0 +1,227 @@
+{
+  "version": 2,
+  "source_sha256": "bea89362c5308d0eed8d469a4b8fabf81a233a0973b4e1ad3a5673a125c0d421",
+  "adaptation": "HTTPS; normalized 512px addressing; Google gl=CN display coordinates use GCJ-02; keep WGS84 project geometry",
+  "sources": [
+    {
+      "id": "bing-satellite",
+      "name": "BING卫星图",
+      "qr_id": 610,
+      "url": "https://ecn.dynamic.t0.tiles.virtualearth.net/comp/ch/{quadkey}?mkt=en-us&it=A&shading=hill&n=z&cb=1",
+      "tile_size": 256,
+      "maxzoom": 18,
+      "crs": "wgs84",
+      "imagery": true,
+      "has_text": false,
+      "overlay_only": false,
+      "attribution": "© Microsoft Bing",
+      "source_fields": {
+        "t": "37",
+        "id": "610",
+        "po": "0",
+        "mt": "1",
+        "mf": "3",
+        "he": "2"
+      }
+    },
+    {
+      "id": "google-road",
+      "name": "谷歌地图（小字体）",
+      "qr_id": 604,
+      "url": "https://mt0.google.com/vt/lyrs=m@292000000&hl=zh-CN&gl=cn&src=app&x={x}&y={y}&z={z}&s=",
+      "tile_size": 256,
+      "maxzoom": 18,
+      "crs": "gcj02",
+      "imagery": false,
+      "has_text": true,
+      "overlay_only": false,
+      "attribution": "© Google",
+      "source_fields": {
+        "t": "37",
+        "id": "604",
+        "po": "1",
+        "ml": "22",
+        "pn": "1",
+        "pt": "443"
+      }
+    },
+    {
+      "id": "google-road-large",
+      "name": "谷歌地图（大字体）",
+      "qr_id": 605,
+      "url": "https://mt0.google.com/vt/lyrs=m@900000000&hl=zh-CN&gl=cn&scale=2&x={x}&y={y}&z={z}&s={galileo}&scale=2",
+      "tile_size": 512,
+      "maxzoom": 18,
+      "crs": "gcj02",
+      "imagery": false,
+      "has_text": true,
+      "overlay_only": false,
+      "attribution": "© Google",
+      "source_fields": {
+        "t": "37",
+        "id": "605",
+        "po": "1",
+        "ml": "23",
+        "pn": "1",
+        "ms": "512",
+        "pt": "443"
+      }
+    },
+    {
+      "id": "google-satellite",
+      "name": "谷歌卫星图",
+      "qr_id": 601,
+      "url": "https://mt0.google.com/vt/lyrs=s@999&hl=zh-CN&gl=CN&src=app&x={x}&y={y}&z={z}&s={galileo}&scale=1",
+      "tile_size": 256,
+      "maxzoom": 18,
+      "crs": "gcj02",
+      "imagery": true,
+      "has_text": false,
+      "overlay_only": false,
+      "attribution": "© Google",
+      "source_fields": {
+        "t": "37",
+        "id": "601",
+        "po": "1",
+        "ml": "20",
+        "pn": "1",
+        "mt": "1",
+        "mf": "3",
+        "pt": "443",
+        "df": "160,16777215,161,16777215"
+      }
+    },
+    {
+      "id": "google-hybrid",
+      "name": "谷歌卫星混合图（小字体）",
+      "qr_id": 602,
+      "url": "https://mt0.google.com/vt/lyrs=s,h&hl=zh-CN&gl=CN&src=app&x={x}&y={y}&z={z}&s={galileo}&scale=1",
+      "tile_size": 256,
+      "maxzoom": 18,
+      "crs": "gcj02",
+      "imagery": true,
+      "has_text": true,
+      "overlay_only": false,
+      "attribution": "© Google",
+      "source_fields": {
+        "t": "37",
+        "id": "602",
+        "po": "1",
+        "ml": "20",
+        "pn": "1",
+        "mt": "1",
+        "mf": "3",
+        "pt": "443"
+      }
+    },
+    {
+      "id": "google-hybrid-large",
+      "name": "谷歌卫星混合图（大字体）",
+      "qr_id": 603,
+      "url": "https://mt0.google.com/vt/lyrs=s,h&hl=zh-CN&gl=CN&src=app&x={x}&y={y}&z={z}&s={galileo}&scale=2",
+      "tile_size": 512,
+      "maxzoom": 18,
+      "crs": "gcj02",
+      "imagery": true,
+      "has_text": true,
+      "overlay_only": false,
+      "attribution": "© Google",
+      "source_fields": {
+        "t": "37",
+        "id": "603",
+        "po": "1",
+        "ml": "21",
+        "pn": "1",
+        "mt": "1",
+        "mf": "3",
+        "ms": "512",
+        "pt": "443"
+      }
+    },
+    {
+      "id": "google-terrain",
+      "name": "谷歌地形（小字体）",
+      "qr_id": 608,
+      "url": "https://mt0.google.com/vt/lyrs=t@132,r@292000000&hl=zh-CN&gl=cn&src=app&x={x}&y={y}&z={z}&s=Gal",
+      "tile_size": 256,
+      "maxzoom": 15,
+      "crs": "gcj02",
+      "imagery": false,
+      "has_text": true,
+      "overlay_only": false,
+      "attribution": "© Google",
+      "source_fields": {
+        "t": "37",
+        "id": "608",
+        "po": "1",
+        "ml": "15",
+        "mf": "3",
+        "pt": "443"
+      }
+    },
+    {
+      "id": "google-terrain-large",
+      "name": "谷歌地形（大字体）",
+      "qr_id": 609,
+      "url": "https://mt0.google.com/vt/lyrs=t@132,r@292000000&hl=zh-CN&gl=cn&src=app&x={x}&y={y}&z={z}&scale=2&s=Gal",
+      "tile_size": 512,
+      "maxzoom": 17,
+      "crs": "gcj02",
+      "imagery": false,
+      "has_text": true,
+      "overlay_only": false,
+      "attribution": "© Google",
+      "source_fields": {
+        "t": "37",
+        "id": "609",
+        "po": "1",
+        "mf": "3",
+        "ms": "512",
+        "pt": "443"
+      }
+    },
+    {
+      "id": "google-labels",
+      "name": "谷歌路网（小字体）",
+      "qr_id": 606,
+      "url": "https://mt0.google.com/vt/lyrs=h@900000000&hl=zh-CN&gl=CN&src=app&x={x}&y={y}&z={z}&s={galileo}&scale=1",
+      "tile_size": 256,
+      "maxzoom": 18,
+      "crs": "gcj02",
+      "imagery": false,
+      "has_text": true,
+      "overlay_only": true,
+      "attribution": "© Google",
+      "source_fields": {
+        "t": "37",
+        "id": "606",
+        "po": "1",
+        "ml": "22",
+        "pn": "1",
+        "pt": "443"
+      }
+    },
+    {
+      "id": "google-labels-large",
+      "name": "谷歌路网（大字体）",
+      "qr_id": 607,
+      "url": "https://mt0.google.com/vt/lyrs=h@900000000&hl=zh-CN&gl=CN&src=app&x={x}&y={y}&z={z}&s={galileo}&scale=2",
+      "tile_size": 512,
+      "maxzoom": 18,
+      "crs": "gcj02",
+      "imagery": false,
+      "has_text": true,
+      "overlay_only": true,
+      "attribution": "© Google",
+      "source_fields": {
+        "t": "37",
+        "id": "607",
+        "po": "1",
+        "ml": "23",
+        "pn": "1",
+        "ms": "512",
+        "pt": "443"
+      }
+    }
+  ]
+}

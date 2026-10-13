@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="session-token" content="__TOKEN__" />
+    <title>Tracktool · 旅途地图</title>
+    <link rel="stylesheet" href="/static/vendor/maplibre-gl.css" />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="editor">
+    <header>
+      <div class="brand">
+        <span class="brandmark">↗</span>
+        <div>TRACKTOOL <small>旅途地图工作室</small></div>
+      </div>
+      <nav class="panel-toggles" aria-label="编辑工具">
+        <button
+          id="toggle-library"
+          aria-controls="library-panel"
+          aria-expanded="true"
+        >
+          轨迹
+        </button>
+        <button
+          id="toggle-inspector"
+          aria-controls="inspector-panel"
+          aria-expanded="true"
+        >
+          样式与画框
+        </button>
+      </nav>
+      <div class="header-actions">
+        <button id="open-project">打开项目</button
+        ><button id="save-project">保存项目</button
+        ><button id="export" class="primary">导出 PNG ↗</button>
+      </div>
+      <input
+        id="project-file"
+        type="file"
+        accept=".json,application/json"
+        hidden
+      />
+    </header>
+    <main>
+      <aside
+        id="library-panel"
+        class="library floating-panel"
+        aria-label="轨迹库"
+      >
+        <div class="panel-heading">
+          <h1>轨迹库</h1>
+          <button data-close="library" aria-label="收起轨迹库">−</button>
+        </div>
+        <div class="panel-body">
+          <button id="browse" class="wide">打开本地归档…</button>
+          <div id="archive-name" class="archive-name">尚未打开归档 ZIP</div>
+          <label
+            >搜索轨迹<input
+              id="search"
+              type="search"
+              placeholder="名称或完整路径"
+          /></label>
+          <div class="date-row">
+            <label>开始日期<input id="date-from" type="date" /></label
+            ><label>结束日期<input id="date-to" type="date" /></label>
+          </div>
+          <label
+            >轨迹类型<select id="kind">
+              <option value="">全部类型</option>
+              <option value="Default">普通轨迹</option>
+              <option value="Train">火车</option>
+              <option value="Flight">飞机</option>
+              <option value="Unknown">未分类</option>
+            </select></label
+          >
+          <p class="hint">
+            日期来自文件名，类型来自归档目录；设置日期后，无日期条目不参与结果。
+          </p>
+          <div class="selection-bar">
+            <span id="list-count">0 条轨迹</span
+            ><button id="select-visible" class="text-button">
+              选择筛选结果</button
+            ><button id="clear" class="text-button">取消全部</button>
+          </div>
+          <div id="track-list" class="track-list">
+            <div class="empty">
+              打开归档后，轨迹会显示在这里。<br />原始文件始终只读。
+            </div>
+          </div>
+          <div id="selection-count" class="selection-count">已选 0 条</div>
+        </div>
+      </aside>
+      <section class="studio">
+        <div class="studio-toolbar">
+          <button
+            id="toggle-frame"
+            aria-controls="export-boundary"
+            aria-pressed="false"
+          >
+            <span id="frame-toggle-label">显示画框</span>
+            <span id="frame-caption" class="muted">4:3</span>
+          </button>
+          <div>
+            <button id="fit">适应所选轨迹</button
+            ><button id="zoom-in" aria-label="放大地图">＋</button
+            ><button id="zoom-out" aria-label="缩小地图">−</button>
+          </div>
+        </div>
+        <div id="stage" class="stage">
+          <div id="frame-holder">
+            <div id="frame" class="frame"></div>
+            <div
+              id="export-boundary"
+              class="export-boundary"
+              aria-hidden="true"
+              hidden
+            >
+              <span>PNG 导出范围</span>
+            </div>
+          </div>
+          <div id="initial-loading">正在准备地图资源…</div>
+        </div>
+        <div class="studio-footer">
+          <span>拖动地图调整构图 · 滚轮缩放 · 显示画框可检查导出范围</span
+          ><span id="preview-scale"></span>
+        </div>
+        <div class="status-window">
+          <div id="status" role="status" aria-live="polite">
+            正在启动本地编辑器…
+          </div>
+          <div class="recovery">
+            <button id="retry">重新加载地图 / 重试资源</button
+            ><button id="adopt-versions" hidden>确认使用当前资源版本</button
+            ><a id="download-again" hidden>重新下载 PNG</a>
+          </div>
+        </div>
+      </section>
+      <aside
+        id="inspector-panel"
+        class="inspector floating-panel"
+        aria-label="构图与样式"
+      >
+        <div class="panel-heading">
+          <h2>构图与样式</h2>
+          <button data-close="inspector" aria-label="收起构图与样式">−</button>
+        </div>
+        <div class="panel-body">
+          <label
+            >底图<select id="basemap">
+              <option value="light">浅色 · 纸白</option>
+              <option value="dark">深色 · 夜航</option>
+              <option value="satellite" disabled>卫星 · 尚未配置</option>
+            </select></label
+          >
+          <p id="basemap-note" class="hint"></p>
+          <div class="color-row">
+            <label
+              >轨迹颜色<input id="color" type="color" value="#e05240" /></label
+            ><label
+              >线宽 <output id="width-value">3</output
+              ><input
+                id="width"
+                type="range"
+                min="0.5"
+                max="12"
+                step="0.5"
+                value="3"
+            /></label>
+          </div>
+          <label
+            >城市地名<select id="cities">
+              <option value="county">仅县级及以上城市</option>
+              <option value="none">不显示</option>
+            </select></label
+          >
+          <p class="hint">
+            中国行政区数据；按级别避让。部分名称或驻地可能缺漏、滞后，不包含乡镇与景点。
+          </p>
+          <hr />
+          <div class="section-label">03 / 成片</div>
+          <label
+            >导出比例<select id="ratio">
+              <option>4:3</option>
+              <option>3:2</option>
+              <option>16:9</option>
+              <option>1:1</option>
+              <option>3:4</option>
+              <option>2:3</option>
+            </select></label
+          ><label
+            >输出长边（像素）<input
+              id="pixels"
+              type="number"
+              value="1920"
+              min="480"
+              max="4096"
+              step="1"
+          /></label>
+          <p id="output-size" class="hint">1920 × 1440 px</p>
+          <label
+            >标题 <span class="muted">可选</span
+            ><input
+              id="title"
+              maxlength="60"
+              placeholder="例如：山河之间 · 秋日漫游"
+          /></label>
+          <p class="hint">
+            标题仅在显示画框和导出时呈现。成片的线宽、字号以长边 960
+            的逻辑画布为准，随输出分辨率等比放大。改变窗口大小不会改变构图。
+          </p>
+          <div class="project-note">
+            <span id="dirty">尚未保存</span>
+            <p>项目保存选择、指纹与构图。轨迹保留在原归档中。</p>
+          </div>
+        </div>
+      </aside>
+    </main>
+    <dialog id="file-dialog">
+      <div class="dialog-heading">
+        <h2>打开轨迹归档</h2>
+        <button id="close-dialog" aria-label="关闭">×</button>
+      </div>
+      <p>选择带有 archive.json 身份文件的归档目录中的 ZIP。</p>
+      <div class="path-row">
+        <input id="folder-path" aria-label="本地目录路径" /><button
+          id="go-folder"
+        >
+          前往</button
+        ><button id="parent-folder">上一级</button>
+      </div>
+      <div id="folder-list"></div>
+      <p id="browse-error" role="alert"></p>
+    </dialog>
+    <script src="/static/vendor/maplibre-gl.js"></script>
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

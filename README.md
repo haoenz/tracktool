@@ -7,6 +7,8 @@
 - **KML 轨迹管理**：归档（ZIP 真值分层存储 + 桌面/手机双汇总视图 + 备份）、视图状态检查与重建、拆分、删坏点（手动两点 + `--auto` 自动清漂移）、合并、Google 高程回填（只认整轨没有高程的手绘轨迹）
 - **EXIF 地理标记**：按拍摄时间与 KML 轨迹二分匹配写入 GPS、Google 高程/逆地理编码补全、时间平移、海拔偏移、MP4 转封装、媒体分类、缺失修复编排
 
+- **交互式轨迹地图**：本地浏览器选轨迹、浅/深底图、行政城市标注、固定画框与标题、项目保存/恢复、PNG 导出（见下方专节）
+
 ## 安装
 
 ```bash
@@ -69,6 +71,141 @@ tracktool archive undo
 不带时区时按 UTC 解释。选中的点归前一段，原文件保留，结果写入同目录的
 `原名-Splited-1.kml`、`原名-Splited-2.kml`。多个切分时间落在同一点时只切一次；
 如果最近的是最后一个轨迹点，会报错，避免生成空的后一段。
+
+## 本地交互式轨迹地图编辑器
+
+第一版是浏览器编辑器：选择归档轨迹、拖动地图、调整样式与画框、保存项目、导出 PNG 都在界面中完成。Python 服务默认监听 `127.0.0.1`，也可显式开启局域网访问；不需要账号、云数据库、前端构建服务或 LLM。
+
+### 安装与启动
+
+在本仓库中运行（Python 3.14+）：
+
+```bash
+uv sync --extra maps
+# 安装匹配锁定版本的浏览器；避免清理其他项目的浏览器缓存
+PLAYWRIGHT_SKIP_BROWSER_GC=1 uv run --extra maps playwright install chromium --only-shell
+uv run --extra maps tracktool-map
+```
+
+自动打开 `http://127.0.0.1:8765`。如浏览器未打开，手动访问此地址。按 `Ctrl+C` 停止。无需 exiftool / ffmpeg。Linux 若提示缺少 Chromium 系统库，按 Playwright 提示安装发行版对应的依赖；安装系统包需要管理员权限。
+
+也可用 `pip install '.[maps]'`、`playwright install chromium --only-shell`、`tracktool-map`。参数：`--port 8766` 更换端口；`--no-browser` 不自动打开浏览器；`--archive /path/to/Archive.zip` 可选预选归档；`--cache /path/to/cache` 指定可写缓存目录。启动器独立于旧 CLI，不加载或迁移 tracktool 配置。
+
+局域网访问：
+
+```bash
+uv run --extra maps tracktool-map --host 0.0.0.0 --port 8765
+```
+
+其他设备打开 `http://<运行服务的电脑的局域网 IPv4>:8765`，例如 `http://192.168.1.20:8765`，不要在浏览器中填 `0.0.0.0`。如无法连接，检查同一网络及服务端防火墙是否允许 TCP 8765。也可 `--host 192.168.1.20` 只绑定指定网卡地址。归档浏览/读取仍发生在服务端电脑，项目和 PNG 下载到访问页面的设备；后台导出自动使用可连接的本机地址。没有账号认证，可访问此端口的局域网用户都能浏览服务端目录和读取轨迹归档，适用于可信局域网。
+
+### 界面操作
+
+页面以整屏地图为工作区，轨迹库、构图与样式为浮动窗口。点顶部「轨迹」「样式与画框」或窗口右上角「−」展开、收起；小屏幕一次展开一个窗口。默认隐藏画框，按整个可见窗口筛选和排布地名，浏览字号不随画框的预览比例缩小，署名位于窗口右下角。点地图下方「显示画框」进入成片预览：细边框与框外轻微遮罩标出导出范围，标题、地名和署名按 PNG 的固定逻辑画布排版；框外地图也可以拖动。再点「隐藏画框」返回整屏浏览，标题只在成片预览和导出中显示。两种视图的地名避让范围不同，显示的地名可能不同；PNG 始终使用成片预览的布局。面板开合、视图切换均不改变已保存的构图和实际导出范围，浮窗、边框与遮罩不会进入 PNG。
+
+1. 点击「打开本地归档」，在目录浏览器中选择 ZIP。可直接输入目录再点「前往」。ZIP 父目录必须有现有 `archive.json` 身份文件；这里只读归档，不初始化、不重建、不写集合。
+2. 用名称、开始/结束日期、类型筛选，勾选多条轨迹，或「选择筛选结果」「取消全部」。日期取自文件名；类型来自归档首层目录（普通/火车/飞机/未分类），不是 KML 活动标签。日期筛选会排除无日期文件，但不设置日期时仍可选它们。筛选不会取消已选的其他轨迹。
+3. 点击「适应所选轨迹」，拖动地图、滚轮或 `＋/−` 调整视野。浅/深底图、统一颜色、线宽、地名模式均实时生效。默认浅/深底图不包含道路、水域、乡镇或景点文字；城市为独立标注层。新增的栅格地图可能自带文字，见下方说明。
+4. 在「样式与画框」选择六种画框比例、输出长边像素，填写可选标题。画框边缘就是 PNG 边缘；不会截取浮动工具窗口。切换比例保留中心与缩放，可再次「适应所选轨迹」。窗口缩放仅改变预览显示大小。
+5. 「保存项目」下载 `tracktool-map.json`；「打开项目」选择该文件恢复选择、样式、视野、画框、输出尺寸和标题。项目不复制 KML，需保留原归档位置；文件移动时恢复原位置后再打开。内容变化、缺失条目会明确列出并暂停保存/导出，可取消问题条目或恢复原件；再次主动选择会采用新内容。
+6. 「导出 PNG」显示进度并自动下载；完成后也可点击「重新下载 PNG」。失败时不生成成功图片，检查提示后再次点导出。地图请求失败可点「重新加载地图 / 重试资源」；字体文件缺失或校验失败需重新安装，标题含字体不支持字符需修改标题。
+
+异常条目不会悄悄消失：完整 ZIP 路径出现在错误提示中。有效几何仍可预览，但必须处理选择错误才能保存/导出。单次选择最多 200 条、200 万点，单个 KML 解压后最多 128 MiB。不带时间戳的线、单点段均支持；段与文件之间不连线。超出 Web Mercator 纬度 ±85.05112878° 的轨迹明确拒绝，地图交互不旋转、不倾斜。
+
+### 画框、线宽与复现
+
+逻辑画框固定为长边 960 CSS 像素：4:3 = 960×720，3:2 = 960×640，16:9 = 960×540，1:1 = 960×960，3:4 = 720×960，2:3 = 640×960。输出长边可设 480–4096，另一边按比例四舍五入。3 像素线宽在长边 1920 的输出中为 6 像素；城市字号、描边、标题、边距、署名同样按比例缩放。地名布局使用逻辑坐标，所以提高分辨率不增加地名数量。
+
+导出在独立 Chromium 页面使用相同 `core.js` 和逻辑画框，按目标像素比例重新绘制 WebGL / Canvas；不会截图编辑器。等待本地字体加载、MapLibre `idle`、所有瓦片和 source worker、两帧标签排版，检查 HTTP/请求/地图/脚本错误后才截图，并检查 PNG 实际尺寸。超时返回失败。导出任务串行，结果最多保留 5 个/15 分钟，仅在内存中；刷新或重启后可重新导出。
+
+项目 schema 1 记录归档绝对路径、完整 ZIP 条目路径、**原始 KML 字节 SHA-256**，以及状态、渲染源码/字体/地名数据指纹、MapLibre/Playwright 版本、底图数据版本。实际 Chromium 版本和标签布局由导出任务报告返回。源码和资源不同的旧项目会提示，需点击「确认使用当前资源版本」后另存。规则、输入和布局可复现；不同 OS、浏览器、GPU、DPR 的抗锯齿可能不同，**不保证跨环境逐像素一致**。
+
+### 底图、字体与数据来源
+
+- 默认底图：[OpenFreeMap](https://openfreemap.org/)，OpenMapTiles schema，来源 OpenStreetMap。公开服务不需要 key；[官方说明](https://openfreemap.org/quick_start/)支持自定义样式。[署名要求](https://openfreemap.org/#attribution)适用于静态输出。我们的样式只定义地物层，不继承服务方地名或 POI 图层。
+- 首次联网获取 `https://tiles.openfreemap.org/planet` 的 TileJSON，缓存其带日期的瓦片路径；之后复用该版本。只有当前视野所需瓦片按需请求，最多 6 个并发、单资源 16 MiB、磁盘瓦片缓存 256 MiB（LRU 淘汰），不下载整省/全世界。默认缓存 `~/.cache/tracktool/maps`。已有瓦片可离线复用，但没有完整离线数据包。服务不可用时会报错，不用空白底图替代。
+- 服务方旧快照可能撤下。停止服务后用 `tracktool-map --refresh-basemap` 获取新版本；已有项目会出现版本变更提示。自托管或其他兼容 OpenMapTiles 的 HTTPS TileJSON 可用环境变量 `TRACKTOOL_MAP_TILEJSON` 配合 `--refresh-basemap` 配置。schema 必须相同，且需同时设置 `TRACKTOOL_MAP_VECTOR_ATTRIBUTION` 为实际提供方要求的完整署名；用户负责检查该服务许可。样式独立放在 `static/styles.js`，字体声明在 `static/fonts.css`，数据源与缓存由 `drawing/resources.py` 管理。
+- MapLibre GL JS **5.6.1** 的 JS/CSS、Noto Sans CJK SC **2.004** 完整字体随包分发；SHA-256 和来源 URL 在 `tracktool/drawing/data/assets.json`，许可证在 `static/vendor/`。无运行时 CDN 字体依赖。服务端 cmap 检查与浏览器字体加载共同阻止缺字导出。
+- 地名是随包附带的全国数据快照，运行时不查询地名 API。来源为 [GeoNames CN.zip](https://download.geonames.org/export/dump/)，[字段定义](https://download.geonames.org/export/dump/readme.txt)、[Feature Codes](https://www.geonames.org/export/codes.html)，CC BY 4.0。来源文件指纹、适配器版本、字段证据和每条记录来源 ID 保存在 `data/cities-cn.json`。
+
+**地名级别的明确规则与局限**：仅对 `country=CN` 实施中国大陆适配，`PPLC/PPLA` 标注首都和省级行政驻地，`ADM2/ADM3` 对应地级/县级行政单元；不使用 `city`、`town`、人口或 rank 推断行政级别，不采纳 PPL/PPLA4/PPLA5。ADM2 可用同一行政代码的上级驻地中文名与坐标；ADM3 始终用行政单元中文名，只有匹配完整行政代码的驻地才修正坐标，绝不用驻地乡镇名替换县名。无驻地匹配时使用 GeoNames 行政记录的代表点，可能是区域中心而非建成区中心。缺少行政代码/中文名的记录及「市辖区」等集合名被计数并排除。
+
+当前快照含首都 1、省级驻地 30、地级 359、县级 2824 条；76 条缺行政代码、39 条缺合适中文名或属于集合名称。按级别确定字号、缩放阈值与优先级，再以稳定 ID 排序、画面范围筛选、碰撞避让，邻近同名择优，画框边缘不截半个地名。**GeoNames 不是当前官方行政区名录**，可能含旧名称、行政改制滞后、代表点不准确或漏项；港澳台及境外行政级别尚未适配，不伪装成全球县级分类，也不声称覆盖所有当代县级行政区。升级数据可显式下载新的 CN.zip 后运行：
+
+```bash
+uv run python scripts/build_map_cities.py /path/to/CN.zip tracktool/drawing/data/cities-cn.json
+```
+
+**额外自定义卫星数据源接口**独立于浅/深矢量底图和内置预设；未配置时不显示该自定义选项。若你有允许静态图片导出和本地缓存的 HTTPS XYZ 卫星服务，在启动前配置：
+
+```bash
+export TRACKTOOL_MAP_SATELLITE_URL='https://your-provider.example/imagery/{z}/{x}/{y}.jpg?key=YOUR_KEY'
+export TRACKTOOL_MAP_SATELLITE_ATTRIBUTION='© 实际影像提供方及其要求的完整署名'
+export TRACKTOOL_MAP_SATELLITE_VERSION='供应商/图层/数据版本'
+uv run --extra maps tracktool-map
+```
+
+要求 WGS84/Web Mercator XYZ、256 像素瓦片、无附带文字。不要使用 GCJ-02/BD-09 瓦片，否则会与原始轨迹错位。URL 仅由服务端请求，凭据不写入项目；项目记录配置指纹与版本，图片保留配置署名。此接口与下面已接入的 Google/Bing 预设分开，用户提供的其他 URL 需自行验证。
+
+### 二维码中的内置地图
+
+已将项目根目录二维码图片中的 **10 项已验证可用的**配置固化为「底图」菜单选项，无需在界面扫码或编辑配置：
+
+| 地图 | 选项 | 坐标 / 瓦片 |
+| --- | --- | --- |
+| Bing | 卫星 | WGS84，256px，QuadKey |
+| Google | 卫星；混合小/大字体；地图小/大字体；地形小/大字体；路网小/大字体 | 此批 `gl=CN` 图层使用 GCJ-02；256/512px |
+
+在「样式与画框 → 底图」直接切换。选择前只探测一张低级别瓦片，失败保留原底图并提示重试；成功后按视野请求。纯路网选项是透明道路/文字图层，显示在纯色背景上；如需道路叠加影像，请选「卫星混合」。大字体使用原配置的 512px/scale=2 图层，归一化请求坐标，避免重复除以二。地图缩放上限为 18，低于此上限的来源按其原最大级别放大。
+
+**文字控制**：Google 地图、混合、地形、路网的文字已经烧进瓦片，不能按行政级别过滤，也不能通过「地名：不显示」清除。该开关只控制 tracktool 自己叠加的城市层。需要严格无道路名、乡镇名和 POI 的成片，请使用默认浅/深矢量底图或无字卫星图；混合图可关闭叠加城市，减少重复文字。
+
+**坐标适配**：本批 Google 中国图层在渲染边界将 WGS84 轨迹、城市和视野转换至 GCJ-02；拖动后的中心反向转换，项目与原 KML 一直保留 WGS84。切换底图不重新读取 KML，也不合并轨迹段。使用随包固定的 [gcoord 1.0.7](https://github.com/hujiulong/gcoord)（MIT），不是测绘精度保证。其国内转换范围是矩形判定，港澳台、国境附近及矩形内的邻国未验证，可能错误偏移；这些区域优先使用 WGS84 图源。自定义卫星接口仍要求 WGS84，不自动猜测坐标系。
+
+二维码中的 OpenCycle 验证返回 HTTP 401，已从菜单和内置源目录移除，不再请求 Thunderforest，也不再读取此前提取的本机凭据。当前保留的 10 项内置图源无需本机密钥。
+
+**来源和稳定性**：预设来自用户提供的 [奥维自定义地图配置](https://www.ovital.com/131425-2/)，静态目录在 `tracktool/drawing/data/basemaps.json`，记录源图片指纹、原配置字段和适配后的模板。Google/Bing 使用二维码中的网页瓦片接口，不是已申请的官方商业 API，当前可访问不代表永久免费、稳定或具备任意再分发授权。保留 Google、Microsoft Bing 署名；使用和发布输出应遵守相应提供方条款。地图数据在线更新，URL 中的版本标识不保证不可变；项目记录目录指纹、坐标库版本及缓存资源配置，不承诺重新联网后逐像素相同。缓存上限和并发限制与默认底图共用，栅格图片的格式与尺寸验证失败会中止加载/导出。
+
+### 模块边界与验证
+
+`editor` 是本地 HTTP 入口、会话和任务管理；`map_workflow` 编排 `kml.archive_reader` 与独立 `drawing` 功能包；`drawing` 不导入 KML、集合、编排或入口。`archive_reader.read_track_data_with_fingerprint()` 从同一份字节生成数组与内容指纹，可选限制解压大小；旧 `read_track_data()` 的语义保持。几何缓存保留紧凑平行数组与分段，按归档文件身份/大小/纳秒 mtime/ctime 与完整条目路径失效，最多 128 条/200 万点。选中轨迹在绘图边界转为 MultiLineString/MultiPoint，点没有独立属性对象。配色、线宽、标题和拖动不访问 KML。导出、重开、保存会重新检查源文件状态；请避免在编辑器读取时同时执行归档写入操作。
+
+`pyproject.toml` 的 import-linter 同时约束层级、绘图独立性和编排只读入口。会话 token、Host/Origin 检查防止其他站点借服务读取文件；局域网模式只接受实际接收连接的服务器 IP 对应的 Host，并继续校验同源请求，不提供任意服务器文件写入接口。JSON/PNG 由浏览器下载，原始归档、KML、备份和桌面/手机集合不变。
+
+常规检查：
+
+```bash
+uv run --extra maps pytest
+uv run --extra maps ruff check .
+uv run --extra maps ruff format --check .
+uv run --extra maps mypy
+uv run --extra maps lint-imports
+```
+
+关键自动化覆盖完整 ZIP 身份、目录列表不解析 KML、无时间戳/单点/分段、日期线、投影界限、状态往返、缓存不重复解析、源内容变化/缺失，以及行政级别与驻地修正规则。实际浏览器验收另需联网与 Chromium；测试和示例图片不作为程序数据源。
+
+复跑浏览器验收（先启动编辑器；选择不超过 200 条轨迹的短日期范围，输出使用独立目录）：
+
+```bash
+uv run --extra maps python scripts/verify_map_editor.py \
+  --archive /path/to/Archive.zip --from-date 2026-10-04 --to-date 2026-10-08 \
+  --output sandbox/map-editor-qa/run
+uv run --extra maps python scripts/verify_map_failures.py --output sandbox/map-editor-qa/run
+```
+
+第一条实际点击界面，验证筛选、多选/取消、浅深底图、颜色线宽、地名开关、拖动缩放、比例与像素尺寸、窗口变化、项目下载/重开、横竖 PNG，以及预览/导出的标签布局和视野相同；同时验证原归档 SHA-256 不变。第二条启动独立测试服务，注入缺瓦片/缺字体，检查失败不产生 PNG、恢复后重试、缺字标题拦截、非整倍数输出尺寸、会话边界和无时间戳多段示例。会在输出目录写入测试专用归档、PNG、项目和 JSON 报告。
+
+2026-10-13 本机 Linux 验收：从 sandbox 的云南行程选择 13 条非飞机轨迹、20,405 点，实际检查 1920×1280 深色、1440×1920 浅色 PNG，确认中文、地名、边缘裁切与署名；另检查四段互不相连的真实导出图片。原归档内容指纹保持不变。Chromium 149.0.7827.55，OpenFreeMap 快照 `20261004_113936_pt`；全套 pytest **898 passed, 2 skipped**，ruff 检查/格式、mypy、4 条 import-linter 契约通过，wheel 验证包含所有运行时资源。验收产物留在被 Git 忽略的 `sandbox/map-editor-qa/final/`，未写入原件或归档集合。
+
+2026-10-13 二维码图源增量验收：Google 9 项和 Bing 1 项成功加载；OpenCycle 的原密钥返回 HTTP 401，之后按要求移除该不可用选项。实际导出并检查 Google 卫星、Google 混合大字体、Bing 卫星的 1920×1280 旅行地图，以及 Google/Bing 古城近景，核对坐标对齐、中文标题与署名。图源切换不重新读取 KML；分段、预览/导出标签和中心一致，项目保存重开成功。原编辑闭环、全屏/画框、手机、缺瓦片/字体阻止出图和恢复重试回归通过。全套 pytest **913 passed, 2 skipped**，ruff、mypy、4 条架构契约通过。产物位于被 Git 忽略的 `sandbox/map-source-check/` 和 `sandbox/map-editor-qa/sources-regression/`。
+
+图源验收脚本（需先在界面保存一个有轨迹的项目；仅验证保留的 10 项图源）：
+
+```bash
+uv run --extra maps python scripts/verify_map_sources.py \
+  --project /path/to/tracktool-map.json --output /tmp/map-source-qa \
+  --url http://127.0.0.1:8765
+```
 
 ## 目录比较与重复文件查找：使用 fclones
 
