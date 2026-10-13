@@ -21,6 +21,7 @@ with sync_playwright() as p:
     page = browser.new_page(viewport={"width": 1400, "height": 1000}, accept_downloads=True)
     errors, reads = [], []
     page.on("pageerror", lambda e: errors.append(str(e)))
+    page.on("dialog", lambda d: d.accept())
     page.on("request", lambda r: reads.append(r.url) if "/api/selection" in r.url else None)
     page.goto(args.url)
     page.locator("#status").filter(has_text="地图已就绪").wait_for(timeout=90000)
@@ -31,7 +32,7 @@ with sync_playwright() as p:
     test_project.write_text(json.dumps(state, ensure_ascii=False))
     page.locator("#project-file").set_input_files(test_project)
     page.locator("#status").filter(has_text="项目已恢复").wait_for(timeout=90000)
-    page.locator("#toggle-frame").click()
+    page.locator("#toggle-inspector").click()
     original_camera = page.evaluate("window.tracktool.state.camera")
     original_tracks = page.evaluate("window.tracktool.state.tracks")
     ids = page.locator("#preset-basemaps option").evaluate_all("els => els.map(e => e.value)")
@@ -41,6 +42,8 @@ with sync_playwright() as p:
         if page.locator(f'option[value="{identity}"]').is_disabled():
             results.append({"id": identity, "error": "missing credentials"})
             continue
+        if page.locator("#output-panel").is_visible():
+            page.locator("#leave-export").click()
         page.locator("#basemap").select_option(identity)
         expect(page.locator("#stage")).to_have_attribute("aria-busy", "false", timeout=120000)
         if page.evaluate("window.tracktool.state.style.basemap") != identity:
@@ -72,6 +75,7 @@ with sync_playwright() as p:
         page.screenshot(path=str(args.output / f"{identity}-editor.png"))
         result = {"id": identity, "ok": True, "geometry": geometry}
         if identity in ("bing-satellite", "google-satellite", "google-hybrid-large"):
+            page.locator("#open-export").click()
             labels = page.evaluate("window.tracktool.renderer.labels")
             with page.expect_download(timeout=180000) as download:
                 with page.expect_response("**/api/export") as submitted:
@@ -106,11 +110,14 @@ with sync_playwright() as p:
       const expected=displayCoordinate(window.tracktool.state.camera.center,r.crs);
       return Math.abs(center.lng-expected[0])<0.000002 && Math.abs(center.lat-expected[1])<0.000002;
     }""")
+    page.locator("#project-menu > summary").click()
     with page.expect_download() as download:
         page.locator("#save-project").click()
     saved_path = args.output / "saved-project.json"
     download.value.save_as(saved_path)
     saved = page.evaluate("window.tracktool.state")
+    if page.locator("#output-panel").is_visible():
+        page.locator("#leave-export").click()
     page.locator("#basemap").select_option("light")
     expect(page.locator("#stage")).to_have_attribute("aria-busy", "false", timeout=90000)
     page.locator("#project-file").set_input_files(saved_path)

@@ -1,5 +1,8 @@
 """LAN Host/Origin validation and internal export destinations, without sockets."""
 
+import json
+import sys
+from contextlib import nullcontext
 from email.message import Message
 from types import SimpleNamespace
 
@@ -61,3 +64,32 @@ def test_export_uses_a_reachable_host_instead_of_wildcard(bind, destination):
     server.host = bind
     server.server_port = 8765
     assert server.origin == f"http://{destination}:8765"
+
+
+@pytest.mark.parametrize("config_key", ["archive_path", "kml_zip_path"])
+def test_launcher_uses_configured_archive_without_migrating_config(tmp_path, monkeypatch, config_key):
+    pytest.importorskip("fontTools.ttLib")
+    pytest.importorskip("playwright.sync_api")
+    from tracktool import config, editor
+    from tracktool.kml.storage import DB_NAME, create_database
+
+    archive = tmp_path / "archive"
+    create_database(archive / DB_NAME)
+    config_file = tmp_path / "config.json"
+    content = json.dumps({config_key: str(archive if config_key == "archive_path" else archive / "Archive.zip")})
+    config_file.write_text(content)
+    monkeypatch.setattr(config, "default_config_path", lambda: config_file)
+    monkeypatch.setattr(sys, "argv", ["tracktool-map", "--no-browser"])
+    opened = []
+
+    def server(port, cache, initial, *, host):
+        opened.append(initial)
+        return nullcontext(
+            SimpleNamespace(origin="http://127.0.0.1:8765", host=host, server_port=port, serve_forever=lambda: None)
+        )
+
+    monkeypatch.setattr(editor, "EditorServer", server)
+    editor.main()
+    assert opened == [str(archive)]
+    assert config_file.read_text() == content
+    assert not (archive / "Archive.zip").exists()

@@ -256,9 +256,18 @@ export class MapCanvas {
     this.updateCredit();
     this.draw();
   }
-  fit() {
+  fit(tracks) {
     const coordinates = [];
-    for (const f of (this.displayData || this.data).features) {
+    const geometry = tracks
+      ? displayGeometry(
+          {
+            type: "FeatureCollection",
+            features: tracks.flatMap((t) => t.geojson.features),
+          },
+          this.crs,
+        )
+      : this.displayData || this.data;
+    for (const f of geometry.features) {
       if (f.geometry.type === "MultiLineString")
         for (const segment of f.geometry.coordinates)
           for (const p of segment) coordinates.push(p);
@@ -427,10 +436,13 @@ export class MapCanvas {
     // Idle includes pending tile loads and source workers; two render frames
     // flush our canvas labels after the idle event. No sleep-based screenshot.
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        cleanup();
-        reject(new Error("地图资源等待超时；请检查网络并重试"));
-      }, Math.max(0, deadline - performance.now()));
+      const timer = setTimeout(
+        () => {
+          cleanup();
+          reject(new Error("地图资源等待超时；请检查网络并重试"));
+        },
+        Math.max(0, deadline - performance.now()),
+      );
       const cleanup = () => {
         clearTimeout(timer);
         this.map.off("idle", check);

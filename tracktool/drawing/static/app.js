@@ -18,7 +18,16 @@ let state,
   basemapRequest = 0,
   candidate,
   switching = false,
-  failedBasemap;
+  failedBasemap,
+  statusTimer,
+  activeTool = "library",
+  previousTool = "library",
+  selectedOnly = false,
+  projectName = "",
+  savedProjectName = "",
+  hasChanges = false,
+  editRevision = 0,
+  projectNames = [];
 const names = {
   Default: "普通",
   Train: "火车",
@@ -30,19 +39,53 @@ function status(message, kind = "") {
     message = "正在加载所选底图，原地图仍可浏览…";
     kind = "busy";
   }
+  if (!kind && versionsChanged) {
+    message += "\n项目资源版本不同，请检查预览并确认使用当前资源版本。";
+    kind = "error";
+  }
   $("status").textContent = message;
   $("status").className = kind;
+  clearTimeout(statusTimer);
+  $("status-window").hidden = false;
+  $("retry").hidden = kind !== "error" || versionsChanged;
+  $("download-again").hidden =
+    !lastBlobUrl || !message.startsWith("PNG 已导出");
+  if (!kind)
+    statusTimer = setTimeout(() => {
+      $("status-window").hidden = true;
+    }, 5000);
 }
 function error(e) {
   status(e.message || String(e), "error");
 }
 function dirty() {
-  $("dirty").textContent = "有未保存的编辑";
+  hasChanges = true;
+  editRevision++;
+  projectIdentity();
+}
+function projectIdentity() {
+  $("project-name").textContent = projectName || "未命名项目";
+  $("project-name").title = projectName || "未命名项目";
+  $("dirty").textContent = hasChanges
+    ? "有修改"
+    : savedProjectName
+      ? "已保存"
+      : "尚未保存";
+}
+function canReplaceProject() {
+  return (
+    !hasChanges || confirm("当前项目有未保存的修改，是否放弃这些修改并继续？")
+  );
 }
 function controls() {
   $("stage").setAttribute("aria-busy", String(switching));
   $("basemap").disabled = !state || pending > 0 || exporting;
-  for (const id of ["save-project", "save-db-project", "export"])
+  for (const id of [
+    "save-project",
+    "save-db-project",
+    "save-as-project",
+    "export",
+  ])
     $(id).disabled =
       !state ||
       pending > 0 ||
@@ -51,8 +94,12 @@ function controls() {
       switching ||
       exporting;
   $("save-db-project").disabled ||= !state?.archive;
+  $("save-as-project").disabled ||= !state?.archive;
   $("load-db-project").disabled =
     !state?.archive || pending > 0 || switching || exporting;
+  for (const id of ["new-project", "open-project", "browse"])
+    $(id).disabled = !state || pending > 0 || switching || exporting;
+  $("open-export").disabled = !state;
 }
 function resize() {
   if (!state) return;
@@ -60,8 +107,9 @@ function resize() {
   const scale = Math.max(
     0.1,
     Math.min(
-      (stage.clientWidth - 80) / state.frame.width,
-      (stage.clientHeight - 320) / state.frame.height,
+      (stage.clientWidth - (stage.clientWidth > 900 ? 680 : 48)) /
+        state.frame.width,
+      (stage.clientHeight - 200) / state.frame.height,
       1,
     ),
   );
@@ -96,31 +144,81 @@ function syncPreview() {
   (show ? $("frame") : $("stage")).append(renderer.credit);
   reserveCreditSpace();
 }
-$("toggle-frame").onclick = () => {
-  const show = $("export-boundary").hidden;
-  $("export-boundary").hidden = !show;
-  $("toggle-frame").setAttribute("aria-pressed", String(show));
-  $("frame-toggle-label").textContent = show ? "隐藏画框" : "显示画框";
-  syncPreview();
-};
-function showPanel(name, show) {
-  $(`${name}-panel`).hidden = !show;
-  $(`toggle-${name}`).setAttribute("aria-expanded", String(show));
-  // On a phone, show one tool window at a time and keep the map underneath.
-  if (show && matchMedia("(max-width: 600px)").matches) {
-    const other = name === "library" ? "inspector" : "library";
-    showPanel(other, false);
+function showTools(show) {
+  $("tool-panel").hidden = !show;
+  $("toggle-tools").hidden = show;
+  $("toggle-tools").setAttribute("aria-expanded", String(show));
+  $("toggle-tools").textContent =
+    activeTool === "output" ? "出图设置" : "轨迹与样式";
+}
+function selectTool(name) {
+  if (name === "output" && activeTool !== "output") previousTool = activeTool;
+  activeTool = name;
+  for (const tool of ["library", "inspector", "output"]) {
+    $(`${tool}-panel`).hidden = tool !== name;
+    if (tool !== "output") {
+      $(`toggle-${tool}`).setAttribute("aria-selected", String(tool === name));
+      $(`toggle-${tool}`).tabIndex = tool === name ? 0 : -1;
+    }
   }
+  $("tool-tabs").hidden = name === "output";
+  $("output-heading").hidden = name !== "output";
+  $("export-boundary").hidden = name !== "output";
+  $("open-export").setAttribute("aria-pressed", String(name === "output"));
+  showTools(true);
+  syncPreview();
 }
 for (const name of ["library", "inspector"]) {
-  $(`toggle-${name}`).onclick = () =>
-    showPanel(name, $(`${name}-panel`).hidden);
-  document.querySelector(`[data-close="${name}"]`).onclick = () => {
-    showPanel(name, false);
-    $(`toggle-${name}`).focus();
+  $(`toggle-${name}`).onclick = () => selectTool(name);
+  $(`toggle-${name}`).onkeydown = (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next =
+      event.key === "Home"
+        ? "library"
+        : event.key === "End"
+          ? "inspector"
+          : name === "library"
+            ? "inspector"
+            : "library";
+    selectTool(next);
+    $(`toggle-${next}`).focus();
   };
 }
-if (matchMedia("(max-width: 900px)").matches) showPanel("inspector", false);
+$("toggle-tools").onclick = () => showTools(true);
+$("close-tools").onclick = $("preview-only").onclick = () => {
+  showTools(false);
+  $("toggle-tools").focus();
+};
+$("open-export").onclick = () => selectTool("output");
+$("leave-export").onclick = () => selectTool(previousTool);
+$("toggle-filters").onclick = () => {
+  $("filters").hidden = !$("filters").hidden;
+  $("toggle-filters").setAttribute(
+    "aria-expanded",
+    String(!$("filters").hidden),
+  );
+};
+for (const [id, selected] of [
+  ["show-all", false],
+  ["show-selected", true],
+])
+  $(id).onclick = () => {
+    selectedOnly = selected;
+    list();
+  };
+document.addEventListener("click", (event) => {
+  if (
+    !$("project-menu").contains(event.target) ||
+    event.target.closest(".menu-items button")
+  )
+    $("project-menu").open = false;
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") $("project-menu").open = false;
+});
+for (const button of document.querySelectorAll("[data-dismiss]"))
+  button.onclick = () => $(button.dataset.dismiss).close();
 function makeRenderer() {
   cancelSwitch();
   creditObserver?.disconnect();
@@ -136,10 +234,7 @@ function makeRenderer() {
       dirty();
     },
     (message) =>
-      status(
-        "地图资源加载失败：" + message + "\n点击「重新加载地图 / 重试资源」。",
-        "error",
-      ),
+      status("地图资源加载失败：" + message + "\n点击「重试资源」。", "error"),
   );
   renderer.setTracks(tracks);
   window.tracktool = {
@@ -182,8 +277,12 @@ function syncFields() {
   $("output-size").textContent =
     `${state.output.width} × ${state.output.height} px`;
   $("frame-caption").textContent = state.frame.ratio;
-  $("archive-name").textContent = state.archive || "尚未打开 SQLite 归档";
+  const parts = state.archive?.replaceAll("\\", "/").split("/") || [];
+  $("archive-name").textContent = parts.length
+    ? parts.at(-2) || parts.at(-1)
+    : "未打开归档";
   $("archive-name").title = state.archive;
+  $("browse").textContent = state.archive ? "切换…" : "打开…";
   $("adopt-versions").hidden = !versionsChanged;
   controls();
 }
@@ -199,6 +298,19 @@ function apply() {
   dirty();
 }
 function visible() {
+  // Selected view is independent of filters, including missing project references.
+  if (selectedOnly) {
+    const known = new Map(entries.map((e) => [e.entry, e]));
+    return [...chosen].map(
+      (entry) =>
+        known.get(entry) || {
+          entry,
+          name: entry.split("/").at(-1),
+          kind: "Unknown",
+          date: "",
+        },
+    );
+  }
   const q = $("search").value.toLocaleLowerCase(),
     from = $("date-from").value,
     to = $("date-to").value,
@@ -215,13 +327,50 @@ function list() {
   const focused = document.activeElement?.getAttribute("aria-label");
   const scrollTop = $("track-list").scrollTop;
   const filtered = visible();
-  $("list-count").textContent = `${filtered.length} / ${entries.length}`;
+  $("list-count").textContent = selectedOnly
+    ? `${filtered.length} 条已选`
+    : `${filtered.length} / ${entries.length} 条`;
+  $("show-selected").textContent = `已选 ${chosen.size}`;
+  $("show-selected").setAttribute("aria-pressed", String(selectedOnly));
+  $("show-all").setAttribute("aria-pressed", String(!selectedOnly));
+  $("select-visible").hidden = selectedOnly;
+  $("clear").disabled = !chosen.size;
+  $("search").disabled = selectedOnly;
+  $("toggle-filters").disabled = selectedOnly;
+  $("filter-chips").hidden = selectedOnly;
+  if (selectedOnly) {
+    $("filters").hidden = true;
+    $("toggle-filters").setAttribute("aria-expanded", "false");
+  }
+  const chips = document.createDocumentFragment();
+  for (const [id, prefix] of [
+    ["date-from", "自 "],
+    ["date-to", "至 "],
+    ["kind", ""],
+  ]) {
+    if (!$(id).value) continue;
+    const chip = document.createElement("button");
+    chip.textContent =
+      prefix + (id === "kind" ? names[$(id).value] : $(id).value) + " ×";
+    chip.setAttribute(
+      "aria-label",
+      "清除筛选：" + chip.textContent.slice(0, -2),
+    );
+    chip.onclick = () => {
+      $(id).value = "";
+      list();
+    };
+    chips.append(chip);
+  }
+  $("filter-chips").replaceChildren(chips);
   $("selection-count").textContent =
     `已选 ${chosen.size} 条 · ${tracks.reduce((n, t) => n + t.points, 0).toLocaleString()} 点`;
   const fragment = document.createDocumentFragment();
   for (const e of filtered) {
+    const row = document.createElement("div");
+    row.className = "track-row";
     const label = document.createElement("label");
-    label.className = "track-row";
+    label.title = e.entry;
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = chosen.has(e.entry);
@@ -234,18 +383,34 @@ function list() {
     const text = document.createElement("span"),
       name = document.createElement("strong"),
       detail = document.createElement("small");
-    name.textContent = e.name;
-    detail.textContent = `${names[e.kind] || e.kind} · ${e.entry}`;
+    name.textContent = e.name.replace(/\.kml$/i, "");
+    const issue = selectionErrors.find((item) => item.entry === e.entry);
+    detail.textContent = issue
+      ? "无法读取 · 可取消选择"
+      : [e.date || "无日期", names[e.kind] || e.kind].join(" · ");
+    if (issue) {
+      detail.className = "track-error";
+      row.title = issue.error;
+    }
     text.append(name, detail);
     label.append(checkbox, text);
-    fragment.append(label);
+    const locate = document.createElement("button");
+    locate.className = "locate";
+    locate.textContent = "◎";
+    locate.title = "定位这条轨迹";
+    locate.setAttribute("aria-label", "定位 " + e.name);
+    locate.onclick = () => locateTrack(e.entry);
+    row.append(label, locate);
+    fragment.append(row);
   }
   if (!filtered.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = entries.length
-      ? "没有匹配的轨迹，请调整筛选条件。"
-      : "请打开本地轨迹归档。";
+    empty.textContent = selectedOnly
+      ? "尚未选择轨迹，去「全部轨迹」添加。"
+      : entries.length
+        ? "没有匹配的轨迹，请调整筛选条件。"
+        : "请打开本地轨迹归档。";
     fragment.append(empty);
   }
   $("track-list").replaceChildren(fragment);
@@ -255,6 +420,32 @@ function list() {
       (item) => item.getAttribute("aria-label") === focused,
     );
     checkbox?.focus({ preventScroll: true });
+  }
+}
+async function locateTrack(entry) {
+  pending++;
+  controls();
+  const generation = requestId;
+  try {
+    const result =
+      tracks.find((t) => t.entry === entry) ||
+      (
+        await api("/api/selection", {
+          archive: state.archive,
+          entries: [entry],
+        })
+      ).tracks[0];
+    if (generation !== requestId) return;
+    if (!result) throw new Error("这条轨迹暂时无法定位，请选择它查看详情。");
+    // Fit one geometry without changing the displayed selection.
+    renderer.fit([result]);
+    dirty();
+    if (matchMedia("(max-width: 600px)").matches) showTools(false);
+  } catch (e) {
+    error(e);
+  } finally {
+    pending--;
+    controls();
   }
 }
 async function loadSelection() {
@@ -285,9 +476,7 @@ async function loadSelection() {
     else {
       await renderer.ready();
       if (id === requestId)
-        status(
-          `已绘制 ${tracks.length} 条轨迹。可点击「适应所选轨迹」，然后调整构图。`,
-        );
+        status(`已绘制 ${tracks.length} 条轨迹。可点击「定位轨迹」查看全部。`);
     }
   } catch (e) {
     if (id === requestId) {
@@ -312,11 +501,14 @@ async function openArchive(path) {
     tracks = [];
     selectionErrors = [];
     chosen = new Set();
+    selectedOnly = false;
+    projectName = savedProjectName = "";
     renderer.setTracks([]);
     candidate?.setTracks([]);
     syncFields();
     list();
-    dirty();
+    hasChanges = false;
+    projectIdentity();
     $("file-dialog").close();
     status(`已打开归档，共 ${entries.length} 条。按日期、类型筛选后选择轨迹。`);
   } finally {
@@ -361,6 +553,7 @@ $("folder-path").oninput = () => {
   $("browse-error").textContent = "点击「前往」读取此目录。";
 };
 $("browse").onclick = () => {
+  if (!canReplaceProject()) return;
   $("file-dialog").showModal();
   browse($("folder-path").value || ".");
 };
@@ -373,6 +566,9 @@ $("parent-folder").onclick = () => browse(parentFolder);
 for (const id of ["search", "date-from", "date-to", "kind"])
   $(id).addEventListener("input", list);
 $("select-visible").onclick = () => {
+  const next = new Set([...chosen, ...visible().map((e) => e.entry)]);
+  if (next.size > 200)
+    return error(new Error("每次最多展示 200 条轨迹，请缩小筛选范围。"));
   for (const e of visible()) chosen.add(e.entry);
   if (state.archive) loadSelection();
 };
@@ -438,7 +634,8 @@ async function switchBasemap(id) {
       candidate?.setCamera(camera);
       dirty();
     };
-    staged.onError = (message) => status("地图资源加载失败：" + message + "；请重试资源。", "error");
+    staged.onError = (message) =>
+      status("地图资源加载失败：" + message + "；请重试资源。", "error");
     previous.destroy();
     $("frame").replaceChildren(...frame.childNodes);
     staged.frame = $("frame");
@@ -458,7 +655,11 @@ async function switchBasemap(id) {
       cancelSwitch();
       frame.remove();
       $("basemap").value = state.style.basemap;
-      error(new Error(e.message + "；保留原底图，点击「重试资源」或重新选择以重试。"));
+      error(
+        new Error(
+          e.message + "；保留原底图，点击「重试资源」或重新选择以重试。",
+        ),
+      );
     }
   } finally {
     if (request === basemapRequest) switching = false;
@@ -525,29 +726,36 @@ function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 $("save-project").onclick = async () => {
+  pending++;
+  controls();
+  const snapshot = structuredClone(state);
   try {
-    const result = await api("/api/project", state);
+    const result = await api("/api/project", snapshot);
     if (result.errors.length)
       throw new Error(
         "源内容已变化或缺失：" + result.errors.map((e) => e.entry).join("、"),
       );
     download(
-      new Blob([JSON.stringify(state, null, 2) + "\n"], {
+      new Blob([JSON.stringify(snapshot, null, 2) + "\n"], {
         type: "application/json",
       }),
-      "tracktool-map.json",
+      (projectName || "tracktool-map").replace(/[\\/:*?"<>|]/g, "_") + ".json",
     );
-    $("dirty").textContent = "项目已下载保存";
-    status("已生成项目文件。下次点击「打开项目」选择此 JSON，即可恢复编辑。");
+    status(
+      "项目文件已导出。可从「项目 → 导入项目文件」恢复构图；轨迹仍保存在归档中。",
+    );
   } catch (e) {
     error(e);
+  } finally {
+    pending--;
+    controls();
   }
 };
 $("open-project").onclick = () => $("project-file").click();
 $("project-file").onchange = async (e) => {
   const file = e.target.files[0];
   e.target.value = "";
-  if (!file) return;
+  if (!file || !canReplaceProject()) return;
   cancelSwitch();
   failedBasemap = undefined;
   styleRequest++;
@@ -557,12 +765,13 @@ $("project-file").onchange = async (e) => {
     if (file.size > 2 * 1024 * 1024) throw new Error("项目文件超过 2 MiB");
     const imported = JSON.parse(await file.text());
     if (
-      state.archive && imported.archive !== state.archive &&
+      state.archive &&
+      imported.archive !== state.archive &&
       confirm("是否将项目轨迹关联到当前归档？将逐条验证原始内容指纹。")
     )
       imported.archive = state.archive;
     const result = await api("/api/project", imported);
-    await restoreProject(result, file.name);
+    await restoreProject(result, file.name.replace(/\.json$/i, ""));
   } catch (e) {
     error(e);
   } finally {
@@ -570,7 +779,7 @@ $("project-file").onchange = async (e) => {
     controls();
   }
 };
-async function restoreProject(result, name) {
+async function restoreProject(result, name, fromDatabase = false) {
   const catalog = result.state.archive
     ? await api("/api/archive", { path: result.state.archive })
     : { entries: [] };
@@ -581,49 +790,172 @@ async function restoreProject(result, name) {
   versionsChanged = result.versionsChanged;
   chosen = new Set(state.tracks.map((t) => t.entry));
   entries = catalog.entries;
+  selectedOnly = false;
+  projectName = name;
+  savedProjectName = fromDatabase ? name : "";
   makeRenderer();
   syncFields();
   list();
-  $("dirty").textContent = "已打开 " + name;
+  hasChanges = false;
+  projectIdentity();
   await renderer.ready();
-  if (selectionErrors.length)
+  if (selectionErrors.length) {
+    selectedOnly = true;
+    selectTool("library");
+    list();
     status(
       "项目已打开，但部分源轨迹缺失或内容变化：\n" +
         selectionErrors.map((e) => e.entry + ": " + e.error).join("\n") +
-        "\n请取消有问题的条目，或恢复原归档后重新打开项目。",
+        "\n请在「已选」中取消有问题的条目，或恢复原归档后重新打开项目。",
       "error",
     );
-  else if (versionsChanged)
+  } else if (versionsChanged)
     status(
       "项目记录的资源版本与当前版本不同。请检查预览，确认使用当前资源后另存项目。",
       "error",
     );
   else status("项目已恢复：轨迹、样式、视野、画框和标题。");
 }
-$("save-db-project").onclick = async () => {
+async function saveNamedProject(name) {
+  const revision = editRevision;
+  const snapshot = structuredClone(state);
+  pending++;
+  controls();
+  $("confirm-save").disabled = true;
+  status("正在保存项目…", "busy");
   try {
-    const name = prompt("项目名称（同名保存会更新该项目）", state.title || "旅行地图");
-    if (!name) return;
-    await api("/api/projects/save", { name, state });
-    $("dirty").textContent = "已保存到归档";
-    status("项目已保存。项目不包含在备份 ZIP 中；需要备份项目时请导出 JSON。");
+    await api("/api/projects/save", { name, state: snapshot });
+    projectName = savedProjectName = name;
+    if (editRevision === revision) hasChanges = false;
+    projectIdentity();
+    $("save-dialog").close();
+    status("项目已保存到当前轨迹库。");
+  } finally {
+    pending--;
+    controls();
+    $("confirm-save").disabled = false;
+  }
+}
+function askProjectName(copy = false) {
+  $("save-title").textContent = copy ? "项目另存为" : "保存项目";
+  $("project-name-input").value = projectName
+    ? projectName + (copy ? " 副本" : "")
+    : "";
+  $("save-error").textContent = "";
+  $("save-dialog").showModal();
+  $("project-name-input").focus();
+}
+$("save-db-project").onclick = () =>
+  savedProjectName
+    ? saveNamedProject(savedProjectName).catch(error)
+    : askProjectName();
+$("save-as-project").onclick = () => askProjectName(true);
+$("save-form").onsubmit = async (event) => {
+  event.preventDefault();
+  if ($("confirm-save").disabled) return;
+  const name = $("project-name-input").value.trim();
+  if (!name) {
+    $("save-error").textContent = "请输入项目名称。";
+    return;
+  }
+  $("confirm-save").disabled = true;
+  try {
+    const { names } = await api("/api/projects", { archive: state.archive });
+    if (names.includes(name) && !confirm(`项目「${name}」已存在，是否覆盖？`))
+      return;
+    await saveNamedProject(name);
   } catch (e) {
-    error(e);
+    $("save-error").textContent = e.message;
+  } finally {
+    $("confirm-save").disabled = false;
   }
 };
+function projectList() {
+  const query = $("project-search").value.toLocaleLowerCase();
+  const matched = projectNames.filter((name) =>
+    name.toLocaleLowerCase().includes(query),
+  );
+  const fragment = document.createDocumentFragment();
+  for (const name of matched) {
+    const button = document.createElement("button");
+    button.textContent = name;
+    button.onclick = () => openSavedProject(name);
+    fragment.append(button);
+  }
+  if (!matched.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = projectNames.length
+      ? "没有匹配的项目。"
+      : "还没有项目。选择轨迹后，点击「保存」创建一个。";
+    fragment.append(empty);
+  }
+  $("project-list").replaceChildren(fragment);
+}
+$("project-search").oninput = projectList;
 $("load-db-project").onclick = async () => {
   pending++;
   controls();
   try {
     const { names } = await api("/api/projects", { archive: state.archive });
-    if (!names.length) throw new Error("当前归档尚无已保存项目");
-    const name = prompt("输入要打开的项目名称：\n" + names.join("\n"), names[0]);
-    if (!name) return;
+    projectNames = names;
+    $("project-search").value = "";
+    $("projects-error").textContent = "";
+    projectList();
+    $("projects-dialog").showModal();
+  } catch (e) {
+    error(e);
+  } finally {
+    pending--;
+    controls();
+  }
+};
+async function openSavedProject(name) {
+  if (!canReplaceProject()) return;
+  pending++;
+  controls();
+  $("project-search").disabled = true;
+  for (const button of $("project-list").querySelectorAll("button"))
+    button.disabled = true;
+  try {
     cancelSwitch();
     failedBasemap = undefined;
     styleRequest++;
-    const result = await api("/api/projects/load", { archive: state.archive, name });
-    await restoreProject(result, name);
+    const result = await api("/api/projects/load", {
+      archive: state.archive,
+      name,
+    });
+    $("projects-dialog").close();
+    await restoreProject(result, name, true);
+  } catch (e) {
+    $("projects-error").textContent = e.message;
+    error(e);
+  } finally {
+    pending--;
+    controls();
+    $("project-search").disabled = false;
+    projectList();
+  }
+}
+$("new-project").onclick = async () => {
+  if (!canReplaceProject()) return;
+  pending++;
+  controls();
+  try {
+    const { state: fresh } = await api("/api/bootstrap");
+    fresh.archive = state.archive;
+    cancelSwitch();
+    failedBasemap = undefined;
+    styleRequest++;
+    await restoreProject(
+      { state: fresh, tracks: [], errors: [], versionsChanged: false },
+      "",
+    );
+    for (const id of ["search", "date-from", "date-to", "kind"])
+      $(id).value = "";
+    selectTool("library");
+    list();
+    status("新项目已就绪，选择轨迹开始编辑。");
   } catch (e) {
     error(e);
   } finally {
@@ -639,6 +971,13 @@ $("adopt-versions").onclick = () => {
   status("已采用当前资源版本，请保存为新项目。");
 };
 $("export").onclick = async () => {
+  try {
+    outputSize();
+  } catch (e) {
+    error(e);
+    $("pixels").focus();
+    return;
+  }
   exporting = true;
   controls();
   $("export").textContent = "正在导出…";
@@ -666,17 +1005,20 @@ $("export").onclick = async () => {
     $("download-again").href = lastBlobUrl;
     $("download-again").download = "tracktool-map.png";
     $("download-again").hidden = false;
+    $("output-download-again").href = lastBlobUrl;
+    $("output-download-again").download = "tracktool-map.png";
+    $("output-download-again").hidden = false;
     status(
       `PNG 已导出 · ${job.report.width} × ${job.report.height} px · ${job.report.labels.length} 个地名。`,
     );
   } catch (e) {
     status(
-      "导出失败：" + e.message + "\n修复网络或资源后，点击「导出 PNG」重试。",
+      "导出失败：" + e.message + "\n修复网络或资源后，点击「下载 PNG」重试。",
       "error",
     );
   } finally {
     exporting = false;
-    $("export").textContent = "导出 PNG ↗";
+    $("export").textContent = "下载 PNG";
     controls();
   }
 };
@@ -726,13 +1068,14 @@ $("retry").onclick = async () => {
   try {
     if (!config || !renderer) return await boot();
     await switchBasemap(failedBasemap || state.style.basemap);
-    if (!failedBasemap && selectionErrors.length && state.archive) await loadSelection();
+    if (!failedBasemap && selectionErrors.length && state.archive)
+      await loadSelection();
   } catch (e) {
     error(e);
   }
 };
 window.addEventListener("beforeunload", (e) => {
-  if ($("dirty").textContent === "有未保存的编辑" && state?.archive) {
+  if (hasChanges && state?.archive) {
     e.preventDefault();
     e.returnValue = "";
   }

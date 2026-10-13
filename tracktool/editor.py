@@ -15,6 +15,7 @@ from ipaddress import IPv4Address
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .config import Config
 from .drawing.basemaps import PRESETS
 from .drawing.export import render_png
 from .drawing.resources import STATIC, Resources
@@ -280,7 +281,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Tracktool 本地交互式轨迹地图编辑器")
     parser.add_argument("--host", type=ipv4_host, default="127.0.0.1", help="监听 IPv4；0.0.0.0 允许局域网访问")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--archive", default="", help="可选：SQLite 归档目录或文件（兼容旧 ZIP 路径定位）")
+    parser.add_argument("--archive", default="", help="SQLite 归档目录或文件；默认打开配置的 archive_path")
     parser.add_argument("--cache", type=Path, default=Path.home() / ".cache/tracktool/maps")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--refresh-basemap", action="store_true", help="更新缓存的底图数据版本")
@@ -290,7 +291,12 @@ def main() -> None:
         import playwright.sync_api  # noqa: F401
     except ImportError:
         parser.error("请先运行 uv sync --extra maps，再运行 uv run --extra maps playwright install chromium")
-    with EditorServer(args.port, args.cache, args.archive, host=args.host) as server:
+    initial = args.archive
+    if not initial:
+        configured = str(Config().load(persist_migration=False)["archive_path"] or "")
+        if configured and (Path(configured).expanduser() / "archive.sqlite3").is_file():
+            initial = str(Path(configured).expanduser().resolve())
+    with EditorServer(args.port, args.cache, initial, host=args.host) as server:
         if args.refresh_basemap:
             server.resources.prepare(refresh=True)
         print(

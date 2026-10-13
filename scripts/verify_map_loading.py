@@ -68,6 +68,7 @@ def main():
             page = browser.new_page(viewport={"width": 1400, "height": 1000}, accept_downloads=True)
             errors, selections = [], []
             page.on("pageerror", lambda e: errors.append(str(e)))
+            page.on("dialog", lambda d: d.accept())
             page.on("request", lambda r: selections.append(r.url) if "/api/selection" in r.url else None)
             page.goto(app.origin)
             try:
@@ -90,6 +91,7 @@ def main():
             project_file.write_text(json.dumps(project))
             page.locator("#project-file").set_input_files(project_file)
             page.locator("#status").filter(has_text="项目已恢复").wait_for(timeout=90000)
+            page.locator("#toggle-inspector").click()
             reads = len(selections)
             app.mode = "slow"
             page.evaluate("window.previousMap=window.tracktool.renderer")
@@ -149,7 +151,7 @@ def main():
                 const actual=r.map.getCenter();
                 return Math.abs(expected[0]-actual.lng)<.000002 && Math.abs(expected[1]-actual.lat)<.000002;
             }""")
-            page.locator("#toggle-frame").click()
+            page.locator("#open-export").click()
             page.evaluate("window.tracktool.renderer.ready()")
             labels = page.evaluate("window.tracktool.renderer.labels")
             camera = page.evaluate("window.tracktool.state.camera")
@@ -165,11 +167,13 @@ def main():
             assert exported["report"]["camera"] == camera
             page.screenshot(path=str(args.output / "editor.png"))
             report["export"] = exported["report"]
+            page.locator("#project-menu > summary").click()
             with page.expect_download() as download:
                 page.locator("#save-project").click()
             saved_path = args.output / "saved.json"
             download.value.save_as(saved_path)
             saved = page.evaluate("window.tracktool.state")
+            page.locator("#leave-export").click()
             page.locator("#basemap").select_option("light")
             expect(page.locator("#stage")).to_have_attribute("aria-busy", "false", timeout=90000)
             page.locator("#project-file").set_input_files(saved_path)

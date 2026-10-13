@@ -10,32 +10,33 @@
   </head>
   <body class="editor">
     <header>
-      <div class="brand">
-        <span class="brandmark">↗</span>
-        <div>TRACKTOOL <small>旅途地图工作室</small></div>
+      <div class="brand">↗ <span>TRACKTOOL</span></div>
+      <details id="project-menu" class="project-menu">
+        <summary>项目 <span aria-hidden="true">⌄</span></summary>
+        <div class="menu-items">
+          <button id="new-project">新建项目</button>
+          <button id="load-db-project">打开项目…</button>
+          <button id="save-as-project">另存为…</button>
+          <hr />
+          <button id="open-project">导入项目文件…</button>
+          <button id="save-project">导出项目文件</button>
+          <p>项目文件用于备份构图，不包含轨迹。</p>
+        </div>
+      </details>
+      <div class="project-identity">
+        <span id="project-name">未命名项目</span
+        ><span id="dirty">尚未保存</span>
       </div>
-      <nav class="panel-toggles" aria-label="编辑工具">
-        <button
-          id="toggle-library"
-          aria-controls="library-panel"
-          aria-expanded="true"
-        >
-          轨迹
-        </button>
-        <button
-          id="toggle-inspector"
-          aria-controls="inspector-panel"
-          aria-expanded="true"
-        >
-          样式与画框
-        </button>
-      </nav>
       <div class="header-actions">
-        <button id="open-project">导入项目 JSON</button
-        ><button id="save-project">导出项目 JSON</button
-        ><button id="save-db-project">保存到归档</button
-        ><button id="load-db-project">打开已存项目</button
-        ><button id="export" class="primary">导出 PNG ↗</button>
+        <button id="save-db-project">保存</button>
+        <button
+          id="open-export"
+          class="primary"
+          aria-controls="output-panel"
+          aria-pressed="false"
+        >
+          导出图片
+        </button>
       </div>
       <input
         id="project-file"
@@ -45,70 +46,7 @@
       />
     </header>
     <main>
-      <aside
-        id="library-panel"
-        class="library floating-panel"
-        aria-label="轨迹库"
-      >
-        <div class="panel-heading">
-          <h1>轨迹库</h1>
-          <button data-close="library" aria-label="收起轨迹库">−</button>
-        </div>
-        <div class="panel-body">
-          <button id="browse" class="wide">打开本地归档…</button>
-          <div id="archive-name" class="archive-name">尚未打开 SQLite 归档</div>
-          <label
-            >搜索轨迹<input
-              id="search"
-              type="search"
-              placeholder="名称或完整路径"
-          /></label>
-          <div class="date-row">
-            <label>开始日期<input id="date-from" type="date" /></label
-            ><label>结束日期<input id="date-to" type="date" /></label>
-          </div>
-          <label
-            >轨迹类型<select id="kind">
-              <option value="">全部类型</option>
-              <option value="Default">普通轨迹</option>
-              <option value="Train">火车</option>
-              <option value="Flight">飞机</option>
-              <option value="Unknown">未分类</option>
-            </select></label
-          >
-          <p class="hint">
-            日期来自文件名，类型来自归档目录；设置日期后，无日期条目不参与结果。
-          </p>
-          <div class="selection-bar">
-            <span id="list-count">0 条轨迹</span
-            ><button id="select-visible" class="text-button">
-              选择筛选结果</button
-            ><button id="clear" class="text-button">取消全部</button>
-          </div>
-          <div id="track-list" class="track-list">
-            <div class="empty">
-              打开归档后，轨迹会显示在这里。<br />原始文件始终只读。
-            </div>
-          </div>
-          <div id="selection-count" class="selection-count">已选 0 条</div>
-        </div>
-      </aside>
-      <section class="studio">
-        <div class="studio-toolbar">
-          <button
-            id="toggle-frame"
-            aria-controls="export-boundary"
-            aria-pressed="false"
-          >
-            <span id="frame-toggle-label">显示画框</span>
-            <span id="frame-caption" class="muted">4:3</span>
-          </button>
-          <div>
-            <button id="fit">适应所选轨迹</button
-            ><button id="zoom-in" aria-label="放大地图">＋</button
-            ><button id="zoom-out" aria-label="缩小地图">−</button>
-          </div>
-        </div>
+      <section class="studio" aria-label="地图">
         <div id="stage" class="stage">
           <div id="frame-holder">
             <div id="frame" class="frame"></div>
@@ -118,36 +56,134 @@
               aria-hidden="true"
               hidden
             >
-              <span>PNG 导出范围</span>
+              <span>图片范围 <span id="frame-caption">4:3</span></span>
             </div>
           </div>
-          <div id="initial-loading">正在准备地图资源…</div>
+          <div id="initial-loading">正在准备地图…</div>
         </div>
-        <div class="studio-footer">
-          <span>拖动地图调整构图 · 滚轮缩放 · 显示画框可检查导出范围</span
-          ><span id="preview-scale"></span>
+        <div class="studio-toolbar" aria-label="地图操作">
+          <button id="fit" title="定位全部所选轨迹">定位轨迹</button>
+          <button id="zoom-in" aria-label="放大地图">＋</button>
+          <button id="zoom-out" aria-label="缩小地图">−</button>
         </div>
-        <div class="status-window">
-          <div id="status" role="status" aria-live="polite">
-            正在启动本地编辑器…
-          </div>
+        <div id="status-window" class="status-window" hidden>
+          <div id="status" role="status" aria-live="polite">正在启动地图…</div>
           <div class="recovery">
-            <button id="retry">重新加载地图 / 重试资源</button
-            ><button id="adopt-versions" hidden>确认使用当前资源版本</button
-            ><a id="download-again" hidden>重新下载 PNG</a>
+            <button id="retry" hidden>重试资源</button>
+            <button id="adopt-versions" hidden>确认使用当前资源版本</button>
+            <a id="download-again" hidden>重新下载 PNG</a>
           </div>
         </div>
       </section>
-      <aside
-        id="inspector-panel"
-        class="inspector floating-panel"
-        aria-label="构图与样式"
+      <button
+        id="toggle-tools"
+        class="tools-launcher"
+        aria-controls="tool-panel"
+        aria-expanded="true"
+        hidden
       >
-        <div class="panel-heading">
-          <h2>构图与样式</h2>
-          <button data-close="inspector" aria-label="收起构图与样式">−</button>
+        轨迹与样式
+      </button>
+      <aside id="tool-panel" class="tools-panel" aria-label="地图工具">
+        <div class="tool-heading">
+          <div id="tool-tabs" class="tabs" role="tablist" aria-label="地图工具">
+            <button
+              id="toggle-library"
+              role="tab"
+              aria-selected="true"
+              aria-controls="library-panel"
+            >
+              轨迹
+            </button>
+            <button
+              id="toggle-inspector"
+              role="tab"
+              aria-selected="false"
+              aria-controls="inspector-panel"
+              tabindex="-1"
+            >
+              样式
+            </button>
+          </div>
+          <div id="output-heading" hidden>
+            <button id="leave-export" class="text-button">← 返回编辑</button>
+          </div>
+          <button id="close-tools" class="icon-button" aria-label="收起工具">
+            ‹
+          </button>
         </div>
-        <div class="panel-body">
+        <section
+          id="library-panel"
+          class="tool-content library"
+          role="tabpanel"
+          aria-labelledby="toggle-library"
+        >
+          <div class="archive-row">
+            <div>
+              <span class="eyebrow">轨迹库</span
+              ><span id="archive-name">未打开归档</span>
+            </div>
+            <button id="browse" class="text-button">切换…</button>
+          </div>
+          <div class="search-row">
+            <input
+              id="search"
+              type="search"
+              aria-label="搜索轨迹"
+              placeholder="搜索轨迹名称"
+            /><button
+              id="toggle-filters"
+              aria-expanded="false"
+              aria-controls="filters"
+            >
+              筛选
+            </button>
+          </div>
+          <div id="filters" hidden>
+            <div class="date-row">
+              <label>开始日期<input id="date-from" type="date" /></label
+              ><label>结束日期<input id="date-to" type="date" /></label>
+            </div>
+            <label
+              >归档分类<select id="kind">
+                <option value="">全部分类</option>
+                <option value="Default">普通轨迹</option>
+                <option value="Train">火车</option>
+                <option value="Flight">飞机</option>
+                <option value="Unknown">未分类</option>
+              </select></label
+            >
+            <p class="hint">
+              按文件名日期筛选；无日期的轨迹不参与日期筛选。分类来自归档。
+            </p>
+          </div>
+          <div
+            id="filter-chips"
+            class="filter-chips"
+            aria-label="当前筛选"
+          ></div>
+          <div class="list-tabs" aria-label="轨迹范围">
+            <button id="show-all" aria-pressed="true">全部轨迹</button
+            ><button id="show-selected" aria-pressed="false">已选 0</button>
+          </div>
+          <div class="selection-bar">
+            <span id="list-count">0 条轨迹</span
+            ><button id="select-visible" class="text-button">全选结果</button
+            ><button id="clear" class="text-button">清空所选</button>
+          </div>
+          <div id="track-list" class="track-list">
+            <div class="empty">打开轨迹库，选择你想展示的旅途。</div>
+          </div>
+          <div id="selection-count" class="selection-count">已选 0 条</div>
+        </section>
+        <section
+          id="inspector-panel"
+          class="tool-content"
+          role="tabpanel"
+          aria-labelledby="toggle-inspector"
+          hidden
+        >
+          <h2>地图样式</h2>
           <label
             >底图<select id="basemap">
               <option value="light">浅色 · 纸白</option>
@@ -155,10 +191,13 @@
               <option value="satellite" disabled>卫星 · 尚未配置</option>
             </select></label
           >
-          <p id="basemap-note" class="hint"></p>
+          <details class="help">
+            <summary>关于当前底图</summary>
+            <p id="basemap-note" class="hint"></p>
+          </details>
+          <div class="section-label">轨迹</div>
           <div class="color-row">
-            <label
-              >轨迹颜色<input id="color" type="color" value="#e05240" /></label
+            <label>颜色<input id="color" type="color" value="#e05240" /></label
             ><label
               >线宽 <output id="width-value">3</output
               ><input
@@ -170,19 +209,30 @@
                 value="3"
             /></label>
           </div>
+          <div class="section-label">地名</div>
           <label
-            >城市地名<select id="cities">
-              <option value="county">仅县级及以上城市</option>
+            >城市标注<select id="cities">
+              <option value="county">县级及以上城市</option>
               <option value="none">不显示</option>
             </select></label
           >
-          <p class="hint">
-            中国行政区数据；按级别避让。部分名称或驻地可能缺漏、滞后，不包含乡镇与景点。
-          </p>
-          <hr />
-          <div class="section-label">03 / 成片</div>
+          <details class="help">
+            <summary>地名显示说明</summary>
+            <p class="hint">
+              叠加中国县级及以上城市，不包含乡镇与景点。底图自带文字由地图源决定。
+            </p>
+          </details>
+        </section>
+        <section
+          id="output-panel"
+          class="tool-content"
+          aria-label="导出图片"
+          hidden
+        >
+          <h2>导出图片</h2>
+          <p class="hint">拖动、缩放地图，调整画框中的构图。</p>
           <label
-            >导出比例<select id="ratio">
+            >图片比例<select id="ratio">
               <option>4:3</option>
               <option>3:2</option>
               <option>16:9</option>
@@ -190,7 +240,8 @@
               <option>3:4</option>
               <option>2:3</option>
             </select></label
-          ><label
+          >
+          <label
             >输出长边（像素）<input
               id="pixels"
               type="number"
@@ -199,31 +250,36 @@
               max="4096"
               step="1"
           /></label>
-          <p id="output-size" class="hint">1920 × 1440 px</p>
+          <p id="output-size" class="output-size">1920 × 1440 px</p>
           <label
-            >标题 <span class="muted">可选</span
+            >图片标题 <span class="muted">可选</span
             ><input
               id="title"
               maxlength="60"
               placeholder="例如：山河之间 · 秋日漫游"
           /></label>
-          <p class="hint">
-            标题仅在显示画框和导出时呈现。成片的线宽、字号以长边 960
-            的逻辑画布为准，随输出分辨率等比放大。改变窗口大小不会改变构图。
-          </p>
-          <div class="project-note">
-            <span id="dirty">尚未保存</span>
-            <p>项目保存选择、指纹与构图。轨迹保留在原归档中。</p>
-          </div>
-        </div>
+          <button id="preview-only" class="wide">收起面板，查看画框</button>
+          <button id="export" class="primary wide">下载 PNG</button>
+          <a id="output-download-again" hidden>再次下载上次图片</a>
+          <details class="help">
+            <summary>图片与预览</summary>
+            <p class="hint">
+              画框内即导出范围，标题和来源署名会一起导出。线宽与字号随输出尺寸等比缩放，调整窗口大小不会改变构图。
+            </p>
+            <span id="preview-scale" class="hint"></span>
+          </details>
+        </section>
       </aside>
     </main>
-    <dialog id="file-dialog">
+    <dialog id="file-dialog" aria-labelledby="file-dialog-title">
       <div class="dialog-heading">
-        <h2>打开轨迹归档</h2>
+        <h2 id="file-dialog-title">打开轨迹库</h2>
         <button id="close-dialog" aria-label="关闭">×</button>
       </div>
-      <p>选择归档目录中的 archive.sqlite3。旧 ZIP 请先使用 archive import-zip 导入。</p>
+      <p class="hint">
+        选择本机归档中的 archive.sqlite3。旧 ZIP 需先使用 archive import-zip
+        导入。
+      </p>
       <div class="path-row">
         <input id="folder-path" aria-label="本地目录路径" /><button
           id="go-folder"
@@ -233,6 +289,49 @@
       </div>
       <div id="folder-list"></div>
       <p id="browse-error" role="alert"></p>
+    </dialog>
+    <dialog id="projects-dialog" aria-labelledby="projects-title">
+      <div class="dialog-heading">
+        <h2 id="projects-title">打开项目</h2>
+        <button data-dismiss="projects-dialog" aria-label="关闭">×</button>
+      </div>
+      <input
+        id="project-search"
+        type="search"
+        aria-label="搜索项目"
+        placeholder="搜索项目名称"
+      />
+      <div id="project-list"></div>
+      <p id="projects-error" role="alert"></p>
+      <p class="hint">
+        项目保存在当前轨迹库中。跨机器使用可通过项目菜单导入项目文件。
+      </p>
+    </dialog>
+    <dialog id="save-dialog" aria-labelledby="save-title">
+      <form id="save-form">
+        <div class="dialog-heading">
+          <h2 id="save-title">保存项目</h2>
+          <button type="button" data-dismiss="save-dialog" aria-label="关闭">
+            ×
+          </button>
+        </div>
+        <label
+          >项目名称<input
+            id="project-name-input"
+            required
+            maxlength="120"
+            autocomplete="off"
+            placeholder="例如：秋日旅行"
+        /></label>
+        <p class="hint">
+          项目名称用于管理，与图片标题独立。备份构图可使用「导出项目文件」。
+        </p>
+        <p id="save-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" data-dismiss="save-dialog">取消</button
+          ><button id="confirm-save" type="submit" class="primary">保存</button>
+        </div>
+      </form>
     </dialog>
     <script src="/static/vendor/maplibre-gl.js"></script>
     <script type="module" src="/static/app.js"></script>
