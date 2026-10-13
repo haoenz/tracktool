@@ -190,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 if child.is_dir():
                     directories.append({"name": child.name, "path": str(child)})
-                elif child.suffix.lower() == ".zip":
+                elif child.name == "archive.sqlite3":
                     archives.append({"name": child.name, "path": str(child)})
             self._json(
                 {"path": str(folder), "parent": str(folder.parent), "directories": directories, "archives": archives}
@@ -230,6 +230,16 @@ class Handler(BaseHTTPRequestHandler):
         app = self.server
         if path == "/api/archive":
             self._json(app.workspace.catalog(body["path"]))
+        elif path == "/api/projects":
+            self._json({"names": app.workspace.projects(body["archive"])})
+        elif path == "/api/projects/save":
+            if body["state"]["versions"] != app.resources.versions():
+                raise UserInputError("项目资源版本不同，请先确认使用当前资源")
+            app.workspace.save(body["name"], body["state"])
+            self._json({"ok": True})
+        elif path == "/api/projects/load":
+            state, selected = app.workspace.load(body["archive"], body["name"])
+            self._json({"state": state, **selected, "versionsChanged": state["versions"] != app.resources.versions()})
         elif path == "/api/basemap-check":
             source = body["id"]
             if source not in PRESETS:
@@ -270,7 +280,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Tracktool 本地交互式轨迹地图编辑器")
     parser.add_argument("--host", type=ipv4_host, default="127.0.0.1", help="监听 IPv4；0.0.0.0 允许局域网访问")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--archive", default="", help="可选：预先打开的归档 ZIP")
+    parser.add_argument("--archive", default="", help="可选：SQLite 归档目录或文件（兼容旧 ZIP 路径定位）")
     parser.add_argument("--cache", type=Path, default=Path.home() / ".cache/tracktool/maps")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--refresh-basemap", action="store_true", help="更新缓存的底图数据版本")

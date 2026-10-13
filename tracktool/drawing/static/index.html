@@ -31,8 +31,10 @@
         </button>
       </nav>
       <div class="header-actions">
-        <button id="open-project">打开项目</button
-        ><button id="save-project">保存项目</button
+        <button id="open-project">导入项目 JSON</button
+        ><button id="save-project">导出项目 JSON</button
+        ><button id="save-db-project">保存到归档</button
+        ><button id="load-db-project">打开已存项目</button
         ><button id="export" class="primary">导出 PNG ↗</button>
       </div>
       <input
@@ -54,7 +56,7 @@
         </div>
         <div class="panel-body">
           <button id="browse" class="wide">打开本地归档…</button>
-          <div id="archive-name" class="archive-name">尚未打开归档 ZIP</div>
+          <div id="archive-name" class="archive-name">尚未打开 SQLite 归档</div>
           <label
             >搜索轨迹<input
               id="search"
@@ -221,7 +223,7 @@
         <h2>打开轨迹归档</h2>
         <button id="close-dialog" aria-label="关闭">×</button>
       </div>
-      <p>选择带有 archive.json 身份文件的归档目录中的 ZIP。</p>
+      <p>选择归档目录中的 archive.sqlite3。旧 ZIP 请先使用 archive import-zip 导入。</p>
       <div class="path-row">
         <input id="folder-path" aria-label="本地目录路径" /><button
           id="go-folder"

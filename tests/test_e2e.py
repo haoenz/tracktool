@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from conftest import TRACK_KML, requires_media_tools
+from conftest import TRACK_KML, import_test_zip, requires_media_tools
 from fixtures.media import make_test_jpeg
 
 from tracktool import exiftool, mediatime
@@ -39,6 +39,7 @@ def scene(tmp_path: Path) -> Scene:
     archive = tmp_path / "Archive.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("2024-05-01 test.kml", TRACK_KML)
+    import_test_zip(archive)
     (tmp_path / "archive.json").write_text('{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
     return Scene(media=media, archive=archive)
 

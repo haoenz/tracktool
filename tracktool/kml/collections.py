@@ -157,8 +157,10 @@ class DesktopCollection(TrackCollection):
         xmlutil.sub(placemark, "name", track.stem)
         xmlutil.sub(placemark, "description", content.description)
         xmlutil.sub(placemark, "styleUrl", f"#{self.path.stem}")
-        ls = xmlutil.sub(placemark, "LineString")
-        xmlutil.sub(ls, "coordinates", content.line_string)
+        parent = xmlutil.sub(placemark, "MultiGeometry") if len(content.segments) > 1 else placemark
+        for segment in content.segments or (content.line_string,):
+            ls = xmlutil.sub(parent, "LineString")
+            xmlutil.sub(ls, "coordinates", segment)
         log.verbose(f"Added track to collection: {track.stem}", target=str(self.path))
 
 
@@ -206,14 +208,19 @@ class MobileCollection(TrackCollection):
         if multi_geom is None:
             raise UserInputError(f"Mobile collection KML has no MultiGeometry: {display_path(self.path)}")
 
-        existing = xmlutil.find(self.tree, f"//kml:LineString[@id='{track.stem}']")
-        if existing is not None:
+        existing = self.tree.xpath("//*[@id=$name]", name=track.stem)
+        if existing:
             log.warning(f"Track already exists in mobile collection: {track.stem}", target=str(self.path))
             return
-
-        ls = xmlutil.sub(multi_geom, "LineString")
-        ls.set("id", track.stem)
-        xmlutil.sub(ls, "coordinates", content.line_string)
+        parent = multi_geom
+        if len(content.segments) > 1:
+            parent = xmlutil.sub(multi_geom, "MultiGeometry")
+            parent.set("id", track.stem)
+        for segment in content.segments or (content.line_string,):
+            ls = xmlutil.sub(parent, "LineString")
+            if parent is multi_geom:
+                ls.set("id", track.stem)
+            xmlutil.sub(ls, "coordinates", segment)
         log.verbose(f"Added track to mobile collection: {track.stem}", target=str(self.path))
 
 

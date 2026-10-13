@@ -257,11 +257,21 @@ def test_time_count_checked_per_track_even_when_document_totals_equal(counts):
     assert coords_a + coords_b == times_a + times_b
     a = track(("1 2",) * coords_a, ("1970-01-01T00:00:00Z",) * times_a)
     b = track(("3 4",) * coords_b, ("1970-01-01T00:00:00Z",) * times_b)
-    bad_segment = 1 if times_a else 2
-    with pytest.raises(
-        UserInputError, match=rf"segment {bad_segment} .*point \d+: \d+ coordinate\(s\) but \d+ timestamp"
-    ):
-        extract(f"<gx:MultiTrack>{a}{b}</gx:MultiTrack>")
+    segments = extract(f"<gx:MultiTrack>{a}{b}</gx:MultiTrack>").tracks[0].segments
+    assert [len(s.longitude) for s in segments] == [coords_a, coords_b]
+    assert all(s.time_us is None for s in segments)
+
+
+@pytest.mark.parametrize("times", [(), ("invalid",), ("invalid",) * 3])
+def test_mismatched_times_keep_geometry_and_other_segments_times(times):
+    a = track(("1 2 0", "3 4"), times)
+    b = track(("5 6 7",), ("1970-01-01T00:00:01Z",))
+    first, second = extract(f"<MultiGeometry>{a}{b}</MultiGeometry>").tracks[0].segments
+    assert first.longitude == array("d", [1, 3])
+    assert first.latitude == array("d", [2, 4])
+    assert first.altitude[0] == 0 and isnan(first.altitude[1])
+    assert first.time_us is None
+    assert second.time_us == array("q", [1000000])
 
 
 @pytest.mark.parametrize(

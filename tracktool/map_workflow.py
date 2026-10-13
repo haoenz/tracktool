@@ -1,4 +1,4 @@
-"""Read-only archive ↔ drawing orchestration; no archive writes or collection access."""
+"""Archive reads and validated project persistence at the drawing boundary."""
 
 import re
 import threading
@@ -8,6 +8,7 @@ from pathlib import Path
 from .drawing.geometry import geojson
 from .drawing.state import validate_state
 from .errors import UserInputError
+from .kml import index, storage
 from .kml.archive_reader import open_archive
 from .kml.trackdata import KmlTrackData
 
@@ -23,8 +24,8 @@ class MapWorkspace:
     @staticmethod
     def _path(path: str) -> Path:
         if not path:
-            raise UserInputError("请先选择归档 ZIP")
-        return Path(path).expanduser().resolve()
+            raise UserInputError("请先选择 SQLite 归档")
+        return storage.database_path(path)
 
     def catalog(self, path: str) -> dict:
         resolved = self._path(path)
@@ -45,20 +46,17 @@ class MapWorkspace:
 
     def selection(self, path: str, entries: list[str], expected: dict[str, str] | None = None) -> dict:
         if not isinstance(entries, list) or len(entries) > 200 or any(not isinstance(e, str) for e in entries):
-            raise UserInputError("每次最多选择 200 条完整 ZIP 路径")
+            raise UserInputError("每次最多选择 200 条完整归档路径")
         if len(set(entries)) != len(entries):
-            raise UserInputError("选择中有重复 ZIP 路径")
+            raise UserInputError("选择中有重复归档路径")
         resolved = self._path(path)
         expected = expected or {}
         tracks, errors = [], []
         selected_points = 0
         with self.lock, open_archive(resolved) as archive:
-            archive.list_entries()  # Reject an ambiguous directory even with cached geometry.
-            stat = resolved.stat()
-            signature = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
             for entry in entries:
                 try:
-                    key = (str(resolved), signature, entry)
+                    key = (str(resolved), archive.fingerprint(entry), index.PARSER_VERSION)
                     if key not in self.cache:
                         data, fingerprint = archive.read_track_data_with_fingerprint(entry, max_bytes=128 * 1024 * 1024)
                         count = sum(len(s.longitude) for t in data.tracks for s in t.segments)
@@ -85,9 +83,6 @@ class MapWorkspace:
                     )
                 except UserInputError as exc:
                     errors.append({"entry": entry, "error": str(exc)})
-            after = resolved.stat()
-            if signature != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
-                raise UserInputError("读取期间归档发生变化，请停止其他归档写入后重试")
         return {"archive": str(resolved), "tracks": tracks, "errors": errors}
 
     def project(self, value: dict) -> tuple[dict, dict]:
@@ -100,3 +95,17 @@ class MapWorkspace:
             state["archive"], [t["entry"] for t in state["tracks"]], {t["entry"]: t["sha256"] for t in state["tracks"]}
         )
         return state, selected
+
+    def save(self, name: str, value: dict) -> None:
+        state, selected = self.project(value)
+        if selected["errors"]:
+            raise UserInputError("源轨迹缺失或变化，不能保存项目")
+        storage.save_project(self._path(state["archive"]), name, state)
+
+    def load(self, path: str, name: str) -> tuple[dict, dict]:
+        state = storage.load_project(self._path(path), name)
+        state["archive"] = str(self._path(path))
+        return self.project(state)
+
+    def projects(self, path: str) -> list[str]:
+        return storage.project_names(self._path(path))

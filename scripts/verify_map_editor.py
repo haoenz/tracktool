@@ -4,12 +4,13 @@ Choose a short date range (under 200 tracks). No sample paths/counts are embedde
 """
 
 import argparse
-import hashlib
 import json
 import re
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
+
+from tracktool.kml.archive import archive_hash
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--archive", type=Path, required=True)
@@ -21,8 +22,7 @@ args = parser.parse_args()
 archive = args.archive.expanduser().resolve()
 OUT = args.output
 OUT.mkdir(parents=True, exist_ok=True)
-with archive.open("rb") as handle:
-    original_hash = hashlib.file_digest(handle, "sha256").hexdigest()
+original_hash = archive_hash(archive)
 with sync_playwright() as p:
     b = p.chromium.launch(headless=True, args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
     page = b.new_page(viewport={"width": 1500, "height": 1000}, device_scale_factor=1, accept_downloads=True)
@@ -247,6 +247,5 @@ with sync_playwright() as p:
     print("PASS: low zoom/polar resize keeps actual camera; mobile tool windows and no horizontal overflow", flush=True)
     b.close()
 
-with archive.open("rb") as handle:
-    assert hashlib.file_digest(handle, "sha256").hexdigest() == original_hash, "source archive changed"
+assert archive_hash(archive) == original_hash, "source archive content changed"
 print("Source archive SHA-256 unchanged:", original_hash)

@@ -11,6 +11,7 @@ import requests
 
 from tracktool.editor import EditorServer, Handler
 from tracktool.errors import UserInputError
+from tracktool.kml.storage import DB_NAME, create_database
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--output", type=Path, required=True)
@@ -96,6 +97,7 @@ try:
     with zipfile.ZipFile(fixture / "Archive.zip", "w") as z:
         z.writestr("Default/same.kml", kml)
         z.writestr("Train/same.kml", kml.replace("26", "26.3"))
+    create_database(fixture / DB_NAME, fixture / "Archive.zip")
     selected = s.post(
         base + "/api/selection",
         json={"archive": str(fixture / "Archive.zip"), "entries": ["Default/same.kml", "Train/same.kml"]},

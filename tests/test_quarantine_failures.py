@@ -4,7 +4,7 @@ import logging
 import zipfile
 
 import pytest
-from conftest import TRACK_KML, InMemoryBackend, make_archive
+from conftest import TRACK_KML, InMemoryBackend, import_test_zip, make_archive
 from typer.testing import CliRunner
 
 from tracktool import fileutil, workflows
@@ -301,6 +301,7 @@ def test_cli_keeps_partial_failure_exit_code_when_failure_directory_is_blocked(t
     zip_path = make_archive(tmp_path / "archive")
     with zipfile.ZipFile(zip_path, "a") as zf:
         zf.writestr("2024-05-01 track.kml", TRACK_KML)
+    import_test_zip(zip_path)
     directory = tmp_path / "photos"
     directory.mkdir()
     bad, good = directory / "a.jpg", directory / "b.jpg"

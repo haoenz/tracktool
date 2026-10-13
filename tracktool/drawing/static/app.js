@@ -42,7 +42,7 @@ function dirty() {
 function controls() {
   $("stage").setAttribute("aria-busy", String(switching));
   $("basemap").disabled = !state || pending > 0 || exporting;
-  for (const id of ["save-project", "export"])
+  for (const id of ["save-project", "save-db-project", "export"])
     $(id).disabled =
       !state ||
       pending > 0 ||
@@ -50,6 +50,9 @@ function controls() {
       versionsChanged ||
       switching ||
       exporting;
+  $("save-db-project").disabled ||= !state?.archive;
+  $("load-db-project").disabled =
+    !state?.archive || pending > 0 || switching || exporting;
 }
 function resize() {
   if (!state) return;
@@ -179,7 +182,7 @@ function syncFields() {
   $("output-size").textContent =
     `${state.output.width} × ${state.output.height} px`;
   $("frame-caption").textContent = state.frame.ratio;
-  $("archive-name").textContent = state.archive || "尚未打开归档 ZIP";
+  $("archive-name").textContent = state.archive || "尚未打开 SQLite 归档";
   $("archive-name").title = state.archive;
   $("adopt-versions").hidden = !versionsChanged;
   controls();
@@ -552,35 +555,75 @@ $("project-file").onchange = async (e) => {
   controls();
   try {
     if (file.size > 2 * 1024 * 1024) throw new Error("项目文件超过 2 MiB");
-    const result = await api("/api/project", JSON.parse(await file.text()));
-    const catalog = result.state.archive
-      ? await api("/api/archive", { path: result.state.archive })
-      : { entries: [] };
-    requestId++;
-    state = result.state;
-    tracks = result.tracks;
-    selectionErrors = result.errors;
-    versionsChanged = result.versionsChanged;
-    chosen = new Set(state.tracks.map((t) => t.entry));
-    entries = catalog.entries;
-    makeRenderer();
-    syncFields();
-    list();
-    $("dirty").textContent = "已打开 " + file.name;
-    await renderer.ready();
-    if (selectionErrors.length)
-      status(
-        "项目已打开，但部分源轨迹缺失或内容变化：\n" +
-          selectionErrors.map((e) => e.entry + ": " + e.error).join("\n") +
-          "\n请取消有问题的条目，或恢复原归档后重新打开项目。",
-        "error",
-      );
-    else if (versionsChanged)
-      status(
-        "项目记录的资源版本与当前版本不同。请检查预览，确认使用当前资源后另存项目。",
-        "error",
-      );
-    else status("项目已恢复：轨迹、样式、视野、画框和标题。");
+    const imported = JSON.parse(await file.text());
+    if (
+      state.archive && imported.archive !== state.archive &&
+      confirm("是否将项目轨迹关联到当前归档？将逐条验证原始内容指纹。")
+    )
+      imported.archive = state.archive;
+    const result = await api("/api/project", imported);
+    await restoreProject(result, file.name);
+  } catch (e) {
+    error(e);
+  } finally {
+    pending--;
+    controls();
+  }
+};
+async function restoreProject(result, name) {
+  const catalog = result.state.archive
+    ? await api("/api/archive", { path: result.state.archive })
+    : { entries: [] };
+  requestId++;
+  state = result.state;
+  tracks = result.tracks;
+  selectionErrors = result.errors;
+  versionsChanged = result.versionsChanged;
+  chosen = new Set(state.tracks.map((t) => t.entry));
+  entries = catalog.entries;
+  makeRenderer();
+  syncFields();
+  list();
+  $("dirty").textContent = "已打开 " + name;
+  await renderer.ready();
+  if (selectionErrors.length)
+    status(
+      "项目已打开，但部分源轨迹缺失或内容变化：\n" +
+        selectionErrors.map((e) => e.entry + ": " + e.error).join("\n") +
+        "\n请取消有问题的条目，或恢复原归档后重新打开项目。",
+      "error",
+    );
+  else if (versionsChanged)
+    status(
+      "项目记录的资源版本与当前版本不同。请检查预览，确认使用当前资源后另存项目。",
+      "error",
+    );
+  else status("项目已恢复：轨迹、样式、视野、画框和标题。");
+}
+$("save-db-project").onclick = async () => {
+  try {
+    const name = prompt("项目名称（同名保存会更新该项目）", state.title || "旅行地图");
+    if (!name) return;
+    await api("/api/projects/save", { name, state });
+    $("dirty").textContent = "已保存到归档";
+    status("项目已保存。项目不包含在备份 ZIP 中；需要备份项目时请导出 JSON。");
+  } catch (e) {
+    error(e);
+  }
+};
+$("load-db-project").onclick = async () => {
+  pending++;
+  controls();
+  try {
+    const { names } = await api("/api/projects", { archive: state.archive });
+    if (!names.length) throw new Error("当前归档尚无已保存项目");
+    const name = prompt("输入要打开的项目名称：\n" + names.join("\n"), names[0]);
+    if (!name) return;
+    cancelSwitch();
+    failedBasemap = undefined;
+    styleRequest++;
+    const result = await api("/api/projects/load", { archive: state.archive, name });
+    await restoreProject(result, name);
   } catch (e) {
     error(e);
   } finally {

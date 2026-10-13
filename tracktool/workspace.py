@@ -1,15 +1,7 @@
-"""Where the user's workspace files live, resolved once.
+"""Resolve archive location without configuration-dependent migration.
 
-The KML archive is a workspace fact: both the KML commands that file tracks
-into it and the media commands that geotag against it need its location, and
-neither should own the lookup. The location comes from the CLI argument or
-the config key, resolved here for both.
-
-An archive is *declared*, not implied: its directory holds an `archive.json`
-manifest, and resolving refuses a directory without one. That is what keeps a
-typo'd path from silently becoming a second archive — creation has exactly
-one entry point (`archive init`), and everything else refuses to run against
-an undeclared directory.
+SQLite identity is archive.sqlite3. Legacy manifest/history names remain reserved
+so merge cannot overwrite them; old metadata is never used as archive truth.
 """
 
 import json
@@ -50,12 +42,10 @@ def read_zip_name(archive_dir: Path) -> str:
 
 
 def resolve_archive(zip_path: str | None) -> tuple[Path, Path]:
-    """CLI override or configured archive -> (archive_dir, zip_file).
+    """Legacy --zip locates the directory; configured paths are directories.
 
-    An explicit ZIP path picks its parent as the archive directory; the config
-    key `archive_path` is the directory itself and the manifest names the ZIP
-    inside it. Either way the directory must be declared — answering "where"
-    includes refusing to guess what is not an archive.
+    The returned ZIP path is an export target/locator only. All daily content
+    operations resolve its sibling archive.sqlite3, even if the ZIP is missing.
     """
     if zip_path:
         zip_file = Path(zip_path).expanduser().resolve()
@@ -65,10 +55,12 @@ def resolve_archive(zip_path: str | None) -> tuple[Path, Path]:
         if not configured:
             raise UserInputError("Archive directory is not configured (set archive_path or pass --zip)")
         archive_dir = Path(configured).expanduser().resolve()
-    if not manifest_path(archive_dir).is_file():
+    if not (archive_dir / "archive.sqlite3").is_file():
         raise UserInputError(
-            f"{display_path(archive_dir)} is not a tracktool archive (run `tracktool archive init` first)"
+            f"{display_path(archive_dir)} is not a tracktool archive with SQLite; "
+            "run `archive init` for an empty directory "
+            "or `archive import-zip ZIP DIRECTORY` for migration/recovery"
         )
     if not zip_path:
-        zip_file = archive_dir / read_zip_name(archive_dir)
+        zip_file = archive_dir / DEFAULT_ZIP_NAME
     return archive_dir, zip_file

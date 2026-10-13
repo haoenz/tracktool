@@ -2,9 +2,11 @@
 
 旅行影像地理数据工具集：KML 轨迹管理与照片/视频 EXIF 地理标记。
 
+**SQLite 存储升级**：日常 CLI、轨迹查询和地图统一使用 `archive.sqlite3`；ZIP 和聚合 KML 改为显式导出。旧归档请先按 [迁移、备份与仅凭 ZIP 恢复说明](docs/sqlite-storage.md) 操作。普通读取不会自动迁移。实现与验收见 [验证记录](docs/sqlite-validation.md)。
+
 ## 功能
 
-- **KML 轨迹管理**：归档（ZIP 真值分层存储 + 桌面/手机双汇总视图 + 备份）、视图状态检查与重建、拆分、删坏点（手动两点 + `--auto` 自动清漂移）、合并、Google 高程回填（只认整轨没有高程的手绘轨迹）
+- **KML 轨迹管理**：归档（SQLite 无损主存储 + ZIP 备份导出 + 桌面/手机聚合导出）、视图状态检查与重建、拆分、删坏点（手动两点 + `--auto` 自动清漂移）、合并、Google 高程回填（只认整轨没有高程的手绘轨迹）
 - **EXIF 地理标记**：按拍摄时间与 KML 轨迹二分匹配写入 GPS、Google 高程/逆地理编码补全、时间平移、海拔偏移、MP4 转封装、媒体分类、缺失修复编排
 
 - **交互式轨迹地图**：本地浏览器选轨迹、浅/深底图、行政城市标注、固定画框与标题、项目保存/恢复、PNG 导出（见下方专节）
@@ -20,8 +22,9 @@ uv tool install .        # 或 pip install .
 ## 快速上手
 
 ```bash
-# 首次使用：声明归档目录（并对 config.json 里的 archive_path 生效）
+# 新建空归档；已有 ZIP 请改用 archive import-zip
 tracktool archive init ~/tracks
+tracktool config set archive_path ~/tracks
 
 # 按轨迹给照片写入 GPS（已有 GPS 的跳过；失败文件移入 TrackPosFailed）
 tracktool exif geotag ./photos --overwrite --failed-folder TrackPosFailed
@@ -29,7 +32,7 @@ tracktool exif geotag ./photos --overwrite --failed-folder TrackPosFailed
 # 一键修复缺失 GPSPosition/GPSAltitude 的媒体
 tracktool exif repair ./VID
 
-# 归档新轨迹（一次可给多条：聚合按批读写，ZIP 按批安全更新；默认把源文件收进归档的 Backup/，--keep 保留原件）
+# 归档新轨迹（一次可给多条：SQLite 批量事务入库；默认把源文件收进归档的 Backup/，--keep 保留原件）
 tracktool kml push ./2024-05-01\ 徒步.kml ./2024-05-02\ 徒步.kml
 
 # 通配符由工具自己展开（只作用于最后一段路径，按路径序入库），PowerShell 里也能直接用
@@ -56,15 +59,18 @@ tracktool kml type ./2024-05-01\ 徒步.kml --raw
 # 通配符在进程内展开（按名排序）；一个文件只给裸值，多个文件每行「值<TAB>路径」，值留在第一列
 tracktool kml type "./tracks/2024-05-*.kml"
 
-# 默认把源文件收进归档的 Backup/（归档里已有的轨迹按名判重跳过，也一并搬走）；
+# 默认把源文件收进归档的 Backup/（同路径同字节的归档成员幂等复用，也一并搬走）；
 # Backup/ 里已有同内容的副本时，新那份副本清掉而不是留第二份，内容不同则两处都留并报警告；
 # 想保留工作区原件就加 --keep
 tracktool kml push ./2024-05-03\ 徒步.kml
 tracktool kml push ./2024-05-03\ 徒步.kml --keep
 
-# 每次改动归档的命令都记一笔；archive log 看最近几条，archive undo 撤回最近一条
-tracktool archive log
-tracktool archive undo
+# 日常操作后按需导出；只异地备份 Archive.zip 即可恢复归档 KML
+tracktool archive status
+tracktool archive backup
+tracktool archive rebuild
+# 中断后完成源文件搬移/提取
+tracktool archive recover
 ```
 
 `kml split` 按时间差选最近的轨迹点，距离相同时选较早的时间；支持 `Z` 和时区偏移，
@@ -89,7 +95,7 @@ uv run --extra maps tracktool-map
 
 自动打开 `http://127.0.0.1:8765`。如浏览器未打开，手动访问此地址。按 `Ctrl+C` 停止。无需 exiftool / ffmpeg。Linux 若提示缺少 Chromium 系统库，按 Playwright 提示安装发行版对应的依赖；安装系统包需要管理员权限。
 
-也可用 `pip install '.[maps]'`、`playwright install chromium --only-shell`、`tracktool-map`。参数：`--port 8766` 更换端口；`--no-browser` 不自动打开浏览器；`--archive /path/to/Archive.zip` 可选预选归档；`--cache /path/to/cache` 指定可写缓存目录。启动器独立于旧 CLI，不加载或迁移 tracktool 配置。
+也可用 `pip install '.[maps]'`、`playwright install chromium --only-shell`、`tracktool-map`。参数：`--port 8766` 更换端口；`--no-browser` 不自动打开浏览器；`--archive /path/to/archive.sqlite3` 可选预选归档；`--cache /path/to/cache` 指定可写缓存目录。启动器独立于旧 CLI，不加载或迁移 tracktool 配置。
 
 局域网访问：
 
@@ -103,14 +109,14 @@ uv run --extra maps tracktool-map --host 0.0.0.0 --port 8765
 
 页面以整屏地图为工作区，轨迹库、构图与样式为浮动窗口。点顶部「轨迹」「样式与画框」或窗口右上角「−」展开、收起；小屏幕一次展开一个窗口。默认隐藏画框，按整个可见窗口筛选和排布地名，浏览字号不随画框的预览比例缩小，署名位于窗口右下角。点地图下方「显示画框」进入成片预览：细边框与框外轻微遮罩标出导出范围，标题、地名和署名按 PNG 的固定逻辑画布排版；框外地图也可以拖动。再点「隐藏画框」返回整屏浏览，标题只在成片预览和导出中显示。两种视图的地名避让范围不同，显示的地名可能不同；PNG 始终使用成片预览的布局。面板开合、视图切换均不改变已保存的构图和实际导出范围，浮窗、边框与遮罩不会进入 PNG。
 
-1. 点击「打开本地归档」，在目录浏览器中选择 ZIP。可直接输入目录再点「前往」。ZIP 父目录必须有现有 `archive.json` 身份文件；这里只读归档，不初始化、不重建、不写集合。
+1. 点击「打开本地归档」，在目录浏览器中选择 `archive.sqlite3`。可直接输入目录再点「前往」。旧 ZIP 需先显式导入；地图不写集合，持久化解析索引保存在库中。
 2. 用名称、开始/结束日期、类型筛选，勾选多条轨迹，或「选择筛选结果」「取消全部」。日期取自文件名；类型来自归档首层目录（普通/火车/飞机/未分类），不是 KML 活动标签。日期筛选会排除无日期文件，但不设置日期时仍可选它们。筛选不会取消已选的其他轨迹。
 3. 点击「适应所选轨迹」，拖动地图、滚轮或 `＋/−` 调整视野。浅/深底图、统一颜色、线宽、地名模式均实时生效。默认浅/深底图不包含道路、水域、乡镇或景点文字；城市为独立标注层。新增的栅格地图可能自带文字，见下方说明。
 4. 在「样式与画框」选择六种画框比例、输出长边像素，填写可选标题。画框边缘就是 PNG 边缘；不会截取浮动工具窗口。切换比例保留中心与缩放，可再次「适应所选轨迹」。窗口缩放仅改变预览显示大小。
-5. 「保存项目」下载 `tracktool-map.json`；「打开项目」选择该文件恢复选择、样式、视野、画框、输出尺寸和标题。项目不复制 KML，需保留原归档位置；文件移动时恢复原位置后再打开。内容变化、缺失条目会明确列出并暂停保存/导出，可取消问题条目或恢复原件；再次主动选择会采用新内容。
+5. 「保存到归档」按名称保存项目，「打开已存项目」恢复；「导出项目 JSON」与「导入项目 JSON」继续支持独立文件。换机器后先打开新库，再导入旧 JSON 并确认关联，逐条核对原始 SHA-256。项目不进入备份 ZIP，需要备份时另存 JSON。
 6. 「导出 PNG」显示进度并自动下载；完成后也可点击「重新下载 PNG」。失败时不生成成功图片，检查提示后再次点导出。地图请求失败可点「重新加载地图 / 重试资源」；字体文件缺失或校验失败需重新安装，标题含字体不支持字符需修改标题。
 
-异常条目不会悄悄消失：完整 ZIP 路径出现在错误提示中。有效几何仍可预览，但必须处理选择错误才能保存/导出。单次选择最多 200 条、200 万点，单个 KML 解压后最多 128 MiB。不带时间戳的线、单点段均支持；段与文件之间不连线。超出 Web Mercator 纬度 ±85.05112878° 的轨迹明确拒绝，地图交互不旋转、不倾斜。
+异常条目不会悄悄消失：完整归档路径出现在错误提示中。有效几何仍可预览，但必须处理选择错误才能保存/导出。单次选择最多 200 条、200 万点，单个 KML 解压后最多 128 MiB。不带时间戳的线、单点段均支持；段与文件之间不连线。超出 Web Mercator 纬度 ±85.05112878° 的轨迹明确拒绝，地图交互不旋转、不倾斜。
 
 ### 画框、线宽与复现
 
@@ -118,7 +124,7 @@ uv run --extra maps tracktool-map --host 0.0.0.0 --port 8765
 
 导出在独立 Chromium 页面使用相同 `core.js` 和逻辑画框，按目标像素比例重新绘制 WebGL / Canvas；不会截图编辑器。等待本地字体加载、MapLibre `idle`、所有瓦片和 source worker、两帧标签排版，检查 HTTP/请求/地图/脚本错误后才截图，并检查 PNG 实际尺寸。超时返回失败。导出任务串行，结果最多保留 5 个/15 分钟，仅在内存中；刷新或重启后可重新导出。
 
-项目 schema 1 记录归档绝对路径、完整 ZIP 条目路径、**原始 KML 字节 SHA-256**，以及状态、渲染源码/字体/地名数据指纹、MapLibre/Playwright 版本、底图数据版本。实际 Chromium 版本和标签布局由导出任务报告返回。源码和资源不同的旧项目会提示，需点击「确认使用当前资源版本」后另存。规则、输入和布局可复现；不同 OS、浏览器、GPU、DPR 的抗锯齿可能不同，**不保证跨环境逐像素一致**。
+项目 schema 1 记录归档绝对路径、完整归档成员路径、**原始 KML 字节 SHA-256**，以及状态、渲染源码/字体/地名数据指纹、MapLibre/Playwright 版本、底图数据版本。实际 Chromium 版本和标签布局由导出任务报告返回。源码和资源不同的旧项目会提示，需点击「确认使用当前资源版本」后另存。规则、输入和布局可复现；不同 OS、浏览器、GPU、DPR 的抗锯齿可能不同，**不保证跨环境逐像素一致**。
 
 ### 底图、字体与数据来源
 
@@ -220,9 +226,9 @@ PYTHONPATH=. uv run --extra maps python scripts/verify_map_loading.py \
 
 ### 模块边界与验证
 
-`editor` 是本地 HTTP 入口、会话和任务管理；`map_workflow` 编排 `kml.archive_reader` 与独立 `drawing` 功能包；`drawing` 不导入 KML、集合、编排或入口。`archive_reader.read_track_data_with_fingerprint()` 从同一份字节生成数组与内容指纹，可选限制解压大小；旧 `read_track_data()` 的语义保持。几何缓存保留紧凑平行数组与分段，按归档文件身份/大小/纳秒 mtime/ctime 与完整条目路径失效，最多 128 条/200 万点。选中轨迹在绘图边界转为 MultiLineString/MultiPoint，点没有独立属性对象。配色、线宽、标题和拖动不访问 KML。导出、重开、保存会重新检查源文件状态；请避免在编辑器读取时同时执行归档写入操作。
+`editor` 是本地 HTTP 入口、会话和任务管理；`map_workflow` 编排 `kml.archive_reader` 与独立 `drawing` 功能包；`drawing` 不导入 KML、集合、编排或入口。`archive_reader.read_track_data_with_fingerprint()` 从同一份字节生成数组与内容指纹，可选限制解压大小；旧 `read_track_data()` 的语义保持。几何缓存保留紧凑平行数组与分段，按原始内容 SHA-256 与解析器版本失效，内存最多 128 项/200 万点；SQLite 持久化索引供重启后复用。选中轨迹在绘图边界转为 MultiLineString/MultiPoint，点没有独立属性对象。配色、线宽、标题和拖动不访问 KML。导出、重开、保存会重新检查成员内容指纹；读取使用 SQLite 一致快照，可与归档写入并行。
 
-`pyproject.toml` 的 import-linter 同时约束层级、绘图独立性和编排只读入口。会话 token、Host/Origin 检查防止其他站点借服务读取文件；局域网模式只接受实际接收连接的服务器 IP 对应的 Host，并继续校验同源请求，不提供任意服务器文件写入接口。JSON/PNG 由浏览器下载，原始归档、KML、备份和桌面/手机集合不变。
+`pyproject.toml` 的 import-linter 同时约束层级、绘图独立性和编排归档边界。会话 token、Host/Origin 检查防止其他站点借服务读取文件；局域网模式只接受实际接收连接的服务器 IP 对应的 Host，并继续校验同源请求，不提供任意服务器文件写入接口。JSON/PNG 由浏览器下载；保存项目只修改数据库的 map_projects，解析只写派生索引，原始成员、KML、备份和桌面/手机集合不变。
 
 常规检查：
 
@@ -234,13 +240,13 @@ uv run --extra maps mypy
 uv run --extra maps lint-imports
 ```
 
-关键自动化覆盖完整 ZIP 身份、目录列表不解析 KML、无时间戳/单点/分段、日期线、投影界限、状态往返、缓存不重复解析、源内容变化/缺失，以及行政级别与驻地修正规则。实际浏览器验收另需联网与 Chromium；测试和示例图片不作为程序数据源。
+关键自动化覆盖完整归档成员身份、目录列表不解析 KML、无时间戳/单点/分段、日期线、投影界限、状态往返、缓存不重复解析、源内容变化/缺失，以及行政级别与驻地修正规则。实际浏览器验收另需联网与 Chromium；测试和示例图片不作为程序数据源。
 
 复跑浏览器验收（先启动编辑器；选择不超过 200 条轨迹的短日期范围，输出使用独立目录）：
 
 ```bash
 uv run --extra maps python scripts/verify_map_editor.py \
-  --archive /path/to/Archive.zip --from-date 2026-10-04 --to-date 2026-10-08 \
+  --archive /path/to/archive.sqlite3 --from-date 2026-10-04 --to-date 2026-10-08 \
   --output sandbox/map-editor-qa/run
 uv run --extra maps python scripts/verify_map_failures.py --output sandbox/map-editor-qa/run
 ```
@@ -371,13 +377,13 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 
 批量命令遇到单个坏文件不会中止整批：该文件计入失败清单，其余文件照常处理，命令以 3 退出，日志里给出 `N file(s) failed` 汇总。指定 `--failed-folder` 后，会在处理前检查失败目录及同名目标。真实执行会提前创建目录，并创建、删除一个空临时文件检查写入能力，因此没有失败时也可能留下空目录；预演只做只读检查。任一失败目录不可用时，停用本批次的自动整理并提示，主任务继续；同名目标只影响对应文件的整理，保留双方。执行中移动失败会同时记录处理原因和整理错误，并继续后续文件；只在实际移动成功后报告移动位置。修复编排不会把留在原处的失败文件归入成功目录。
 
-`kml push` 与修复编排（`repair`）都把整个文件列表交给批量入口，因此一次 Google 高程请求可覆盖最多 512 个坐标；`exif geotag` 按拍摄时间窗只加载解析归档里相关月份的轨迹（±1 天 multiday 跨月也覆盖）。入库时集合按批读写，ZIP 对整批执行一次追加和发布。
+`kml push` 与修复编排（`repair`）都把整个文件列表交给批量入口，因此一次 Google 高程请求可覆盖最多 512 个坐标；`exif geotag` 按拍摄时间窗只加载解析归档里相关月份的轨迹（±1 天 multiday 跨月也覆盖）。入库时 SQLite 对整批执行一个事务，源文件移动通过短期日志恢复；ZIP/集合另行导出。
 
 ## 配置
 
 配置文件放在各平台自己的用户配置目录里，文件名统一是 `config.json`：Windows 用 `%APPDATA%\tracktool\`（Roaming，变量缺席时退回 `~\AppData\Roaming\tracktool\`），macOS 用 `~/Library/Application Support/tracktool/`，其余系统用 `$XDG_CONFIG_HOME/tracktool/`（取值未设或**不是绝对路径**时退回 `~/.config/tracktool/`——XDG 规范要求忽略相对值）。放在用户目录而不是项目里，是因为设置对工具是全局的：从照片文件夹里跑和从项目根跑必须读到同一份。
 
-字段：`log_level`、`archive_path`、`archive_history`、`kml_backup_dir_name`、`output_filters`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向**归档目录**；归档是声明出来的——目录里要有 `archive.json` 身份文件，只有 `tracktool archive init` 能创建它（对已有归档文件的目录补办身份即可收编），其余命令碰到没有身份文件的目录一律报错，路径打错不会静默多出第二份归档。它原先住在项目根的 `config.json`：新位置为空而旧位置有文件时，第一次加载就把它搬过去——先把完整一份写到新位置，确认落盘后再删旧文件，并在日志里报出落点；旧文件删不掉（被占用、权限不足）只留下一份过时的副本，新位置照常生效，此时另警告一句让你手工删。旧键 `kml_zip_path`（ZIP 文件）读到时会平移为所在目录的 `archive_path`。两类迁移都在正常运行里回写，`--dry-run` 只在内存中转换，所有文件保持原样。`archive_history`（默认 `true`）控制归档记账与撤回，代价见「归档撤回」一节。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
+字段：`log_level`、`archive_path`、`archive_history`、`kml_backup_dir_name`、`output_filters`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向包含 `archive.sqlite3` 的**归档目录**；新库通过 `archive init` 创建，旧 ZIP 通过 `archive import-zip` 导入。路径打错不会静默建立新库。配置文件原先住在项目根的 `config.json`：新位置为空而旧位置有文件时，第一次加载就把它搬过去——先把完整一份写到新位置，确认落盘后再删旧文件，并在日志里报出落点；旧文件删不掉（被占用、权限不足）只留下一份过时的副本，新位置照常生效，此时另警告一句让你手工删。旧键 `kml_zip_path`（ZIP 文件）读到时会平移为所在目录的 `archive_path`。两类迁移都在正常运行里回写，`--dry-run` 只在内存中转换，所有文件保持原样。`archive_history` 作为旧配置保留，但不再记录长期历史或启用 undo；设置时会明确提示。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
 
 `track_tag.<类别>` 是活动词表：KML 里的 `TrackTags` 存的是 2bulu 的活动名（徒步、地铁），归档类别（集合文件名 `Train.kml`、ZIP 条目前缀 `Train/`、`kml push --type` 的取值域）由这张表查出来。用 `tracktool config set` 增删：
 
@@ -389,38 +395,23 @@ tracktool config set track_tag.Default "徒步,爬山"  # 不带符号 = 整表�
 
 一个活动只能属于一个类别，所以加词时会从其他类别里摘掉，改名归类都是一条命令；幂等，重复执行同一指令不会累积。命令报出的是这一类改完之后的样子，不是敲进去的那段词。同一个词出现在两个类别、类别名拼错、列表里出现空名字都会报错而不是静默忽略——每一种都会让「这条轨迹属于哪一类」失去唯一答案。词表是唯一的判据：加进去的词立刻被 `kml set-tag --tag` 接受，并被 `kml type` 判读成它所属的类别。
 
-## 归档：真值与视图
+## SQLite 归档与导出
 
-ZIP 压缩包是归档的**真值**，条目按 `<类型>/<yyyy-MM>/<文件名>` 分层存放。类型不看目录、只看轨迹自己的 `TrackTags`：活动名查词表得到类别，表里没有的词一律进 `_unclassified/`，不猜。桌面 `<类型>.kml` 与手机 `<类型>.Mobile.kml` 是由真值派生的**视图**：
-
-- `tracktool archive status` 报告视图与真值是否一致，并把「分层之前写下的扁平条目里，哪些的 TrackTags 认不出来」按值汇总一行（每个值只说一次）。`archive.json`（version 2）记着上次视图与真值同步时 ZIP 的哈希，真值一动哈希就对不上；`kml push` 与 `kml pop` 在视图本来就同步的前提下会顺带前移哈希，本来落后就如实报落后。
-- `tracktool archive rebuild` 从真值全量再生两个视图并刷新哈希——视图坏了、落后了都能修，不需要从备份倒腾。真值里已经一条不剩、视图文件却还在的类型，视图会被清空：视图不能留着真值里没有的轨迹。从来就没有过视图的类型仍然不新建。放不进任何视图的条目照旧跳过，其中扁平条目里认不出值的那些同样按值汇总。
-
-`kml push` 和 `kml merge` 的入库会先把旧 ZIP 复制到同目录临时文件，在临时文件上追加整批新条目，完成 CRC 校验和文件同步后再原子替换。替换前发生异常或进程被强制结束，旧 ZIP 保持原样；重复条目全部跳过时不复制、不替换。代价是额外容纳一份新 ZIP 的空间、一次旧 ZIP 复制和整包校验，不重新压缩旧条目。普通失败清理临时文件，强制结束可能留下 `.Archive.zip.*.tmp`；重跑使用新的临时文件。这个保护以 ZIP 为边界，失败前可能已更新集合，必要时用 `archive rebuild` 从保留的 ZIP 恢复视图。`Backup/` 仍保存 KML 源文件，不是历史 ZIP 副本。
-
-`kml merge --output` 必须指定尚不存在的新文件路径。已有文件、目录、符号链接（含悬空链接）、输入文件的硬链接或路径别名，以及归档 ZIP/manifest/集合路径，均在写入前拒绝；`--dry-run` 执行同样检查。合并结果先写临时文件，再通过硬链接创建目标名称，期间出现同名目标也不会覆盖；文件系统不支持硬链接时安全报错。源轨迹整批归档成功后，源文件默认移入 `Backup/`（`--keep` 保留原位）。
-
-`kml pop` 接受完整文件名或完整名称（不含 `.kml`），不再按子串查找。例如 `tracktool kml pop '2024-05-01 行程.kml' --type Train` 只选择 Train 类型。**不指定 `--type` 就在 ZIP 的全部条目里找**，命中哪一条就按哪一条自己的类型去查两个视图——分层条目以类型目录为准，旧版扁平条目按 `TrackTags` 查词表确认类型，表外的词不会自动当作 Default。所以同一文件名在两种类型下是两条不同的轨迹，跨类型重名在任何修改前拒绝，须用 `--type` 指定（提示语附在报错里）；`_unclassified/` 里以及词表认不出类型的扁平条目没有任何视图持有，不指定 `--type` 时只解压到当前目录、不动视图。同一类型匹配多个 ZIP 条目，或集合中同名记录不唯一时同样在任何修改前拒绝，`--force` 也不能绕过歧义；提取和两个集合的删除均使用同一个已解析名称。
-
-## 归档撤回：`archive undo`
-
-`kml push` / `kml pop` / `kml merge` 每动一次真值，就往归档目录里的 `history.jsonl` 追一行，记下这次**真的**落盘了什么：加进去与删掉的条目路径、搬进 `Backup/` 收走的每对位置（原位与 `Backup/` 里的；与 `Backup/` 里那份同内容而被清掉的副本同样记一对——它确实离开了原位，撤回也要能把它还回来）、`pop` 解压出来的那个文件，以及改动前后的 ZIP 哈希。视图一个字都不记——它们由真值派生，撤回结尾那次 `rebuild` 就把它们带回与真值一致的样子。
+完整操作和结构说明见 [SQLite 存储文档](docs/sqlite-storage.md)：无损原始对象、分类与活动标签、文件名日期与实际时间、事务/连接/线程模型、短期移动日志、索引序列化及数据库迁移。
 
 ```bash
-tracktool archive log              # 最近 10 条，倒序：#id / 时刻 / 命令 / 改动 / 待撤或已撤
-tracktool archive log --last 50
-tracktool archive undo             # 撤回最近一条
-tracktool archive undo --steps 2   # 撤回最近两条，只 rebuild 一次
-tracktool --dry-run archive undo   # 预演：逐条报出要动的每一步，磁盘一个字节不动
+tracktool archive import-zip /old/Archive.zip /new/tracks
+tracktool config set archive_path /new/tracks
+tracktool kml push "2026-10-01 徒步.kml" --keep
+tracktool archive status
+tracktool archive backup              # SQLite → Archive.zip
+tracktool archive rebuild             # SQLite → 聚合 KML
+tracktool archive recover             # 完成中断文件操作
 ```
 
-`archive undo` 先把每一条的前提全查一遍，全通过才动手；动手顺序只有一条纪律——**先造副本，后消耗副本**：文件先还原到位，再删归档里那份，中途断掉留下的是多一份副本，不是少一份。日志记的是实际落盘的条目而不是命令行：`kml push a b` 里 b 早已在归档时，撤回只摘掉 a，b 那条是上一次 push 的成果。整批判重的 push 什么都没动，也照样占一条记录。
+只有成员变化使备份过期，项目/索引更新不影响内容修订。push/pop 不改 ZIP/集合。`--zip` 保留为所在目录的定位方式，ZIP 本身可以不存在；不作为另一个可修改的真源。
 
-任一条前提没了就整条拒绝退 1，此时一个字节都没动、记录仍是待撤，把占住位置的东西挪走再跑一次即可；`--force` 跳过这些项，已经动过手的改动不回滚，命令退 3，没撤成的项写进那条 tombstone 的 `not_undone`，`archive log` 相应显示 `partial`。两种前提各缺不得：`pop` 解压出来的那个文件（缺或内容被改 → 那条 pop 永久撤不回来，它是这条轨迹唯一的一份）、还原时源位置不能被占用（被占 → 条目保留不删）。被搬进 `Backup/` 的那份文件**不是前提**：`Backup/` 是近期暂存，手工清空后还原材料改用同一笔 push 落下的 ZIP 条目——push 存的是原样字节，解压回去与搬回实物等价。归档已经被没记账的改动推走时，`undo` 一律拒绝——哈希校验让它退化成「拒绝」，而不是撤错。
-
-`config set archive_history false` 把整个功能关掉：`kml push` / `kml pop` / `kml merge` 照常改归档，但一行也不记，`archive undo` 直接拒绝退 1（`--dry-run` 也照拒——这是命令的结论，不是一个字节的差别）。关掉期间发生的改动不在账上，那段空档就撤不回来：`--steps` 跨过它会被哈希校验拒绝退 1，而只撤空档之后那些记录（`--steps 1`）仍然成立、也仍然自校验通过。重新打开后新改动照记可撤；已有的 `history.jsonl` 不会被动，关掉只是让它停止增长，`archive log` 也照读不误（末尾提醒一句记账已停）。
-
-日志是撤回的能力，不是备份：`history.jsonl` 丢了等于没有可撤的记录（不报错）。ZIP 丢了 `undo` 救不回来——那要靠归档目录自己的备份；`Backup/` 清空则不碍撤回，条目本身就是还原材料。
+`archive undo` 已退休，会明确报错并提示替代操作：pop 取回原件，push 重新归档，recover 完成中断，或把旧备份 ZIP 导入另一个新目录。`archive log` 仅查看保留的旧 history.jsonl。只备份 ZIP 即可在全新机器恢复成员路径和原字节；不承诺恢复项目、历史、内部 ID 或瓦片。
 
 ## Python 只读轨迹数据接口
 
@@ -458,32 +449,21 @@ for track in data.tracks:
 
 ## Python 只读归档访问接口
 
-`tracktool.kml.archive_reader.open_archive` 接受显式 **ZIP 文件路径**（`str` 或 `Path`，不是归档目录），沿用现有 `--zip` 路径规则：展开 `~`、解析相对路径，其父目录必须有 `archive.json` 身份文件。显式 ZIP 路径优先于 manifest 中的 ZIP 名称，只检查身份文件存在，不读取配置，也不初始化归档。
+`tracktool.kml.archive_reader.open_archive` 接受 SQLite 文件、归档目录，或旧 ZIP 路径定位（只读同目录 SQLite，不读取 ZIP）。不依赖配置或 archive.json。
 
 ```python
-from pathlib import Path
 from tracktool.kml.archive_reader import open_archive
 
-with open_archive(Path("/path/to/archive/Archive.zip")) as archive:
-    entries = archive.list_entries()
-    for entry in entries:
+with open_archive("/path/to/archive/archive.sqlite3") as archive:
+    for entry in archive.list_entries():
         print(entry.path, entry.name, entry.kind)
-
-    # 使用列表中的完整路径精确选择；同名文件可按不同目录分别读取
-    data = archive.read_track_data("Default/2026-05/2026-05-01 徒步.kml")
-    print(data.source, data.track_tags)
-    for track in data.tracks:
-        for segment in track.segments:
-            print(segment.longitude[0], segment.latitude[0], len(segment.longitude))
+    data, sha256 = archive.read_track_data_with_fingerprint("Default/2026-05/2026-05-01 徒步.kml")
+    original_bytes = archive.read_bytes("Default/2026-05/2026-05-01 徒步.kml")
 ```
 
-`list_entries()` 返回现有的 `ZipEntry` 列表，按完整路径的大小写敏感字符串顺序排列。`path` 是原始 ZIP 条目路径，`name` 是显示文件名；扩展名 `.kml` 不区分大小写，目录项和其他文件忽略，空归档返回 `[]`。列表只读 ZIP 目录信息，不解压或解析 KML。`kind` 仅根据首层目录识别 `Default` / `Train` / `Flight`；旧扁平条目、未知目录和 `_unclassified` 都返回 `None`，不猜测类别。原始活动名在读取后的 `data.track_tags` 中，与目录类别不同。
+历史类型名 `ZipEntry` 保留，但代表数据库成员。路径精确匹配且大小写敏感；目录只查 SQL，不解析 KML。`kind` 为导入/入库时固定的归档分类，`data.track_tags` 为原活动标签。连接提供一致读快照，异常退出也关闭；返回的元数据和数组可独立使用。来源标签是 `<SQLite 路径>!/<成员路径>`。
 
-`read_track_data(entry.path)` 按完整路径逐字匹配，不按文件名或片段查找，也不规范化条目路径或忽略大小写。每次只解压、校验并解析选中条目，直接返回现有 `KmlTrackData`，数组、分段和缺失值约定同上。没有全归档几何缓存，也没有临时 KML 文件；再次读取会重新解析。未知类别或缺少活动标签不妨碍读取有效几何。
-
-`with` 进入时打开 ZIP，正常或异常退出都会关闭；返回的数据和条目列表可在退出后继续使用，但归档对象的方法会报告已关闭。`data.source` 为 `<解析后的绝对 ZIP 路径>!/<完整条目路径>`，是来源位置标签，改名或移动后会变化，不是永久 ID。接口不提供并发写入期间的快照或锁定保证。
-
-路径/身份错误、无效 ZIP、缺失条目、重复路径歧义、CRC/解压损坏、XML 或轨迹数据无效都抛出 `UserInputError`，错误带归档来源，条目错误还带完整条目路径。目录列表遇到重复 KML 路径会报错；精确读取也拒绝有重复路径的目标，但仍可读取其他唯一条目。未选中的坏 KML 不影响列目录和读取其他条目；不会静默跳过明确选中的坏轨迹，调用方可捕获错误后继续。读取不修改归档、源文件、配置、集合、备份或撤销历史。
+几何以原始 SHA-256 和解析器版本持久化索引；重开数据库可直接读取，新增其他成员不使已有索引失效。读取可能写入派生索引，但不改成员修订或原件。解析失败明确报告并保存状态，原件仍可导出。详见 [数值精度、分段和缺失值约定](docs/sqlite-storage.md#表结构与事务边界)。
 
 ## 实现说明
 
@@ -501,4 +481,4 @@ uv run pytest                       # 全部（含真实 exiftool / ffmpeg 的�
 uv run pytest -m "not integration"  # 只跑内存替身，不碰外部工具
 ```
 
-需要真实工具的用例打 `integration` 标记（`tests/test_e2e.py` 走完整链路：ffmpeg 造样本、exiftool 读写、轨迹从 ZIP 归档读出），工具缺席时自动跳过。`MetadataBackend` 的两套实现（真实 exiftool 与内存替身）跑同一份断言（`tests/fixtures/backend_contract.py`），替身因此不能与真身漂移。
+需要真实工具的用例打 `integration` 标记（`tests/test_e2e.py` 走完整链路：ffmpeg 造样本、exiftool 读写、轨迹从显式导入的 SQLite 归档读出），工具缺席时自动跳过。`MetadataBackend` 的两套实现（真实 exiftool 与内存替身）跑同一份断言（`tests/fixtures/backend_contract.py`），替身因此不能与真身漂移。

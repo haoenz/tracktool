@@ -24,8 +24,7 @@ from .fileutil import BatchResult
 from .kml import archive as kml_archive
 from .kml import edit as kml_edit
 from .kml import history as kml_history
-from .kml import kmlfile
-from .kml import undo as kml_undo
+from .kml import kmlfile, storage
 from .kml.kmlfile import TrackKind
 from .paths import display_path
 from .progress import DEFAULT_WORKERS
@@ -190,7 +189,7 @@ def archive_init(
         Path | None, typer.Argument(help="Archive directory (default: the configured archive_path)")
     ] = None,
 ) -> None:
-    """Declare a directory as the track archive (manifest + ZIP).
+    """Create an empty SQLite archive; legacy ZIPs require import-zip.
 
     The only command that creates an archive; everything else refuses an
     undeclared directory instead of silently starting a second one.
@@ -203,46 +202,107 @@ def archive_init(
     kml_archive.init_archive(directory)
 
 
+@archive_app.command("import-zip")
+def archive_import_zip(
+    source: Annotated[Path, typer.Argument(help="Existing backup ZIP; never modified")],
+    directory: Annotated[Path, typer.Argument(help="Destination directory; existing database is never overwritten")],
+) -> None:
+    """Migrate a legacy ZIP or rebuild a fresh SQLite archive using only a backup ZIP."""
+    if ctx.is_plan:
+        log.info(f"Would validate and import {source} into {directory / storage.DB_NAME}")
+        return
+    storage.create_database(directory.expanduser().resolve() / storage.DB_NAME, _resolve_path(source))
+    log.info("ZIP imported and verified. Configure archive_path, then run archive status / backup.")
+
+
+@archive_app.command("backup")
+def archive_backup(
+    zip_path: Annotated[str | None, typer.Option("--zip", help="Archive locator (legacy ZIP path accepted)")] = None,
+    output: Annotated[Path | None, typer.Option("--output", help="Backup ZIP target; default Archive.zip")] = None,
+) -> None:
+    """Generate a verified backup ZIP from one SQLite snapshot; replace target atomically."""
+    directory, default = resolve_archive(zip_path)
+    if ctx.is_plan:
+        log.info(f"Would export SQLite to {output or default}")
+        return
+    revision = storage.export_zip(directory / storage.DB_NAME, output or default)
+    log.info(f"Backup ZIP published, snapshot revision {revision}", target=output or default)
+    kml_archive.status(zip_path)
+
+
+@archive_app.command("recover")
+def archive_recover(
+    zip_path: Annotated[str | None, typer.Option("--zip")] = None,
+) -> None:
+    """Finish interrupted push/pop file operations, checking content before deleting anything."""
+    directory, _ = resolve_archive(zip_path)
+    if ctx.is_plan:
+        log.info("Would resume pending file operations")
+        return
+    log.info(f"Completed {storage.recover(directory / storage.DB_NAME)} pending file operations")
+
+
+@archive_app.command("migrate")
+def archive_migrate(
+    zip_path: Annotated[str | None, typer.Option("--zip")] = None,
+) -> None:
+    """Check database schema; ZIP migration uses the explicit import-zip command."""
+    directory, _ = resolve_archive(zip_path)
+    if ctx.is_plan:
+        log.info("Would migrate SQLite schema transactionally")
+        return
+    storage.migrate(directory / storage.DB_NAME)
+    log.info(f"Database schema {storage.SCHEMA_VERSION} is current")
+
+
 @archive_app.command("status")
 def archive_status(
-    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    zip_path: Annotated[
+        str | None, typer.Option("--zip", help="Archive locator: legacy ZIP path selects its sibling SQLite database")
+    ] = None,
 ) -> None:
-    """Report whether the collections match the ZIP (the archive's truth)."""
+    """Report SQLite revision, backup ZIP freshness and pending recovery."""
     kml_archive.status(zip_path, tag_map=ctx.config.track_tag_map)
 
 
 @archive_app.command("rebuild")
 def archive_rebuild(
-    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    zip_path: Annotated[
+        str | None, typer.Option("--zip", help="Archive locator: legacy ZIP path selects its sibling SQLite database")
+    ] = None,
 ) -> None:
-    """Regenerate the desktop and mobile collections from the ZIP."""
+    """Export desktop and mobile aggregate KML from SQLite."""
     kml_archive.rebuild(zip_path, tag_map=ctx.config.track_tag_map)
 
 
 @archive_app.command("undo")
 def archive_undo(
-    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    zip_path: Annotated[
+        str | None, typer.Option("--zip", help="Archive locator: legacy ZIP path selects its sibling SQLite database")
+    ] = None,
     steps: Annotated[int, typer.Option("--steps", min=1, help="How many recorded changes to reverse")] = 1,
     force: Annotated[
         bool, typer.Option("--force", help="Skip the items whose premise is gone instead of stopping")
     ] = False,
 ) -> None:
-    """Reverse the last recorded change(s): a push, a restore, or a merge.
-
-    A refusal has touched nothing, so putting back what it names and running
-    the command again works; --force gets past it but settles for less.
-    """
-    if not kml_undo.undo_last(zip_path, steps, force).ok:
-        raise typer.Exit(code=EXIT_PARTIAL)
+    """Retired: use pop/push, recover interrupted moves, or import a backup into a new directory."""
+    raise UserInputError(
+        "Archive undo is retired for SQLite. Use kml pop to retrieve, kml push to rearchive, "
+        "archive recover for interrupted moves, or import a backup ZIP into a new directory. "
+        "Legacy history files are retained unchanged."
+    )
 
 
 @archive_app.command("log")
 def archive_log(
-    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    zip_path: Annotated[
+        str | None, typer.Option("--zip", help="Archive locator: legacy ZIP path selects its sibling SQLite database")
+    ] = None,
     last: Annotated[int, typer.Option("--last", min=1, help="How many of the newest changes to show")] = 10,
 ) -> None:
     """List the archive's recorded changes, newest first."""
     archive_dir, _ = resolve_archive(zip_path)
+    log.warning("Legacy history only; SQLite does not record long-term history. Use archive status / recover.")
     changes = kml_history.load(archive_dir)
     if not changes:
         log.info("No recorded changes", target=str(archive_dir))
@@ -347,10 +407,12 @@ def kml_set_tag(
 def kml_push(
     paths: Annotated[list[Path], typer.Argument(help="KML file(s) to archive, wildcards allowed")],
     track_type: Annotated[TrackKind | None, typer.Option("--type", help="Track type (Default/Train/Flight)")] = None,
-    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    zip_path: Annotated[
+        str | None, typer.Option("--zip", help="Archive locator: legacy ZIP path selects its sibling SQLite database")
+    ] = None,
     keep: Annotated[bool, typer.Option("--keep", help="Leave the source files where they are")] = False,
 ) -> None:
-    """Archive KMLs: add to both collections, compress into ZIP, and collect the sources into the backup folder."""
+    """Archive exact KML bytes in SQLite; collect sources into Backup unless --keep."""
     files = _expand_paths(paths)
     _finish(workflows.push_tracks(files, zip_path, track_type, move=not keep, tag_map=ctx.config.track_tag_map))
 
@@ -362,10 +424,12 @@ def kml_pop(
         TrackKind | None,
         typer.Option("--type", help="Track type; omit to search every type (Default/Train/Flight)"),
     ] = None,
-    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    zip_path: Annotated[
+        str | None, typer.Option("--zip", help="Archive locator: legacy ZIP path selects its sibling SQLite database")
+    ] = None,
     force: Annotated[bool, typer.Option("--force", help="Warn instead of stopping when the archive disagrees")] = False,
 ) -> None:
-    """Restore a KML from the archive: extract into the current directory, remove from collections."""
+    """Restore original bytes into the current directory and remove the SQLite member."""
     kml_archive.pop_kml_archive(kml_name, track_type, zip_path, force, tag_map=ctx.config.track_tag_map)
 
 
@@ -526,7 +590,9 @@ def exif_show_missing(
 @exif_app.command("geotag")
 def exif_geotag(
     path: Annotated[Path, typer.Argument(help="File or directory")],
-    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    zip_path: Annotated[
+        str | None, typer.Option("--zip", help="Archive locator: legacy ZIP path selects its sibling SQLite database")
+    ] = None,
     max_time_diff: Annotated[
         int, typer.Option("--max-time-diff", help="Max seconds from the nearest recorded track point")
     ] = MAX_TIME_DIFF_SECONDS,
@@ -648,7 +714,9 @@ def exif_group(
 @exif_app.command("repair")
 def exif_repair(
     path: Annotated[Path, typer.Argument(help="Directory of media files")],
-    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    zip_path: Annotated[
+        str | None, typer.Option("--zip", help="Archive locator: legacy ZIP path selects its sibling SQLite database")
+    ] = None,
     parallel: ParallelOpt = False,
 ) -> None:
     """Repair files missing GPSPosition/GPSAltitude (Google altitude, then KML position)."""
@@ -663,7 +731,9 @@ def exif_repair_vid(
     make: Annotated[str | None, typer.Option("--make", help="Camera make to write")] = None,
     model: Annotated[str | None, typer.Option("--model", help="Camera model to write")] = None,
     offset_time: OffsetTimeOpt = mediatime.DEFAULT_TZ_OFFSET,
-    zip_path: Annotated[str | None, typer.Option("--zip", help="KML ZIP archive path")] = None,
+    zip_path: Annotated[
+        str | None, typer.Option("--zip", help="Archive locator: legacy ZIP path selects its sibling SQLite database")
+    ] = None,
     parallel: ParallelOpt = False,
     timezone_policy: TimezonePolicyOpt = mediatime.TimezonePolicy.AUTO,
     time_source: TimeSourceOpt = None,
@@ -738,6 +808,10 @@ def config_set(
         raise UserInputError(
             f"Unknown track category: {key}. Categories: {', '.join(TRACK_KIND_NAMES)}; add an activity with "
             f'tracktool config set "{TRACK_TAG_PREFIX}Default" "+<activity>"'
+        )
+    if key == "archive_history":
+        log.warning(
+            "archive_history is deprecated; SQLite has no long-term undo history. Use archive recover / backup."
         )
     if key not in DEFAULTS:
         close = difflib.get_close_matches(key, DEFAULTS, n=1)

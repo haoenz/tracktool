@@ -2,7 +2,7 @@
 
 The archive's tracks are read and parsed per month on first demand — layered
 entries carry their month in the entry path, so a batch whose media spans two
-weeks touches two months' entries instead of decompressing the whole ZIP —
+weeks touches two months' entries instead of loading the whole archive —
 and each media file's timestamp is matched against the tracks whose name
 carries the date (±1 day with --multiday). Recording bounds reject impossible
 tracks before binary search. The closest point across all remaining tracks
@@ -14,12 +14,11 @@ and a track lookup, returning the steps to take; the batch only replays them.
 
 import re
 import threading
-import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from math import isnan
 from pathlib import Path
-from zipfile import BadZipFile
 
 from .. import coords, log, mediatime
 from ..actions import Action, Failed, Skip, WriteTags, run
@@ -27,8 +26,8 @@ from ..context import ctx
 from ..discover import list_files
 from ..errors import UserInputError
 from ..fileutil import BatchResult, run_per_file
-from ..kml import xmlutil
-from ..kml.track import Track, TrackMatch
+from ..kml.archive_reader import open_archive
+from ..kml.track import Track, TrackMatch, TrackPoint
 from ..metadata import MediaMetadata
 from ..paths import display_path
 from ..tags import POSITION_TAGS
@@ -51,20 +50,18 @@ class _TrackLibrary:
 
     def __init__(self, zip_path: Path) -> None:
         self._zip_path = zip_path
-        self._zf = zipfile.ZipFile(zip_path)
-        self._by_month: dict[str, list[zipfile.ZipInfo]] = {}
-        self._unlayered: list[zipfile.ZipInfo] = []
+        self._by_month: dict[str, list[str]] = {}
+        self._unlayered: list[str] = []
         total = 0
-        for info in self._zf.infolist():
-            if not info.filename.lower().endswith(".kml"):
-                continue
-            total += 1
-            parts = info.filename.split("/")
-            month = parts[1] if len(parts) >= 3 and self._MONTH.match(parts[1]) else None
-            if month is None:
-                self._unlayered.append(info)
-            else:
-                self._by_month.setdefault(month, []).append(info)
+        with open_archive(zip_path) as archive:
+            for entry in archive.list_entries():
+                total += 1
+                parts = entry.path.split("/")
+                month = parts[1] if len(parts) >= 3 and self._MONTH.match(parts[1]) else None
+                if month is None:
+                    self._unlayered.append(entry.path)
+                else:
+                    self._by_month.setdefault(month, []).append(entry.path)
         self._cache: dict[str, list[Track]] = {}
         self._unlayered_tracks: list[Track] | None = None
         self._lock = threading.Lock()
@@ -89,7 +86,7 @@ class _TrackLibrary:
                 infos = self._by_month.get(month, [])
                 cached = [track for info in infos if (track := self._parse(info)) is not None]
                 self._cache[month] = cached
-                log.debug(f"Loaded {len(cached)} tracks for {month} from ZIP: {display_path(self._zip_path)}")
+                log.debug(f"Loaded {len(cached)} tracks for {month} from SQLite: {display_path(self._zip_path)}")
         return cached
 
     def _always_tracks(self) -> list[Track]:
@@ -98,14 +95,28 @@ class _TrackLibrary:
                 self._unlayered_tracks = [track for info in self._unlayered if (track := self._parse(info)) is not None]
             return self._unlayered_tracks
 
-    def _parse(self, info: zipfile.ZipInfo) -> Track | None:
-        """Read and parse one entry; the caller holds the lock, since zipfile's
-        one shared file object does not take kindly to concurrent reads."""
-        name = Path(info.filename).name
+    def _parse(self, entry: str) -> Track | None:
         try:
-            text = self._zf.read(info.filename).decode("utf-8")
-            return Track.from_kml(xmlutil.parse_string(text), name)
-        except (UserInputError, BadZipFile, UnicodeDecodeError) as exc:
+            with open_archive(self._zip_path) as archive:
+                data = archive.read_track_data(entry)
+            points = []
+            epoch = datetime(1970, 1, 1, tzinfo=UTC)
+            for feature in data.tracks:
+                for segment in feature.segments:
+                    if segment.time_us is None:
+                        continue
+                    for i, stamp in enumerate(segment.time_us):
+                        alt = segment.altitude[i] if segment.altitude is not None else 0.0
+                        points.append(
+                            TrackPoint(
+                                segment.latitude[i],
+                                segment.longitude[i],
+                                0.0 if isnan(alt) else alt,
+                                epoch + timedelta(microseconds=stamp),
+                            )
+                        )
+            return Track(Path(entry).name, tuple(points))
+        except UserInputError as exc:
             log.warning(f"Skipping broken KML track: {exc}")
             return None
 
@@ -251,7 +262,7 @@ def geotag_from_kml(
     options: GeotagOptions | None = None,
     parallel: bool = False,
 ) -> BatchResult[list[Action]]:
-    """Set GPS position/altitude on media files from the KML ZIP archive.
+    """Set GPS position/altitude on media files from the SQLite archive.
 
     A file list is accepted so one call can cover a whole selection: the
     archive's relevant months are read and parsed once for the batch, not
@@ -263,7 +274,7 @@ def geotag_from_kml(
 
     try:
         library = _TrackLibrary(zip_path)
-    except (OSError, BadZipFile) as exc:
+    except OSError as exc:
         raise UserInputError(f"Failed to read KML archive file: {display_path(zip_path)}") from exc
 
     files = list_files(path)

@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from conftest import TRACK_KML, InMemoryBackend, make_archive
+from conftest import TRACK_KML, InMemoryBackend, import_test_zip, make_archive
 from typer.testing import CliRunner
 
 from tracktool import workflows
@@ -133,7 +133,6 @@ class TestArchiveWritesAreReported:
         zip_path = tmp_path / "archive" / "Archive.zip"
 
         archive.ensure_archive_directory(zip_path.parent)
-        archive.ensure_zip_file(zip_path)
         archive.push_compressed_kml(_kml(tmp_path), zip_path)
 
         assert not zip_path.parent.exists()
@@ -143,6 +142,7 @@ class TestArchiveWritesAreReported:
         zip_path = tmp_path / "Archive.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("2024-05-01 test.kml", TRACK_KML)
+        import_test_zip(zip_path)
         (tmp_path / "2024-05-01 test.kml").write_text("occupied", encoding="utf-8")
 
         with pytest.raises(UserInputError, match="already exists at destination"):

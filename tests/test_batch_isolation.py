@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from conftest import TRACK_KML, requires_media_tools
+from conftest import TRACK_KML, import_test_zip, requires_media_tools
 from fixtures.media import make_test_jpeg
 from typer.testing import CliRunner
 
@@ -41,6 +41,7 @@ def _write_kml_zip(tmp_path: Path) -> Path:
     zip_path = tmp_path / "Archive.zip"
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr("2024-05-01 test.kml", TRACK_KML)
+    import_test_zip(zip_path)
     (tmp_path / "archive.json").write_text('{"version": 1, "zip": "Archive.zip"}', encoding="utf-8")
     return zip_path
 

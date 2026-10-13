@@ -86,8 +86,9 @@ def track_data_from_tree(tree: xmlutil.etree._ElementTree, *, source: str = "") 
     """Extract lines from an existing XML tree without modifying it.
 
     Raise UserInputError for invalid/empty supported geometry, invalid numbers,
-    timestamps without an explicit timezone, or partial time data within any
-    gx:Track. No lines also raises UserInputError. Time order is unrestricted.
+    or invalid timestamps in aligned time arrays. A gx:Track with mismatched
+    coordinate/time counts is read without time data. No lines also raises
+    UserInputError. Time order is unrestricted.
     Points/polygons are ignored. A one-point line is retained as provided.
     """
     ns = xmlutil.doc_ns(tree)
@@ -177,12 +178,9 @@ def _read_segment(node: xmlutil.etree._Element, kind: str, kml: str, location: s
         # this Track. Never zip the document-wide coordinate/time collections.
         when_tags = (f"{kml}when", f"{gx}when")
         time_count = sum(1 for _ in node.iterchildren(*when_tags))
-        if time_count:
-            if time_count != len(longitude):
-                raise UserInputError(
-                    f"{location}, point {min(time_count, len(longitude)) + 1}: "
-                    f"{len(longitude)} coordinate(s) but {time_count} timestamp(s)"
-                )
+        # Without one-to-one alignment, none of this segment's times can be
+        # assigned reliably. Keep all geometry, as for an untimed drawn track.
+        if time_count and time_count == len(longitude):
             time_us = array("q")
             for index, child in enumerate(node.iterchildren(*when_tags), 1):
                 time_us.append(_timestamp(xmlutil.element_text(child), f"{location}, point {index}"))

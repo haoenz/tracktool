@@ -1,40 +1,10 @@
-"""Multi-step commands: what a command does, in the order it does it.
+"""Command orchestration: SQLite archiving and media repair workflows.
 
-Filing a track into the archive is not one action but a short sequence of
-them — file it into each collection, append it to the ZIP, move it to the
-backup folder — and repairing a folder of videos is a longer one. Written as
-statements inside a function, that order exists only while it runs: a reader
-has to follow the calls, and a preview has nothing to show. Written as a list
-of steps, the same sequence *is* the command's plan — `--dry-run` prints it as
-a table — and a step is where a batch happens as one thing.
-
-That last part is why the steps are shaped the way they are. Each step of a
-push works on the batch, not on one track: one collection is opened once and
-every track it receives is appended to it, and the ZIP is opened once for all
-of them. Putting the loop inside the step instead of the step inside the loop
-is the difference between one read and one write of a 40 MiB archive and one
-per track.
-
-The commands that live here are the ones that are a sequence rather than an
-action: filing tracks into the archive, and the two repairs — repair
-fills GPSAltitude from Google before GPSPosition from the KML archive, and
-marks what it fixed in a GoogleAltOK folder; repair-vid turns a VID directory
-into VID_original, converts its videos into a fresh VID, and repairs those. A
-preview goes through the same steps and stops at the same places, so the steps
-it cannot show are the ones whose *inputs* the earlier steps produce — the
-rename of VID, the folder the repaired files land in — and it says so instead
-of pretending to know.
-
-A step is not a decision the backend can carry out; the workflow owns its
-effect (see actions.Step). Whether that effect writes is decided below it, by
-the primitives it calls, so nothing here consults the run mode except where a
-step's inputs only exist once an earlier step has written.
+Push validates/classifies source files, then commits raw content and durable file
+intents in one storage transaction. Exports are separate commands.
 """
 
-from collections import defaultdict
 from collections.abc import Mapping
-from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 
 from . import log, mediatime
@@ -45,101 +15,15 @@ from .exif.google import fill_altitude_from_google
 from .exif.media import convert_to_mp4, validate_conversion_options
 from .exif.position import GeotagOptions, geotag_from_kml
 from .exif.write import find_missing_tag
-from .fileutil import BatchResult, folder_target, move_to_folder
-from .kml import archive, collections, history, kmlfile
-from .kml.kmlfile import KmlContent, TrackKind
+from .fileutil import BatchResult, move_to_folder
+from .kml import archive, collections, kmlfile, xmlutil
+from .kml.kmlfile import TrackKind
 from .paths import display_path
 from .progress import batch_progress
 from .tags import ALTITUDE, POSITION
 from .workspace import resolve_archive
 
 REPAIRED_FOLDER = "GoogleAltOK"
-
-
-@dataclass(frozen=True)
-class _Track:
-    """A track on its way into the archive: read once, filed once."""
-
-    path: Path
-    type_: TrackKind
-    content: KmlContent
-
-
-def _read_track(path: Path, type_: TrackKind | None, tag_map: Mapping[str, str] | None = None) -> _Track | None:
-    """Read what the archive needs from a track; None — logged — when it cannot be filed.
-
-    Reading happens while the plan is built, so a track that cannot be filed
-    is a failure the preview reports too, and the contents are carried into
-    the steps instead of being read again per collection.
-    """
-    try:
-        kind = type_ if type_ is not None else kmlfile.get_kml_type(path, tag_map=tag_map)
-        collections.desktop_date(path)  # 桌面聚合按文件名里的日期归档
-        content = kmlfile.get_kml_content(path)
-    except UserInputError as exc:
-        log.error(str(exc), target=str(path))
-        return None
-    if kind is None:
-        # 识别不出不是一种类型：报出值本身和两条出路（换成词表里的词、把词加进表），
-        # 而不是把它归进一个 Unknown 类目
-        log.error(kmlfile.explain_unknown_tags(kmlfile.get_track_tags(path)), target=str(path))
-        return None
-    return _Track(path=path, type_=kind, content=content)
-
-
-def _names(tracks: list[_Track]) -> str:
-    return ", ".join(track.path.stem for track in tracks)
-
-
-def _file_desktop(collection_path: Path, type_: TrackKind, tracks: list[_Track]) -> None:
-    """File the batch's tracks of one type into their desktop collection."""
-    with batch_progress(len(tracks), ctx.reporter("Updating desktop collection")) as advance:
-        archive.ensure_archive_directory(collection_path.parent)
-        collection = collections.DesktopCollection.open(collection_path, type_)
-        for track in tracks:
-            collection.add(track.path, track.content)
-            advance()
-        collection.save()
-
-
-def _file_mobile(collection_path: Path, tracks: list[_Track]) -> None:
-    """File the batch's tracks of one type into their mobile collection."""
-    with batch_progress(len(tracks), ctx.reporter("Updating mobile collection")) as advance:
-        archive.ensure_archive_directory(collection_path.parent)
-        collection = collections.MobileCollection.open(collection_path)
-        for track in tracks:
-            collection.add(track.path, track.content)
-            advance()
-        collection.save()
-
-
-def _append_to_zip(tracks: list[_Track], zip_file: Path, change: history.Change) -> None:
-    with batch_progress(len(tracks), ctx.reporter("Writing ZIP")) as advance:
-        archive.ensure_zip_file(zip_file)
-        # 前移哈希的判据归 archive 所有（与 pop 共用一处）：它要的是推之前的真值哈希
-        zip_hash_before = archive.current_hash(zip_file)
-        stored_views_hash = archive.read_views_hash(zip_file)
-        change.added_entries = archive.push_compressed_kmls(
-            [(track.path, track.type_.value) for track in tracks], zip_file, on_entry=advance
-        )
-        archive.advance_views_hash(zip_file, zip_hash_before=zip_hash_before, stored_views_hash=stored_views_hash)
-
-
-def _move_to_backup(tracks: list[_Track], archive_dir: Path, change: history.Change) -> None:
-    with batch_progress(len(tracks), ctx.reporter("Moving to backup")) as advance:
-        archive.ensure_archive_directory(archive_dir)
-        backup_folder = ctx.config.kml_backup_dir_name
-        for track in tracks:
-            if move_to_folder(track.path, backup_folder, archive_dir):
-                # 只记源文件真的离开了原位的：搬走的，和 Backup 里已有同内容副本而被清掉的
-                # 都算；同名而内容不同时两处都留着，那一对与「没带 --move」同义，不记
-                change.backup_moves.append(
-                    history.BackupMove(
-                        original_path=str(track.path),
-                        backup_path=str(folder_target(track.path, backup_folder, archive_dir)),
-                    )
-                )
-            advance()
 
 
 def push_tracks(
@@ -150,95 +34,41 @@ def push_tracks(
     *,
     tag_map: Mapping[str, str] | None = None,
 ) -> BatchResult[list[Action]]:
-    """File tracks into the archive: both collections, then the ZIP.
-
-    The steps are where the batch happens: each collection is opened once for
-    every track of the batch that belongs in it, and the archive once for all
-    of them, so N tracks are one read and one write of the archive rather than
-    N. A track that cannot be filed (unreadable, undated, unknown type) is
-    counted as failed and the rest of the batch goes on. Filing a track means
-    consuming it: every track the batch filed is moved into the backup folder,
-    the ones the archive already held included — all three stores skip a
-    duplicate by name, so a second filing of a track touches nothing, and the
-    move turns the same run into a sweep that also collects the stray copy.
-    A stray copy whose content the backup folder already holds is dropped
-    instead of being kept twice; one whose content differs stays where it is,
-    with a warning. Either way the record is about the source: a file the run
-    carried away — including one it dropped as the backup folder's duplicate —
-    is logged as a backup move, and one it left in place is not. `move` is off
-    when the caller keeps its sources (--keep).
-
-    What the run did to the archive is recorded as it goes, and the record is
-    written even when a step fails: entries an earlier step already added are
-    as much in the archive as any other, and leaving them unrecorded would put
-    them beyond `archive undo`'s reach.
-    """
-    archive_dir, zip_file = resolve_archive(zip_path)
+    """Validate per-file classification, then commit raw KML and move intents."""
+    _, zip_file = resolve_archive(zip_path)
     result: BatchResult[list[Action]] = BatchResult()
+    pending: list[tuple[Path, str]] = []
     with batch_progress(len(paths), ctx.reporter("Reading KMLs")) as advance:
-        change = history.start(history.PUSH, zip_hash_before=archive.current_hash(zip_file))
-
-        pending: list[_Track] = []
-        for path in paths:
-            track = _read_track(path, type_, tag_map)
-            if track is None:
+        for path in dict.fromkeys(paths):
+            try:
+                xmlutil.parse_file(path)
+                kind = type_ if type_ is not None else kmlfile.get_kml_type(path, tag_map=tag_map)
+                collections.desktop_date(path)
+                if kind is None:
+                    raise UserInputError(kmlfile.explain_unknown_tags(kmlfile.get_track_tags(path)))
+                pending.append((path, kind.value))
+            except UserInputError as exc:
+                log.error(str(exc), target=path)
                 result.failed.append(path)
-            else:
-                pending.append(track)
             advance()
-    # 记下用到的源文件：归档里那份不是它们的副本，源件被清掉时只有日志知道
-    change.source_paths = [str(track.path) for track in pending]
 
-    by_type: dict[TrackKind, list[_Track]] = defaultdict(list)
-    for track in pending:
-        by_type[track.type_].append(track)
+    def commit() -> None:
+        with batch_progress(len(pending), ctx.reporter("Writing SQLite")) as advance:
+            archive.push_compressed_kmls(pending, zip_file, move=move, on_entry=advance)
 
-    steps: list[Action] = []
-    for type_, tracks in by_type.items():
-        desktop_path, mobile_path = collections.collection_paths(type_, archive_dir)
-        steps.append(
-            Step(
-                file=desktop_path,
-                kind="add to collection",
-                detail=_names(tracks),
-                effect=partial(_file_desktop, desktop_path, type_, tracks),
-            )
-        )
-        steps.append(
-            Step(
-                file=mobile_path,
-                kind="add to mobile collection",
-                detail=_names(tracks),
-                effect=partial(_file_mobile, mobile_path, tracks),
-            )
-        )
     if pending:
-        steps.append(
-            Step(
-                file=zip_file,
-                kind="append to ZIP",
-                detail=_names(pending),
-                effect=partial(_append_to_zip, pending, zip_file, change),
+        result.succeeded.append(
+            run(
+                [
+                    Step(
+                        file=zip_file.parent / "archive.sqlite3",
+                        kind="archive in SQLite",
+                        detail=f"{len(pending)} KML(s); move sources={move}; ZIP exported separately",
+                        effect=commit,
+                    )
+                ]
             )
         )
-    if pending and move:
-        steps.append(
-            Step(
-                file=archive_dir / ctx.config.kml_backup_dir_name,
-                kind="move to backup folder",
-                detail=_names(pending),
-                effect=partial(_move_to_backup, pending, archive_dir, change),
-            )
-        )
-
-    try:
-        result.succeeded.append(run(steps))
-    finally:
-        # 落盘的那部分照记：一次失败的 push 也可能已经加进几条，那些同样要撤得回来。
-        # 一条都没读出来时不记：没有步骤，也就没有动过归档的东西
-        if pending:
-            with batch_progress(1, ctx.reporter("Recording push")):
-                history.commit(archive_dir, change, zip_hash_after=archive.current_hash(zip_file))
     return result
 
 

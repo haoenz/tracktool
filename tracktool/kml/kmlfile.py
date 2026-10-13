@@ -2,7 +2,7 @@
 
 A KML records what a track *is* in one ExtendedData value, TrackTags: a 2bulu
 activity name (徒步, 地铁). The archive's category — the collection file name,
-the ZIP entry's folder — is derived from that, never stored beside it, and the
+the archive entry category — is derived on new ingestion and persisted separately; the
 table saying which activity belongs to which category is the user's, so it
 lives in the config (`track_tag.*`) and reaches this module as a `tag_map`
 argument. A caller that has no Config — a test, a library user — falls back to
@@ -82,7 +82,7 @@ def track_tags_from_tree(tree: xmlutil.etree._ElementTree) -> str:
 def kind_from_tree(
     tree: xmlutil.etree._ElementTree, target: str = "", *, tag_map: Mapping[str, str] | None = None
 ) -> TrackKind | None:
-    """The same mapping for an already-parsed document — what rebuild reads from the ZIP.
+    """The same mapping for an already-parsed document — what aggregate export reads from SQLite.
 
     None is not a category: a file whose TrackTags is absent, empty, or outside
     the table has no kind to file it under, and picking one anyway would put a
@@ -214,6 +214,7 @@ def set_track_tags_batch(paths: list[Path], activity: str, create_tag: bool = Fa
 class KmlContent:
     line_string: str
     description: str
+    segments: tuple[str, ...] = ()
 
 
 def get_kml_content(path: Path) -> KmlContent:
@@ -228,20 +229,18 @@ def get_kml_content(path: Path) -> KmlContent:
 
 
 def content_from_tree(tree: xmlutil.etree._ElementTree, target: str = "") -> KmlContent:
-    """The same extraction for an already-parsed document — what rebuild reads from the ZIP."""
-    line_string = ""
+    """The same extraction for an already-parsed document — what aggregate export reads from SQLite."""
+    segments = []
     for placemark in xmlutil.findall(tree, "//kml:Placemark"):
-        # coordinates directly under this Placemark's LineString
-        ls_node = placemark.find(f"{{{xmlutil.doc_ns(tree)}}}LineString/{{{xmlutil.doc_ns(tree)}}}coordinates")
-        if ls_node is not None and (ls_node.text or "").strip():
-            line_string = " ".join(part for part in (line_string, (ls_node.text or "").strip()) if part)
-        else:
-            # 将带时间信息的 gx:Track 转换为不带时间信息的 LineString
-            for coord in placemark.iter(f"{{{xmlutil.GX_NS}}}coord"):
-                if (coord.text or "").strip():
-                    line_string = " ".join(
-                        part for part in (line_string, (coord.text or "").strip().replace(" ", ",")) if part
-                    )
+        for node in placemark.iter(f"{{{xmlutil.doc_ns(tree)}}}LineString", f"{{{xmlutil.GX_NS}}}Track"):
+            if node.tag.endswith("LineString"):
+                coords = node.find(f"{{{xmlutil.doc_ns(tree)}}}coordinates")
+                text = (coords.text or "").strip() if coords is not None else ""
+            else:
+                text = " ".join(",".join((c.text or "").split()) for c in node.iter(f"{{{xmlutil.GX_NS}}}coord"))
+            if text:
+                segments.append(text)
+    line_string = " ".join(segments)
     log.debug("Extracted LineString coordinates", target=target or None)
 
     description = ""
@@ -257,4 +256,4 @@ def content_from_tree(tree: xmlutil.etree._ElementTree, target: str = "") -> Kml
         description += ("".join(desc_node.itertext()) or "") + "\n"
     log.debug("Extracted track description and metadata", target=target or None)
 
-    return KmlContent(line_string=line_string, description=description)
+    return KmlContent(line_string=line_string, description=description, segments=tuple(segments))

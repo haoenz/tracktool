@@ -5,7 +5,7 @@ import zipfile
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
-from conftest import InMemoryBackend, make_archive
+from conftest import InMemoryBackend, import_test_zip, make_archive
 
 from tracktool.context import RunMode, ctx
 from tracktool.errors import UserInputError
@@ -152,6 +152,7 @@ def test_library_skips_unsorted_track_and_keeps_valid_track(tmp_path, caplog):
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("Default/2024-05/2024-05-01 bad.kml", kml([60, 0], 39))
         zf.writestr("Default/2024-05/2024-05-01 good.kml", kml([0, 60], 40))
+    import_test_zip(archive)
     tracks = _TrackLibrary(archive).tracks_for(["2024-05-01"])
     assert [t.name for t in tracks] == ["2024-05-01 good.kml"]
     assert "time order" in caplog.text
@@ -165,6 +166,7 @@ def test_batch_uses_best_track_and_custom_tolerance(tmp_path, monkeypatch, paral
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("Default/2024-05/2024-05-01 sparse.kml", kml([0, 1200], 39))
         zf.writestr("Default/2024-05/2024-05-01 exact.kml", kml([600], 40))
+    import_test_zip(archive)
     files = [tmp_path / "exact.jpg", tmp_path / "endpoint.jpg"]
     backend = InMemoryBackend()
     for file, timestamp in zip(files, ["00:10:00", "00:21:30"], strict=True):

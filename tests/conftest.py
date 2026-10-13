@@ -181,3 +181,18 @@ def plan_mode(apply_mode, monkeypatch) -> None:
     the same way the CLI does and then calls the ordinary entry point.
     """
     monkeypatch.setattr(ctx, "mode", RunMode.PLAN)
+
+
+def import_test_zip(path: Path) -> None:
+    """Explicitly seed a disposable test database from a legacy ZIP fixture.
+
+    An existing database must be empty; this helper is never production code.
+    """
+    from tracktool.kml import storage
+
+    target = path.parent / storage.DB_NAME
+    if target.exists():
+        with storage.connect(target) as db:
+            assert db.execute("SELECT count(*) FROM archive_entries").fetchone()[0] == 0
+        target.unlink()
+    storage.create_database(target, path)

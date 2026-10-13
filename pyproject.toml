@@ -96,6 +96,8 @@ name = "exif geotags against the track model, not the archive orchestration"
 type = "forbidden"
 source_modules = ["tracktool.exif"]
 forbidden_modules = ["tracktool.kml.archive", "tracktool.kml.collections", "tracktool.kml.kmlfile"]
+# EXIF reads only archive_reader; its private storage/import helpers may depend on KML inspection.
+allow_indirect_imports = true
 
 # 绘图只接受状态与边界几何；不认识 KML、归档、编排或入口。
 [[tool.importlinter.contracts]]
@@ -105,7 +107,7 @@ source_modules = ["tracktool.drawing"]
 forbidden_modules = ["tracktool.kml", "tracktool.workflows", "tracktool.map_workflow", "tracktool.editor"]
 
 [[tool.importlinter.contracts]]
-name = "map orchestration only uses the read-only archive interface"
+name = "map orchestration uses archive reader and project storage, not archive workflows"
 type = "forbidden"
 source_modules = ["tracktool.map_workflow"]
 forbidden_modules = ["tracktool.kml.archive", "tracktool.kml.collections", "tracktool.kml.kmlfile", "tracktool.workflows"]

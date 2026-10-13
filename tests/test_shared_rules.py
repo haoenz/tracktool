@@ -11,6 +11,7 @@ from tracktool.config import Config
 from tracktool.context import ctx
 from tracktool.errors import UserInputError
 from tracktool.kml.archive import UNCLASSIFIED, zip_entry_name
+from tracktool.kml.archive_reader import open_archive
 from tracktool.metadata import is_missing_altitude
 from tracktool.workspace import resolve_archive
 
@@ -64,7 +65,7 @@ class TestResolveArchive:
 
         assert resolve_archive(None) == (zip_path.parent.resolve(), zip_path.resolve())
 
-    def test_the_manifest_names_the_zip(self, tmp_path: Path, monkeypatch):
+    def test_legacy_manifest_cannot_redirect_database_exports(self, tmp_path: Path, monkeypatch):
         """ZIP 文件名记在 archive.json 里，不必非叫 Archive.zip。"""
         directory = tmp_path / "archive"
         make_archive(directory)
@@ -72,7 +73,7 @@ class TestResolveArchive:
         self._install(tmp_path, monkeypatch, archive_path=str(directory))
 
         _, zip_file = resolve_archive(None)
-        assert zip_file == (directory / "Tracks.zip").resolve()
+        assert zip_file == (directory / "Archive.zip").resolve()
 
     def test_unset_path_raises(self, tmp_path: Path, monkeypatch):
         self._install(tmp_path, monkeypatch, archive_path="")
@@ -137,5 +138,6 @@ class TestResolveArchive:
         merge_kml([src], tmp_path / "merged.kml", move=True)
 
         # merge 产物没有类型信息，落在 _unclassified 而不是被猜一个类型
-        assert zip_entry_name(src, UNCLASSIFIED) in zipfile.ZipFile(zip_path).namelist()
+        with open_archive(zip_path) as archive:
+            assert zip_entry_name(src, UNCLASSIFIED) in [e.path for e in archive.list_entries()]
         assert (zip_path.parent / "Backup" / src.name).is_file()

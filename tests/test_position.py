@@ -5,10 +5,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from conftest import TRACK_KML
+from conftest import TRACK_KML, import_test_zip
 
 from tracktool import mediatime
 from tracktool.actions import Failed, Skip, WriteTags
+from tracktool.errors import UserInputError
 from tracktool.exif.position import (
     GeotagOptions,
     _candidate_dates,
@@ -159,6 +160,7 @@ class TestTrackLibrary:
         with zipfile.ZipFile(zip_path, "w") as zf:
             for name, text in entries.items():
                 zf.writestr(name, text)
+        import_test_zip(zip_path)
         return zip_path
 
     def test_layered_entries_load_by_month(self, tmp_path):
@@ -202,7 +204,7 @@ class TestTrackLibrary:
         assert second == first  # 同一月份只解析一次：两次查询拿到同一批 Track 对象
 
     def test_broken_kml_is_skipped_not_fatal(self, tmp_path):
-        broken = TRACK_KML.replace("<when>2024-05-01T00:02:00Z</when>", "")
+        broken = TRACK_KML.replace("<when>2024-05-01T00:02:00Z</when>", "<when>invalid</when>")
         zip_path = self._zip(
             tmp_path,
             {
@@ -214,17 +216,16 @@ class TestTrackLibrary:
 
         assert [t.name for t in library.tracks_for(["2024-05-01"])] == ["2024-05-01 good.kml"]
 
-    def test_non_kml_entries_are_ignored(self, tmp_path):
-        zip_path = self._zip(
-            tmp_path,
-            {
-                "Default/2024-05/2024-05-01 a.kml": TRACK_KML,
-                "Default/2024-05/notes.txt": "not a track",
-            },
-        )
-        library = _TrackLibrary(zip_path)
+    def test_mismatched_time_count_produces_no_geotag_points(self, tmp_path):
+        untimed = TRACK_KML.replace("<when>2024-05-01T00:02:00Z</when>", "")
+        zip_path = self._zip(tmp_path, {"Default/2024-05/2024-05-01 untimed.kml": untimed})
+        tracks = _TrackLibrary(zip_path).tracks_for(["2024-05-01"])
+        assert len(tracks) == 1
+        assert not tracks[0].points
 
-        assert [t.name for t in library.tracks_for(["2024-05-01"])] == ["2024-05-01 a.kml"]
+    def test_non_kml_import_is_reported(self, tmp_path):
+        with pytest.raises(UserInputError, match="Non-KML"):
+            self._zip(tmp_path, {"a.kml": TRACK_KML, "notes.txt": "not a track"})
 
 
 class TestVerifyOrSkip:

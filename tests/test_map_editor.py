@@ -11,7 +11,7 @@ from tracktool.drawing.gazetteer import build_gazetteer
 from tracktool.drawing.geometry import geojson
 from tracktool.drawing.state import default_state, validate_state
 from tracktool.errors import UserInputError
-from tracktool.kml import trackdata
+from tracktool.kml import storage, trackdata
 from tracktool.map_workflow import MapWorkspace
 
 KML = """<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><MultiGeometry>
@@ -22,11 +22,17 @@ KML = """<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><Multi
 
 
 def archive_at(tmp_path, members):
-    (tmp_path / "archive.json").write_text("{}")
     path = tmp_path / "Archive.zip"
-    with zipfile.ZipFile(path, "w") as archive:
+    db_path = tmp_path / storage.DB_NAME
+    if not db_path.exists():
+        storage.create_database(db_path)
+    with storage.connect(db_path, write=True) as db:
+        db.execute("DELETE FROM archive_entries")
         for name, content in members:
-            archive.writestr(name, content)
+            category = (
+                name.split("/")[0] if "/" in name and name.split("/")[0] in {"Default", "Train", "Flight"} else None
+            )
+            storage.add_entry(db, name, content.encode(), category)
     return path
 
 

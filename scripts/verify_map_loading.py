@@ -12,6 +12,7 @@ from playwright.sync_api import expect, sync_playwright
 
 import tracktool.editor as editor
 from tracktool.errors import UserInputError
+from tracktool.kml.storage import DB_NAME, create_database
 
 
 def main():
@@ -58,6 +59,7 @@ def main():
           <LineString><coordinates>102.76,25.07 102.8,25.02</coordinates></LineString>
           </MultiGeometry></Placemark></Document></kml>""",
         )
+    create_database(fixture / DB_NAME, archive)
     original_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
     report = {}
     try:
@@ -68,7 +70,14 @@ def main():
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.on("request", lambda r: selections.append(r.url) if "/api/selection" in r.url else None)
             page.goto(app.origin)
-            page.locator("#status").filter(has_text="地图已就绪").wait_for(timeout=90000)
+            try:
+                page.locator("#status").filter(has_text="地图已就绪").wait_for(timeout=90000)
+            except Exception:
+                report["startup_status"] = page.locator("#status").inner_text()
+                report["page_errors"] = errors
+                page.screenshot(path=str(args.output / "startup-failure.png"))
+                print(json.dumps(report, ensure_ascii=False), flush=True)
+                raise
             # Load a tiny, generated archive through the ordinary project flow.
             selected = app.workspace.selection(str(archive.resolve()), ["Default/2026-10-13 test.kml"])
             project = page.evaluate("window.tracktool.state")
