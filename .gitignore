@@ -12,6 +12,7 @@ ai-notes/
 .workbuddy/
 /config.json
 /sandbox/
+/data/
 /.tracktool-map-secrets.json
 
 # TypeScript build and validation artifacts

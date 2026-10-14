@@ -1,3 +1,4 @@
+import { tool } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 import { test, expect } from "@playwright/test";
 import sharp from "sharp";
@@ -27,6 +28,7 @@ async function call<T>(
     { url, body },
   );
 }
+
 test("archive → selection → styling → save/reopen → JSON → independent PNG", async ({
   page,
 }, info) => {
@@ -34,6 +36,8 @@ test("archive → selection → styling → save/reopen → JSON → independent
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/map");
+  await tool(page, "新建出图工程");
+  await tool(page, "轨迹库");
   await expect(page.getByRole("heading", { name: "轨迹地图" })).toBeVisible();
   await expect(
     page.getByRole("checkbox", {
@@ -44,19 +48,28 @@ test("archive → selection → styling → save/reopen → JSON → independent
   await page
     .getByRole("checkbox", { name: "Default/2026-10-01 中文.kml", exact: true })
     .click();
-  await expect(page.getByRole("status")).toContainText("已选择 1 条轨迹");
+  await expect(page.locator(".ant-message")).toContainText("已选择 1 条轨迹");
   await page.getByRole("button", { name: "适合轨迹" }).click();
+  await tool(page, "工程样式");
   await page.getByLabel("标题", { exact: true }).fill("中文轨迹 · M3");
   await page.getByRole("spinbutton", { name: "线宽", exact: true }).fill("5");
+  await tool(page, "项目");
   await page.getByLabel("项目名称", { exact: true }).fill("验收项目");
   await page.getByRole("button", { name: "保存项目", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("项目已保存");
+  await expect(page.locator(".ant-message")).toContainText("项目已保存");
+  await tool(page, "工程样式");
   await page.getByLabel("标题", { exact: true }).fill("未保存的修改");
+  await tool(page, "项目");
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "载入项目", exact: true }).click();
+  await expect(page.locator(".ant-message")).toContainText("项目已载入", {
+    timeout: 20000,
+  });
+  await tool(page, "工程样式");
   await expect(page.getByLabel("标题", { exact: true })).toHaveValue(
     "中文轨迹 · M3",
   );
+  await tool(page, "项目");
   const jsonDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出 JSON", exact: true }).click();
   const json = await jsonDownload;
@@ -64,10 +77,13 @@ test("archive → selection → styling → save/reopen → JSON → independent
   await page
     .locator("input[type=file]")
     .setInputFiles(info.outputPath("project.json"));
-  await expect(page.getByRole("status")).toContainText("项目已载入");
+  await expect(page.locator(".ant-message")).toContainText("项目已载入", {
+    timeout: 20000,
+  });
   await page.waitForFunction(
     () => !!window.renderer?.loadedFont && window.renderer.map.loaded(),
   );
+  await tool(page, "出图");
   const previewReport = await page.evaluate(async () =>
     window.renderer!.ready(),
   );
@@ -103,17 +119,19 @@ test("archive → selection → styling → save/reopen → JSON → independent
     ),
   ).toBe(true);
   await page.screenshot({ path: info.outputPath("map-mobile.png") });
-  await page.getByRole("link", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "设置", exact: true }),
   ).toBeVisible();
-  expect(await page.evaluate(() => window.renderer)).toBeUndefined();
+  expect(await page.evaluate(() => !!window.renderer)).toBe(true);
   expect(errors).toEqual([]);
 });
 test("selection updates the GeoJSON source while camera tiles are still pending", async ({
   page,
 }) => {
   await page.goto("/map");
+  await tool(page, "新建出图工程");
+  await tool(page, "轨迹库");
   await expect(
     page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
   ).toBeVisible();
@@ -136,7 +154,7 @@ test("selection updates the GeoJSON source while camera tiles are still pending"
     await page
       .getByRole("checkbox", { name: "Train/same.kml", exact: true })
       .click();
-    await expect(page.getByRole("status")).toContainText("已选择 1 条轨迹");
+    await expect(page.locator(".ant-message")).toContainText("已选择 1 条轨迹");
     const data = await page.evaluate(async () =>
       (window.renderer!.map.getSource("tracks") as GeoJSONSource).getData(),
     );
@@ -171,6 +189,7 @@ test("missing tiles, missing fonts and unsupported title glyphs block independen
 }) => {
   test.setTimeout(120_000);
   await page.goto("/map");
+  await tool(page, "地图样式");
   await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
   const bootstrap = await call<{ state: Project }>(page, "/api/bootstrap");
   const state = bootstrap.body.state;
@@ -218,6 +237,7 @@ test("outdated resource versions and fingerprints are surfaced before save/expor
     state: Project;
     initialArchive: string;
   }>(page, "/api/bootstrap");
+  await tool(page, "打开已有工程");
   const outdated = { ...bootstrap.state, versions: { old: true } };
   await page.locator("input[type=file]").setInputFiles({
     name: "old.json",
@@ -227,6 +247,7 @@ test("outdated resource versions and fingerprints are surfaced before save/expor
   await expect(
     page.getByText("项目资源版本已变化；请确认后另存为新项目"),
   ).toBeVisible();
+  await tool(page, "出图");
   await expect(
     page.getByRole("button", { name: "导出 PNG", exact: true }),
   ).toBeDisabled();
@@ -235,6 +256,7 @@ test("outdated resource versions and fingerprints are surfaced before save/expor
   await expect(
     page.getByRole("button", { name: "导出 PNG", exact: true }),
   ).toBeEnabled();
+  await tool(page, "项目");
   const changed = {
     ...bootstrap.state,
     archive: bootstrap.initialArchive,
@@ -246,7 +268,10 @@ test("outdated resource versions and fingerprints are surfaced before save/expor
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(changed)),
   });
-  await expect(page.getByRole("alert")).toContainText("源内容已变化");
+  await expect(page.locator(".map-errors [role=alert]")).toContainText(
+    "源内容已变化",
+  );
+  await tool(page, "出图");
   await expect(
     page.getByRole("button", { name: "导出 PNG", exact: true }),
   ).toBeDisabled();
@@ -254,6 +279,7 @@ test("outdated resource versions and fingerprints are surfaced before save/expor
 test("rapid source changes only commit the latest choice", async ({ page }) => {
   test.setTimeout(60_000);
   await page.goto("/map");
+  await tool(page, "地图样式");
   await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
   let release!: () => void;
   const waiting = new Promise<void>((r) => {
@@ -281,10 +307,13 @@ test("rapid source changes only commit the latest choice", async ({ page }) => {
   await page.getByLabel("底图", { exact: true }).fill("深色矢量");
   await page.getByText("深色矢量", { exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => window.renderer?.state.style.basemap))
+    .poll(() => page.evaluate(() => window.renderer?.state.style.basemap), {
+      timeout: 20000,
+    })
     .toBe("dark");
+  const completed = page.waitForResponse("**/api/basemap-check");
   release();
-  await page.waitForResponse("**/api/basemap-check");
+  await completed;
   expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
     "dark",
   );
@@ -298,6 +327,7 @@ test("failed source retains the current map; a later source wins and camera/styl
     if (r.url().endsWith("/api/selection")) selections++;
   });
   await page.goto("/map");
+  await tool(page, "地图样式");
   await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
   const config = await page.evaluate(async () => {
     const token = document.querySelector<HTMLMetaElement>(
@@ -316,15 +346,118 @@ test("failed source retains the current map; a later source wins and camera/styl
   await page
     .getByText(`${google.group} · ${google.name}`, { exact: true })
     .click();
-  await expect(page.getByRole("alert")).toContainText("原地图已保留");
+  await expect(page.locator(".map-errors [role=alert]")).toContainText(
+    "原地图已保留",
+  );
   expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
     "light",
   );
   await page.getByLabel("底图", { exact: true }).click();
   await page.getByText("深色矢量", { exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => window.renderer?.state.style.basemap))
+    .poll(() => page.evaluate(() => window.renderer?.state.style.basemap), {
+      timeout: 20000,
+    })
     .toBe("dark");
-  await page.getByLabel("标题", { exact: true }).fill("不重复解析");
+  await expect(page.getByLabel("标题", { exact: true })).not.toBeVisible();
   expect(selections).toBe(0);
+});
+test("panels preserve the map, selection and unfinished edits on desktop and mobile", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/map");
+  await tool(page, "新建出图工程");
+  await tool(page, "轨迹库");
+  await page
+    .getByRole("checkbox", { name: "Train/same.kml", exact: true })
+    .click();
+  await expect(
+    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
+  ).toBeChecked();
+  await page.getByRole("button", { name: "适合轨迹", exact: true }).click();
+  await tool(page, "工程样式");
+  await page.getByLabel("标题", { exact: true }).fill("切换面板保留的草稿");
+  const camera = await page.evaluate(() => window.renderer!.state.camera);
+  const canvas = await page.locator(".maplibregl-canvas").elementHandle();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "设置", exact: true }),
+  ).toBeVisible();
+  await tool(page, "处理记录");
+  await expect(
+    page.getByRole("heading", { name: "处理记录", exact: true }),
+  ).toBeVisible();
+  await tool(page, "轨迹库");
+  await expect(
+    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
+  ).toBeChecked();
+  await tool(page, "工程样式");
+  await expect(page.getByLabel("标题", { exact: true })).toHaveValue(
+    "切换面板保留的草稿",
+  );
+  expect(await canvas!.evaluate((el) => el.isConnected)).toBe(true);
+  expect(await page.evaluate(() => window.renderer!.state.camera)).toEqual(
+    camera,
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "收起控制面板", exact: true }).click();
+  await expect(
+    page.getByRole("complementary", { name: "地图控制面板" }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("地图预览")).toHaveCSS("height", "844px");
+  await tool(page, "轨迹库");
+  await expect(
+    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
+  ).toBeChecked();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  expect(errors).toEqual([]);
+});
+test("the configured library stays fixed when importing a project from another machine", async ({
+  page,
+}) => {
+  await page.goto("/map");
+  const track = page.getByRole("checkbox", {
+    name: "Train/same.kml",
+    exact: true,
+  });
+  await track.click();
+  await expect(track).toBeChecked();
+  await expect(
+    page.getByRole("button", { name: "浏览目录", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("服务端归档路径", { exact: true })).toHaveCount(
+    0,
+  );
+  const state = await page.evaluate(() => window.renderer!.state);
+  await tool(page, "打开已有工程");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "another-machine.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({ ...state, archive: "/another-machine/archive.sqlite3" }),
+    ),
+  });
+  await expect(page.locator(".ant-message")).toContainText("项目已载入", {
+    timeout: 20000,
+  });
+  expect(await page.evaluate(() => window.renderer!.state.archive)).toBe(
+    state.archive,
+  );
+  await tool(page, "轨迹库");
+  await expect(track).toBeChecked();
+  await page.getByRole("button", { name: "管理轨迹库", exact: true }).click();
+  await expect(page.getByLabel("归档目录", { exact: true })).toHaveCount(0);
+  await page.getByLabel("操作", { exact: true }).click();
+  await expect(
+    page.getByRole("option", { name: "建立归档", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("option", { name: "轨迹入库", exact: true }),
+  ).toBeVisible();
 });

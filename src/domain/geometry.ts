@@ -2,7 +2,7 @@ import { AppError } from "./errors.js";
 import type { TrackData } from "./trackdata.js";
 import type { Position, TrackGeoJSON } from "../shared/map.js";
 // Python round uses ties-to-even; preserve the exact antimeridian tie behavior.
-function roundEven(n: number): number {
+export function roundEven(n: number): number {
   const floor = Math.floor(n);
   return n - floor === 0.5
     ? floor % 2 === 0

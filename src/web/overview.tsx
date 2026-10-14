@@ -1,0 +1,184 @@
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import type {
+  OverviewCrs,
+  OverviewEntry,
+  OverviewStatus,
+} from "../shared/overview.js";
+import type { TrackGeoJSON, SelectedTrack } from "../shared/map.js";
+import type { Project } from "../shared/project.js";
+import { api } from "./api.js";
+
+export interface OverviewEntries {
+  version: string;
+  total: number;
+  entries: OverviewEntry[];
+}
+export interface OverviewDetail {
+  version: string;
+  crs: "wgs84";
+  entry: OverviewEntry;
+  geometry: TrackGeoJSON;
+}
+export function rememberedCamera(
+  archive: string,
+): Project["camera"] | undefined {
+  try {
+    const v = JSON.parse(
+      sessionStorage.getItem(`tracktool-browse:${archive}`) ?? "null",
+    ) as Project["camera"] | null;
+    if (
+      v &&
+      Array.isArray(v.center) &&
+      v.center.length === 2 &&
+      v.center.every(Number.isFinite) &&
+      Math.abs(v.center[1]!) <= 85 &&
+      Number.isFinite(v.zoom) &&
+      v.zoom >= 0 &&
+      v.zoom <= 18
+    )
+      return v;
+  } catch {
+    /* Storage may be disabled. */
+  }
+}
+export function rememberCamera(archive: string, camera: Project["camera"]) {
+  try {
+    sessionStorage.setItem(
+      `tracktool-browse:${archive}`,
+      JSON.stringify(camera),
+    );
+  } catch {
+    /* Optional session persistence. */
+  }
+}
+export function useOverview(
+  crs: OverviewCrs,
+  search: string,
+  kind: string,
+  active = true,
+) {
+  const [version, setVersion] = useState<string>();
+  const [id, setId] = useState("");
+  const [candidates, setCandidates] = useState<string[]>([]);
+  const [offset, setOffset] = useState(0);
+  const [candidateOffset, setCandidateOffset] = useState(0);
+  const [queryText, setQueryText] = useState(search);
+  const [tileError, setTileError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const query = useQuery({
+    queryKey: ["overview", crs],
+    enabled: active,
+    queryFn: ({ signal }) =>
+      api<OverviewStatus>(`/api/overview?crs=${crs}`, undefined, signal),
+    refetchInterval: active ? 2000 : false,
+    retry: false,
+  });
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setQueryText(search);
+      setOffset(0);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [search]);
+  useEffect(() => setOffset(0), [kind, version]);
+  const listVersion = version ?? query.data?.version;
+  const list = useQuery({
+    queryKey: ["overview-entries", listVersion, queryText, kind, offset],
+    enabled: active && !!listVersion,
+    queryFn: ({ signal }) =>
+      api<OverviewEntries>(
+        `/api/overview/entries?${new URLSearchParams({ version: listVersion!, q: queryText, kind, offset: String(offset), limit: "50" })}`,
+        undefined,
+        signal,
+      ),
+    retry: false,
+  });
+  const matching = useQuery({
+    queryKey: [
+      "overview-candidates",
+      listVersion,
+      candidates,
+      candidateOffset,
+      id,
+    ],
+    enabled: active && !!listVersion && (!!candidates.length || !!id),
+    queryFn: ({ signal }) =>
+      api<OverviewEntries>(
+        `/api/overview/entries?${new URLSearchParams({ version: listVersion!, ids: (candidates.length ? candidates.slice(candidateOffset, candidateOffset + 100) : [id]).join(",") })}`,
+        undefined,
+        signal,
+      ),
+    retry: false,
+  });
+  const detail = useQuery({
+    queryKey: ["overview-detail", listVersion, id],
+    enabled: active && !!listVersion && !!id,
+    queryFn: ({ signal }) =>
+      api<OverviewDetail>(
+        `/api/overview/entries/${encodeURIComponent(id)}/geometry?version=${listVersion}`,
+        undefined,
+        signal,
+      ),
+    retry: false,
+    gcTime: 0,
+  });
+  const selected =
+    matching.data?.entries.find((e) => e.id === id) ?? detail.data?.entry;
+  const selectedTrack: SelectedTrack | undefined = detail.data
+    ? {
+        entry: detail.data.entry.entry,
+        sha256: detail.data.entry.sha256,
+        points: detail.data.entry.points,
+        geojson: detail.data.geometry,
+      }
+    : undefined;
+  // An expired version is replaced from status, never retried in a tight request loop.
+  const recovery = useRef("");
+  useEffect(() => {
+    const error = list.error ?? matching.error ?? detail.error;
+    if (
+      error?.message.includes("版本已过期") &&
+      recovery.current !== listVersion
+    ) {
+      recovery.current = listVersion ?? "";
+      setVersion(undefined);
+      void query.refetch();
+    }
+  }, [list.error, matching.error, detail.error, listVersion]);
+  return {
+    query,
+    list,
+    detail,
+    selected,
+    selectedTrack,
+    id,
+    setId,
+    candidates,
+    setCandidates,
+    candidateOffset,
+    setCandidateOffset,
+    matching,
+    offset,
+    setOffset,
+    version: listVersion,
+    tileError,
+    setTileError,
+    loading,
+    setLoading,
+    published: (next: string) => {
+      setVersion(next);
+      setTileError("");
+    },
+    pick: (ids: string[]) => {
+      setCandidateOffset(0);
+      setCandidates(ids.length > 1 ? ids : []);
+      setId(ids.length === 1 ? ids[0]! : "");
+    },
+    retry: async () => {
+      setTileError("");
+      await api(`/api/overview/retry?crs=${crs}`, {});
+      await query.refetch();
+    },
+  };
+}

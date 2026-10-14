@@ -48,7 +48,11 @@ const app = await createApp({
     archive: temporary,
   },
   configStore: new FileConfigStore({ path: configPath }),
-  maps: { initialArchive: archive, resources: () => resources },
+  maps: {
+    initialArchive: archive,
+    cache: path.join(temporary, "cache"),
+    resources: () => resources,
+  },
 });
 let fault = "";
 app.post("/api/test/fault", async (request) => {

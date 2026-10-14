@@ -353,7 +353,7 @@ it("HTTP archive init, push, backup and pop call the shared services and expose 
   );
 });
 it("HTTP rejects stale file/config previews, unknown paths, symlink aliases and unauthenticated uploads", async () => {
-  const { dir, address, call, settled } = await server(),
+  const { dir, config, address, call, settled } = await server(),
     source = path.join(dir, "a.jpg");
   await sharp({
     create: { width: 8, height: 8, channels: 3, background: "red" },
@@ -366,7 +366,7 @@ it("HTTP rejects stale file/config previews, unknown paths, symlink aliases and 
     options: { make: "SONY" },
   });
   expect((await settled(p.id)).status).toBe("succeeded");
-  await call("/api/work/settings", { key: "log_level", value: "DEBUG" });
+  await new FileConfigStore({ path: config }).set("log_level", "DEBUG");
   await expect(call(`/api/work/tasks/${p.id}/apply`, {})).rejects.toThrow(
     "变化",
   );
@@ -590,4 +590,71 @@ it("completed task and its events remain readable after closing and reopening th
   expect(saved.status).toBe("succeeded");
   expect(saved.events).toEqual(complete.events);
   expect(saved.output).toEqual(complete.output);
+});
+it("map selections produce isolated copies, reject changed fingerprints and enforce file roots", async () => {
+  const { archive, call } = await server();
+  const selected = await call<{ tracks: { entry: string; sha256: string }[] }>(
+    "/api/selection",
+    {
+      archive,
+      entries: ["Default/2026-10-01 中文.kml", "Train/same.kml"],
+    },
+  );
+  expect(selected.tracks).toHaveLength(2);
+  const tracks = selected.tracks.map(({ entry, sha256 }) => ({
+    entry,
+    sha256,
+  }));
+  const copied = await call<{ id: string; files: string[] }>(
+    "/api/work/selection-copy",
+    { archive, tracks },
+  );
+  expect(copied.files).toHaveLength(2);
+  expect(new Set(copied.files).size).toBe(2);
+  expect(await readFile(copied.files[0]!, "utf8")).toContain("kml");
+  await writeFile(copied.files[0]!, "changed staging copy");
+  const again = await call<{ tracks: { sha256: string }[] }>("/api/selection", {
+    archive,
+    entries: tracks.map((t) => t.entry),
+  });
+  expect(again.tracks.map((t) => t.sha256)).toEqual(
+    tracks.map((t) => t.sha256),
+  );
+  const before = await call<{ uploads: unknown[] }>("/api/work/uploads");
+  await expect(
+    call("/api/work/selection-copy", {
+      archive,
+      tracks: [tracks[0], { ...tracks[1], sha256: "0".repeat(64) }],
+    }),
+  ).rejects.toThrow("源轨迹已变化");
+  expect(
+    (await call<{ uploads: unknown[] }>("/api/work/uploads")).uploads,
+  ).toHaveLength(before.uploads.length);
+  await expect(
+    call("/api/work/selection-copy", { archive: "/etc", tracks }),
+  ).rejects.toThrow("不在已开放");
+});
+it("web settings reject every server configuration write while CLI configuration remains available", async () => {
+  const { archive, config, call } = await server();
+  const before = await readFile(config);
+  for (const key of [
+    "archive_path",
+    "log_level",
+    "kml_backup_dir_name",
+    "google_api_key",
+    "track_tag.Default",
+    "output_filters",
+  ]) {
+    await expect(
+      call("/api/work/settings", { key, value: "changed" }),
+    ).rejects.toThrow("只能通过后台配置或 CLI 修改");
+  }
+  expect(await readFile(config)).toEqual(before);
+  expect((await call<{ archive: string }>("/api/work/bootstrap")).archive).toBe(
+    archive,
+  );
+  await new FileConfigStore({ path: config }).set("log_level", "DEBUG");
+  expect((await new FileConfigStore({ path: config }).load()).log_level).toBe(
+    "DEBUG",
+  );
 });

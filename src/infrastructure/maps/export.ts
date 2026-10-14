@@ -115,14 +115,19 @@ export class Exports {
         labels: report.labels,
         camera: report.camera,
       };
-      job.status = "done";
     } catch (error) {
       job.error = error instanceof Error ? error.message : "导出失败";
-      job.status = "failed";
     } finally {
       delete job.tracks;
-      await this.browser?.close();
+      try {
+        await this.browser?.close();
+      } catch {
+        job.error ??= "导出浏览器清理失败，请重试";
+      }
       this.browser = undefined;
+      // A terminal response means a new submission can start immediately.
+      // Publish it only after the browser is closed and no async cleanup remains.
+      job.status = job.error ? "failed" : "done";
     }
   }
   async close() {

@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
@@ -33,27 +33,7 @@ import type {
 import type { PublicConfig } from "../shared/contracts.js";
 import type { Catalog } from "../shared/map.js";
 import "./work.css";
-const LocalMap = lazy(() => import("./work-map.js"));
-const links = [
-  ["/map", "地图"],
-  ["/archive", "归档"],
-  ["/tracks", "轨迹处理"],
-  ["/media", "媒体"],
-  ["/tasks", "任务"],
-  ["/settings", "设置"],
-];
-export function WorkNav() {
-  return (
-    <nav className="work-nav" aria-label="功能导航">
-      <strong>TRACKTOOL</strong>
-      {links.map(([to, label]) => (
-        <Link key={to} to={to!}>
-          {label}
-        </Link>
-      ))}
-    </nav>
-  );
-}
+import { useWorkspace } from "./workspace.js";
 const statusLabel: Record<string, string> = {
   queued: "等待执行",
   running: "正在处理",
@@ -83,8 +63,8 @@ export function TaskDetail({
   onSelect: (id: string) => void;
 }) {
   const cache = useQueryClient();
+  const workspace = useWorkspace();
   const [error, setError] = useState<unknown>(),
-    [showMap, setShowMap] = useState(false),
     [busy, setBusy] = useState(false);
   const query = useQuery({
     queryKey: ["task", id],
@@ -169,7 +149,9 @@ export function TaskDetail({
         <Typography.Text type="secondary">
           {new Date(task.createdAt).toLocaleString()}
         </Typography.Text>
-        <Link to={"/tasks?id=" + id}>在任务页查看</Link>
+        <Button type="link" onClick={() => workspace.open("tasks", id)}>
+          查看处理记录
+        </Button>
       </Space>
       <Progress
         percent={
@@ -239,7 +221,18 @@ export function TaskDetail({
           </Button>
         )}
         <Button onClick={() => void query.refetch()}>刷新状态</Button>
-        {task.request.archive && <Link to="/map">在地图检查归档结果</Link>}
+        {task.request.archive && (
+          <Button
+            onClick={() => {
+              void workspace
+                .refresh(task.request.archive!)
+                .then(() => workspace.open("library"))
+                .catch(setError);
+            }}
+          >
+            刷新轨迹库
+          </Button>
+        )}
       </Space>
       {canApply && (
         <Typography.Paragraph type="secondary">
@@ -304,16 +297,13 @@ export function TaskDetail({
       {(task.request.operation.startsWith("kml:") ||
         task.output?.paths.some((p) => p.toLowerCase().endsWith(".kml"))) &&
         !active && (
-          <>
-            <Button onClick={() => setShowMap(!showMap)}>
-              {task.mode === "plan" ? "地图检查输入轨迹" : "地图检查处理结果"}
-            </Button>
-            {showMap && (
-              <Suspense fallback={<Spin />}>
-                <LocalMap key={task.id} id={task.id} />
-              </Suspense>
-            )}
-          </>
+          <Button
+            onClick={() => {
+              void workspace.inspect(id).catch(setError);
+            }}
+          >
+            {task.mode === "plan" ? "地图检查输入轨迹" : "地图检查处理结果"}
+          </Button>
         )}
       <details>
         <summary>日志（最近 500 条）</summary>
@@ -627,7 +617,7 @@ function CatalogPanel({
   });
   return (
     <Card
-      title="归档内容"
+      title="轨迹库内容"
       extra={<Button onClick={() => void catalog.refetch()}>刷新归档</Button>}
     >
       <ErrorBox error={catalog.error} />
@@ -656,7 +646,6 @@ function CatalogPanel({
                 label: v === "all" ? "全部分类" : v,
               }))}
             />
-            <Link to="/map">在地图查看</Link>
           </Space>
           <Table
             size="small"
@@ -689,11 +678,8 @@ function CatalogPanel({
     </Card>
   );
 }
-export default function WorkPage({
-  group,
-}: {
-  group: "archive" | "tracks" | "media";
-}) {
+export default function WorkPage({ group }: { group: "archive" | "tracks" }) {
+  const workspace = useWorkspace();
   const bootstrap = useQuery({
     queryKey: ["work-bootstrap"],
     queryFn: ({ signal }) =>
@@ -704,26 +690,54 @@ export default function WorkPage({
       ),
   });
   const [operation, setOperation] = useState<Operation>(
-      group === "archive"
-        ? "archive:status"
-        : group === "tracks"
-          ? "kml:type"
-          : "exif:info",
+      group === "archive" ? "archive:status" : "kml:type",
     ),
     [inputs, setInputs] = useState(""),
-    [archive, setArchive] = useState<string>(),
     [output, setOutput] = useState(""),
     [options, setOptions] = useState<Record<string, unknown>>({}),
     [special, setSpecial] = useState<Record<string, string>>({}),
     [error, setError] = useState<unknown>(),
     [busy, setBusy] = useState(false),
     [params, setParams] = useSearchParams();
-  const archivePath = archive ?? bootstrap.data?.archive ?? "",
-    id = params.get("task");
-  const names = Object.entries(OPERATIONS).filter(([key]) =>
-    key.startsWith(
-      group === "tracks" ? "kml:" : group === "media" ? "exif:" : "archive:",
-    ),
+  const archivePath = workspace.archive || bootstrap.data?.archive || "";
+  const [id, setId] = useState<string | null>(() =>
+    params.get("panel") === group ? params.get("task") : null,
+  );
+  useEffect(() => {
+    if (params.get("panel") !== group) return;
+    const requested = params.get("task");
+    if (requested) setId(requested);
+    else if (id) setParams({ panel: group, task: id }, { replace: true });
+  }, [params, group, id, setParams]);
+  const [usingSelection, setUsingSelection] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const setTask = (next: string) => {
+    setId(next);
+    setParams({ panel: group, task: next });
+  };
+  async function useSelection() {
+    setCopying(true);
+    setError(undefined);
+    try {
+      const batch = await api<UploadResult>("/api/work/selection-copy", {
+        archive: workspace.archive,
+        tracks: workspace.selected.map(({ entry, sha256 }) => ({
+          entry,
+          sha256,
+        })),
+      });
+      setInputs(batch.files.join("\n"));
+      setUsingSelection(true);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setCopying(false);
+    }
+  }
+  const names = Object.entries(OPERATIONS).filter(
+    ([key]) =>
+      key.startsWith(group === "tracks" ? "kml:" : "archive:") &&
+      !["archive:init", "archive:import-zip"].includes(key),
   );
   const choose = (next: Operation) => {
     setOperation(next);
@@ -767,7 +781,7 @@ export default function WorkPage({
         options: opts,
       });
       const task = await api<WorkTask>("/api/work/preview", body);
-      setParams({ task: task.id });
+      setTask(task.id);
     } catch (e) {
       setError(e);
     } finally {
@@ -776,14 +790,9 @@ export default function WorkPage({
   }
   return (
     <>
-      <WorkNav />
-      <main className="work-main">
+      <div className="work-main">
         <Typography.Title level={1}>
-          {group === "archive"
-            ? "归档管理"
-            : group === "tracks"
-              ? "轨迹处理"
-              : "媒体处理"}
+          {group === "archive" ? "轨迹库管理" : "轨迹处理"}
         </Typography.Title>
         <Typography.Paragraph type="secondary">
           选择对象和参数，先查看预览，再确认执行。任务保存在服务端，关闭页面后仍可继续查看。
@@ -793,6 +802,29 @@ export default function WorkPage({
           <Spin />
         ) : (
           <>
+            {group === "tracks" && (
+              <Card size="small" title="处理对象">
+                <p>
+                  {workspace.selected.length
+                    ? `地图上已选择 ${workspace.selected.length} 条轨迹`
+                    : "在轨迹库选择轨迹，或在下方上传 KML 文件。"}
+                </p>
+                <Button
+                  disabled={!workspace.selected.length}
+                  loading={copying}
+                  onClick={() => void useSelection()}
+                >
+                  使用地图已选轨迹
+                </Button>
+                {usingSelection && (
+                  <Alert
+                    type="info"
+                    title="正在处理轨迹副本"
+                    description="库中原件保留不变。结果可下载并在主地图检查；需要保存到轨迹库时，请通过库管理入库。"
+                  />
+                )}
+              </Card>
+            )}
             <div className="work-grid">
               <section>
                 <Card title="处理操作">
@@ -807,24 +839,6 @@ export default function WorkPage({
                     options={names.map(([value, label]) => ({ value, label }))}
                     style={{ width: "100%" }}
                   />
-                  {(group === "archive" ||
-                    [
-                      "kml:merge",
-                      "exif:geotag",
-                      "exif:repair",
-                      "exif:repair-vid",
-                    ].includes(operation)) && (
-                    <>
-                      <label className="work-label" htmlFor="work-archive">
-                        归档目录
-                      </label>
-                      <Input
-                        id="work-archive"
-                        value={archivePath}
-                        onChange={(e) => setArchive(e.target.value)}
-                      />
-                    </>
-                  )}
                   <label className="work-label" htmlFor="work-output">
                     输出路径（可选）
                   </label>
@@ -967,22 +981,24 @@ export default function WorkPage({
                   <FilePicker
                     roots={bootstrap.data.roots}
                     value={inputs}
-                    onChange={setInputs}
+                    onChange={(value) => {
+                      setInputs(value);
+                      setUsingSelection(false);
+                    }}
                   />
                 )}
               </section>
               <section>
                 {id ? (
-                  <TaskDetail
-                    id={id}
-                    onSelect={(next) => setParams({ task: next })}
-                  />
+                  <TaskDetail id={id} onSelect={setTask} />
                 ) : (
                   <Card title="预览与结果">
                     <Typography.Paragraph type="secondary">
                       尚未提交操作。预览会列出处理对象、预计输出和发现的问题。
                     </Typography.Paragraph>
-                    <Link to="/tasks">查看历史任务</Link>
+                    <Button onClick={() => workspace.open("tasks")}>
+                      查看处理记录
+                    </Button>
                   </Card>
                 )}
               </section>
@@ -999,7 +1015,7 @@ export default function WorkPage({
             )}
           </>
         )}
-      </main>
+      </div>
     </>
   );
 }
@@ -1053,22 +1069,28 @@ export function TasksPage() {
   });
   return (
     <>
-      <WorkNav />
-      <main className="work-main">
-        <Typography.Title level={1}>任务</Typography.Title>
+      <div className="work-main">
+        <Typography.Title level={1}>处理记录</Typography.Title>
         <Typography.Paragraph type="secondary">
           任务保存在服务端。中断或部分失败后，重新预览当前文件再重试；不会自动重复写入。
         </Typography.Paragraph>
         <ErrorBox error={tasks.error} />
         <Table
           rowKey="id"
-          dataSource={tasks.data?.tasks ?? []}
+          dataSource={
+            tasks.data?.tasks.filter(
+              (task) => !task.request.operation.startsWith("exif:"),
+            ) ?? []
+          }
           pagination={{ pageSize: 10 }}
           columns={[
             {
               title: "操作",
               render: (_, task) => (
-                <Button type="link" onClick={() => setParams({ id: task.id })}>
+                <Button
+                  type="link"
+                  onClick={() => setParams({ panel: "tasks", id: task.id })}
+                >
                   {task.mode === "plan" ? "预览" : "执行"} ·{" "}
                   {OPERATIONS[task.request.operation]}
                 </Button>
@@ -1082,87 +1104,13 @@ export function TasksPage() {
           ]}
         />
         {id && (
-          <TaskDetail id={id} onSelect={(next) => setParams({ id: next })} />
+          <TaskDetail
+            id={id}
+            onSelect={(next) => setParams({ panel: "tasks", id: next })}
+          />
         )}
         <UploadsPanel />
-      </main>
+      </div>
     </>
-  );
-}
-export function SettingsEditor({ refresh }: { refresh: () => void }) {
-  const [key, setKey] = useState("log_level"),
-    [value, setValue] = useState(""),
-    [error, setError] = useState<unknown>(),
-    [notice, setNotice] = useState(""),
-    [busy, setBusy] = useState(false);
-  return (
-    <Card title="修改设置">
-      <Typography.Paragraph type="secondary">
-        设置由 CLI 与网页共用。活动标签用逗号分隔，支持 +添加 和
-        -移除；密钥只写入服务端，不会回显。
-      </Typography.Paragraph>
-      <label className="work-label" htmlFor="setting-key">
-        配置项
-      </label>
-      <Select
-        virtual={false}
-        id="setting-key"
-        value={key}
-        onChange={(v) => {
-          setKey(v);
-          setValue("");
-          setNotice("");
-        }}
-        options={[
-          ["log_level", "日志级别"],
-          ["archive_path", "归档目录"],
-          ["kml_backup_dir_name", "备份目录名"],
-          ["google_api_key", "Google API 密钥"],
-          ["output_filters", "工具告警过滤"],
-          ["track_tag.Default", "默认活动"],
-          ["track_tag.Train", "轨交活动"],
-          ["track_tag.Flight", "飞行活动"],
-        ].map(([value, label]) => ({ value, label }))}
-        style={{ width: "100%" }}
-      />
-      <label className="work-label" htmlFor="setting-value">
-        新值
-      </label>
-      {key === "google_api_key" ? (
-        <Input.Password
-          id="setting-value"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          autoComplete="new-password"
-        />
-      ) : (
-        <Input
-          id="setting-value"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-        />
-      )}
-      <ErrorBox error={error} />
-      {notice && <Alert type="success" title={notice} />}
-      <Button
-        className="work-actions"
-        type="primary"
-        loading={busy}
-        onClick={() => {
-          setBusy(true);
-          setError(undefined);
-          void api("/api/work/settings", { key, value })
-            .then(() => {
-              setValue("");
-              setNotice("设置已保存");
-              refresh();
-            })
-            .catch(setError)
-            .finally(() => setBusy(false));
-        }}
-      >
-        保存设置
-      </Button>
-    </Card>
   );
 }

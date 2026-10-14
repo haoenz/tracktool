@@ -1,22 +1,9 @@
 import type { Position, TrackGeoJSON } from "../shared/map.js";
-import gcoord from "gcoord";
+import { displayCoordinate } from "../shared/coordinates.js";
+export { displayCoordinate } from "../shared/coordinates.js";
 
 // Projects and archive geometry always remain WGS84. Convert only at the
 // rendering boundary for the supplied Google gl=CN raster presets.
-export function displayCoordinate(
-  position: Position,
-  crs: string,
-  inverse = false,
-): Position {
-  if (crs !== "gcj02") return [...position];
-  const [lon, lat] = position;
-  const wrapped = ((((lon + 180) % 360) + 360) % 360) - 180;
-  const shifted = inverse
-    ? gcoord.transform([wrapped, lat], gcoord.GCJ02, gcoord.WGS84)
-    : gcoord.transform([wrapped, lat], gcoord.WGS84, gcoord.GCJ02);
-  return [shifted[0]! + lon - wrapped, shifted[1]!];
-}
-
 export function displayGeometry(
   collection: TrackGeoJSON,
   crs: string,

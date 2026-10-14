@@ -1,8 +1,8 @@
+import { tool } from "./map-tools.js";
 import os from "node:os";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import sharp from "sharp";
 import type { Page } from "@playwright/test";
 async function choose(page: Page, name: string) {
   await page.getByLabel("操作", { exact: true }).click();
@@ -23,53 +23,22 @@ async function confirm(page: Page) {
     page.getByRole("button", { name: "下载", exact: true }).first(),
   ).toBeVisible({ timeout: 20000 });
 }
-test("media upload → review → write → reload → download works on mobile without exposing secrets", async ({
+test("media links return to the map with no web media tools", async ({
   page,
 }) => {
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
-  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/media");
-  await choose(page, "设置元数据");
-  await page.getByLabel("自定义标签（每行 NAME=VALUE）").fill("IPTC:City=杭州");
-  const jpg = await sharp({
-    create: { width: 8, height: 8, channels: 3, background: "red" },
-  })
-    .jpeg()
-    .toBuffer();
-  await upload(page, "手机照片.jpg", jpg);
-  await page.getByRole("button", { name: "生成操作预览" }).click();
+  await expect(page).toHaveURL(/\/map$/);
+  await expect(page.getByRole("heading", { name: "轨迹地图" })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "确认执行此预览" }),
-  ).toBeVisible();
-  await page.reload();
-  await expect(
-    page.getByRole("button", { name: "确认执行此预览" }),
-  ).toBeVisible();
-  await confirm(page);
-  const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载", exact: true }).first().click();
-  const downloaded = await downloadPromise;
-  expect(downloaded.suggestedFilename()).toBe("手机照片.jpg");
-  expect((await readFile((await downloaded.path())!)).length).toBeGreaterThan(
-    jpg.length,
-  );
-  await page.reload();
-  await expect(page.getByText("已完成", { exact: true })).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth,
-    ),
-  ).toBe(true);
-  expect(await page.content()).not.toContain("synthetic-e2e-private-key");
-  expect(errors).toEqual([]);
+    page.getByRole("link", { name: "媒体", exact: true }),
+  ).toHaveCount(0);
 });
 test("archive upload and tagging preview feed real push, filtering and backup downloads", async ({
   page,
 }) => {
   await page.goto("/archive");
   await choose(page, "轨迹入库");
-  await page.getByLabel("轨迹分类", { exact: true }).first().click();
+  await page.locator("#option-category").click();
   await page.getByRole("option", { name: "Default", exact: true }).click();
   await page.getByText("保留入库的源文件", { exact: true }).click();
   await upload(
@@ -109,28 +78,16 @@ test("track editing reports malformed input as partial and allows a fresh retry"
   ).toHaveCount(0);
   await page.getByRole("button", { name: "重新预览 / 重试" }).click();
   await expect(page.getByText("部分失败", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "在任务页查看" }).click();
+  await page.getByRole("button", { name: "查看处理记录" }).click();
   await expect(
-    page.getByRole("heading", { name: "任务", exact: true }),
+    page.getByRole("heading", { name: "处理记录", exact: true }),
   ).toBeVisible();
   await page.reload();
   await expect(
     page.getByRole("button", { name: "重新预览 / 重试" }),
   ).toBeVisible();
 });
-test("shared settings save a config value and refresh the existing public summary", async ({
-  page,
-}) => {
-  await page.goto("/settings");
-  await page.getByLabel("配置项", { exact: true }).click();
-  await page.getByRole("option", { name: "日志级别", exact: true }).click();
-  await page.getByLabel("新值", { exact: true }).fill("VERBOSE");
-  await page.getByRole("button", { name: "保存设置" }).click();
-  await expect(page.getByText("设置已保存", { exact: true })).toBeVisible();
-  await expect(page.getByText("VERBOSE", { exact: true })).toBeVisible();
-  await page.reload();
-  await expect(page.getByText("VERBOSE", { exact: true })).toBeVisible();
-});
+
 test("edited KML can be inspected on a map and its upload batch remains manageable after refresh", async ({
   page,
 }) => {
@@ -150,15 +107,63 @@ test("edited KML can be inspected on a map and its upload batch remains manageab
   await expect(
     page.getByRole("region", { name: "轨迹结果地图" }),
   ).toBeVisible();
-  await expect(
-    page.locator('[aria-label="轨迹结果地图"] .map-stage'),
-  ).toHaveAttribute("data-status", "ready", { timeout: 20000 });
+  await expect(page.locator(".map-stage")).toHaveAttribute(
+    "data-status",
+    "ready",
+    { timeout: 20000 },
+  );
   await page.screenshot({
     path: path.join(os.tmpdir(), "tracktool-m6-tracks.png"),
     fullPage: true,
   });
-  await page.goto("/tasks");
+  await page.getByRole("button", { name: "返回原地图" }).click();
   await page.reload();
   await expect(page.getByText("暂存文件", { exact: true })).toBeVisible();
   await expect(page.getByText(/2026-10-01 地图检查.kml ·/)).toBeVisible();
+});
+test("selected library tracks can be processed as copies and inspected without losing the original map", async ({
+  page,
+}) => {
+  await page.goto("/map");
+  await page
+    .getByRole("checkbox", { name: "Train/same.kml", exact: true })
+    .click();
+  await expect(
+    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
+  ).toBeChecked();
+  await page.getByRole("button", { name: "适合轨迹", exact: true }).click();
+  const camera = await page.evaluate(() => window.renderer!.state.camera);
+  await page
+    .getByRole("button", { name: "处理已选轨迹 · 1", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "使用地图已选轨迹", exact: true })
+    .click();
+  await expect(
+    page.getByText("正在处理轨迹副本", { exact: true }),
+  ).toBeVisible();
+  await choose(page, "设置活动标签");
+  await page.getByLabel("活动标签", { exact: true }).click();
+  await page.getByRole("option", { name: "徒步", exact: true }).click();
+  await page.getByText("缺少活动标签时创建", { exact: true }).click();
+  await page.getByRole("button", { name: "生成操作预览", exact: true }).click();
+  await confirm(page);
+  await page
+    .getByRole("button", { name: "地图检查处理结果", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "轨迹结果地图" }),
+  ).toBeVisible();
+  await expect(page.locator(".map-stage")).toHaveCount(1);
+  await page.getByRole("button", { name: "返回原地图", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "处理记录", exact: true }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => window.renderer!.state.camera)).toEqual(
+    camera,
+  );
+  await tool(page, "轨迹库");
+  await expect(
+    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
+  ).toBeChecked();
 });

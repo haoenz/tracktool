@@ -58,6 +58,7 @@ export class MapCanvas {
   credit: HTMLDivElement;
   map: maplibregl.Map;
   fontReady: Promise<void>;
+  private handledErrors = new WeakSet<Error>();
 
   constructor(
     frame: HTMLElement,
@@ -66,6 +67,10 @@ export class MapCanvas {
     cities: CityLabel[],
     onCamera?: (camera: Project["camera"]) => void,
     onError?: (message: string) => void,
+    handleResourceError?: (event: {
+      error: Error;
+      sourceId?: string;
+    }) => boolean,
   ) {
     this.frame = frame;
     this.state = state;
@@ -118,6 +123,10 @@ export class MapCanvas {
     });
     this.map.touchZoomRotate.disableRotation();
     this.map.on("error", (event) => {
+      if (handleResourceError?.(event)) {
+        this.handledErrors.add(event.error);
+        return;
+      }
       const message = event.error?.message || "地图资源加载失败";
       this.errors.push(message);
       this.onError?.(message);
@@ -543,7 +552,8 @@ export class MapCanvas {
         cleanup();
         resolve();
       };
-      const failed = () => {
+      const failed = (event?: { error: Error }) => {
+        if (event && this.handledErrors.has(event.error)) return;
         cleanup();
         reject(new Error(this.errors.join("; ")));
       };

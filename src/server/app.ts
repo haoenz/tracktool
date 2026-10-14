@@ -1,6 +1,7 @@
 import { workRoutes, type WorkOptions } from "./work.js";
 import { ZodError } from "zod";
 import { mapRoutes, type MapOptions } from "./maps.js";
+import { overviewRoutes } from "./overview.js";
 import Fastify, { type FastifyInstance } from "fastify";
 import staticFiles from "@fastify/static";
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -82,6 +83,13 @@ export async function createApp(options: {
     ),
   }));
   workRoutes(app, options.configStore, options.envKey, options.work);
+  overviewRoutes(app, {
+    cache: options.maps?.cache,
+    archive: async () =>
+      options.maps?.initialArchive ??
+      options.work?.archive ??
+      String((await options.configStore.load()).archive_path ?? ""),
+  });
   mapRoutes(app, token, {
     ...options.maps,
     archiveDefault: async () =>
