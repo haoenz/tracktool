@@ -1,0 +1,41 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #1d2838;
+  background: #f5f7fa;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 900px;
+  margin: 48px auto;
+  padding: 0 24px;
+}
+header {
+  margin-bottom: 28px;
+}
+.brand {
+  letter-spacing: 0.16em;
+  font-weight: 700;
+  color: #376291;
+}
+.ant-card {
+  margin-bottom: 24px;
+}
+.ant-descriptions-item-content {
+  overflow-wrap: anywhere;
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+@media (max-width: 600px) {
+  main {
+    margin-top: 24px;
+    padding: 0 16px;
+  }
+  .ant-card-body {
+    padding: 16px !important;
+  }
+}

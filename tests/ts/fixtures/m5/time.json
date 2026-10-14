@@ -1,0 +1,1348 @@
+[
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714527000123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0000"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714498200123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714546800123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "-0530"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Keys:CreationDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Keys:CreationDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Keys:CreationDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Keys:CreationDate",
+      "instant": "1714527000123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0000"
+    }
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Keys:CreationDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Keys:CreationDate",
+      "instant": "1714498200123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Keys:CreationDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Keys:CreationDate",
+      "instant": "1714546800123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "-0530"
+    }
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Keys:CreationDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "expected": {
+      "source": "UserData:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "UserData:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "UserData:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "UserData:DateTimeOriginal",
+      "instant": "1714527000123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0000"
+    }
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "UserData:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "UserData:DateTimeOriginal",
+      "instant": "1714498200123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "UserData:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "UserData:DateTimeOriginal",
+      "instant": "1714546800123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "-0530"
+    }
+  },
+  {
+    "tags": {
+      "UserData:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "UserData:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714527000123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0000"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714498200123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714546800123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "-0530"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "expected": {
+      "source": "H264:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "H264:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "H264:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "H264:DateTimeOriginal",
+      "instant": "1714527000123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0000"
+    }
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "H264:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "H264:DateTimeOriginal",
+      "instant": "1714498200123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "H264:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "H264:DateTimeOriginal",
+      "instant": "1714546800123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "-0530"
+    }
+  },
+  {
+    "tags": {
+      "H264:DateTimeOriginal": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "H264:DateTimeOriginal",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-xmp:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-xmp:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-xmp:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-xmp:CreateDate",
+      "instant": "1714527000123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0000"
+    }
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-xmp:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-xmp:CreateDate",
+      "instant": "1714498200123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-xmp:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-xmp:CreateDate",
+      "instant": "1714546800123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "-0530"
+    }
+  },
+  {
+    "tags": {
+      "XMP-xmp:CreateDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "XMP-xmp:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "expected": {
+      "source": "QuickTime:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "QuickTime:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "QuickTime:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "QuickTime:CreateDate",
+      "instant": "1714527000123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0000"
+    }
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "QuickTime:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "QuickTime:CreateDate",
+      "instant": "1714498200123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "QuickTime:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "QuickTime:CreateDate",
+      "instant": "1714546800123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "-0530"
+    }
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "QuickTime:CreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Track1:TrackCreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Track1:TrackCreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Track1:TrackCreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Track1:TrackCreateDate",
+      "instant": "1714527000123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0000"
+    }
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456Z"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Track1:TrackCreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Track1:TrackCreateDate",
+      "instant": "1714498200123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456+08:00"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Track1:TrackCreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "auto",
+    "offset": "+09:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "keep",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Track1:TrackCreateDate",
+      "instant": "1714546800123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "-0530"
+    }
+  },
+  {
+    "tags": {
+      "Track1:TrackCreateDate": "2024:05:01 01:30:00.123456-05:30"
+    },
+    "policy": "force",
+    "offset": "+09:00",
+    "expected": {
+      "source": "Track1:TrackCreateDate",
+      "instant": "1714494600123456",
+      "wall": "2024-05-01 01:30:00.123456",
+      "offset": "+0900"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00+08:00",
+      "Keys:CreationDate": "2024:05:01 04:00:00Z"
+    },
+    "policy": "auto",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00+08:00",
+      "Keys:CreationDate": "2024:05:01 04:00:00Z"
+    },
+    "policy": "keep",
+    "offset": "+08:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714536000000000",
+      "wall": "2024-05-01 12:00:00",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00+08:00",
+      "Keys:CreationDate": "2024:05:01 04:00:00Z"
+    },
+    "policy": "force",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00.125+08:00",
+      "QuickTime:CreateDate": "2024:05:01 04:00:00"
+    },
+    "policy": "auto",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00.125+08:00",
+      "QuickTime:CreateDate": "2024:05:01 04:00:00"
+    },
+    "policy": "keep",
+    "offset": "+08:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714536000125000",
+      "wall": "2024-05-01 12:00:00.125000",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00.125+08:00",
+      "QuickTime:CreateDate": "2024:05:01 04:00:00"
+    },
+    "policy": "force",
+    "offset": "+08:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714536000125000",
+      "wall": "2024-05-01 12:00:00.125000",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00Z",
+      "QuickTime:CreateDate": "2024:05:01 12:00:00"
+    },
+    "policy": "auto",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00Z",
+      "QuickTime:CreateDate": "2024:05:01 12:00:00"
+    },
+    "policy": "keep",
+    "offset": "+08:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714564800000000",
+      "wall": "2024-05-01 12:00:00",
+      "offset": "+0000"
+    }
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00Z",
+      "QuickTime:CreateDate": "2024:05:01 12:00:00"
+    },
+    "policy": "force",
+    "offset": "+08:00",
+    "expected": {
+      "source": "XMP-exif:DateTimeOriginal",
+      "instant": "1714536000000000",
+      "wall": "2024-05-01 12:00:00",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 12:00:00",
+      "ExifIFD:OffsetTimeOriginal": "+00:00"
+    },
+    "policy": "auto",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 12:00:00",
+      "ExifIFD:OffsetTimeOriginal": "+00:00"
+    },
+    "policy": "keep",
+    "offset": "+08:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714564800000000",
+      "wall": "2024-05-01 12:00:00",
+      "offset": "+0000"
+    }
+  },
+  {
+    "tags": {
+      "ExifIFD:DateTimeOriginal": "2024:05:01 12:00:00",
+      "ExifIFD:OffsetTimeOriginal": "+00:00"
+    },
+    "policy": "force",
+    "offset": "+08:00",
+    "expected": {
+      "source": "ExifIFD:DateTimeOriginal",
+      "instant": "1714536000000000",
+      "wall": "2024-05-01 12:00:00",
+      "offset": "+0800"
+    }
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "0000:00:00 00:00:00"
+    },
+    "policy": "auto",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "0000:00:00 00:00:00"
+    },
+    "policy": "keep",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "QuickTime:CreateDate": "0000:00:00 00:00:00"
+    },
+    "policy": "force",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:02:30 12:00:00"
+    },
+    "policy": "auto",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:02:30 12:00:00"
+    },
+    "policy": "keep",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "Keys:CreationDate": "2024:02:30 12:00:00"
+    },
+    "policy": "force",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00Z",
+      "Keys:CreationDate": "invalid"
+    },
+    "policy": "auto",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00Z",
+      "Keys:CreationDate": "invalid"
+    },
+    "policy": "keep",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  },
+  {
+    "tags": {
+      "XMP-exif:DateTimeOriginal": "2024:05:01 12:00:00Z",
+      "Keys:CreationDate": "invalid"
+    },
+    "policy": "force",
+    "offset": "+08:00",
+    "error": "UserInputError"
+  }
+]

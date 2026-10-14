@@ -1,0 +1,26 @@
+{
+  "registered_before_ts_measurements": true,
+  "date": "2026-10-14",
+  "rounds": 3,
+  "samples": {
+    "points-2m.kml": {
+      "cold_seconds": 10.991844849660993,
+      "peak_rss_kib": 1603496,
+      "edit_seconds": 2,
+      "index_read_seconds": 1
+    },
+    "bytes-128m.kml": {
+      "cold_seconds": 11.075844483450055,
+      "peak_rss_kib": 2229568,
+      "edit_seconds": 2,
+      "index_read_seconds": 1
+    }
+  },
+  "lifecycle": {
+    "iterations": 20,
+    "sample_points": 100000,
+    "post_warmup_rss_growth_mib": 96,
+    "idle_ping_p95_ms": 250
+  },
+  "notes": "Same generated input; separate processes. Baseline parsed and extracted then edited/serialized, index encoded/decoded. Cold <= 2x Python median; peak <= 2x Python median; edit <= max(2s,3x); index hit <= max(1s,2x). Raw 128MiB and 2m point limits unchanged."
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="GB18030"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"
+ xmlns:custom="urn:extra"><Document><!--keep--><?probe keep?><name>原始中文</name>
+<ExtendedData><Data name="TrackTags"><value>火车</value></Data>
+<Data name="unknown"><value><![CDATA[a<b & c]]></value></Data></ExtendedData>
+<Style id="keep"><LineStyle><color>ff0000ff</color><width>4.25</width></LineStyle></Style>
+<custom:opaque foo="bar">untouched</custom:opaque>
+<Placemark id="p"><name>多段</name><description><![CDATA[<b>描述</b>]]></description><styleUrl>#keep</styleUrl>
+<MultiGeometry><LineString id="a"><coordinates>100,26 101,27,0 102,28,8.25</coordinates></LineString>
+<gx:Track id="b"><when>2026-10-01T00:00:00.123456789Z</when><when>2026-10-01T08:00:01+08:00</when>
+<gx:coord>103 29 9</gx:coord><gx:coord>104 30</gx:coord></gx:Track>
+<LineString><coordinates>105,31</coordinates></LineString>
+<Polygon><outerBoundaryIs><LinearRing><coordinates>0,0 1,0 0,1 0,0</coordinates>
+</LinearRing></outerBoundaryIs></Polygon>
+</MultiGeometry></Placemark></Document></kml>

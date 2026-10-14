@@ -1,0 +1,124 @@
+.work-nav {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 16px 24px;
+  background: #fff;
+  border-bottom: 1px solid #dce3ec;
+}
+.work-nav strong {
+  color: #376291;
+  letter-spacing: 0.12em;
+  margin-right: auto;
+}
+.work-nav a {
+  color: #345e86;
+  text-decoration: none;
+}
+.work-main {
+  max-width: 1320px;
+  margin: 28px auto;
+}
+.work-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(360px, 1.3fr);
+  gap: 24px;
+}
+.work-grid > section {
+  min-width: 0;
+}
+.work-label {
+  display: block;
+  font-weight: 500;
+  margin: 14px 0 6px;
+}
+.work-fields {
+  display: grid;
+  gap: 10px;
+}
+.work-fields .ant-select,
+.work-fields .ant-input-number {
+  width: 100%;
+}
+.work-actions {
+  margin: 16px 0;
+}
+.wrap-path,
+.work-result,
+.ant-descriptions-item-content {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.work-result {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  margin: 8px 0;
+}
+.work-result .ant-btn {
+  flex-shrink: 0;
+}
+.work-output,
+.work-log {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 380px;
+  overflow: auto;
+  background: #f5f7fa;
+  padding: 12px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+.file-browser {
+  margin-top: 12px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #dce3ec;
+  padding: 12px;
+}
+.file-browser > div {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+details {
+  margin: 16px 0;
+}
+summary {
+  cursor: pointer;
+  color: #345e86;
+}
+input[type="file"] {
+  max-width: 100%;
+}
+.work-main .ant-table-wrapper {
+  overflow: auto;
+}
+@media (max-width: 850px) {
+  .work-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .work-nav {
+    gap: 12px;
+    padding: 12px 16px;
+  }
+  .work-nav strong {
+    width: 100%;
+  }
+  .work-main {
+    padding: 0 12px;
+  }
+  .task-detail .ant-descriptions-item-label {
+    white-space: nowrap;
+  }
+}
+.work-map {
+  height: 420px;
+  display: flex;
+  min-width: 0;
+  margin-top: 12px;
+}
+.work-map .map-stage {
+  min-height: 300px;
+}

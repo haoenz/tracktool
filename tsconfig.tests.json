@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true
+  },
+  "include": [
+    "tests/ts/**/*.ts",
+    "tests/e2e/**/*.ts",
+    "*.config.ts",
+    "scripts/build-maps.ts"
+  ],
+  "exclude": []
+}

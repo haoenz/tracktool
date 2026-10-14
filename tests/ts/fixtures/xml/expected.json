@@ -1,0 +1,30 @@
+{
+  "valid": {
+    "complex.kml": {
+      "name": "原始中文",
+      "coords": ["103 29 9", "104 30"],
+      "unknown": "untouched",
+      "sha256": "731d755bc38dcfaf097361ddee4154aa43d176dd7201927d99d5c8e0bf7a9186"
+    },
+    "utf16.kml": {
+      "name": "原始中文",
+      "coords": ["103 29 9", "104 30"],
+      "unknown": "untouched",
+      "sha256": "88d6d3949397a61b17f76c96a2a95519ed99d70cb33b95b7de3bf388b33befad"
+    },
+    "gb18030.kml": {
+      "name": "原始中文",
+      "coords": ["103 29 9", "104 30"],
+      "unknown": "untouched",
+      "sha256": "e4988fd232abd36d0122916f670fef62537cf00d4cacf8935f5d010a2f856f78"
+    }
+  },
+  "invalid": [
+    "unclosed.kml",
+    "duplicate-attribute.kml",
+    "undeclared-prefix.kml",
+    "unknown-entity.kml",
+    "multiple-roots.kml",
+    "trailing-text.kml"
+  ]
+}
