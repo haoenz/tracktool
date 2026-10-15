@@ -1,5 +1,9 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { OverviewLayer, type OverviewHit } from "./overview-layer.js";
+import {
+  OverviewLayer,
+  type OverviewHit,
+  type OverviewVisibility,
+} from "./overview-layer.js";
 import type { OverviewStatus } from "../shared/overview.js";
 import { MapCanvas } from "../drawing/core.js";
 import type { Project } from "../shared/project.js";
@@ -30,6 +34,7 @@ type Props = {
   preview: boolean;
   overview?: OverviewStatus;
   overviewSelected?: string;
+  overviewVisibility?: OverviewVisibility;
   hideOverview?: boolean;
   onOverviewPick?: (hits: OverviewHit[]) => void;
   onOverviewLoading?: (loading: boolean) => void;
@@ -79,6 +84,7 @@ export const MapViewport = forwardRef<Viewport, Props>(
             : undefined) ??
             latest.current.hideOverview ??
             true,
+          latest.current.overviewVisibility,
         );
     const destroy = (map?: MapCanvas) => {
       if (!map) return;
@@ -241,7 +247,12 @@ export const MapViewport = forwardRef<Viewport, Props>(
     useEffect(() => {
       if (current.current) updateOverview(current.current);
       if (candidate.current) updateOverview(candidate.current);
-    }, [props.overview, props.overviewSelected, props.hideOverview]);
+    }, [
+      props.overview,
+      props.overviewSelected,
+      props.hideOverview,
+      props.overviewVisibility,
+    ]);
     useImperativeHandle(ref, () => ({
       retryOverview: () => {
         if (current.current) layers.current.get(current.current)?.retry();

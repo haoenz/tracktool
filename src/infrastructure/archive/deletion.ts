@@ -147,11 +147,22 @@ export function deleteEntry(
   input: DeleteRequest,
   fault: DeleteFault = () => {},
 ): DeleteResult {
+  return transaction(file, true, (db) =>
+    deleteEntryInTransaction(db, input, fault),
+  );
+}
+/** Allow a checked migration to publish replacements and remove legacy entries atomically. */
+export function deleteEntryInTransaction(
+  db: Database.Database,
+  input: DeleteRequest,
+  fault: DeleteFault = () => {},
+): DeleteResult {
+  if (!db.inTransaction) throw new Error("Deletion requires a transaction");
   const parsed = DeleteRequestSchema.safeParse(input);
   if (!parsed.success) throw new AppError("USER_INPUT", parsed.error.message);
   const request = parsed.data,
     hash = hashJson(request);
-  return transaction(file, true, (db) => {
+  {
     requireDeletionSchema(db);
     if (archiveId(db) !== request.archive_id)
       throw new AppError("USER_INPUT", "Archive identity changed");
@@ -266,5 +277,5 @@ export function deleteEntry(
     } finally {
       db.function("tracktool_can_delete", { varargs: true }, () => 0);
     }
-  });
+  }
 }

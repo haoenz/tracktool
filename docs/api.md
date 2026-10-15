@@ -109,3 +109,5 @@ EditApply 只含 `{schema:1,archive_id,preview_id,preview_sha256,request_key}`�
 | `GET /api/jobs/:id/kml` | 下载登记的展示 KML，不接受任意服务器输出路径 |
 
 导出任务为进程内结果，至多保留 5 个，后续提交会清理超过 15 分钟的已完成任务；重启失效。项目 KML 单次最多 200 条、128 MiB。PNG 使用同一份固定项目几何。原字节读取及媒体匹配不应用展示覆盖；生成连接线没有采样时间，不参与媒体匹配。
+
+旧成果整组整理使用 `EditRequest` 的独立分支：`{schema:1,archive_id,operation:{kind:"legacy_regroup",expected:[完整活动引用],path,category,segments:[{version_id,segment_id}],evidence}}`。最多 100 个成员；必须同分类、全段且不重复、保留各原成员内部顺序，输出使用新 KML 路径。保留忽略及内部连接，文件之间默认断开；不推断来源种类。预览和应用仍走同一组 edit-previews 端点，输出与原成员 superseded 原子提交，恢复使用 restore_group。独立规划和不同交通方式应留在组外。

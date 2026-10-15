@@ -27,10 +27,12 @@ import {
   VersionStore,
   archiveId,
   currentEntry,
+  publishVersions,
   type PublishRequest,
 } from "../../dist/node/infrastructure/archive/versions.js";
 import {
   deleteEntry,
+  deleteEntryInTransaction,
   previewDeletion,
   type DeleteFault,
 } from "../../dist/node/infrastructure/archive/deletion.js";
@@ -131,6 +133,50 @@ function edit(
     ],
   };
 }
+it("rolls back replacement publication and legacy cleanup together on failure", async () => {
+  const { file, id, archive } = await fixture();
+  const deletion = request(file, id, "replace-cleanup");
+  const before = snapshot(file);
+  const replace = (fail: boolean) =>
+    transaction(file, true, (db) => {
+      const imported = publishVersions(db, {
+        archive_id: archive,
+        request_key: "replacement-import",
+        kind: "import",
+        algorithm_version: "test",
+        params: {},
+        inputs: [],
+        outputs: [
+          {
+            kind: "version",
+            path: "original.kml",
+            category: "Train",
+            raw: raw(),
+            origin: "imported",
+          },
+        ],
+      });
+      publishVersions(
+        db,
+        edit(archive, imported.entries[0]!, "replacement-edit"),
+      );
+      deleteEntryInTransaction(db, deletion, (point) => {
+        if (fail && point === "delete-before-commit")
+          throw new Error("rollback replacement");
+      });
+      return imported.entries[0]!.entry_id;
+    });
+  expect(() => replace(true)).toThrow("rollback replacement");
+  expect(snapshot(file)).toEqual(before);
+  const replacement = replace(false);
+  expect(rows(file, "SELECT id FROM archive_entries")).toEqual([
+    { id: replacement },
+  ]);
+  expect(
+    rows(file, "SELECT version_no FROM track_versions ORDER BY version_no"),
+  ).toEqual([{ version_no: 1 }, { version_no: 2 }]);
+  expect(() => entry(file, id)).toThrow("Entry not found");
+});
 it.each([2, 3, 4])(
   "downloads schema %s with no recovery, database writes or target overwrite",
   async (schema) => {

@@ -24,6 +24,7 @@ import type {
   SelectedTrack,
 } from "../shared/map.js";
 import { useOverview, rememberedCamera, rememberCamera } from "./overview.js";
+import type { OverviewVisibility } from "./overview-layer.js";
 import { TRACK_STYLES } from "../shared/track-style.js";
 import type { OverviewStatus } from "../shared/overview.js";
 import type { Project } from "../shared/project.js";
@@ -117,6 +118,10 @@ export default function MapPage() {
 }
 function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
   const [messages, messageHolder] = toast.useMessage({ maxCount: 1 });
+  const [browseVisibility, setBrowseVisibility] = useState<OverviewVisibility>({
+    all: true,
+    exceptions: {},
+  });
   const [browseState, setBrowseState] = useState(() => ({
       ...initial.state,
       camera: rememberedCamera(initial.initialArchive) ?? initial.state.camera,
@@ -313,6 +318,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       const data = await api<Catalog>("/api/archive", { path });
       if (sequence !== operations.current) return;
       setCatalog(data);
+      if (!inProject) setBrowseVisibility({ all: true, exceptions: {} });
       setTracks([]);
       setSourceErrors([]);
       setName("");
@@ -404,6 +410,36 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     } finally {
       if (sequence === operations.current) setBusy(false);
     }
+  };
+  const chooseBrowse = (next: OverviewVisibility) => {
+    setBrowseVisibility(next);
+    if (next.all === Object.hasOwn(next.exceptions, browseOverview.id)) {
+      browseOverview.setId("");
+      browseOverview.setCandidates([]);
+    }
+    const entries = next.all ? [] : Object.values(next.exceptions);
+    // Visibility uses vector tile filters, so selecting the whole archive never
+    // downloads every track. Detailed geometry remains bounded for editing/export.
+    if (!next.all && entries.length <= 200) void select(entries);
+    else {
+      selection.current?.abort();
+      operations.current++;
+      setBusy(false);
+      setBrowseTracks([]);
+      setBrowseState((s) => ({ ...s, tracks: [] }));
+      setSourceErrors([]);
+      setNotice(
+        next.all
+          ? "已更新地图显示"
+          : `已显示 ${entries.length} 条轨迹；处理或出图请选不超过 200 条。`,
+      );
+    }
+  };
+  const toggleBrowse = (id: string, entry: string, checked: boolean) => {
+    const exceptions = { ...browseVisibility.exceptions };
+    if (checked === browseVisibility.all) delete exceptions[id];
+    else exceptions[id] = entry;
+    chooseBrowse({ ...browseVisibility, exceptions });
   };
   const projectPresentation = async (
     entry_id: string,
@@ -948,7 +984,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                   <p className="overview-hint">
                     {inProject
                       ? "勾选需要出图的轨迹；地图只显示工程所选轨迹。"
-                      : "地图展示全库。搜索只筛选列表；勾选用于处理或新建出图工程。"}
+                      : "勾选控制地图显示，初始全选。搜索只筛选列表；清空后可只勾选要查看的轨迹。"}
                   </p>
                   <label htmlFor="filter">筛选轨迹</label>
                   <Input
@@ -974,18 +1010,26 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                         className={`overview-row${overview.id === e.id ? " selected" : ""}`}
                       >
                         <Checkbox
-                          checked={state.tracks.some(
-                            (t) => t.entry === e.entry,
-                          )}
+                          checked={
+                            inProject
+                              ? state.tracks.some((t) => t.entry === e.entry)
+                              : browseVisibility.all !==
+                                Object.hasOwn(browseVisibility.exceptions, e.id)
+                          }
                           disabled={busy}
                           onChange={(v) =>
-                            void select(
-                              v.target.checked
-                                ? [...state.tracks.map((t) => t.entry), e.entry]
-                                : state.tracks
-                                    .filter((t) => t.entry !== e.entry)
-                                    .map((t) => t.entry),
-                            )
+                            inProject
+                              ? void select(
+                                  v.target.checked
+                                    ? [
+                                        ...state.tracks.map((t) => t.entry),
+                                        e.entry,
+                                      ]
+                                    : state.tracks
+                                        .filter((t) => t.entry !== e.entry)
+                                        .map((t) => t.entry),
+                                )
+                              : toggleBrowse(e.id, e.entry, v.target.checked)
                           }
                         >
                           {e.entry}
@@ -1027,6 +1071,16 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                     hideOnSinglePage
                   />
                   <div className="map-actions">
+                    {!inProject && (
+                      <Button
+                        disabled={busy}
+                        onClick={() =>
+                          chooseBrowse({ all: true, exceptions: {} })
+                        }
+                      >
+                        全选轨迹
+                      </Button>
+                    )}
                     <Button
                       onClick={() => {
                         const bounds = overview.query.data?.bounds;
@@ -1038,11 +1092,27 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                     </Button>
                     <Button
                       disabled={busy || !visible.length || visible.length > 200}
-                      onClick={() => void select(visible.map((e) => e.entry))}
+                      onClick={() =>
+                        inProject
+                          ? void select(visible.map((e) => e.entry))
+                          : chooseBrowse({
+                              all: false,
+                              exceptions: Object.fromEntries(
+                                visible.map((e) => [e.id, e.entry]),
+                              ),
+                            })
+                      }
                     >
                       选择本页轨迹
                     </Button>
-                    <Button disabled={busy} onClick={() => void select([])}>
+                    <Button
+                      disabled={busy}
+                      onClick={() =>
+                        inProject
+                          ? void select([])
+                          : chooseBrowse({ all: false, exceptions: {} })
+                      }
+                    >
                       清空选择
                     </Button>
                     <Button
@@ -1074,11 +1144,22 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                             aria-label={`移除 ${t.entry}`}
                             disabled={busy}
                             onClick={() =>
-                              void select(
-                                state.tracks
-                                  .filter((s) => s.entry !== t.entry)
-                                  .map((s) => s.entry),
-                              )
+                              inProject
+                                ? void select(
+                                    state.tracks
+                                      .filter((s) => s.entry !== t.entry)
+                                      .map((s) => s.entry),
+                                  )
+                                : chooseBrowse({
+                                    ...browseVisibility,
+                                    exceptions: Object.fromEntries(
+                                      Object.entries(
+                                        browseVisibility.exceptions,
+                                      ).filter(
+                                        ([, entry]) => entry !== t.entry,
+                                      ),
+                                    ),
+                                  })
                             }
                           >
                             移除
@@ -1480,6 +1561,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             preview={inProject && preview && !inspection}
             overview={overview.query.data}
             overviewSelected={overview.id}
+            overviewVisibility={browseVisibility}
             hideOverview={!browsing}
             onOverviewPick={(hits) => overview.pick(hits.map((h) => h.id))}
             onOverviewLoading={overview.setLoading}

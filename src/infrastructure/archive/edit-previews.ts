@@ -27,6 +27,7 @@ import {
   type PublishResult,
 } from "./versions.js";
 import { prepareSegmentEdit } from "./segment-editor.js";
+import { prepareLegacyRegroup } from "./legacy-regroup.js";
 import {
   inputGeometry,
   requireVersioned,
@@ -141,7 +142,22 @@ export class EditPreviews {
     let publish: PublishRequest | undefined;
     const artifacts: Artifact[] = [],
       changes: EditPreview["changes"] = [];
-    if (request.operation.kind === "restore_group") {
+    if (request.operation.kind === "legacy_regroup") {
+      const prepared = await prepareLegacyRegroup(
+        file,
+        request.archive_id,
+        id,
+        request.operation,
+        signal,
+      );
+      publish = prepared.publish;
+      artifacts.push({
+        ...prepared.result,
+        path: request.operation.path,
+        state: "active",
+      });
+      changes.push(prepared.result.changes);
+    } else if (request.operation.kind === "restore_group") {
       const operationId = request.operation.operation_id;
       readTransaction(file, (db) => {
         if (

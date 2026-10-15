@@ -238,7 +238,9 @@ export default function TrackEditor() {
       setBusy(false);
     }
   }
-  async function make(operation: EditRequest["operation"]) {
+  async function make(
+    operation: Exclude<EditRequest["operation"], { kind: "legacy_regroup" }>,
+  ) {
     if (!d) return;
     const body: EditRequest =
       operation.kind === "restore_group"

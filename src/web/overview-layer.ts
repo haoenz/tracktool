@@ -20,6 +20,10 @@ const categoryPaint = (key: "color" | "opacity"): ExpressionSpecification => [
 ];
 
 export type OverviewHit = { id: string; segment: string };
+export type OverviewVisibility = {
+  all: boolean;
+  exceptions: Record<string, string>;
+};
 /** Browser-only layers; the independent export renderer never installs these. */
 export class OverviewLayer {
   private status?: OverviewStatus;
@@ -27,6 +31,7 @@ export class OverviewLayer {
   private pending?: string;
   private selected = "";
   private hidden = false;
+  private visibility?: OverviewVisibility;
   private serial = 0;
   private scale = 1;
   private failed = new Set<string>();
@@ -69,9 +74,11 @@ export class OverviewLayer {
     status: OverviewStatus | undefined,
     selected: string,
     hidden: boolean,
+    visibility?: OverviewVisibility,
   ) {
     this.selected = selected;
     this.hidden = hidden;
+    this.visibility = visibility;
     if (status?.crs === this.crs) this.status = status;
     if (this.map.isStyleLoaded()) this.install();
     this.paint();
@@ -181,8 +188,22 @@ export class OverviewLayer {
   private paint() {
     const id = this.current;
     if (!id || !this.map.getLayer(`${id}-line`)) return;
-    this.map.setFilter(`${id}-line`, ["==", ["get", "role"], "line"]);
-    this.map.setFilter(`${id}-point`, ["==", ["get", "role"], "point"]);
+    for (const role of ["line", "point"]) {
+      const filter: ExpressionSpecification = ["==", ["get", "role"], role];
+      const visibility = this.visibility;
+      const ids = Object.keys(visibility?.exceptions ?? {});
+      const member: ExpressionSpecification = [
+        "in",
+        ["get", "trackId"],
+        ["literal", ids],
+      ];
+      this.map.setFilter(
+        `${id}-${role}`,
+        !visibility || (visibility.all && !ids.length)
+          ? filter
+          : ["all", filter, visibility.all ? ["!", member] : member],
+      );
+    }
     const selected: ExpressionSpecification = [
       "==",
       ["get", "trackId"],

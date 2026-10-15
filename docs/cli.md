@@ -276,3 +276,5 @@ tracktool track export ENTRY_ID --version VERSION_ID --presentation PRESENTATION
 导出可见段、补绘及启用的连接线，保留实测时间、高程、样式和扩展字段。目标是文件，不覆盖已有目标；`--dry-run` 校验并计算输出但不创建文件。历史版本省略 `--presentation` 时使用该版本第一份展示快照；当前版本默认使用当前快照。原字节请用 `kml download`，完整历史用 `archive full-backup`。网页出图项目的“导出展示 KML”包含该项目的独立覆盖。
 
 `archive backup` 保留原命令名，用于当前库默认展示 ZIP；`archive rebuild` 生成桌面和手机集合。两者不套用任何项目私有覆盖。导出的 Tracktool 元数据记录来源种类、段顺序和显式连线；再次导入时连接线不会成为实测采样，也不会重复补线。
+
+旧成果重组也通过 `track preview REQUEST.json` / `track apply`，请求 operation.kind 为 `legacy_regroup`，具体字段见 [API](api.md)。候选需明确完整成员、段顺序、新路径、相同分类和依据；不会按名称自动归组。使用同一持久预览和组级撤销；希望重做时可撤销上一次组级撤销操作，复用原输出，不必创建同名新条目。

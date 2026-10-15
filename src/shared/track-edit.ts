@@ -166,6 +166,25 @@ export const EditRequestSchema = z.union([
     .object({
       schema: z.literal(1),
       archive_id: id,
+      operation: z
+        .object({
+          kind: z.literal("legacy_regroup"),
+          expected: z.array(ArchiveRefSchema).min(2).max(100),
+          path: z.string().min(1).max(4096),
+          category: z.enum(["Default", "Train", "Flight"]).nullable(),
+          segments: z
+            .array(z.object({ version_id: id, segment_id: id }).strict())
+            .min(1)
+            .max(10000),
+          evidence: z.string().min(1).max(4000),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      schema: z.literal(1),
+      archive_id: id,
       target: ArchiveRefSchema,
       sources: z.array(HistoricalRefSchema).max(1000).default([]),
       operation: targetOperation,

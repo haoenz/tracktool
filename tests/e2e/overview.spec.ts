@@ -40,7 +40,7 @@ async function overviewSource(page: Page) {
   );
 }
 
-test("default overview requests viewport tiles, keeps browsing selection separate, and restores camera", async ({
+test("default overview requests viewport tiles, checks visible tracks, and restores camera", async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -56,6 +56,9 @@ test("default overview requests viewport tiles, keeps browsing selection separat
   ).toBe(false);
   expect(await page.evaluate(() => window.renderer!.state.tracks)).toEqual([]);
   await expect(page.locator(".save-state")).toHaveText("浏览地图");
+  await expect(
+    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
+  ).toBeChecked();
   const view = page.getByRole("button", {
     name: "查看 Default/2026-10-01 中文.kml",
     exact: true,
@@ -269,7 +272,7 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
   ).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
-  ).not.toBeChecked();
+  ).toBeChecked();
   await page.getByRole("button", { name: "关闭详情", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "查看 Train/same.kml", exact: true }),
@@ -395,6 +398,10 @@ test("only pending work shows a translucent loading status and success notificat
   await expect(
     page.getByText("选择轨迹查看，拖动地图探索。", { exact: true }),
   ).toHaveCount(0);
+  await page.getByRole("button", { name: "清空选择", exact: true }).click();
+  await expect(
+    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
+  ).toBeEnabled();
   await page
     .getByRole("checkbox", { name: "Train/same.kml", exact: true })
     .click();
@@ -403,4 +410,95 @@ test("only pending work shows a translucent loading status and success notificat
     timeout: 10000,
   });
   await expect(page.locator(".map-status")).toHaveCount(0);
+});
+
+test("browse checkboxes filter map lines and points, survive searches and style reload, and select all again", async ({
+  page,
+}) => {
+  await loaded(page);
+  const source = await overviewSource(page);
+  await page.getByRole("button", { name: "清空选择", exact: true }).click();
+  const checkbox = page.getByRole("checkbox", {
+    name: "Train/same.kml",
+    exact: true,
+  });
+  await expect(checkbox).not.toBeChecked();
+  await expect
+    .poll(() =>
+      page.evaluate((s) => window.renderer!.map.getFilter(s + "-line"), source),
+    )
+    .toEqual([
+      "all",
+      ["==", ["get", "role"], "line"],
+      ["in", ["get", "trackId"], ["literal", []]],
+    ]);
+  await expect(checkbox).toBeEnabled();
+  await checkbox.check();
+  await expect(page.locator(".ant-message")).toContainText("已选择 1 条轨迹");
+  const filters = await page.evaluate(
+    (s) =>
+      ["line", "point"].map((role) =>
+        window.renderer!.map.getFilter(s + "-" + role),
+      ),
+    source,
+  );
+  for (const filter of filters)
+    expect(JSON.stringify(filter)).toMatch(/"literal",\["[^"]+"\]/);
+  await page.getByLabel("筛选轨迹", { exact: true }).fill("no-such-track");
+  await expect(
+    page.getByText("没有匹配的轨迹。", { exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      (s) => window.renderer!.map.getFilter(s + "-line"),
+      source,
+    ),
+  ).toEqual(filters[0]);
+  await page.evaluate(() => {
+    const m = window.renderer!.map;
+    m.setStyle(m.getStyle(), { diff: false });
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const m = window.renderer!.map;
+        const l = m
+          .getStyle()
+          .layers.find(
+            (l) => l.id.startsWith("overview-") && l.type === "line",
+          );
+        return l && m.getFilter(l.id);
+      }),
+    )
+    .toEqual(filters[0]);
+  await page.getByLabel("筛选轨迹", { exact: true }).fill("");
+  await expect(checkbox).toBeChecked();
+  await expect(
+    page.getByRole("checkbox", {
+      name: "Default/2026-10-01 中文.kml",
+      exact: true,
+    }),
+  ).not.toBeChecked();
+  await page.getByRole("button", { name: "全选轨迹", exact: true }).click();
+  await expect(
+    page.getByRole("checkbox", {
+      name: "Default/2026-10-01 中文.kml",
+      exact: true,
+    }),
+  ).toBeChecked();
+  await expect.poll(() => overviewSource(page)).toBeTruthy();
+  await checkbox.uncheck();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const m = window.renderer!.map;
+        const l = m
+          .getStyle()
+          .layers.find(
+            (l) => l.id.startsWith("overview-") && l.type === "line",
+          );
+        return l && JSON.stringify(m.getFilter(l.id));
+      }),
+    )
+    .toContain('["!",["in"');
 });
