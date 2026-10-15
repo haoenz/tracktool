@@ -92,6 +92,16 @@ Node 可使用 `import { readTrackData, openArchive } from 'tracktool'`。其他
 
 ## 开发与验收
 
+开发网页界面时运行：
+
+```sh
+pnpm run dev
+```
+
+首次启动会先构建后台，再同时启动后台和 Vite：Vite 在 `0.0.0.0:8765` 提供网页并启用热更新，后台在本机 `127.0.0.1:8766` 提供 API。电脑浏览器访问 `http://127.0.0.1:8765`；同一局域网内的设备访问这台电脑的 IPv4 地址加 `:8765`。修改 `src/web` 下的 React、样式和页面代码后，浏览器会自动更新。按 Ctrl+C 会同时停止两项服务。
+
+`pnpm run` 不带脚本名时只会列出可用脚本，启动开发环境请使用 `pnpm run dev`。`pnpm start` 仍用于启动构建后的常规服务。
+
 ```sh
 pnpm check
 pnpm test:e2e

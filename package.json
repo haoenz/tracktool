@@ -30,6 +30,7 @@
     "format:check": "prettier --check src tests/ts tests/e2e *.ts scripts/*.ts scripts/release/*.mjs package.json tsconfig*.json .dependency-cruiser.cjs eslint.config.js",
     "check": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm test",
     "start": "node dist/node/server/main.js",
+    "dev": "pnpm build && node scripts/dev.ts",
     "cli": "node dist/node/cli/main.js",
     "cities": "node scripts/build-map-cities.ts",
     "verify:package": "node scripts/release/verify-package.mjs",
