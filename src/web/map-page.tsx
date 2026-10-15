@@ -77,11 +77,18 @@ export default function MapPage() {
   const [params] = useSearchParams();
   const bootstrap = useQuery({
     queryKey: ["map-bootstrap"],
+    // Bootstrap resources own the renderer lifetime; refresh them on page reload.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: ({ signal }) =>
       api<Bootstrap>("/api/bootstrap", undefined, signal),
   });
   const cities = useQuery({
     queryKey: ["cities"],
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: ({ signal }) => api<Cities>("/api/cities", undefined, signal),
   });
   if (bootstrap.isError || cities.isError)
