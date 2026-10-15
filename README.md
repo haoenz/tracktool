@@ -50,7 +50,7 @@ pnpm start --files-root /数据 --state-dir /数据/网页状态 --no-browser
 pnpm start --host 0.0.0.0 --files-root /数据 --archive /数据/归档
 ```
 
-详细参数、文件范围、上传限制和任务恢复见[使用与开发说明](docs/typescript-development.md)。
+网页文件范围、上传和任务恢复见[网页地图使用说明](docs/web-usage.md)。
 
 ## CLI 示例
 
@@ -99,6 +99,6 @@ pnpm test:terminal           # Linux PTY / zsh / Bash
 pnpm cities CN.zip new-cities.json
 ```
 
-正式构建、测试及城市数据维护无需 Python。旧源码、测试和探针的恢复说明在[历史快照](docs/history/README.md)，现有 Python 生成的固定差分样本仍参与 TS 验收。
+正式构建、测试及城市数据维护无需 Python。
 
 参考：[存储格式](docs/sqlite-storage.md)、[安装升级与发布检查](docs/install-upgrade.md)、[第三方资源](THIRD_PARTY_NOTICES.md)。

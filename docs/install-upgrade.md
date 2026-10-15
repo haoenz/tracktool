@@ -40,39 +40,6 @@ ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL
 
 若已升级 schema 3/4，先用 `archive restore-backup` 将迁移前的 schema 1/2 完整备份恢复到独立目录，再交给旧版本打开；旧程序不能直接使用 schema 3/4 库。
 
-停止新服务和 CLI，保留新状态目录以便诊断；使用先前保留的 Python 环境/独立检出恢复旧命令 PATH。旧版本源码基线是 `5fa6aa97f9dd834a116fd5277f33ad6d4bae9f9e`，离线快照恢复见 [history/README.md](history/README.md)。
+停止新服务和 CLI，保留新状态目录以便诊断；使用先前保留的 Python 环境恢复旧命令 PATH。旧程序不能直接使用 schema 3/4 数据库。
 
 在独立目录恢复完整数据库备份及配置，或把 ZIP 导入一个全新归档；不要覆盖当前唯一数据库或把数据库文件单独复制到仍存在不匹配 WAL 的目录。媒体变更需从原件/首次备份恢复。回退应用程序本身不会撤销已经写入的元数据、轨迹或任务结果。
-
-## 验收矩阵
-
-| 平台/入口 | 本轮状态 |
-| --- | --- |
-| Linux x86_64 / Node 26 / pnpm | 构建、真实媒体工具、网页、独立包、PNG、配置/归档恢复已实测 |
-| Linux zsh | 真实 Tab：命令、参数、中文路径、分类、动态标签；PTY 进度/取消/窄终端已实测 |
-| Linux bash | 真实 Tab：命令、参数、分类、中文路径、动态标签，以及干净管道 stdout 已实测 |
-| macOS / zsh | 不在本次范围；CI 已配置但没有实机结果 |
-| Windows x64 / PowerShell | 用户有需要时另行验收；CI 已配置但没有实机或原生补全结果 |
-
-`.github/workflows/release-check.yml` 运行各系统构建、集成、浏览器、打包及安装后验证，并保留报告；此文件创建不等于工作流已执行。用户已确认本次仅验收 Linux，其他平台不阻塞此次迁移完成；现有安装包保留rc.2 版本号。CI 的 pnpm/浏览器安装方式分别参考 [pnpm action](https://github.com/pnpm/action-setup) 与 [Playwright CI](https://playwright.dev/docs/ci-intro)。
-
-本地复验：
-
-```sh
-pnpm check
-pnpm cli setup chromium
-pnpm test:e2e
-pnpm test:terminal
-pnpm pack --pack-destination sandbox/pack
-node scripts/release/prepare-consumer.mjs sandbox/consumer sandbox/pack
-pnpm --dir sandbox/consumer install
-pnpm verify:package sandbox/consumer sandbox/release-check
-# 此项使用 Linux 的独立 PATH 和外部工具位置
-node scripts/release/web-smoke.mjs sandbox/consumer sandbox/release-check
-node scripts/release/performance.mjs sandbox/release-performance
-node --expose-gc scripts/release/lifecycle.mjs sandbox/release-performance/lifecycle.json
-```
-
-每次发布验收使用新的空 consumer/pack 目录，避免已有产物污染结果。`verify:package` 验证实际安装产物的字体 SHA、前端、API、旧库读取、项目、1920×1440 PNG、ZIP 恢复、媒体备份与真实 ffmpeg；Unix 上限制 PATH 以移除 Python。性能复验沿用 M3 的同样本和预算；联网地图源/Google API 单独记录，不以离线测试承诺外部服务持续可用。
-
-原 pop 已移除，使用独立的 `kml download` 和 `kml delete`。下载兼容 schema 2/3/4，删除需要显式升级到 schema 4。若旧库有待完成 pop，先运行 `archive recover` 按该库原语义完成，再迁移；schema 3 的旧退出展示状态不会自动转为删除。

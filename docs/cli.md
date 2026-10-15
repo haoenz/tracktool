@@ -66,7 +66,7 @@ tracktool archive recover
 
 ## 网页地图
 
-运行 `tracktool-map`，地图编辑/项目/PNG 及其他页面的启动和操作见 [使用说明](typescript-development.md)。
+运行 `tracktool-map`，地图编辑、项目、PNG 及其他页面的启动和操作见[网页使用说明](web-usage.md)。
 
 ## 库内行程编辑
 

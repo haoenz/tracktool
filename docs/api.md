@@ -70,7 +70,7 @@ Python 调用方只需用自己的 `subprocess.run([...], check=True, capture_ou
 | `POST /api/work/tasks/:id/retry` | 普通任务建立新预览；版本编辑 apply 任务以原请求键重试，先回放已提交结果 |
 | `GET /api/work/tasks/:id/download?index=0` | 下载该任务登记的结果文件 |
 
-HTTP 契约由 `src/shared/work.ts` / `contracts.ts` 定义，面向本地单用户应用，不是公网身份认证方案。上传暂存、15 分钟预览、重试及取消边界见[使用说明](typescript-development.md)。
+HTTP 契约面向本地单用户应用，不是公网身份认证方案。上传暂存、预览、重试及取消方式见[网页使用说明](web-usage.md)。
 
 ## 版本化轨迹编辑
 
