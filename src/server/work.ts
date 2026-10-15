@@ -21,6 +21,8 @@ import { WorkFiles } from "../infrastructure/work-files.js";
 import { BusinessRunner } from "../infrastructure/work-runner.js";
 import { TaskQueue } from "../infrastructure/task-queue.js";
 import { ArchiveClient } from "../infrastructure/archive/client.js";
+import { EditPreviews } from "../infrastructure/archive/edit-previews.js";
+import { trackRoutes } from "./tracks.js";
 export interface WorkOptions {
   stateDir?: string;
   roots?: string[];
@@ -32,7 +34,14 @@ export function workRoutes(
   envKey?: string,
   options?: WorkOptions,
 ) {
-  let engine: Promise<{ queue: TaskQueue; files: WorkFiles }> | undefined;
+  let engine:
+    | Promise<{
+        queue: TaskQueue;
+        files: WorkFiles;
+        edits: EditPreviews;
+        runner: BusinessRunner;
+      }>
+    | undefined;
   const get = () =>
     (engine ??= (async () => {
       const config = await configStore.load();
@@ -61,11 +70,13 @@ export function workRoutes(
       const files = new WorkFiles(stateDir, roots);
       await files.prepare();
       const store = new SqliteTasks(path.join(stateDir, "tasks.sqlite3")),
+        edits = new EditPreviews(path.join(stateDir, "tasks.sqlite3")),
         runner = new BusinessRunner(
           files,
           configStore,
           envKey,
           options?.archive,
+          edits,
         ),
         queue = new TaskQueue(store, runner);
       await files.sweep(
@@ -79,14 +90,26 @@ export function workRoutes(
           ]),
       );
       queue.start();
-      return { queue, files };
+      return { queue, files, edits, runner };
     })());
   if (options)
     app.addHook("onReady", async () => {
       await get();
     });
   app.addHook("onClose", async () => {
-    if (engine) await (await engine).queue.close();
+    if (engine) {
+      const value = await engine;
+      await value.queue.close();
+      value.edits.close();
+    }
+  });
+  trackRoutes(app, async () => {
+    const value = await get();
+    return {
+      queue: value.queue,
+      edits: value.edits,
+      file: await value.runner.trackDatabase(),
+    };
   });
   app.get("/api/work/bootstrap", async () => ({
     roots: (await get()).files.roots,

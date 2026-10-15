@@ -42,7 +42,7 @@ describe("shared contracts", () => {
     ).toEqual({ future: true });
   });
   it.each([
-    { ...project, schema: 3 },
+    { ...project, schema: 4 },
     { ...project, title: "a\nb" },
     { ...project, title: "字".repeat(61) },
     { ...project, output: { width: 1920, height: 1000 } },

@@ -1,7 +1,7 @@
 import { deflateSync, inflateSync } from "node:zlib";
 import { z } from "zod";
 import type { TrackData, TrackSegment } from "../domain/trackdata.js";
-export const PARSER_VERSION = 2,
+export const PARSER_VERSION = 4,
   SERIALIZATION_VERSION = 1;
 const array = z.string().nullable();
 const schema = z.object({

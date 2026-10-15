@@ -20,7 +20,10 @@ async function upload(page: Page, name: string, buffer: Buffer) {
 async function confirm(page: Page) {
   await page.getByRole("button", { name: "确认执行此预览" }).click();
   await expect(
-    page.getByRole("button", { name: "下载", exact: true }).first(),
+    page
+      .locator(".task-detail")
+      .getByRole("button", { name: "下载", exact: true })
+      .first(),
   ).toBeVisible({ timeout: 20000 });
 }
 test("media links return to the map with no web media tools", async ({
@@ -33,7 +36,7 @@ test("media links return to the map with no web media tools", async ({
     page.getByRole("link", { name: "媒体", exact: true }),
   ).toHaveCount(0);
 });
-test("archive upload and tagging preview feed real push, filtering and backup downloads", async ({
+test("archive upload, backup, read-only download and real deletion use separate controls", async ({
   page,
 }) => {
   await page.goto("/archive");
@@ -56,17 +59,56 @@ test("archive upload and tagging preview feed real push, filtering and backup do
   await expect(
     page.getByText("2026-10-01 网页归档.kml", { exact: true }),
   ).toBeVisible();
-  await choose(page, "ZIP 备份");
+  await choose(page, "导出展示 ZIP");
   await page.getByRole("button", { name: "生成操作预览" }).click();
   await confirm(page);
   const event = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载", exact: true }).first().click();
+  await page
+    .locator(".task-detail")
+    .getByRole("button", { name: "下载", exact: true })
+    .first()
+    .click();
   expect((await event).suggestedFilename()).toBe("Archive.zip");
+  const row = page
+    .getByRole("row")
+    .filter({ hasText: "2026-10-01 网页归档.kml" });
+  await row.getByRole("button", { name: "下载", exact: true }).click();
+  await expect(page.getByLabel("输出路径（可选）")).toHaveCount(0);
+  await page.getByRole("button", { name: "生成操作预览" }).click();
+  await page.getByRole("button", { name: "确认执行此预览" }).click();
+  await expect(page.getByText("已完成", { exact: true })).toBeVisible();
+  const artifact = page
+    .locator(".task-detail")
+    .getByRole("button", { name: "下载", exact: true });
+  const downloading = page.waitForEvent("download");
+  await artifact.click();
+  const downloaded = await downloading;
+  expect(downloaded.suggestedFilename()).toBe("2026-10-01 网页归档.kml");
+  expect(await readFile((await downloaded.path())!)).toEqual(
+    await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml"),
+  );
+  await page.getByRole("button", { name: "刷新归档" }).click();
+  await expect(row).toBeVisible();
+  await row.getByRole("button", { name: "删除", exact: true }).click();
+  await page.getByRole("button", { name: "生成操作预览" }).click();
+  await expect(
+    page.getByText(/将删除 .*网页归档.kml 及 1 个版本/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "确认执行此预览" }).click();
+  await expect(page.getByText("已完成", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .locator(".task-detail")
+      .getByRole("button", { name: "下载", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "刷新归档" }).click();
+  await expect(row).toHaveCount(0);
 });
 test("track editing reports malformed input as partial and allows a fresh retry", async ({
   page,
 }) => {
   await page.goto("/tracks");
+  await page.getByRole("tab", { name: "独立文件工具" }).click();
   await choose(page, "检查分类");
   await upload(page, "bad.kml", Buffer.from("<kml>"));
   await page.getByRole("button", { name: "开始检查" }).click();
@@ -92,6 +134,7 @@ test("edited KML can be inspected on a map and its upload batch remains manageab
   page,
 }) => {
   await page.goto("/tracks");
+  await page.getByRole("tab", { name: "独立文件工具" }).click();
   await choose(page, "设置活动标签");
   await page.getByLabel("活动标签", { exact: true }).click();
   await page.getByRole("option", { name: "徒步", exact: true }).click();
@@ -136,6 +179,7 @@ test("selected library tracks can be processed as copies and inspected without l
   await page
     .getByRole("button", { name: "处理已选轨迹 · 1", exact: true })
     .click();
+  await page.getByRole("tab", { name: "独立文件工具" }).click();
   await page
     .getByRole("button", { name: "使用地图已选轨迹", exact: true })
     .click();

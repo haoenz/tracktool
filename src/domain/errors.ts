@@ -27,7 +27,14 @@ export function errorInfo(error: unknown): ErrorInfo {
         : error.code === "CANCELLED"
           ? 130
           : 1;
-  return { code: error.code, message: error.message, exitCode };
+  return {
+    code: error.code,
+    message: error.message,
+    exitCode,
+    ...("reason" in error && typeof error.reason === "string"
+      ? { reason: error.reason }
+      : {}),
+  };
 }
 export function checkCancelled(signal?: AbortSignal): void {
   if (signal?.aborted) throw new AppError("CANCELLED", "操作已取消");

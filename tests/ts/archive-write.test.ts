@@ -23,9 +23,19 @@ import {
   transaction,
   rawObject,
 } from "../../dist/node/infrastructure/archive/database.js";
+import { SCHEMA_3 } from "../../dist/node/infrastructure/archive/schema-v3.js";
+import {
+  previewDeletion,
+  deleteEntry,
+} from "../../dist/node/infrastructure/archive/deletion.js";
+import {
+  SCHEMA,
+  MIGRATE_1,
+} from "../../dist/node/infrastructure/archive/schema.js";
 import { readZip } from "../../dist/node/infrastructure/archive/zip.js";
 import { digest } from "../../dist/node/infrastructure/durable-files.js";
 import { withDocument } from "../../dist/node/infrastructure/xml/document.js";
+import { exportDisplay } from "../../dist/node/infrastructure/archive/display-export.js";
 import expected from "./fixtures/m4/python.json";
 const fixture = (n: string) =>
   fileURLToPath(new URL(`./fixtures/m4/${n}`, import.meta.url));
@@ -40,10 +50,18 @@ afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   dirs.length = 0;
 });
-async function initialized() {
+async function initialized(version = 4) {
   const directory = tmp();
   const writer = new ArchiveWriter();
-  await writer.init(directory);
+  if (version === 4) await writer.init(directory);
+  else {
+    const db = new Database(path.join(directory, "archive.sqlite3"));
+    db.exec(version === 3 ? SCHEMA_3 : SCHEMA + MIGRATE_1);
+    db.prepare(
+      "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'legacy')",
+    ).run();
+    db.close();
+  }
   return { directory, writer, file: path.join(directory, "archive.sqlite3") };
 }
 async function zipBytes(names: [string, Uint8Array, number?][]) {
@@ -75,7 +93,20 @@ it.each(["stored", "deflate", "bzip2", "lzma", "zstd"])(
       original[n] = digest(b);
     });
     const output = path.join(d, "out.zip");
-    await w.backup(file, output);
+    const result = await w.backup(file, output);
+    expect(result.warnings?.some((w) => w.includes("保留原字节"))).toBe(true);
+    transaction(file, false, (db) => {
+      for (const hash of Object.values(original))
+        expect(digest(rawObject(db, hash))).toBe(hash);
+      const rows = db
+        .prepare(
+          "SELECT e.path,v.manifest_status FROM archive_entries e JOIN track_versions v ON v.id=e.current_version_id",
+        )
+        .all() as { path: string; manifest_status: string }[];
+      for (const row of rows)
+        if (row.manifest_status === "ready")
+          original[row.path] = digest(exportDisplay(db, row.path));
+    });
     const roundtrip: Record<string, string> = {};
     await readZip(output, (n, b) => {
       roundtrip[n] = digest(b);
@@ -159,8 +190,8 @@ it("push deduplicates bytes/revisions, preserves conflicting backup sources, pop
   mkdirSync(out);
   writeFileSync(path.join(out, path.basename(source)), "occupied");
   await expect(
-    w.pop({
-      kind: "pop",
+    w.execute({
+      kind: "download",
       database: file,
       name: path.basename(source),
       output: out,
@@ -182,13 +213,20 @@ it("push deduplicates bytes/revisions, preserves conflicting backup sources, pop
   ).toHaveLength(1);
   expect(existsSync(source)).toBe(true);
   rmSync(path.join(out, path.basename(source)));
-  await w.pop({
-    kind: "pop",
+  await w.execute({
+    kind: "download",
     database: file,
     name: path.basename(source),
     output: out,
   });
   expect(readFileSync(path.join(out, path.basename(source)))).toEqual(raw);
+  expect(w.status(file)).toMatchObject({ entries: 1, revision: 1 });
+  const plan = previewDeletion(file, { name: path.basename(source) });
+  deleteEntry(file, {
+    archive_id: plan.archive_id,
+    expected: plan.expected,
+    request_key: "remove",
+  });
   expect(w.status(file)).toMatchObject({ entries: 0, pending: 0, revision: 2 });
 });
 it.each([
@@ -304,22 +342,26 @@ it("older export cannot replace a newer receipt for the same target", async () =
   expect(readFileSync(output)).toEqual(before);
 });
 it("schema upgrade is explicit, transactional and preserves existing raw bytes", async () => {
-  const { file, writer: w } = await initialized();
-  transaction(file, true, (db) => addEntry(db, "a.kml", raw, "Train"));
+  const directory = tmp(),
+    file = path.join(directory, "archive.sqlite3"),
+    w = new ArchiveWriter();
   const db = new Database(file);
+  db.exec(SCHEMA);
   db.exec(
-    "DROP TABLE export_receipts; DROP INDEX operation_source; DROP INDEX operation_entry; CREATE UNIQUE INDEX operation_entry ON file_operations(entry_id); PRAGMA user_version=1;",
+    "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'v1-fixture'); PRAGMA user_version=1; BEGIN",
   );
+  addEntry(db, "a.kml", raw, "Train");
+  db.exec("COMMIT");
   db.close();
   expect(() => w.status(file)).toThrow("schema 1");
-  w.migrate(file);
+  await w.migrate(file);
   expect(w.status(file).entries).toBe(1);
   transaction(file, false, (db) =>
     expect(Buffer.from(rawObject(db, digest(raw)))).toEqual(raw),
   );
 });
-it("all six rebuilt collections match Python semantic output", async () => {
-  const { directory: d, file, writer: w } = await initialized();
+it("all six legacy collections match Python semantic output", async () => {
+  const { directory: d, file, writer: w } = await initialized(2);
   transaction(file, true, (db) =>
     addEntry(db, "Train/2026-10/2026-10-01 轨迹.kml", raw, "Train"),
   );
@@ -349,25 +391,26 @@ it("all six rebuilt collections match Python semantic output", async () => {
   expect(w.status(file).views_revision).toBe(1);
   expect(readdirSync(d).filter((n) => n.endsWith(".kml"))).toHaveLength(6);
 });
-it("pop resumes after publication failure without deleting the only copy", async () => {
-  const { directory, file, writer } = await initialized();
-  transaction(file, true, (db) => addEntry(db, "Train/a.kml", raw, "Train"));
-  const output = path.join(directory, "popped");
-  mkdirSync(output);
+it("legacy schema 2 pop intents recover with their original removal semantics", async () => {
+  const { directory, file, writer } = await initialized(2);
+  transaction(file, true, (db) => {
+    const e = addEntry(db, "Train/a.kml", raw, "Train");
+    db.prepare(
+      "INSERT INTO file_operations VALUES ('old-pop','pop',?,?,NULL,?)",
+    ).run(e.id, e.sha256, path.join(directory, "popped", "a.kml"));
+  });
   const crash = new ArchiveWriter(undefined, (p) => {
     if (p === "target-durable") throw new Error("injected");
   });
-  await expect(
-    crash.pop({ kind: "pop", database: file, name: "a", output }),
-  ).rejects.toThrow("injected");
+  await expect(crash.recover(file)).rejects.toThrow("injected");
   expect(writer.status(file)).toMatchObject({ entries: 1, pending: 1 });
-  expect(readFileSync(path.join(output, "a.kml"))).toEqual(raw);
   await writer.recover(file);
   expect(writer.status(file)).toMatchObject({
     entries: 0,
     pending: 0,
     revision: 2,
   });
+  expect(readFileSync(path.join(directory, "popped", "a.kml"))).toEqual(raw);
 });
 it("a backup directory alias of the source directory never removes the source", async () => {
   const { directory, file, writer } = await initialized();
@@ -421,12 +464,12 @@ it("conflicting paths roll back the whole push and retain every source", async (
   });
   expect(existsSync(first) && existsSync(second)).toBe(true);
 });
-it("pop preview checks target conflicts without recovery or mutation", async () => {
+it("download preview checks target conflicts without recovery or mutation", async () => {
   const { directory, file, writer } = await initialized();
   transaction(file, true, (db) => addEntry(db, "Train/a.kml", raw, "Train"));
   const before = readFileSync(file);
-  await writer.pop({
-    kind: "pop",
+  await writer.execute({
+    kind: "download",
     database: file,
     name: "a",
     output: directory,
@@ -436,8 +479,8 @@ it("pop preview checks target conflicts without recovery or mutation", async () 
   expect(existsSync(path.join(directory, "a.kml"))).toBe(false);
   writeFileSync(path.join(directory, "a.kml"), "occupied");
   await expect(
-    writer.pop({
-      kind: "pop",
+    writer.execute({
+      kind: "download",
       database: file,
       name: "a",
       output: directory,
@@ -460,4 +503,35 @@ it("reads Python forced ZIP64 and CP437 names; validates directory CRC and dupli
     await expect(
       new ArchiveWriter().init(tmp(), fixture(name)),
     ).rejects.toThrow();
+});
+
+it("recovers an already committed schema 1 pop before explicit migration", async () => {
+  const directory = tmp(),
+    file = path.join(directory, "archive.sqlite3"),
+    target = path.join(directory, "old.kml"),
+    db = new Database(file);
+  db.exec(SCHEMA);
+  db.pragma("user_version=1");
+  db.prepare(
+    "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'schema1')",
+  ).run();
+  const e = addEntry(db, "a.kml", raw, "Train");
+  db.prepare("INSERT INTO file_operations VALUES ('old','pop',?,?,NULL,?)").run(
+    e.id,
+    e.sha256,
+    target,
+  );
+  db.close();
+  const writer = new ArchiveWriter();
+  await expect(
+    writer.execute({ kind: "migrate", database: file }),
+  ).rejects.toThrow(/recover/);
+  await writer.recover(file);
+  expect(readFileSync(target)).toEqual(raw);
+  await writer.execute({ kind: "migrate", database: file });
+  expect(writer.status(file)).toMatchObject({
+    entries: 0,
+    pending: 0,
+    revision: 3,
+  });
 });

@@ -15,12 +15,15 @@ import {
   Space,
   Spin,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from "antd";
 import { api, request } from "./api.js";
 import {
   OPERATIONS,
+  executableOperation,
+  operationLabel,
   READ_OPERATIONS,
   WorkRequestSchema,
 } from "../shared/work.js";
@@ -31,9 +34,29 @@ import type {
   UploadResult,
 } from "../shared/work.js";
 import type { PublicConfig } from "../shared/contracts.js";
+import type { DeletePreview } from "../shared/archive-actions.js";
 import type { Catalog } from "../shared/map.js";
 import "./work.css";
 import { useWorkspace } from "./workspace.js";
+import TrackEditor from "./track-editor.js";
+export default function WorkPage({ group }: { group: "archive" | "tracks" }) {
+  return group === "tracks" ? (
+    <Tabs
+      destroyOnHidden
+      defaultActiveKey="journey"
+      items={[
+        { key: "journey", label: "库内行程编辑", children: <TrackEditor /> },
+        {
+          key: "files",
+          label: "独立文件工具",
+          children: <FileWorkPage group="tracks" />,
+        },
+      ]}
+    />
+  ) : (
+    <FileWorkPage group="archive" />
+  );
+}
 const statusLabel: Record<string, string> = {
   queued: "等待执行",
   running: "正在处理",
@@ -120,14 +143,20 @@ export function TaskDetail({
         <Spin />
       </>
     );
+  const deletion = (
+    task.output?.data as { deletion_preview?: DeletePreview } | undefined
+  )?.deletion_preview;
+  const executable = executableOperation(task.request.operation);
   const active = ["queued", "running"].includes(task.status),
     canApply =
+      executable &&
+      !deletion?.dependencies.length &&
       task.mode === "plan" &&
       task.status === "succeeded" &&
       !READ_OPERATIONS.includes(task.request.operation);
   return (
     <Card
-      title={`${task.mode === "plan" ? "预览" : "执行"} · ${OPERATIONS[task.request.operation]}`}
+      title={`${task.mode === "plan" ? "预览" : "执行"} · ${operationLabel(task.request.operation)}`}
       className="task-detail"
     >
       <Space wrap>
@@ -182,11 +211,15 @@ export function TaskDetail({
             children:
               task.request.inputs.join("\n") || task.request.archive || "归档",
           },
-          {
-            key: "output",
-            label: "输出位置",
-            children: task.request.output || "沿用源文件或归档目录",
-          },
+          ...(task.request.operation === "archive:delete"
+            ? []
+            : [
+                {
+                  key: "output",
+                  label: "输出位置",
+                  children: task.request.output || "沿用源文件或归档目录",
+                },
+              ]),
           {
             key: "mode",
             label: "当前阶段",
@@ -199,12 +232,44 @@ export function TaskDetail({
           },
         ]}
       />
+      {!executable && (
+        <Alert
+          type="info"
+          title="此历史操作已移除，仅可查看记录和下载已有结果"
+        />
+      )}
+      {deletion && (
+        <Alert
+          type={deletion.dependencies.length ? "warning" : "info"}
+          title={`将删除 ${deletion.path} 及 ${deletion.versions} 个版本`}
+          description={
+            <>
+              <p>
+                删除后不能从版本历史恢复。仍被其他轨迹使用的{" "}
+                {deletion.shared_objects} 份共享内容会保留。
+              </p>
+              {deletion.dependencies.map((d) => (
+                <p key={d.kind + d.id}>
+                  阻塞依赖：
+                  {d.kind === "project"
+                    ? "项目"
+                    : d.kind === "trajectory"
+                      ? "轨迹"
+                      : "待恢复操作"}{" "}
+                  {d.detail}（{d.id}）
+                </p>
+              ))}
+            </>
+          }
+        />
+      )}
       {task.error && <Alert type="error" title={task.error.message} />}
       <ErrorBox error={error} />
       <Space wrap className="work-actions">
         {canApply && (
           <Button
             type="primary"
+            danger={task.request.operation === "archive:delete"}
             loading={busy}
             onClick={() => void act("apply")}
           >
@@ -215,11 +280,13 @@ export function TaskDetail({
           <Button danger loading={busy} onClick={() => void act("cancel")}>
             取消任务
           </Button>
-        ) : (
+        ) : executable ? (
           <Button loading={busy} onClick={() => void act("retry")}>
-            重新预览 / 重试
+            {task.request.operation === "track:apply"
+              ? "用原请求重试应用"
+              : "重新预览 / 重试"}
           </Button>
-        )}
+        ) : null}
         <Button onClick={() => void query.refetch()}>刷新状态</Button>
         {task.request.archive && (
           <Button
@@ -236,8 +303,9 @@ export function TaskDetail({
       </Space>
       {canApply && (
         <Typography.Paragraph type="secondary">
-          预览有效期 15
-          分钟。执行前会再次检查文件、配置与归档；发生变化时需要重新预览。
+          {task.request.operation === "track:preview"
+            ? "编辑预览有效期 24 小时；应用已保存产物，来源变化时需重新预览。"
+            : "预览有效期 15 分钟。执行前会再次检查文件、配置与归档；发生变化时需要重新预览。"}
         </Typography.Paragraph>
       )}
       {task.result && (
@@ -271,6 +339,11 @@ export function TaskDetail({
           <summary>检查结果与处理明细</summary>
           <pre className="work-output">{resultText(task.output.data)}</pre>
         </details>
+      )}
+      {task.request.operation.startsWith("track:") && (
+        <Button onClick={() => workspace.open("tracks", id)}>
+          打开行程编辑与预览
+        </Button>
       )}
       {!!task.output?.paths.length && (
         <section aria-label="结果文件">
@@ -510,6 +583,7 @@ function FilePicker({
   );
 }
 const textFields: Record<string, string> = {
+  versionId: "历史版本 ID（留空下载当前版本）",
   name: "轨迹名称或完整归档成员路径",
   tag: "活动标签",
   position: "坐标（纬度 经度，或 DMS）",
@@ -545,7 +619,8 @@ const booleanFields: Record<string, string> = {
 };
 const fields: Partial<Record<Operation, string[]>> = {
   "archive:push": ["category", "keep"],
-  "archive:pop": ["name", "category"],
+  "archive:download": ["name", "category", "versionId"],
+  "archive:delete": ["name", "category"],
   "kml:set-tag": ["tag", "create"],
   "kml:split": ["auto", "points", "gapSeconds", "gapMeters"],
   "kml:prune": [
@@ -594,10 +669,13 @@ const fields: Partial<Record<Operation, string[]>> = {
 };
 function CatalogPanel({
   archive,
-  onPop,
+  onAction,
 }: {
   archive: string;
-  onPop: (name: string) => void;
+  onAction: (
+    operation: "archive:download" | "archive:delete",
+    name: string,
+  ) => void;
 }) {
   const [filter, setFilter] = useState(""),
     [kind, setKind] = useState("all");
@@ -668,7 +746,19 @@ function CatalogPanel({
               {
                 title: "操作",
                 render: (_, entry) => (
-                  <Button onClick={() => onPop(entry.entry)}>取回</Button>
+                  <Space>
+                    <Button
+                      onClick={() => onAction("archive:download", entry.entry)}
+                    >
+                      下载
+                    </Button>
+                    <Button
+                      danger
+                      onClick={() => onAction("archive:delete", entry.entry)}
+                    >
+                      删除
+                    </Button>
+                  </Space>
                 ),
               },
             ]}
@@ -678,7 +768,7 @@ function CatalogPanel({
     </Card>
   );
 }
-export default function WorkPage({ group }: { group: "archive" | "tracks" }) {
+function FileWorkPage({ group }: { group: "archive" | "tracks" }) {
   const workspace = useWorkspace();
   const bootstrap = useQuery({
     queryKey: ["work-bootstrap"],
@@ -741,6 +831,7 @@ export default function WorkPage({ group }: { group: "archive" | "tracks" }) {
   );
   const choose = (next: Operation) => {
     setOperation(next);
+    setOutput("");
     setOptions({});
     setSpecial({});
   };
@@ -777,7 +868,9 @@ export default function WorkPage({ group }: { group: "archive" | "tracks" }) {
                 .map((p) => p.trim())
                 .filter(Boolean),
         archive: archivePath || undefined,
-        output: output || undefined,
+        output: ["archive:download", "archive:delete"].includes(operation)
+          ? undefined
+          : output || undefined,
         options: opts,
       });
       const task = await api<WorkTask>("/api/work/preview", body);
@@ -839,19 +932,25 @@ export default function WorkPage({ group }: { group: "archive" | "tracks" }) {
                     options={names.map(([value, label]) => ({ value, label }))}
                     style={{ width: "100%" }}
                   />
-                  <label className="work-label" htmlFor="work-output">
-                    输出路径（可选）
-                  </label>
-                  <Input
-                    id="work-output"
-                    value={output}
-                    onChange={(e) => setOutput(e.target.value)}
-                    placeholder={
-                      operation === "kml:merge"
-                        ? "完整输出 KML 文件路径"
-                        : "留空使用源目录或归档目录"
-                    }
-                  />
+                  {!["archive:download", "archive:delete"].includes(
+                    operation,
+                  ) && (
+                    <>
+                      <label className="work-label" htmlFor="work-output">
+                        输出路径（可选）
+                      </label>
+                      <Input
+                        id="work-output"
+                        value={output}
+                        onChange={(e) => setOutput(e.target.value)}
+                        placeholder={
+                          operation === "kml:merge"
+                            ? "完整输出 KML 文件路径"
+                            : "留空使用源目录或归档目录"
+                        }
+                      />
+                    </>
+                  )}
                   <div className="work-fields">
                     {(fields[operation] ?? []).map((key) =>
                       booleanFields[key] ? (
@@ -1006,8 +1105,8 @@ export default function WorkPage({ group }: { group: "archive" | "tracks" }) {
             {group === "archive" && archivePath && (
               <CatalogPanel
                 archive={archivePath}
-                onPop={(name) => {
-                  choose("archive:pop");
+                onAction={(action, name) => {
+                  choose(action);
                   setOptions({ name });
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
@@ -1092,7 +1191,7 @@ export function TasksPage() {
                   onClick={() => setParams({ panel: "tasks", id: task.id })}
                 >
                   {task.mode === "plan" ? "预览" : "执行"} ·{" "}
-                  {OPERATIONS[task.request.operation]}
+                  {operationLabel(task.request.operation)}
                 </Button>
               ),
             },

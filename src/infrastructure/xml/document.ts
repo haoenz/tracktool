@@ -36,7 +36,10 @@ export function withDocument<T>(
 }
 export function executeXml(
   bytes: Uint8Array,
-  operation: Exclude<XmlOperation, { kind: "tracks" | "content" | "edit" }>,
+  operation: Exclude<
+    XmlOperation,
+    { kind: "tracks" | "content" | "edit" | "segment-edit" }
+  >,
 ): XmlResult {
   return withDocument(bytes, (doc) => {
     const name = doc.get("/kml:kml/kml:Document/kml:name", namespaces);

@@ -68,6 +68,33 @@
   gap: 8px;
   margin-top: 10px;
 }
+.project-presentation {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.project-presentation summary {
+  cursor: pointer;
+}
+.project-presentation > .ant-select {
+  width: 100%;
+  margin-bottom: 8px;
+}
+.project-presentation .ant-btn {
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+}
+.project-segment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0;
+}
+.project-segment .ant-select {
+  min-width: 120px;
+}
 .map-stage {
   flex: 1;
   min-width: 0;

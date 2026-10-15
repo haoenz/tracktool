@@ -79,7 +79,7 @@ function child(code: string) {
   });
   return { process: process_, done };
 }
-it("CLI init/type/tag/push/status/rebuild/backup/pop retains stdout contracts and original bytes", async () => {
+it("CLI init/type/tag/push/status/rebuild/backup/download/delete retains stdout contracts and original bytes", async () => {
   const { dir, archive, file } = await setup();
   expect(run(dir, "kml", "type", file).stdout.trim()).toBe("Train");
   expect(run(dir, "kml", "type", file, "--raw").stdout.trim()).toBe("火车");
@@ -115,13 +115,18 @@ it("CLI init/type/tag/push/status/rebuild/backup/pop retains stdout contracts an
     const result = run(dir, "archive", op);
     expect(result.status, result.stderr).toBe(0);
   }
-  const pop = run(dir, "kml", "pop", path.basename(file));
-  expect(pop.status, pop.stderr).toBe(0);
+  expect(run(dir, "kml", "pop", path.basename(file)).status).not.toBe(0);
+  const download = run(dir, "kml", "download", path.basename(file));
+  expect(download.status, download.stderr).toBe(0);
+  expect(JSON.parse(run(dir, "archive", "status").stdout).entries).toBe(1);
+  const deletion = run(dir, "kml", "delete", path.basename(file));
+  expect(deletion.status, deletion.stderr).toBe(0);
+  expect(JSON.parse(run(dir, "archive", "status").stdout).entries).toBe(0);
   expect(readFileSync(file)).toEqual(raw);
   expect(run(dir, "archive", "undo").status).toBe(1);
   expect(run(dir, "archive", "log").status).toBe(0);
-});
-it("CLI split/prune/multigeom/merge, wildcard batches and partial exit preserve expected behavior", async () => {
+}, 30000);
+it("CLI split/prune/merge and retired converter, wildcard batches and partial exit preserve expected behavior", async () => {
   const { dir, file } = await setup();
   const split = run(dir, "kml", "split", file, "2026-10-01T00:00:01.400000Z");
   expect(split.status, split.stderr).toBe(0);
@@ -135,8 +140,8 @@ it("CLI split/prune/multigeom/merge, wildcard batches and partial exit preserve 
     '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><name>A</name><LineString><coordinates>1,2 3,4</coordinates></LineString></Placemark></Document></kml>',
   );
   const convert = run(dir, "kml", "to-multigeom", lines);
-  expect(convert.status, convert.stderr).toBe(0);
-  expect(existsSync(lines.replace(".kml", "-Merged.kml"))).toBe(true);
+  expect(convert.status, convert.stderr).not.toBe(0);
+  expect(existsSync(lines.replace(".kml", "-Merged.kml"))).toBe(false);
   const plan = run(dir, "--dry-run", "kml", "fill-altitude", lines);
   expect(plan.status, plan.stderr).toBe(0);
   expect(plan.stderr).toContain("Would query");
@@ -279,4 +284,24 @@ it("cross-process init and merge-output races have exactly one winner without ov
   transaction(path.join(archive, "archive.sqlite3"), false, (db) =>
     expect(Buffer.from(rawObject(db, digest(raw)))).toEqual(raw),
   );
+});
+
+it("CLI full backup and restore preserve the library and refuse to overwrite destinations", async () => {
+  const { dir, archive, file } = await setup();
+  expect(run(dir, "kml", "push", file, "--keep").status).toBe(0);
+  const backup = path.join(dir, "full.sqlite3"),
+    restored = path.join(dir, "restored");
+  expect(
+    run(dir, "--dry-run", "archive", "full-backup", "--output", backup).status,
+  ).toBe(0);
+  expect(existsSync(backup)).toBe(false);
+  const copied = run(dir, "archive", "full-backup", "--output", backup);
+  expect(copied.status, copied.stderr).toBe(0);
+  const result = run(dir, "archive", "restore-backup", backup, restored);
+  expect(result.status, result.stderr).toBe(0);
+  expect(
+    new ArchiveWriter().status(path.join(restored, "archive.sqlite3")),
+  ).toMatchObject({ schema: 4, entries: 1 });
+  expect(run(dir, "archive", "full-backup", "--output", backup).status).toBe(1);
+  expect(run(dir, "archive", "restore-backup", backup, archive).status).toBe(1);
 });

@@ -11,6 +11,7 @@ import type { ConfigStore } from "../services/ports.js";
 import { createContext } from "../services/context.js";
 import { getPublicConfig } from "../services/config.js";
 import { AppError, errorInfo } from "../domain/errors.js";
+import { EditError } from "../infrastructure/archive/edit-previews.js";
 
 export async function createApp(options: {
   configStore: ConfigStore;
@@ -68,11 +69,13 @@ export async function createApp(options: {
     );
     reply
       .code(
-        info.code === "FORBIDDEN"
-          ? 403
-          : info.code === "USER_INPUT"
-            ? 400
-            : 500,
+        error instanceof EditError
+          ? error.status
+          : info.code === "FORBIDDEN"
+            ? 403
+            : info.code === "USER_INPUT"
+              ? 400
+              : 500,
       )
       .send({ error: info });
   });

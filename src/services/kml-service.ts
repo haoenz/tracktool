@@ -63,8 +63,11 @@ export class KmlService {
     request: ArchiveRequest,
   ): Promise<ArchiveResult> {
     checkCancelled(ctx.signal);
-    if (ctx.mode === "plan" && request.kind !== "status") {
-      if (request.kind === "pop")
+    if (
+      ctx.mode === "plan" &&
+      !["status", "delete-preview"].includes(request.kind)
+    ) {
+      if (request.kind === "download")
         await this.archive.execute({ ...request, preview: true }, ctx.signal);
       this.log(ctx, `Would ${request.kind}: ${JSON.stringify(request)}`);
       return { message: `Would ${request.kind}` };

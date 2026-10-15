@@ -307,7 +307,7 @@ it("HTTP media upload → preview → execute → download survives page reload 
   await call("/api/work/uploads/" + uploaded.id + "/cleanup", {});
   expect(existsSync(uploaded.files[0]!)).toBe(false);
 });
-it("HTTP archive init, push, backup and pop call the shared services and expose downloadable results", async () => {
+it("HTTP archive init, push, backup, download and delete call the shared services and expose downloadable results", async () => {
   const { dir, call, settled } = await server(),
     archive = path.join(dir, "new-archive"),
     source = path.join(dir, "2026-10-01 轨迹.kml");
@@ -337,18 +337,25 @@ it("HTTP archive init, push, backup and pop call the shared services and expose 
   ).toHaveLength(1);
   const backup = await run({ operation: "archive:backup", archive });
   expect(backup.output?.paths[0]).toBe(path.join(archive, "Archive.zip"));
-  const dest = path.join(dir, "returned");
-  await mkdir(dest);
-  const popped = await run({
-    operation: "archive:pop",
+  const downloaded = await run({
+    operation: "archive:download",
     archive,
-    output: dest,
     options: { name: "2026-10-01 轨迹.kml" },
   });
-  expect(popped.output?.paths).toContain(
-    path.join(dest, "2026-10-01 轨迹.kml"),
+  expect(await readFile(downloaded.output!.paths[0]!)).toEqual(
+    await readFile(source),
   );
-  expect(await readFile(path.join(dest, "2026-10-01 轨迹.kml"))).toEqual(
+  const catalog = () =>
+    call<{ catalog: { entries: unknown[] } }>("/api/work/catalog", { archive });
+  expect((await catalog()).catalog.entries).toHaveLength(1);
+  const removed = await run({
+    operation: "archive:delete",
+    archive,
+    options: { name: "2026-10-01 轨迹.kml" },
+  });
+  expect(removed.output?.paths).toEqual([]);
+  expect((await catalog()).catalog.entries).toHaveLength(0);
+  expect(await readFile(downloaded.output!.paths[0]!)).toEqual(
     await readFile(source),
   );
 });
@@ -658,3 +665,96 @@ it("web settings reject every server configuration write while CLI configuration
     "DEBUG",
   );
 });
+
+it.each(["archive:pop", "kml:to-multigeom"])(
+  "retains historical %s tasks and downloads but rejects new requests, retries and queued execution",
+  async (operation) => {
+    const { dir, call, address } = await server();
+    // Initialize the lazy task store, then seed records written by the older release.
+    await call("/api/work/tasks");
+    const store = new SqliteTasks(path.join(dir, "state/tasks.sqlite3"));
+    cleanup.push(() => store.close());
+    const output = path.join(dir, "old-download.kml");
+    await writeFile(output, "original downloaded bytes");
+    const old = store.enqueue(body());
+    store.db
+      .prepare("UPDATE tasks SET status='succeeded',body=? WHERE id=?")
+      .run(
+        JSON.stringify({
+          ...old,
+          status: "succeeded",
+          mode: "apply",
+          request: { ...old.request, operation },
+          output: { paths: [output] },
+        }),
+        old.id,
+      );
+    const listed = await call<{ tasks: WorkTask[] }>("/api/work/tasks");
+    expect(listed.tasks.find((t) => t.id === old.id)?.request.operation).toBe(
+      operation,
+    );
+    expect(
+      (await call<WorkTask>(`/api/work/tasks/${old.id}`)).output?.paths,
+    ).toEqual([output]);
+    const response = await fetch(
+      address + `/api/work/tasks/${old.id}/download?index=0`,
+      { headers: { "X-Tracktool-Token": "work-test" } },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("original downloaded bytes");
+    await expect(call(`/api/work/tasks/${old.id}/retry`, {})).rejects.toThrow();
+    await expect(
+      call("/api/work/preview", {
+        operation,
+        options: { name: "a.kml" },
+      }),
+    ).rejects.toThrow();
+    const preview = store.enqueue(body());
+    store.db
+      .prepare("UPDATE tasks SET status='succeeded',body=? WHERE id=?")
+      .run(
+        JSON.stringify({
+          ...preview,
+          status: "succeeded",
+          fingerprint: "old",
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+          request: { ...preview.request, operation },
+        }),
+        preview.id,
+      );
+    await expect(
+      call(`/api/work/tasks/${preview.id}/apply`, {}),
+    ).rejects.toThrow();
+    let calls = 0;
+    const isolated = new SqliteTasks(path.join(dir, "legacy-queue.sqlite3")),
+      queue = new TaskQueue(
+        isolated,
+        fake({
+          fingerprint: async () => {
+            calls++;
+            return "unchanged";
+          },
+          run: async () => {
+            calls++;
+            return { output: { paths: [] } };
+          },
+        }),
+      );
+    cleanup.push(() => queue.close());
+    const queued = isolated.enqueue(body());
+    isolated.db.prepare("UPDATE tasks SET body=? WHERE id=?").run(
+      JSON.stringify({
+        ...queued,
+        request: { ...queued.request, operation },
+      }),
+      queued.id,
+    );
+    queue.start();
+    await until(
+      () => isolated.read(queued.id),
+      (t) => t?.status === "failed",
+    );
+    expect(calls).toBe(0);
+    expect(await readFile(output, "utf8")).toBe("original downloaded bytes");
+  },
+);

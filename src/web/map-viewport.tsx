@@ -4,6 +4,7 @@ import type { OverviewStatus } from "../shared/overview.js";
 import { MapCanvas } from "../drawing/core.js";
 import type { Project } from "../shared/project.js";
 import type { MapConfig, CityLabel, SelectedTrack } from "../shared/map.js";
+import { displayCoordinate } from "../shared/coordinates.js";
 type Transition = {
   tracks: SelectedTrack[];
   preview: boolean;
@@ -36,6 +37,9 @@ type Props = {
   onOverviewError?: (message: string) => void;
   onCamera: (camera: Project["camera"]) => void;
   onError: (message: string) => void;
+  onPointPick?: (position: [number, number]) => void;
+  exposeRenderer?: boolean;
+  highlightSegment?: string;
 };
 export const MapViewport = forwardRef<Viewport, Props>(
   function MapViewport(props, ref) {
@@ -49,6 +53,21 @@ export const MapViewport = forwardRef<Viewport, Props>(
     const transition = useRef<Transition | undefined>(undefined);
     const layers = useRef(new Map<MapCanvas, OverviewLayer>());
     latest.current = props;
+    const highlight = (map: MapCanvas) => {
+      if (latest.current.highlightSegment === undefined) return;
+      for (const [layer, property] of [
+        ["track-lines", "line-color"],
+        ["track-points", "circle-color"],
+      ]) {
+        if (map.map.getLayer(layer!))
+          map.map.setPaintProperty(layer!, property!, [
+            "case",
+            ["==", ["get", "segment_id"], latest.current.highlightSegment],
+            "#1677ff",
+            map.state.style.color,
+          ]);
+      }
+    };
     const updateOverview = (map: MapCanvas, status = latest.current.overview) =>
       layers.current
         .get(map)
@@ -156,6 +175,18 @@ export const MapViewport = forwardRef<Viewport, Props>(
         },
       );
       layers.current.set(map, layer.current);
+      map.map.on("click", (event) => {
+        if (current.current !== map || !latest.current.onPointPick) return;
+        const point = displayCoordinate(
+          [event.lngLat.lng, event.lngLat.lat],
+          map.crs,
+          true,
+        );
+        latest.current.onPointPick([
+          ((((point[0] + 180) % 360) + 360) % 360) - 180,
+          point[1],
+        ]);
+      });
       updateOverview(map, overview);
       map.setTracks(latest.current.tracks);
       return map;
@@ -163,12 +194,15 @@ export const MapViewport = forwardRef<Viewport, Props>(
     useEffect(() => {
       const map = create(latest.current.state);
       current.current = map;
-      window.renderer = map;
+      if (latest.current.exposeRenderer !== false) window.renderer = map;
       layout();
       void map
         .ready()
         .then(() => {
-          if (!map.destroyed) stage.current!.dataset.status = "ready";
+          if (!map.destroyed) {
+            highlight(map);
+            stage.current!.dataset.status = "ready";
+          }
         })
         .catch((e: unknown) => {
           if (!map.destroyed)
@@ -183,7 +217,7 @@ export const MapViewport = forwardRef<Viewport, Props>(
         destroy(current.current);
         holder.current?.replaceChildren();
         current.current = undefined;
-        delete window.renderer;
+        if (latest.current.exposeRenderer !== false) delete window.renderer;
       };
     }, [props.config, props.cities]); // Stable bootstrap resources own the renderer lifetime.
     useEffect(() => {
@@ -197,6 +231,9 @@ export const MapViewport = forwardRef<Viewport, Props>(
       }
       layout();
     }, [props.state, props.preview]);
+    useEffect(() => {
+      if (current.current) highlight(current.current);
+    }, [props.state, props.highlightSegment]);
     useEffect(() => {
       current.current?.setTracks(props.tracks);
       if (!transition.current) candidate.current?.setTracks(props.tracks);

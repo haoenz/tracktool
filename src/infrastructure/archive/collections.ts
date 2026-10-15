@@ -5,7 +5,15 @@ import type { ArchiveResult, Category, Content } from "../../domain/archive.js";
 import { kmlRoot, xmlText } from "../../domain/kml-edit.js";
 import { AppError } from "../../domain/errors.js";
 import type { XmlPort } from "../../services/ports.js";
-import { rawObject, snapshot, transaction } from "./database.js";
+import {
+  activeEntries,
+  rawObject,
+  snapshot,
+  transaction,
+  schemaVersion,
+} from "./database.js";
+import { exportDisplay } from "./display-export.js";
+import { withDocument } from "../xml/document.js";
 import { syncDirectory, syncFile, temporary } from "../durable-files.js";
 const styles: Record<Category, [string, string]> = {
   Default: ["普通行程", "ff2257ff"],
@@ -23,7 +31,7 @@ export async function rebuild(
   const warnings: string[] = [];
   const staged: { stage: string; target: string }[] = [];
   try {
-    const { revision, files } = await snapshot(file, async (db) => {
+    const { revision, files, versioned } = await snapshot(file, async (db) => {
       const revision = (
         db.prepare("SELECT revision FROM archive_meta").get() as {
           revision: number;
@@ -31,12 +39,12 @@ export async function rebuild(
       ).revision;
       const rows = db
         .prepare(
-          "SELECT path,sha256,category FROM archive_entries ORDER BY path",
+          `SELECT path,sha256,category FROM ${activeEntries(db)} ORDER BY path`,
         )
         .all() as { path: string; sha256: string; category: Category | null }[];
       const items = new Map<
         Category,
-        { name: string; date: string; content: Content }[]
+        { name: string; date: string; content?: Content; display?: string }[]
       >(CATEGORIES.map((c) => [c, []]));
       for (const row of rows) {
         if (!row.category) {
@@ -45,6 +53,21 @@ export async function rebuild(
         }
         try {
           const date = filenameDate(path.basename(row.path));
+          if (schemaVersion(db) >= 3) {
+            const raw = exportDisplay(db, row.path);
+            const display = withDocument(raw, (doc) =>
+              doc.root
+                .find("./*")
+                .map((n) => n.canonicalizeToString({ withComments: true }))
+                .join(""),
+            );
+            items.get(row.category)!.push({
+              name: path.basename(row.path, path.extname(row.path)),
+              date,
+              display,
+            });
+            continue;
+          }
           const content = (
             await xml.run(rawObject(db, row.sha256), { kind: "content" })
           ).content!;
@@ -70,22 +93,30 @@ export async function rebuild(
         for (const item of items.get(category)!) {
           const month = item.date.slice(0, 7).replace("-", ""),
             key = `${month}/${item.name}`;
-          const lines = item.content.segments.map((s) => line(s)).join("");
+          if (item.display !== undefined) {
+            if (!months.has(month)) months.set(month, []);
+            const fragment = `<Folder><name>${xmlText(item.name)}</name>${item.display}</Folder>`;
+            months.get(month)!.push(fragment);
+            mobile.push(fragment);
+            continue;
+          }
+          const content = item.content!;
+          const lines = content.segments.map((s) => line(s)).join("");
           if (!seen.has(key)) {
             seen.add(key);
             if (!months.has(month)) months.set(month, []);
             months
               .get(month)!
               .push(
-                `<Placemark><name>${xmlText(item.name)}</name><description>${xmlText(item.content.description)}</description><styleUrl>#${category}</styleUrl>${item.content.segments.length > 1 ? `<MultiGeometry>${lines}</MultiGeometry>` : lines}</Placemark>`,
+                `<Placemark><name>${xmlText(item.name)}</name><description>${xmlText(content.description)}</description><styleUrl>#${category}</styleUrl>${content.segments.length > 1 ? `<MultiGeometry>${lines}</MultiGeometry>` : lines}</Placemark>`,
               );
           }
           if (!mobileSeen.has(item.name)) {
             mobileSeen.add(item.name);
             mobile.push(
-              item.content.segments.length > 1
+              content.segments.length > 1
                 ? `<MultiGeometry id="${xmlText(item.name)}">${lines}</MultiGeometry>`
-                : line(item.content.segments[0]!, item.name),
+                : line(content.segments[0]!, item.name),
             );
           }
         }
@@ -116,16 +147,21 @@ export async function rebuild(
           {
             name: `${category}.Mobile.kml`,
             xml: kmlRoot(
-              `<Folder><Placemark><MultiGeometry>${mobile.join("")}</MultiGeometry></Placemark></Folder>`,
+              schemaVersion(db) >= 3
+                ? `<Document>${mobile.join("")}</Document>`
+                : `<Folder><Placemark><MultiGeometry>${mobile.join("")}</MultiGeometry></Placemark></Folder>`,
             ),
           },
         );
       }
-      return { revision, files };
+      return { revision, files, versioned: schemaVersion(db) >= 3 };
     });
     mkdirSync(output, { recursive: true });
     for (const f of files) {
-      await xml.run(Buffer.from(f.xml), { kind: "inspect" });
+      // Versioned fragments were parsed and canonicalized individually above.
+      // Only escaped wrapper text is added. A whole collection can exceed the
+      // single-source XML limit; do not parse the entire library a second time.
+      if (!versioned) await xml.run(Buffer.from(f.xml), { kind: "inspect" });
       const target = path.join(output, f.name),
         stage = temporary(target);
       staged.push({ stage, target });

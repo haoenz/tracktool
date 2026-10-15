@@ -13,7 +13,16 @@ import {
 } from "../../domain/overview.js";
 import { pointCount } from "../../domain/trackdata.js";
 import type { OverviewEntry, OverviewProgress } from "../../shared/overview.js";
-import { rawObject } from "../archive/database.js";
+import {
+  activeEntries,
+  rawObject,
+  schemaVersion,
+} from "../archive/database.js";
+import {
+  readPresentation,
+  resolveTrack,
+  displayed,
+} from "../archive/presentation.js";
 import { deserialize, PARSER_VERSION } from "../track-index.js";
 import { withDocument } from "../xml/document.js";
 import { readTrackData } from "../xml/trackdata.js";
@@ -79,7 +88,7 @@ export async function buildOverview(
       throw new AppError("CANCELLED", "轨迹库已更新，准备构建最新版本");
     const rows = db
       .prepare(
-        "SELECT id,path,sha256,category,filename_date FROM archive_entries ORDER BY id",
+        `SELECT id,path,sha256,category,filename_date FROM ${activeEntries(db)} ORDER BY id`,
       )
       .all() as {
       id: string;
@@ -109,6 +118,12 @@ export async function buildOverview(
       };
       let features: DisplayFeature[];
       try {
+        const ref =
+          schemaVersion(db) >= 3
+            ? resolveTrack(db, { entry: row.path })
+            : undefined;
+        const presentation = ref ? readPresentation(db, ref) : undefined;
+        entry.display_key = presentation?.key ?? row.sha256;
         let value: Coordinates;
         try {
           value = await readObject(root, row.sha256);
@@ -142,6 +157,56 @@ export async function buildOverview(
           const bytes = encodeObject(row.sha256, value);
           account(bytes.length);
           await atomic(objectPath(root, row.sha256), bytes);
+        }
+        if (presentation) {
+          try {
+            value = await readObject(root, presentation.key);
+          } catch {
+            const source = {
+              source: row.path,
+              name: value.name,
+              track_tags: "",
+              start_name: "",
+              end_name: "",
+              tracks: [
+                {
+                  index: 1,
+                  placemark_id: "",
+                  name: value.name,
+                  segments: value.segments.map((coords, i) => ({
+                    kind:
+                      presentation.segments[i]?.geometry_kind ??
+                      ("LineString" as const),
+                    geometry_id: "",
+                    longitude: Float64Array.from(coords, (p) => p[0]),
+                    latitude: Float64Array.from(coords, (p) => p[1]),
+                    altitude: null,
+                    time_us: null,
+                  })),
+                },
+              ],
+            };
+            const data = displayed(
+              source,
+              presentation.segments,
+              presentation.settings,
+            ).data;
+            value = {
+              name: value.name,
+              points: pointCount(data),
+              segments: data.tracks.flatMap((t) =>
+                t.segments.map((s) =>
+                  Array.from(
+                    s.longitude,
+                    (x, i) => [x, s.latitude[i]!] as [number, number],
+                  ),
+                ),
+              ),
+            };
+            const bytes = encodeObject(presentation.key, value);
+            account(bytes.length);
+            await atomic(objectPath(root, presentation.key), bytes);
+          }
         }
         features = overviewFeatures(row.id, value.segments, crs, entry.kind);
         entry.name = value.name || entry.name;

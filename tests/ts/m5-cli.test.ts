@@ -37,12 +37,29 @@ async function run(dir: string, args: string[]) {
     return e;
   }
 }
-it("covers exactly the original 34 business commands and resolves every help page", async () => {
+it("covers the current business commands, excludes pop and resolves every help page", async () => {
   const names = Object.keys(COMMANDS).filter(
     (n) =>
       !["completion", "data:", "setup:"].some((prefix) => n.startsWith(prefix)),
   );
-  expect(names).toHaveLength(34);
+  expect(names).toHaveLength(43);
+  expect(names).not.toContain("kml:pop");
+  expect(names).not.toContain("kml:to-multigeom");
+  expect(names).toEqual(
+    expect.arrayContaining([
+      "track:list",
+      "track:show",
+      "track:history",
+      "track:operation",
+      "track:preview",
+      "track:apply",
+      "track:export",
+    ]),
+  );
+  expect(names).toEqual(expect.arrayContaining(["kml:download", "kml:delete"]));
+  expect(names).toEqual(
+    expect.arrayContaining(["archive:full-backup", "archive:restore-backup"]),
+  );
   for (const name of names) {
     const result = await exec(process.execPath, [
       cli,
@@ -51,7 +68,7 @@ it("covers exactly the original 34 business commands and resolves every help pag
     ]);
     expect(result.stdout).toContain("USAGE");
   }
-}, 30000);
+}, 60000);
 it("supports negative config list values, negative time flags and negative altitude positional values", async () => {
   const d = tmp(),
     file = path.join(d, "中文 image.jpg");

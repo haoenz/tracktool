@@ -9,6 +9,7 @@ export interface ExportJob {
   state: Project;
   tracks?: SelectedTrack[];
   png?: Buffer;
+  kml?: Buffer;
   error?: string;
   report?: Record<string, unknown>;
 }
@@ -48,6 +49,29 @@ export class Exports {
     const job = this.jobs.get(id);
     if (!job) throw new AppError("USER_INPUT", "导出任务不存在或已过期");
     return job;
+  }
+  submitKml(state: Project, bytes: Uint8Array): string {
+    for (const [id, j] of this.jobs)
+      if (
+        !["queued", "rendering"].includes(j.status) &&
+        Date.now() - j.created > 900_000
+      )
+        this.jobs.delete(id);
+    if (this.jobs.size >= 5) {
+      const old = [...this.jobs].find(
+        ([, j]) => !["queued", "rendering"].includes(j.status),
+      );
+      if (old) this.jobs.delete(old[0]);
+      else throw new AppError("TOOL", "导出队列已满");
+    }
+    const id = randomBytes(20).toString("hex");
+    this.jobs.set(id, {
+      status: "done",
+      created: Date.now(),
+      state: structuredClone(state),
+      kml: Buffer.from(bytes),
+    });
+    return id;
   }
   private async render(id: string, job: ExportJob) {
     const failures: string[] = [];

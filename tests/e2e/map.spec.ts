@@ -259,6 +259,7 @@ test("outdated resource versions and fingerprints are surfaced before save/expor
   await tool(page, "项目");
   const changed = {
     ...bootstrap.state,
+    schema: 2,
     archive: bootstrap.initialArchive,
     tracks: [{ entry: "Default/2026-10-01 中文.kml", sha256: "0".repeat(64) }],
   };
@@ -269,7 +270,7 @@ test("outdated resource versions and fingerprints are surfaced before save/expor
     buffer: Buffer.from(JSON.stringify(changed)),
   });
   await expect(page.locator(".map-errors [role=alert]")).toContainText(
-    "源内容已变化",
+    "无法唯一关联原始基线",
   );
   await tool(page, "出图");
   await expect(
@@ -406,7 +407,10 @@ test("panels preserve the map, selection and unfinished edits on desktop and mob
   await expect(
     page.getByRole("complementary", { name: "地图控制面板" }),
   ).toHaveCount(0);
-  await expect(page.getByLabel("地图预览")).toHaveCSS("height", "844px");
+  await expect(page.locator(".map-stage.export-preview")).toHaveCSS(
+    "height",
+    "844px",
+  );
   await tool(page, "轨迹库");
   await expect(
     page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),

@@ -40,7 +40,10 @@ async function run(command: OverviewCommand) {
         "USER_INPUT",
         "轨迹超过详情点数上限，请使用分级地图或 CLI 查看",
       );
-    const object = await readObject(command.root, entry.sha256);
+    const object = await readObject(
+      command.root,
+      entry.display_key ?? entry.sha256,
+    );
     return {
       version: command.version,
       crs: "wgs84",

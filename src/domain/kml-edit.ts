@@ -21,7 +21,6 @@ export type EditOperation =
       returnMeters: number;
       maxSeconds: number;
     }
-  | { kind: "to-multigeom" }
   | { kind: "altitude-targets" }
   | { kind: "altitude-apply"; values: (number | null)[] };
 export type EditResult = {

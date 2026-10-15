@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { ProjectSchema } from "./project.js";
+import type { ProjectTrack } from "./project-track.js";
+import type { Presentation, SegmentManifest } from "./track-edit.js";
 export type Position = [number, number];
 export type Geometry =
   | { type: "MultiLineString"; coordinates: Position[][] }
@@ -18,6 +20,12 @@ export interface SelectedTrack {
   sha256: string;
   points: number;
   geojson: TrackGeoJSON;
+  reference?: ProjectTrack;
+  presentation?: {
+    settings: Presentation;
+    segments: SegmentManifest[];
+    current: boolean;
+  };
 }
 export interface Selection {
   archive: string;

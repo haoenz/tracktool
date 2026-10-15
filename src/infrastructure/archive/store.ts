@@ -19,10 +19,22 @@ import type { TrackData } from "../../domain/trackdata.js";
 import { geojson } from "../../domain/geometry.js";
 import type { Catalog, Selection } from "../../shared/map.js";
 import type { Project } from "../../shared/project.js";
+import type { ProjectTrack } from "../../shared/project-track.js";
+import { resolveTrack, readPresentation, displayed } from "./presentation.js";
+import { exportDisplay } from "./display-export.js";
+import { withDocument } from "../xml/document.js";
+import { kmlRoot } from "../../domain/kml-edit.js";
 import { XmlWorkers } from "../xml/client.js";
 
 import { deserialize, serialize, PARSER_VERSION } from "../track-index.js";
-import { databasePath, transaction, rawObject, snapshot } from "./database.js";
+import {
+  activeEntries,
+  schemaVersion,
+  databasePath,
+  transaction,
+  rawObject,
+  snapshot,
+} from "./database.js";
 // RAM cache is separate from the unchanged 2m-point selection/input limit.
 const CACHE_POINTS = 500_000;
 type IndexRow = {
@@ -40,7 +52,7 @@ export class ArchiveStore {
   readBytes(input: string, entry: string): Uint8Array {
     return transaction(databasePath(input), false, (db) => {
       const row = db
-        .prepare("SELECT sha256 FROM archive_entries WHERE path=?")
+        .prepare(`SELECT sha256 FROM ${activeEntries(db)} WHERE path=?`)
         .get(entry) as { sha256: string } | undefined;
       if (!row)
         throw new AppError("USER_INPUT", `Archive member not found: ${entry}`);
@@ -51,7 +63,7 @@ export class ArchiveStore {
     const archive = databasePath(input);
     return snapshot(archive, async (db) => {
       const row = db
-        .prepare("SELECT sha256 FROM archive_entries WHERE path=?")
+        .prepare(`SELECT sha256 FROM ${activeEntries(db)} WHERE path=?`)
         .get(entry) as { sha256: string } | undefined;
       if (!row)
         throw new AppError("USER_INPUT", `Archive member not found: ${entry}`);
@@ -67,7 +79,9 @@ export class ArchiveStore {
       archive,
       entries: (
         db
-          .prepare("SELECT path,category FROM archive_entries ORDER BY path")
+          .prepare(
+            `SELECT path,category FROM ${activeEntries(db)} ORDER BY path`,
+          )
           .all() as { path: string; category: string | null }[]
       ).map((e) => ({
         entry: e.path,
@@ -108,7 +122,7 @@ export class ArchiveStore {
       if (!(e instanceof AppError) || e.code !== "USER_INPUT") throw e;
       error = e.message;
     }
-    // Separate WAL writer: the caller's snapshot can survive a concurrent pop.
+    // Separate WAL writer: the caller's snapshot can survive a concurrent deletion.
     transaction(file, true, (writer) => {
       if (
         !writer.prepare("SELECT 1 FROM kml_objects WHERE sha256=?").get(digest)
@@ -165,6 +179,7 @@ export class ArchiveStore {
     input: string,
     entries: string[],
     expected: Record<string, string> = {},
+    references?: ProjectTrack[],
   ): Promise<Selection> {
     if (entries.length > 200 || new Set(entries).size !== entries.length)
       throw new AppError("USER_INPUT", "每次最多选择 200 条不同的完整归档路径");
@@ -174,11 +189,26 @@ export class ArchiveStore {
       let selected = 0;
       for (const entry of entries)
         try {
-          const row = db
-            .prepare(
-              "SELECT e.sha256,o.raw_size FROM archive_entries e JOIN kml_objects o ON e.sha256=o.sha256 WHERE e.path=?",
-            )
-            .get(entry) as { sha256: string; raw_size: number } | undefined;
+          const ref =
+            schemaVersion(db) >= 3
+              ? resolveTrack(
+                  db,
+                  references?.find((t) => t.entry === entry) ?? { entry },
+                )
+              : undefined;
+          const row = ref
+            ? (db
+                .prepare(
+                  "SELECT sha256,raw_size FROM kml_objects WHERE sha256=?",
+                )
+                .get(ref.sha256) as
+                { sha256: string; raw_size: number } | undefined)
+            : (db
+                .prepare(
+                  `SELECT e.sha256,o.raw_size FROM ${activeEntries(db)} e JOIN kml_objects o ON e.sha256=o.sha256 WHERE e.path=?`,
+                )
+                .get(entry) as
+                { sha256: string; raw_size: number } | undefined);
           if (!row)
             throw new AppError(
               "USER_INPUT",
@@ -232,7 +262,31 @@ export class ArchiveStore {
             entry,
             sha256: row.sha256,
             points: hit.points,
-            geojson: geojson(hit.data),
+            ...(() => {
+              if (!ref) return { geojson: geojson(hit.data) };
+              const presentation = readPresentation(db, ref);
+              const display = displayed(
+                hit.data,
+                presentation.segments,
+                presentation.settings,
+              );
+              selected += display.view.connections.length * 2;
+              if (selected > MAX_POINTS)
+                throw new AppError(
+                  "USER_INPUT",
+                  "包含连接线后超过 200 万点，请减少所选轨迹",
+                );
+              return {
+                geojson: display.geojson(),
+                points: pointCount(display.data),
+                reference: ref,
+                presentation: {
+                  settings: presentation.settings,
+                  segments: presentation.segments,
+                  current: presentation.current,
+                },
+              };
+            })(),
           });
         } catch (error) {
           if (!(error instanceof AppError)) throw error;
@@ -253,7 +307,7 @@ export class ArchiveStore {
     );
     return snapshot(archive, async (db) => {
       const entries = db
-        .prepare("SELECT path,sha256 FROM archive_entries ORDER BY path")
+        .prepare(`SELECT path,sha256 FROM ${activeEntries(db)} ORDER BY path`)
         .all() as { path: string; sha256: string }[];
       let best: NearestPoint | undefined;
       for (const entry of entries) {
@@ -315,6 +369,53 @@ export class ArchiveStore {
       ).map((r) => r.name),
     );
   }
+  displayKml(input: string, references: ProjectTrack[]): Uint8Array {
+    if (references.length > 200)
+      throw new AppError("USER_INPUT", "每次最多导出 200 条轨迹");
+    return transaction(databasePath(input), false, (db) => {
+      let bytes = 0;
+      const values = references.map((ref) => {
+        const raw = exportDisplay(db, ref.entry, ref);
+        bytes += raw.length;
+        if (bytes > MAX_KML_BYTES)
+          throw new AppError("USER_INPUT", "展示导出总量超过 128 MiB");
+        return raw;
+      });
+      if (values.length === 1) return values[0]!;
+      const output = Buffer.from(
+        kmlRoot(
+          `<Document>${values
+            .map((raw) =>
+              withDocument(raw, (doc) =>
+                doc.root
+                  .find("./*")
+                  .map((n) => n.canonicalizeToString({ withComments: true }))
+                  .join(""),
+              ),
+            )
+            .join("")}</Document>`,
+        ),
+      );
+      if (output.length > MAX_KML_BYTES)
+        throw new AppError("USER_INPUT", "展示导出总量超过 128 MiB");
+      return output;
+    });
+  }
+  currentReference(input: string, entryId: string): ProjectTrack {
+    return transaction(databasePath(input), false, (db) => {
+      const row = db
+        .prepare(
+          "SELECT path FROM archive_entries WHERE id=? AND state='active'",
+        )
+        .get(entryId) as { path: string } | undefined;
+      if (!row)
+        throw new AppError(
+          "USER_INPUT",
+          "原行程已被替代或删除，请明确选择新的行程",
+        );
+      return resolveTrack(db, { entry: row.path });
+    });
+  }
   load(input: string, name: string): unknown {
     return transaction(databasePath(input), false, (db) => {
       const row = db
@@ -330,14 +431,18 @@ export class ArchiveStore {
     transaction(databasePath(input), true, (db) => {
       // Revalidate content inside the write reservation; no check/save race with another CLI.
       for (const t of state.tracks) {
+        if (schemaVersion(db) >= 3 && t.entry_id) {
+          readPresentation(db, resolveTrack(db, t));
+          continue;
+        }
         const row = db
-          .prepare("SELECT sha256 FROM archive_entries WHERE path=?")
+          .prepare(`SELECT sha256 FROM ${activeEntries(db)} WHERE path=?`)
           .get(t.entry) as { sha256: string } | undefined;
         if (row?.sha256 !== t.sha256)
           throw new AppError("USER_INPUT", "源轨迹缺失或变化，不能保存项目");
       }
       db.prepare(
-        "INSERT INTO map_projects VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(name) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at",
+        `INSERT INTO map_projects(name,state,updated_at) VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(name) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at${schemaVersion(db) >= 3 ? ",generation=map_projects.generation+1" : ""}`,
       ).run(name, JSON.stringify(state));
     });
   }

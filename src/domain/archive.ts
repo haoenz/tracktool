@@ -1,3 +1,8 @@
+import type {
+  DeleteRequest,
+  DeletePreview,
+  DeleteResult,
+} from "../shared/archive-actions.js";
 import { AppError } from "./errors.js";
 export type Category = "Default" | "Train" | "Flight";
 export const CATEGORIES: Category[] = ["Default", "Train", "Flight"];
@@ -42,16 +47,29 @@ export type ArchiveRequest =
       move: boolean;
     }
   | {
-      kind: "pop";
+      kind: "download";
       database: string;
-      name: string;
+      name?: string;
+      entry_id?: string;
       category?: Category;
+      version_id?: string;
       output: string;
       preview?: boolean;
     }
-  | { kind: "backup"; database: string; output: string }
+  | {
+      kind: "delete-preview";
+      database: string;
+      name?: string;
+      entry_id?: string;
+      category?: Category;
+    }
+  | { kind: "delete"; database: string; request: DeleteRequest }
+  | { kind: "backup" | "full-backup"; database: string; output: string }
+  | { kind: "restore-backup"; backup: string; directory: string }
   | { kind: "rebuild"; database: string; output: string };
 export type ArchiveStatus = {
+  schema: number;
+  storage_revision: number | null;
   revision: number;
   entries: number;
   pending: number;
@@ -66,4 +84,6 @@ export type ArchiveResult = {
   status?: ArchiveStatus;
   paths?: string[];
   count?: number;
+  deletion_preview?: DeletePreview;
+  deletion?: DeleteResult;
 };

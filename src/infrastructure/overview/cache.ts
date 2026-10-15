@@ -156,7 +156,12 @@ export class OverviewCache {
     }
     const referenced = new Set(
       [...this.manifests.values()].flatMap((m) =>
-        m.entries.filter((e) => !e.error).map((e) => `${e.sha256}.gz`),
+        m.entries
+          .filter((e) => !e.error)
+          .flatMap((e) => [
+            `${e.sha256}.gz`,
+            `${e.display_key ?? e.sha256}.gz`,
+          ]),
       ),
     );
     // Only prune objects when there is no builder writing the next snapshot.
@@ -205,7 +210,12 @@ export class OverviewCache {
       if (!this.reserved) {
         const referenced = new Set(
           [...this.manifests.values()].flatMap((item) =>
-            item.entries.filter((e) => !e.error).map((e) => `${e.sha256}.gz`),
+            item.entries
+              .filter((e) => !e.error)
+              .flatMap((e) => [
+                `${e.sha256}.gz`,
+                `${e.display_key ?? e.sha256}.gz`,
+              ]),
           ),
         );
         const objects = path.join(this.root, "objects") + path.sep;

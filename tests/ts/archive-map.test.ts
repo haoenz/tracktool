@@ -3,13 +3,15 @@ import { mkdtemp, copyFile, rm, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { inflateSync } from "node:zlib";
+import { inflateSync, deflateSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import { ArchiveClient } from "../../dist/node/infrastructure/archive/client.js";
 import { withDocument } from "../../dist/node/infrastructure/xml/document.js";
 import { readTrackData } from "../../dist/node/infrastructure/xml/trackdata.js";
 import {
   serialize,
   deserialize,
+  PARSER_VERSION,
 } from "../../dist/node/infrastructure/track-index.js";
 import { timestamp } from "../../dist/node/domain/trackdata.js";
 import { MapService } from "../../dist/node/services/map-service.js";
@@ -145,9 +147,9 @@ it("reads the exact complete paths, uses persisted/memory indices and rejects pa
   ]);
   expect(selected.tracks).toHaveLength(2);
   expect(selected.errors).toHaveLength(1);
-  expect(await client.stats()).toMatchObject({ xml: 1, indexHits: 1 });
+  expect(await client.stats()).toMatchObject({ xml: 2, indexHits: 0 });
   await client.selection(archive, [first]);
-  expect(await client.stats()).toMatchObject({ xml: 1, memoryHits: 1 });
+  expect(await client.stats()).toMatchObject({ xml: 2, memoryHits: 1 });
   await client.close();
   client = new ArchiveClient();
   await client.selection(archive, ["Train/same.kml"]);
@@ -171,7 +173,9 @@ it("rebuilds corrupt disposable indices without altering originals, rejects bad/
   const original = db
     .prepare("SELECT sha256,payload FROM kml_objects ORDER BY sha256")
     .all();
-  db.prepare("UPDATE kml_index SET geometry=X'00'").run();
+  db.prepare("UPDATE kml_index SET geometry=X'00',parser_version=?").run(
+    PARSER_VERSION,
+  );
   db.close();
   const result = await client.selection(archive, [
     first,
@@ -205,6 +209,7 @@ it("saves/reopens projects, blocks changed content, and rechecks inside the writ
     selected = await client.selection(archive, [first]),
     state = defaultProject();
   state.archive = archive;
+  state.schema = 2;
   state.tracks = selected.tracks.map((t) => ({
     entry: t.entry,
     sha256: t.sha256,
@@ -246,9 +251,63 @@ it("cancellation releases the worker and queued requests resume", async () => {
   await expect(cancelled).rejects.toThrow("取消");
   expect((await client.catalog(archive)).entries).toHaveLength(5);
 });
+it("rebuilds old parser errors for empty time slots and preserves raw data and schema", async () => {
+  const raw = Buffer.from(
+    '<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Placemark><gx:Track><when>2026-01-01T00:00:00Z</when><when/><gx:coord>120 30</gx:coord><gx:coord>121 31</gx:coord></gx:Track></Placemark></kml>',
+  );
+  const digest = createHash("sha256").update(raw).digest("hex"),
+    entry = "Default/partial.kml",
+    db = new Database(archive),
+    payload = deflateSync(raw);
+  const schema = db.pragma("user_version", { simple: true });
+  db.prepare("INSERT INTO kml_objects VALUES (?,?,?,?)").run(
+    digest,
+    "zlib",
+    raw.length,
+    payload,
+  );
+  db.prepare(
+    "INSERT INTO archive_entries(id,path,sha256,category) VALUES (?,?,?,?)",
+  ).run("partial-time", entry, digest, "Default");
+  db.prepare("INSERT INTO kml_index VALUES (?,?, 'error', '{}', NULL, ?)").run(
+    digest,
+    2,
+    'Invalid timestamp ""',
+  );
+  db.close();
+  const selected = await client.selection(archive, [entry]);
+  expect(selected.errors).toEqual([]);
+  expect(selected.tracks[0]!.points).toBe(2);
+  const after = new Database(archive);
+  try {
+    const rows = after
+      .prepare(
+        "SELECT parser_version,status,geometry FROM kml_index WHERE sha256=?",
+      )
+      .all(digest) as {
+      parser_version: number;
+      status: string;
+      geometry: Buffer;
+    }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      parser_version: PARSER_VERSION,
+      status: "ok",
+    });
+    expect(
+      deserialize(rows[0]!.geometry).tracks[0]!.segments[0]!.time_us,
+    ).toBeNull();
+    expect(
+      after
+        .prepare("SELECT payload FROM kml_objects WHERE sha256=?")
+        .get(digest),
+    ).toEqual({ payload });
+    expect(after.pragma("user_version", { simple: true })).toBe(schema);
+  } finally {
+    after.close();
+  }
+});
 it("tracks larger than the RAM cache remain selectable and reopen from the persistent index", async () => {
-  const { createHash } = await import("node:crypto"),
-    { deflateSync } = await import("node:zlib");
   const raw = Buffer.from(
     '<kml xmlns="http://www.opengis.net/kml/2.2"><Placemark><LineString><coordinates>' +
       "104,30,0 ".repeat(500_001) +

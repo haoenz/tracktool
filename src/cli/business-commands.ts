@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Args, Command, Flags } from "@oclif/core";
 import path from "node:path";
 import { readFileSync, existsSync } from "node:fs";
@@ -155,20 +156,27 @@ class ArchiveImport extends BusinessCommand {
   }
 }
 function archiveCommand(
-  kind: "status" | "backup" | "recover" | "migrate" | "rebuild",
+  kind: "status" | "backup" | "full-backup" | "recover" | "migrate" | "rebuild",
 ) {
   return class extends BusinessCommand {
     static description = {
       status: "查看归档修订、导出与待恢复状态",
-      backup: "从一致快照导出 ZIP",
+      backup: "从一致快照导出当前展示 KML ZIP（不含隐藏段和历史）",
+      "full-backup": "完整备份 SQLite：原件、版本、展示设置、来源及项目",
       recover: "恢复中断的文件操作",
-      migrate: "显式升级数据库到 schema 2",
+      migrate: "完整备份后显式升级数据库到 schema 4",
       rebuild: "重新生成桌面与手机集合 KML",
     }[kind];
     static flags = {
       zip,
-      ...(kind === "backup"
-        ? { output: Flags.string({ description: "输出 ZIP 路径" }) }
+      ...(kind === "backup" || kind === "full-backup"
+        ? {
+            output: Flags.string({
+              description:
+                kind === "backup" ? "输出 ZIP 路径" : "新的 .sqlite3 备份路径",
+              required: kind === "full-backup",
+            }),
+          }
         : {}),
     };
     async run() {
@@ -176,7 +184,7 @@ function archiveCommand(
       await this.using(flags as unknown as CommonFlags, async (ctx, s) => {
         const w = workspace(ctx.config, flags.zip as string | undefined);
         const request: ArchiveRequest =
-          kind === "backup"
+          kind === "backup" || kind === "full-backup"
             ? {
                 kind,
                 database: w.database,
@@ -192,6 +200,23 @@ function archiveCommand(
       });
     }
   };
+}
+class ArchiveRestoreBackup extends BusinessCommand {
+  static description = "将完整 SQLite 备份恢复到新目录或空目录";
+  static args = {
+    source: Args.string({ required: true }),
+    directory: Args.string({ required: true }),
+  };
+  async run() {
+    const { args, flags } = await this.parse(ArchiveRestoreBackup);
+    await this.using(flags, async (ctx, s) => {
+      await s.archiveOperation(ctx, {
+        kind: "restore-backup",
+        backup: resolvePath(args.source),
+        directory: resolvePath(args.directory),
+      });
+    });
+  }
 }
 class ArchiveUndo extends BusinessCommand {
   static description = "已退役：不再支持历史撤销";
@@ -219,7 +244,8 @@ class ArchiveLog extends BusinessCommand {
       ctx.report({
         type: "log",
         level: "WARNING",
-        message: "Archive history is retired; displaying legacy history only",
+        message:
+          "This command displays legacy history.jsonl only; versioned archives use separate history storage",
       });
       const w = workspace(ctx.config, flags.zip);
       const file = path.join(w.directory, "history.jsonl");
@@ -314,30 +340,67 @@ class Push extends BusinessCommand {
     });
   }
 }
-class Pop extends BusinessCommand {
-  static description = "把指定轨迹移出归档，写入当前目录";
-  static args = { name: Args.string({ required: true }) };
+class Download extends BusinessCommand {
+  static description = "下载当前或指定历史版本的 KML 原字节，不修改数据库";
+  static args = {
+    name: Args.string({ description: "完整成员路径、文件名或 stem" }),
+  };
   static flags = {
     type: category(),
     zip,
-    force: Flags.boolean({ description: "兼容参数，不允许覆盖现有文件" }),
+    "entry-id": Flags.string(),
+    version: Flags.string({ description: "该条目的历史版本 ID" }),
+    output: Flags.string({
+      char: "o",
+      description: "下载目标目录，默认当前目录",
+    }),
   };
   async run() {
-    const { args, flags } = await this.parse(Pop);
+    const { args, flags } = await this.parse(Download);
     await this.using(flags, async (ctx, s) => {
       const w = workspace(ctx.config, flags.zip);
-      if (flags.force)
-        ctx.report({
-          type: "log",
-          level: "WARNING",
-          message: "--force does not allow overwriting existing files",
-        });
       await s.archiveOperation(ctx, {
-        kind: "pop",
+        kind: "download",
         database: w.database,
         name: args.name,
+        entry_id: flags["entry-id"],
         category: flags.type as Category | undefined,
-        output: process.cwd(),
+        version_id: flags.version,
+        output: resolvePath(flags.output ?? process.cwd()),
+      });
+    });
+  }
+}
+class DeleteTrack extends BusinessCommand {
+  static description = "删除轨迹及其全部历史；--dry-run 查看范围与依赖";
+  static args = {
+    name: Args.string({ description: "完整成员路径、文件名或 stem" }),
+  };
+  static flags = { type: category(), zip, "entry-id": Flags.string() };
+  async run() {
+    const { args, flags } = await this.parse(DeleteTrack);
+    await this.using(flags, async (ctx, s) => {
+      const w = workspace(ctx.config, flags.zip);
+      const result = await s.archiveOperation(ctx, {
+        kind: "delete-preview",
+        database: w.database,
+        name: args.name,
+        entry_id: flags["entry-id"],
+        category: flags.type as Category | undefined,
+      });
+      const preview = result.deletion_preview!;
+      if (ctx.mode === "plan") {
+        this.log(JSON.stringify(preview, null, 2));
+        return;
+      }
+      await s.archiveOperation(ctx, {
+        kind: "delete",
+        database: w.database,
+        request: {
+          archive_id: preview.archive_id,
+          expected: preview.expected,
+          request_key: randomUUID(),
+        },
       });
     });
   }
@@ -439,28 +502,6 @@ class Merge extends BusinessCommand {
     });
   }
 }
-class ToMultigeom extends BusinessCommand {
-  static description = "转换 LineString 到 MultiGeometry";
-  static args = { path: Args.string({ required: true }) };
-  static flags = { output: Flags.string({ char: "o" }) };
-  async run() {
-    const { args, flags } = await this.parse(ToMultigeom);
-    await this.using(flags, async (ctx, s) => {
-      const file = resolvePath(args.path);
-      await s.edit(
-        ctx,
-        file,
-        { kind: "to-multigeom" },
-        flags.output
-          ? resolvePath(flags.output)
-          : path.join(
-              path.dirname(file),
-              `${path.basename(file, path.extname(file))}-Merged.kml`,
-            ),
-      );
-    });
-  }
-}
 class FillAltitude extends BusinessCommand {
   static description = "使用 Google Elevation 回填无高程的 LineString";
   static args = { path: Args.string({ required: true }) };
@@ -485,6 +526,8 @@ export const BUSINESS_COMMANDS: Record<string, Command.Class> = {
   "archive:import-zip": ArchiveImport,
   "archive:status": archiveCommand("status"),
   "archive:backup": archiveCommand("backup"),
+  "archive:full-backup": archiveCommand("full-backup"),
+  "archive:restore-backup": ArchiveRestoreBackup,
   "archive:recover": archiveCommand("recover"),
   "archive:migrate": archiveCommand("migrate"),
   "archive:rebuild": archiveCommand("rebuild"),
@@ -493,10 +536,10 @@ export const BUSINESS_COMMANDS: Record<string, Command.Class> = {
   "kml:type": KmlType,
   "kml:set-tag": SetTag,
   "kml:push": Push,
-  "kml:pop": Pop,
+  "kml:download": Download,
+  "kml:delete": DeleteTrack,
   "kml:split": Split,
   "kml:prune": Prune,
   "kml:merge": Merge,
-  "kml:to-multigeom": ToMultigeom,
   "kml:fill-altitude": FillAltitude,
 };

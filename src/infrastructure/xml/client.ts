@@ -41,6 +41,13 @@ export class XmlWorkers implements XmlPort {
       if (bytes.byteLength > 128 * 1024 * 1024)
         throw new AppError("USER_INPUT", "XML 超过 128 MiB");
       if (
+        operation.kind === "segment-edit" &&
+        bytes.byteLength +
+          operation.additional.reduce((n, s) => n + s.raw.byteLength, 0) >
+          128 * 1024 * 1024
+      )
+        throw new AppError("USER_INPUT", "Composition inputs exceed 128 MiB");
+      if (
         this.active.size >= this.concurrency &&
         this.queue.length >= this.queueLimit
       )

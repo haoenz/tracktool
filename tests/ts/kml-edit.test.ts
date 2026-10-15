@@ -154,7 +154,7 @@ it("set-tag preserves custom namespaces, CDATA, and creates a missing tag only e
   ).edit!.outputs[0]!.xml;
   expect(summary(Buffer.from(created)).tags).toEqual(["火车"]);
 });
-it("altitude excludes a whole Placemark if any segment has elevation; multigeom preserves styles", async () => {
+it("altitude excludes a whole Placemark if any segment has elevation", async () => {
   const input = Buffer.from(
     '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>D</name><Style id="s"><LineStyle><width>4</width></LineStyle></Style><Placemark><name>A</name><MultiGeometry><LineString><coordinates>100,26,0</coordinates></LineString><LineString><coordinates>101,27,2</coordinates></LineString></MultiGeometry></Placemark><Placemark><name>B</name><LineString><coordinates>102,28 103,29,-0</coordinates></LineString></Placemark></Document></kml>',
   );
@@ -181,11 +181,6 @@ it("altitude excludes a whole Placemark if any segment has elevation; multigeom 
     "101,27,2",
     "102,28,12.34 103,29,0",
   ]);
-  const converted = (
-    await p.run(input, { kind: "edit", operation: { kind: "to-multigeom" } })
-  ).edit!.outputs[0]!.xml;
-  expect(converted).toContain('id="s"');
-  expect(summary(Buffer.from(converted)).ids).toEqual(["B"]);
 });
 it("plan mode never writes, moves or calls Google; edits reject changed originals", async () => {
   const dir = tmp(),

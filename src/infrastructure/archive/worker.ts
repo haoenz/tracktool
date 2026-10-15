@@ -5,6 +5,7 @@ import { parentPort } from "node:worker_threads";
 import { ArchiveStore } from "./store.js";
 import { errorInfo } from "../../domain/errors.js";
 import type { Project } from "../../shared/project.js";
+import type { ProjectTrack } from "../../shared/project-track.js";
 const store = new ArchiveStore();
 const writer = new ArchiveWriter();
 parentPort!.on(
@@ -19,12 +20,19 @@ parentPort!.on(
     path: string;
     entries?: string[];
     expected?: Record<string, string>;
+    references?: ProjectTrack[];
     name?: string;
     state?: Project;
   }) => {
     try {
       let result: unknown;
       switch (m.op) {
+        case "display-kml":
+          result = store.displayKml(m.path, m.references!);
+          break;
+        case "current-reference":
+          result = store.currentReference(m.path, m.name!);
+          break;
         case "bytes":
           result = store.readBytes(m.path, m.name!);
           break;
@@ -46,7 +54,12 @@ parentPort!.on(
           result = store.catalog(m.path);
           break;
         case "selection":
-          result = await store.selection(m.path, m.entries!, m.expected);
+          result = await store.selection(
+            m.path,
+            m.entries!,
+            m.expected,
+            m.references,
+          );
           break;
         case "projects":
           result = store.projects(m.path);

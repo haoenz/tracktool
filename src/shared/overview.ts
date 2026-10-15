@@ -16,6 +16,10 @@ export const OverviewEntry = z.object({
   kind: z.string(),
   date: z.string(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  display_key: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   points: z.number().int().nonnegative(),
   segments: z.number().int().nonnegative(),
   error: z.string().optional(),

@@ -1,4 +1,5 @@
 import { executeEdit, readContent } from "./edit.js";
+import { editSegments } from "./segment-edit.js";
 import { parentPort, workerData } from "node:worker_threads";
 import { readTrackData } from "./trackdata.js";
 import { pointCount } from "../../domain/trackdata.js";
@@ -36,6 +37,20 @@ setImmediate(() => {
         },
         buffers,
       );
+    } else if (operation.kind === "segment-edit") {
+      parentPort?.postMessage({
+        result: {
+          name: "",
+          placemarks: 0,
+          coordinateNodes: 0,
+          segment_edit: editSegments(
+            { ...operation.input, raw: bytes },
+            operation.operation,
+            operation.seed,
+            operation.additional,
+          ),
+        },
+      });
     } else if (operation.kind === "content" || operation.kind === "edit") {
       parentPort?.postMessage({
         result: {

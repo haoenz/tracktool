@@ -69,7 +69,11 @@ export class SqliteTasks implements TaskStore {
         .all() as { id: string }[]
     ).map((row) => this.public(this.read(row.id)!));
   }
-  enqueue(request: WorkRequest, preview?: StoredTask): StoredTask {
+  enqueue(
+    request: WorkRequest,
+    preview?: StoredTask,
+    directApply = false,
+  ): StoredTask {
     return this.transaction(() => {
       const queued = (
         this.db
@@ -104,7 +108,7 @@ export class SqliteTasks implements TaskStore {
         id: randomUUID(),
         operation: request.operation,
         request,
-        mode: preview ? "apply" : "plan",
+        mode: preview || directApply ? "apply" : "plan",
         status: "queued",
         revision: 0,
         createdAt: now,
@@ -279,11 +283,19 @@ export class SqliteTasks implements TaskStore {
       id,
       (task) => {
         Object.assign(task, values);
-        task.status = task.cancelRequested ? "cancelled" : status;
+        task.status =
+          task.cancelRequested && !values.output?.committed
+            ? "cancelled"
+            : status;
         task.owner = undefined;
         task.lease = 0;
         if (task.mode === "plan" && status === "succeeded")
-          task.expiresAt = new Date(this.now() + 15 * 60_000).toISOString();
+          task.expiresAt = new Date(
+            this.now() +
+              (task.request.operation === "track:preview"
+                ? 86400000
+                : 15 * 60_000),
+          ).toISOString();
       },
       [],
       owner,

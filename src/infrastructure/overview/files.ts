@@ -20,7 +20,9 @@ export function openSource(source: string): Database.Database {
     fileMustExist: true,
     timeout: 1000,
   });
-  if (db.pragma("user_version", { simple: true }) !== 2) {
+  if (
+    ![2, 3, 4].includes(db.pragma("user_version", { simple: true }) as number)
+  ) {
     db.close();
     throw new AppError("USER_INPUT", "轨迹库版本不支持地图概览");
   }

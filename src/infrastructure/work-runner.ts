@@ -1,6 +1,6 @@
 import path from "node:path";
 import { lstat, readdir } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { AppError, checkCancelled } from "../domain/errors.js";
 import { TAGS as T } from "../domain/tags.js";
@@ -10,6 +10,8 @@ import { resolveApiKey } from "../domain/config.js";
 import type { ConfigStore } from "../services/ports.js";
 import type { WorkRunner } from "../services/work-ports.js";
 import type { WorkRequest, WorkOutput } from "../shared/work.js";
+import { WorkRequestSchema } from "../shared/work.js";
+import { previewDeletion } from "./archive/deletion.js";
 import type { TaskEvent, BatchResult } from "../shared/contracts.js";
 import { createContext } from "../services/context.js";
 import { KmlService } from "../services/kml-service.js";
@@ -23,6 +25,8 @@ import { ExifMetadata } from "./metadata.js";
 import { GoogleElevation } from "./elevation.js";
 import { GoogleGeocode } from "./geocode.js";
 import { WorkFiles } from "./work-files.js";
+import { EditPreviews } from "./archive/edit-previews.js";
+import { databasePath } from "./archive/database.js";
 const archiveNeeded = (op: string) =>
   op.startsWith("archive:") ||
   ["kml:merge", "exif:geotag", "exif:repair", "exif:repair-vid"].includes(op);
@@ -70,9 +74,22 @@ export class BusinessRunner implements WorkRunner {
     private readonly config: ConfigStore,
     private readonly envKey?: string,
     private readonly defaultArchive?: string,
+    private readonly edits?: EditPreviews,
   ) {}
   async normalize(request: WorkRequest): Promise<WorkRequest> {
-    const value = structuredClone(request);
+    const value = WorkRequestSchema.parse(request);
+    if (value.operation.startsWith("track:")) {
+      if (value.inputs.length || value.output)
+        throw new AppError("USER_INPUT", "轨迹编辑只接受库内固定引用");
+      if (
+        value.operation === "track:preview"
+          ? !value.options.trackPreview
+          : !value.options.trackApply
+      )
+        throw new AppError("USER_INPUT", "缺少编辑请求");
+      value.archive = await this.trackDatabase();
+      return value;
+    }
     value.inputs = await Promise.all(
       [...new Set(value.inputs)].map((p) => this.files.resolve(p)),
     );
@@ -106,8 +123,40 @@ export class BusinessRunner implements WorkRunner {
       throw new AppError("USER_INPUT", "此操作需要选择一个媒体目录");
     if (value.operation === "kml:merge" && !value.output)
       throw new AppError("USER_INPUT", "合并轨迹需要指定输出文件");
-    if (value.operation === "archive:pop" && !value.options.name)
-      throw new AppError("USER_INPUT", "请选择要取回的轨迹");
+    if (["archive:download", "archive:delete"].includes(value.operation)) {
+      if (
+        !value.options.name &&
+        !value.options.entryId &&
+        !value.options.deletion
+      )
+        throw new AppError("USER_INPUT", "请选择轨迹");
+      if (value.operation === "archive:delete") {
+        if (value.output)
+          throw new AppError("USER_INPUT", "删除操作不生成下载文件");
+        if (!value.options.deletion) {
+          const plan = previewDeletion(
+            path.join(value.archive!, "archive.sqlite3"),
+            {
+              name: value.options.name,
+              entry_id: value.options.entryId,
+              category: value.options.category,
+            },
+          );
+          value.options.deletion = {
+            archive_id: plan.archive_id,
+            expected: plan.expected,
+            request_key: randomUUID(),
+          };
+        }
+      } else {
+        value.output ??= path.join(this.files.uploads, randomUUID());
+        const relative = path.relative(this.files.uploads, value.output);
+        if (!relative || relative.startsWith("..") || path.isAbsolute(relative))
+          throw new AppError("FORBIDDEN", "网页下载只能写入受管暂存目录");
+        if (value.options.deletion)
+          throw new AppError("USER_INPUT", "下载不接受删除参数");
+      }
+    }
     if (value.operation === "kml:set-tag" && !value.options.tag)
       throw new AppError("USER_INPUT", "请选择活动标签");
     if (
@@ -220,6 +269,26 @@ export class BusinessRunner implements WorkRunner {
     signal: AbortSignal,
     report: (event: TaskEvent) => void,
   ): Promise<{ output: WorkOutput; result?: BatchResult }> {
+    if (request.operation.startsWith("track:")) {
+      if (!this.edits) throw new AppError("USER_INPUT", "编辑工作流尚未初始化");
+      const file = await this.trackDatabase();
+      if (request.operation === "track:preview") {
+        const p = request.options.trackPreview!;
+        return {
+          output: {
+            paths: [],
+            data: await this.edits.create(file, p.id, p.request, signal),
+          },
+        };
+      }
+      return {
+        output: {
+          paths: [],
+          data: this.edits.apply(file, request.options.trackApply!, signal),
+          committed: true,
+        },
+      };
+    }
     const config = await this.config.load(),
       xml = new XmlWorkers(),
       archive = new ArchiveClient(),
@@ -326,17 +395,31 @@ export class BusinessRunner implements WorkRunner {
             directory,
             ...(kind === "import-zip" ? { zip: first } : {}),
           });
-        } else if (kind === "pop") {
-          const target = request.output || directory;
+        } else if (kind === "download") {
           const value = await kml.archiveOperation(ctx, {
-            kind: "pop",
+            kind: "download",
             database,
-            name: o.name!,
+            name: o.name,
+            entry_id: o.entryId,
             category: o.category,
-            output: target,
+            version_id: o.versionId,
+            output: request.output!,
           });
           output.data = value;
           value.paths?.forEach((p) => paths.add(p));
+        } else if (kind === "delete") {
+          if (!o.deletion)
+            throw new AppError("USER_INPUT", "删除需要固定的预览引用");
+          output.data = await kml.archiveOperation(
+            ctx,
+            mode === "plan"
+              ? {
+                  kind: "delete-preview",
+                  database,
+                  entry_id: o.deletion.expected.entry_id,
+                }
+              : { kind: "delete", database, request: o.deletion },
+          );
         } else if (kind === "backup") {
           const target = request.output || path.join(directory, "Archive.zip");
           output.data = await kml.archiveOperation(ctx, {
@@ -424,12 +507,10 @@ export class BusinessRunner implements WorkRunner {
                         returnMeters: o.returnMeters ?? 30,
                         maxSeconds: o.maxSeconds ?? 120,
                       }
-                    : { kind: "to-multigeom" as const };
-            const target =
-              request.output ||
-              (operation.kind === "to-multigeom"
-                ? path.join(path.dirname(file), stem + "-Merged.kml")
-                : undefined);
+                    : undefined;
+            if (!operation)
+              throw new AppError("USER_INPUT", "不支持的轨迹操作");
+            const target = request.output;
             if (target && files.length > 1)
               throw new AppError(
                 "USER_INPUT",
@@ -598,12 +679,7 @@ export class BusinessRunner implements WorkRunner {
           // Directory inputs may contain the in-place source; other occupied outputs are conflicts.
           if (
             input.some((p) => path.dirname(target) === p) &&
-            ![
-              "kml:split",
-              "kml:prune",
-              "kml:merge",
-              "kml:to-multigeom",
-            ].includes(request.operation)
+            !["kml:split", "kml:prune", "kml:merge"].includes(request.operation)
           )
             continue;
           if (["kml:set-tag", "kml:fill-altitude"].includes(request.operation))
@@ -643,5 +719,12 @@ export class BusinessRunner implements WorkRunner {
       await archive.close();
       await xml.close();
     }
+  }
+  async trackDatabase() {
+    const configured =
+      this.defaultArchive ||
+      String((await this.config.load()).archive_path || "");
+    if (!configured) throw new AppError("USER_INPUT", "未配置轨迹库");
+    return databasePath(await this.files.resolve(configured));
   }
 }

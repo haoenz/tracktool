@@ -37,6 +37,8 @@ import {
 } from "../drawing/layers.js";
 import { api, request } from "./api.js";
 import { MapViewport, type Viewport } from "./map-viewport.js";
+import { ProjectPresentation } from "./project-presentation.js";
+import type { Presentation } from "../shared/track-edit.js";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map.css";
 const WorkPage = lazy(() => import("./work-page.js"));
@@ -352,18 +354,47 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     try {
       const result = await api<Selection>(
         "/api/selection",
-        { archive: catalog.archive, entries },
+        {
+          archive: catalog.archive,
+          entries: inProject
+            ? entries.filter(
+                (entry) => !state.tracks.some((t) => t.entry === entry),
+              )
+            : entries,
+        },
         controller.signal,
       );
       if (sequence !== operations.current) return;
+      if (inProject) {
+        result.tracks = entries.flatMap(
+          (entry) =>
+            projectTracks.find((t) => t.entry === entry) ??
+            result.tracks.find((t) => t.entry === entry) ??
+            [],
+        );
+        result.errors = [
+          ...sourceErrors.filter(
+            (e) =>
+              entries.includes(e.entry) &&
+              state.tracks.some((t) => t.entry === e.entry),
+          ),
+          ...result.errors,
+        ];
+      }
       setTracks(result.tracks);
       setSourceErrors(result.errors);
       change((s) => {
         s.archive = result.archive;
-        s.tracks = result.tracks.map((t) => ({
-          entry: t.entry,
-          sha256: t.sha256,
-        }));
+        const previous = new Map(s.tracks.map((t) => [t.entry, t]));
+        s.tracks = entries.flatMap((entry) => {
+          const old = inProject ? previous.get(entry) : undefined;
+          const track = result.tracks.find((t) => t.entry === entry);
+          return (
+            old ??
+            (track ? (track.reference ?? { entry, sha256: track.sha256 }) : [])
+          );
+        });
+        s.schema = s.tracks.every((t) => t.entry_id) ? 3 : 2;
       });
       setNotice(
         `已选择 ${result.tracks.length} 条轨迹，共 ${result.tracks.reduce((n, t) => n + t.points, 0).toLocaleString()} 个点`,
@@ -372,6 +403,53 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       if (!controller.signal.aborted) setError(message(e));
     } finally {
       if (sequence === operations.current) setBusy(false);
+    }
+  };
+  const projectPresentation = async (
+    entry_id: string,
+    settings: Presentation | null | undefined,
+  ) => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<Loaded>(
+        settings === undefined
+          ? "/api/project/update-track"
+          : "/api/project/presentation",
+        {
+          state: stateRef.current,
+          entry_id,
+          ...(settings === undefined ? {} : { settings }),
+        },
+      );
+      if (result.errors.length)
+        throw new Error(result.errors.map((e) => e.error).join("；"));
+      setProjectState(result.state);
+      setProjectTracks(result.tracks);
+      setSourceErrors([]);
+      setNotice("当前项目已更新，保存项目后保留；库默认展示未改动。");
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const exportKml = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const { job } = await api<{ job: string }>(
+        "/api/export-kml",
+        stateRef.current,
+      );
+      download(
+        await (await request(`/api/jobs/${job}/kml`)).blob(),
+        "tracktool-display.kml",
+      );
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
     }
   };
   const switchBase = async (id: string) => {
@@ -524,10 +602,10 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       next.archive = catalog?.archive ?? initial.initialArchive;
       next.camera = structuredClone(browseState.camera);
       next.style = structuredClone(browseState.style);
-      next.tracks = result.tracks.map(({ entry, sha256 }) => ({
-        entry,
-        sha256,
-      }));
+      next.tracks = result.tracks.map(
+        (t) => t.reference ?? { entry: t.entry, sha256: t.sha256 },
+      );
+      next.schema = next.tracks.every((t) => t.entry_id) ? 3 : 2;
       if (!exportPanel) browsePanel.current = rawPanel;
       fitted.current = true;
       setProjectFilter("");
@@ -1273,12 +1351,37 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               >
                 导出 PNG
               </Button>
+              <Button
+                onClick={() => void exportKml()}
+                disabled={busy || invalid || !!inspection}
+              >
+                导出展示 KML
+              </Button>
             </section>
             <section
               hidden={!exportPanel || (!inProject && panel !== "project")}
             >
               <h2>{inProject ? "项目" : "打开已有工程"}</h2>
               <div hidden={!inProject}>
+                {projectTracks.map((track) => (
+                  <ProjectPresentation
+                    key={track.entry}
+                    track={track}
+                    busy={busy}
+                    onApply={(settings) =>
+                      void projectPresentation(
+                        track.reference!.entry_id!,
+                        settings,
+                      )
+                    }
+                    onUpdate={() =>
+                      void projectPresentation(
+                        track.reference!.entry_id!,
+                        undefined,
+                      )
+                    }
+                  />
+                ))}
                 <label htmlFor="project-name">项目名称</label>
                 <Input
                   id="project-name"

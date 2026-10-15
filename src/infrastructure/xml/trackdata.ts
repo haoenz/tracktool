@@ -1,8 +1,13 @@
 import { XmlElement, type XmlDocument } from "libxml2-wasm";
 import { AppError } from "../../domain/errors.js";
-import { coordinateNumber, timestamp } from "../../domain/trackdata.js";
+import {
+  coordinateNumber,
+  timestamp,
+  MAX_POINTS,
+} from "../../domain/trackdata.js";
 import type { TrackData, TrackSegment } from "../../domain/trackdata.js";
 import { namespaces, xpathLiteral } from "./document.js";
+import { displayMetadata } from "./display-metadata.js";
 
 const text = (node: { content: string } | null) => node?.content.trim() ?? "";
 export function readTrackData(doc: XmlDocument, source = ""): TrackData {
@@ -10,6 +15,12 @@ export function readTrackData(doc: XmlDocument, source = ""): TrackData {
   if (!uri)
     throw new AppError("USER_INPUT", "Expected a namespaced KML document");
   const ns = { ...namespaces, kml: uri };
+  const metadata = displayMetadata(doc),
+    generated = new Set(
+      metadata.flatMap((g) =>
+        g.edges.flatMap((e) => (e.line_id ? [e.line_id] : [])),
+      ),
+    );
   const value = (name: string) =>
     text(
       doc.get(
@@ -26,6 +37,7 @@ export function readTrackData(doc: XmlDocument, source = ""): TrackData {
     tracks: [],
   };
   const placemarks = doc.find("//kml:Placemark", ns);
+  let totalPoints = 0;
   for (const [i, placemark] of placemarks.entries()) {
     if (!(placemark instanceof XmlElement)) continue;
     const name = text(placemark.get("kml:name", ns)),
@@ -35,9 +47,12 @@ export function readTrackData(doc: XmlDocument, source = ""): TrackData {
       ns,
     )) {
       if (!(element instanceof XmlElement)) continue;
+      if (generated.has(element.attr("id")?.content ?? "")) continue;
       const gx = element.namespaceUri === ns.gx;
       const location = `${source || "<XML>"}: Placemark ${i + 1} (${name}), segment ${segments.length + 1}`;
       const coordinates = element.find(gx ? "gx:coord" : "kml:coordinates", ns);
+      if (gx && totalPoints + coordinates.length > MAX_POINTS)
+        throw new AppError("USER_INPUT", "KML exceeds 2,000,000 points");
       if (!gx && coordinates.length !== 1)
         throw new AppError(
           "USER_INPUT",
@@ -56,6 +71,8 @@ export function readTrackData(doc: XmlDocument, source = ""): TrackData {
         lat = new Float64Array(capacity),
         alt: Float64Array | null = null;
       for (const point of texts) {
+        if (++totalPoints > MAX_POINTS)
+          throw new AppError("USER_INPUT", "KML exceeds 2,000,000 points");
         if (count === capacity) {
           capacity = Math.max(1, capacity * 2);
           const a = new Float64Array(capacity),
@@ -106,9 +123,14 @@ export function readTrackData(doc: XmlDocument, source = ""): TrackData {
         const times = element.find("kml:when | gx:when", ns);
         if (times.length && times.length === count) {
           time = new BigInt64Array(count);
+          let missing = false;
           times.forEach((n, j) => {
-            time![j] = timestamp(text(n), `${location}, point ${j + 1}`);
+            const value = text(n);
+            if (value)
+              time![j] = timestamp(value, `${location}, point ${j + 1}`);
+            else missing = true;
           });
+          if (missing) time = null;
         }
       }
       segments.push({
@@ -128,7 +150,7 @@ export function readTrackData(doc: XmlDocument, source = ""): TrackData {
         segments,
       });
   }
-  if (!result.tracks.length)
+  if (!result.tracks.length && !metadata.length)
     throw new AppError(
       "USER_INPUT",
       `${source || "<XML>"}: No extractable line tracks (gx:Track or LineString)`,

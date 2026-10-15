@@ -269,12 +269,13 @@ test("highlight initializes full precision project; old JSON binds current libra
     timeout: 20000,
   });
   const upgraded = await state(page);
-  expect(upgraded.schema).toBe(2);
+  expect(upgraded.schema).toBe(3);
   expect(upgraded.archive).toBe(project.archive);
   expect(upgraded.tracks).toEqual(project.tracks);
   await expect(page.locator(".save-state")).toHaveText("出图工程");
   const missing: Project = {
     ...upgraded,
+    schema: 2,
     tracks: [{ entry: "Default/missing.kml", sha256: "0".repeat(64) }],
   };
   await page.locator("input[type=file]").setInputFiles({

@@ -21,7 +21,11 @@ export function databasePath(input: string): string {
       ? p
       : path.join(path.dirname(p), "archive.sqlite3");
 }
-export function connect(file: string, write = false): Database.Database {
+export function connect(
+  file: string,
+  write = false,
+  allowedSchemas = [2, 3, 4],
+): Database.Database {
   let db: Database.Database;
   try {
     db = new Database(file, { fileMustExist: true, timeout: 30_000 });
@@ -34,12 +38,13 @@ export function connect(file: string, write = false): Database.Database {
   }
   try {
     db.pragma("foreign_keys=ON");
+    db.function("tracktool_can_delete", { varargs: true }, () => 0);
     db.pragma("synchronous=FULL");
     const version = db.pragma("user_version", { simple: true });
-    if (version !== 2)
+    if (!allowedSchemas.includes(version as number))
       throw new AppError(
         "USER_INPUT",
-        `Unsupported database schema ${String(version)}; expected 2; run archive migrate`,
+        `Unsupported database schema ${String(version)}; expected 2, 3 or 4; run archive migrate`,
       );
     // Concurrent first opens of an older DELETE-mode database can fail journal-mode
     // conversion immediately, before SQLite's normal BEGIN busy timeout applies.
@@ -63,6 +68,13 @@ export function connect(file: string, write = false): Database.Database {
     db.close();
     throw error;
   }
+}
+export function schemaVersion(db: Database.Database): number {
+  return db.pragma("user_version", { simple: true }) as number;
+}
+/** Only current active versions belong in catalogs, ordinary reads and exports. */
+export function activeEntries(db: Database.Database): string {
+  return schemaVersion(db) >= 3 ? "active_archive_entries" : "archive_entries";
 }
 export function transaction<T>(
   file: string,
@@ -123,6 +135,31 @@ export async function snapshot<T>(
     if (db.inTransaction) db.exec("ROLLBACK");
     throw error;
   } finally {
+    db.close();
+  }
+}
+
+/** Read-only archive access: no journal-mode changes, recovery, indexing or receipts. */
+export function readTransaction<T>(
+  file: string,
+  run: (db: Database.Database) => T,
+): T {
+  const db = new Database(file, {
+    readonly: true,
+    fileMustExist: true,
+    timeout: 30000,
+  });
+  try {
+    if (![2, 3, 4].includes(schemaVersion(db)))
+      throw new AppError(
+        "USER_INPUT",
+        "Unsupported archive schema; run archive migrate",
+      );
+    db.pragma("query_only=ON");
+    db.exec("BEGIN");
+    return run(db);
+  } finally {
+    if (db.inTransaction) db.exec("ROLLBACK");
     db.close();
   }
 }

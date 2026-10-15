@@ -1,6 +1,11 @@
 import type { Content } from "../domain/archive.js";
 import type { EditOperation, EditResult } from "../domain/kml-edit.js";
 import type { TrackData } from "../domain/trackdata.js";
+import type {
+  SegmentInput,
+  SegmentEdit,
+  SegmentEditResult,
+} from "../domain/segment-edit.js";
 import type { ConfigData } from "../domain/config.js";
 import type { Task, TaskEvent } from "../shared/contracts.js";
 export interface ConfigStore {
@@ -9,6 +14,13 @@ export interface ConfigStore {
 export type XmlOperation =
   | { kind: "content" }
   | { kind: "edit"; operation: EditOperation }
+  | {
+      kind: "segment-edit";
+      input: Omit<SegmentInput, "raw">;
+      operation: SegmentEdit;
+      seed: string;
+      additional: SegmentInput[];
+    }
   | { kind: "tracks"; source: string }
   | { kind: "inspect" }
   | { kind: "rename"; name: string };
@@ -20,6 +32,7 @@ export type XmlResult = {
   tracks?: TrackData;
   content?: Content;
   edit?: EditResult;
+  segment_edit?: SegmentEditResult;
 };
 export interface XmlPort {
   run(

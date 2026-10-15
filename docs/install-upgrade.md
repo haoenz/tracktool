@@ -34,9 +34,11 @@ ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL
 
 配置位置沿用 Linux `$XDG_CONFIG_HOME/tracktool`（默认 `~/.config/tracktool`）、macOS `~/Library/Application Support/tracktool`、Windows `%APPDATA%/tracktool`。网页任务默认存入配置目录的 `web/tasks.sqlite3`，上传存入 `web/uploads/`；可指定 `--state-dir`。不要把状态目录当作永久文件备份。
 
-地图项目继续使用 schema 2，但渲染器版本不同；旧项目可能要求确认当前资源再另存。PNG 的短期出图会话不跨进程恢复。配置密钥读取优先级仍为环境变量 > CLI 参数 > 文件；网页不回显密钥。
+已有 schema 2/3 归档不自动升级；新库使用 schema 4，`archive migrate` 先生成完整备份再升级。地图项目 JSON schema 3 固定库和版本；schema 1/2 按 path + SHA 唯一关联基线，不自动跟随最新轨迹。渲染器资源版本不同仍需确认后另存。新版展示 ZIP 只保留可见结果，原件和隐藏历史用 full-backup 保留。PNG 的短期出图会话不跨进程恢复。配置密钥读取优先级仍为环境变量 > CLI 参数 > 文件；网页不回显密钥。
 
 ## 回退
+
+若已升级 schema 3/4，先用 `archive restore-backup` 将迁移前的 schema 1/2 完整备份恢复到独立目录，再交给旧版本打开；旧程序不能直接使用 schema 3/4 库。
 
 停止新服务和 CLI，保留新状态目录以便诊断；使用先前保留的 Python 环境/独立检出恢复旧命令 PATH。旧版本源码基线是 `5fa6aa97f9dd834a116fd5277f33ad6d4bae9f9e`，离线快照恢复见 [history/README.md](history/README.md)。
 
@@ -72,3 +74,5 @@ node --expose-gc scripts/release/lifecycle.mjs sandbox/release-performance/lifec
 ```
 
 每次发布验收使用新的空 consumer/pack 目录，避免已有产物污染结果。`verify:package` 验证实际安装产物的字体 SHA、前端、API、旧库读取、项目、1920×1440 PNG、ZIP 恢复、媒体备份与真实 ffmpeg；Unix 上限制 PATH 以移除 Python。性能复验沿用 M3 的同样本和预算；联网地图源/Google API 单独记录，不以离线测试承诺外部服务持续可用。
+
+原 pop 已移除，使用独立的 `kml download` 和 `kml delete`。下载兼容 schema 2/3/4，删除需要显式升级到 schema 4。若旧库有待完成 pop，先运行 `archive recover` 按该库原语义完成，再迁移；schema 3 的旧退出展示状态不会自动转为删除。

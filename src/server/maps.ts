@@ -10,7 +10,13 @@ import { ArchiveClient } from "../infrastructure/archive/client.js";
 import { MapResources } from "../infrastructure/maps/resources.js";
 import { Exports } from "../infrastructure/maps/export.js";
 import { resolvePath } from "../infrastructure/paths.js";
-import { defaultProject } from "../shared/project.js";
+import {
+  defaultProject,
+  ProjectSchema,
+  upgradeProject,
+} from "../shared/project.js";
+import { PresentationSchema } from "../shared/track-edit.js";
+import { presentationDigest } from "../infrastructure/archive/identity.js";
 import { SelectionRequest } from "../shared/map.js";
 export interface MapOptions {
   archiveDefault?: () => Promise<string>;
@@ -141,6 +147,65 @@ export function mapRoutes(
       ),
     };
   });
+  app.post("/api/project/presentation", async (request) => {
+    const body = z
+      .object({
+        state: z.unknown(),
+        entry_id: z.string(),
+        settings: PresentationSchema.nullable(),
+      })
+      .strict()
+      .parse(request.body);
+    const state = ProjectSchema.parse(upgradeProject(body.state));
+    const track = state.tracks.find((t) => t.entry_id === body.entry_id);
+    if (!track) throw new AppError("USER_INPUT", "项目中没有该行程");
+    if (body.settings)
+      track.override = {
+        settings: body.settings,
+        sha256: presentationDigest(body.settings),
+      };
+    else delete track.override;
+    return service.project(state);
+  });
+  app.post("/api/project/update-track", async (request) => {
+    const body = z
+      .object({ state: z.unknown(), entry_id: z.string() })
+      .strict()
+      .parse(request.body);
+    const state = ProjectSchema.parse(upgradeProject(body.state));
+    const i = state.tracks.findIndex((t) => t.entry_id === body.entry_id);
+    if (i < 0) throw new AppError("USER_INPUT", "项目中没有该行程");
+    state.tracks[i] = await client.currentReference(
+      state.archive,
+      body.entry_id,
+    );
+    return service.project(state);
+  });
+  app.post("/api/export-kml", async (request) => {
+    const result = await service.project(request.body);
+    if (result.errors.length)
+      throw new AppError("USER_INPUT", "源轨迹缺失或无法关联，不能导出");
+    return {
+      job: jobs.submitKml(
+        result.state,
+        await client.displayKml(result.archive, result.state.tracks),
+      ),
+    };
+  });
+  app.get<{ Params: { id: string } }>(
+    "/api/jobs/:id/kml",
+    async (request, reply) => {
+      const j = jobs.get(request.params.id);
+      if (!j.kml) throw new AppError("USER_INPUT", "展示 KML 不存在或已过期");
+      return reply
+        .type("application/vnd.google-earth.kml+xml")
+        .header(
+          "Content-Disposition",
+          'attachment; filename="tracktool-display.kml"',
+        )
+        .send(j.kml);
+    },
+  );
   app.post("/api/basemap-check", async (request) => {
     const { id } = z.object({ id: z.string() }).parse(request.body),
       r = await getResources();

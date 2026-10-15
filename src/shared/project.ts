@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MAP_CATALOG as catalog } from "./map-catalog.js";
+import { ProjectTrackSchema } from "./project-track.js";
 
 const number = (min: number, max: number) =>
   z.number().finite().min(min).max(max);
@@ -20,18 +21,9 @@ const presets: Record<
 > = catalog.presets;
 export const ProjectSchema = z
   .object({
-    schema: z.literal(2),
+    schema: z.union([z.literal(2), z.literal(3)]),
     archive: z.string().max(4096),
-    tracks: z
-      .array(
-        z
-          .object({
-            entry: z.string().min(1).max(4096),
-            sha256: z.string().regex(/^[0-9a-f]{64}$/),
-          })
-          .passthrough(),
-      )
-      .max(200),
+    tracks: z.array(ProjectTrackSchema).max(200),
     camera: z
       .object({
         center: z.tuple([number(-180, 180), number(-85, 85)]),
@@ -98,6 +90,8 @@ export const ProjectSchema = z
   .superRefine((value, ctx) => {
     const issue = (message: string) =>
       ctx.addIssue({ code: "custom", message });
+    if (value.schema === 3 && value.tracks.some((t) => !t.entry_id))
+      issue("新版项目必须固定轨迹版本；旧项目请按原 schema 导入以关联历史版本");
     if (new Set(value.tracks.map((t) => t.entry)).size !== value.tracks.length)
       issue("重复轨迹");
     const [width, height] = catalog.frames[value.frame.ratio];
@@ -127,7 +121,7 @@ export function defaultProject(
   versions: Record<string, unknown> = {},
 ): Project {
   return {
-    schema: 2,
+    schema: 3,
     archive: "",
     tracks: [],
     camera: { center: [105, 35], zoom: 3.5 },

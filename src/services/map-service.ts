@@ -3,6 +3,7 @@ import { ProjectSchema, upgradeProject } from "../shared/project.js";
 import { SelectionRequest, ProjectSaveRequest } from "../shared/map.js";
 import type { Catalog, Selection } from "../shared/map.js";
 import { AppError } from "../domain/errors.js";
+import type { ProjectTrack } from "../shared/project-track.js";
 export interface MapStore {
   catalog(path: string): Promise<Catalog>;
   selection(
@@ -10,6 +11,7 @@ export interface MapStore {
     entries: string[],
     expected?: Record<string, string>,
     signal?: AbortSignal,
+    references?: ProjectTrack[],
   ): Promise<Selection>;
   projects(path: string): Promise<string[]>;
   save(path: string, name: string, state: Project): Promise<void>;
@@ -40,14 +42,21 @@ export class MapService {
         throw new AppError("USER_INPUT", "项目有轨迹但没有归档引用");
       return { state, archive: "", tracks: [], errors: [] };
     }
-    return {
-      state,
-      ...(await this.store.selection(
-        state.archive,
-        state.tracks.map((t) => t.entry),
-        Object.fromEntries(state.tracks.map((t) => [t.entry, t.sha256])),
-      )),
-    };
+    const selection = await this.store.selection(
+      state.archive,
+      state.tracks.map((t) => t.entry),
+      Object.fromEntries(state.tracks.map((t) => [t.entry, t.sha256])),
+      undefined,
+      state.tracks,
+    );
+    if (
+      !selection.errors.length &&
+      selection.tracks.every((t) => t.reference)
+    ) {
+      state.schema = 3;
+      state.tracks = selection.tracks.map((t) => t.reference!);
+    }
+    return { state, ...selection };
   }
   async save(name: string, value: unknown) {
     const { state, ...selected } = await this.project(value);

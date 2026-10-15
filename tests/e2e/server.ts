@@ -5,6 +5,16 @@ import sharp from "sharp";
 import { createApp } from "../../dist/node/server/app.js";
 import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js";
 import { MapResources } from "../../dist/node/infrastructure/maps/resources.js";
+import { migrateArchive } from "../../dist/node/infrastructure/archive/migrate.js";
+import { randomUUID } from "node:crypto";
+import { transaction } from "../../dist/node/infrastructure/archive/database.js";
+import { addEntry } from "../../dist/node/infrastructure/archive/writer.js";
+import { VersionStore } from "../../dist/node/infrastructure/archive/versions.js";
+import { trackDetail } from "../../dist/node/infrastructure/archive/track-reader.js";
+import {
+  previewDeletion,
+  deleteEntry,
+} from "../../dist/node/infrastructure/archive/deletion.js";
 const temporary = await mkdtemp(
   path.join(os.tmpdir(), "tracktool-m3-browser-"),
 );
@@ -12,6 +22,7 @@ const configPath = path.join(temporary, "config.json");
 await copyFile("tests/e2e/config.json", configPath);
 const archive = path.join(temporary, "archive.sqlite3");
 await copyFile("tests/ts/fixtures/maps/archive.sqlite3", archive);
+await migrateArchive(archive);
 // A valid empty MVT layer: no external requests or misleading basemap fixtures.
 const tile = Buffer.from([26, 9, 10, 5, 119, 97, 116, 101, 114, 120, 2]);
 const raster = await sharp({
@@ -55,6 +66,49 @@ const app = await createApp({
   },
 });
 let fault = "";
+app.post("/api/test/edit-fixture", async () => {
+  const name = `Default/2026-10-14 编辑测试-${randomUUID()}.kml`;
+  const raw = Buffer.from(
+    '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><LineString><coordinates>120,30 120.01,30 120.02,30 120.03,30</coordinates></LineString></Placemark><Placemark><LineString><coordinates>120.04,30 120.05,30</coordinates></LineString></Placemark></Document></kml>',
+  );
+  return transaction(archive, true, (db) => addEntry(db, name, raw, "Default"));
+});
+app.post("/api/test/edit-cleanup", async (request) => {
+  const project = (request.body as { project?: string }).project;
+  if (project)
+    transaction(archive, true, (db) =>
+      db.prepare("DELETE FROM map_projects WHERE name=?").run(project),
+    );
+  const plan = previewDeletion(archive, {
+    entry_id: (request.body as { id: string }).id,
+  });
+  return deleteEntry(archive, {
+    archive_id: plan.archive_id,
+    request_key: randomUUID(),
+    expected: plan.expected,
+  });
+});
+app.post("/api/test/edit-presentation", async (request) => {
+  const id = (request.body as { id: string }).id,
+    detail = trackDetail(archive, id),
+    store = new VersionStore(archive);
+  store.publish({
+    archive_id: detail.archive_id,
+    request_key: randomUUID(),
+    kind: "presentation",
+    algorithm_version: "browser-test",
+    params: {},
+    inputs: [store.current(id)],
+    outputs: [
+      {
+        kind: "presentation",
+        entry_id: id,
+        settings: { ...detail.settings, ignored: [detail.settings.order[0]!] },
+      },
+    ],
+  });
+  return trackDetail(archive, id);
+});
 app.post("/api/test/fault", async (request) => {
   fault = (request.body as { mode: string }).mode;
   return { ok: true };

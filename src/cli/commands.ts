@@ -2,6 +2,7 @@ import { MEDIA_COMMANDS } from "./media-commands.js";
 import { DATA_COMMANDS } from "./data-commands.js";
 import { ZshCompletion, CompletionTags } from "./completion.js";
 import { BUSINESS_COMMANDS } from "./business-commands.js";
+import { TRACK_COMMANDS } from "./track-commands.js";
 import { Command, Flags } from "@oclif/core";
 import { FileConfigStore } from "../infrastructure/config-store.js";
 import { createContext } from "../services/context.js";
@@ -47,6 +48,7 @@ class ConfigShow extends Command {
 export const COMMANDS: Record<string, Command.Class> = {
   "config:show": ConfigShow,
   ...BUSINESS_COMMANDS,
+  ...TRACK_COMMANDS,
   ...MEDIA_COMMANDS,
   ...DATA_COMMANDS,
   completion: ZshCompletion,

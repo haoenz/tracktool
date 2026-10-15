@@ -48,11 +48,14 @@ tracktool kml type "./tracks/2024-05-*.kml"
 tracktool kml push ./2024-05-03\ 徒步.kml
 tracktool kml push ./2024-05-03\ 徒步.kml --keep
 
-# 日常操作后按需导出；只异地备份 Archive.zip 即可恢复归档 KML
+# 日常操作后按需导出当前展示；原件、隐藏段和历史请另做 full-backup
+tracktool kml download "2026-10-01 徒步" --output /downloads
+tracktool --dry-run kml delete "2026-10-01 徒步"  # 查看范围与依赖
+tracktool kml delete "2026-10-01 徒步"            # 删除条目及全部历史
 tracktool archive status
 tracktool archive backup
 tracktool archive rebuild
-# 中断后完成源文件搬移/提取
+# 中断后完成源文件搬移或已提交的旧文件操作
 tracktool archive recover
 ```
 
@@ -64,6 +67,48 @@ tracktool archive recover
 ## 网页地图
 
 运行 `tracktool-map`，地图编辑/项目/PNG 及其他页面的启动和操作见 [使用说明](typescript-development.md)。
+
+## 库内行程编辑
+
+`track` 命令操作 schema 4 中的版本化行程。默认内部断开仍是一个 KML；独立行程拆分须明确使用 split_journey。原有 `kml split/prune` 属于独立文件工具，不修改库内版本。`kml to-multigeom` 已移除，没有兼容别名；MultiGeometry 文件仍可正常读取。
+
+```sh
+tracktool track list --search '2026-10-01'
+tracktool track show ENTRY_ID
+tracktool track history ENTRY_ID
+tracktool track preview edit.json --state-dir /数据/网页状态
+tracktool track apply PREVIEW_ID --sha PREVIEW_SHA256 --state-dir /数据/网页状态
+# 同一预览默认使用相同请求键，响应丢失时可重复上一条命令
+tracktool track operation OPERATION_ID
+```
+
+以下是 edit.json 的内部断开示例。archive_id、target 各字段及 segment_id 从 `track show` 结果填写；target 只包含示例列出的字段，不包含路径、分类和状态。after_point_indices 从 0 开始，边界点属于左段。
+
+```json
+{
+  "schema": 1,
+  "archive_id": "轨迹库ID",
+  "target": {
+    "entry_id": "行程ID",
+    "version_id": "当前版本ID",
+    "presentation_id": "当前展示ID",
+    "generation": 1,
+    "sha256": "用实际64位小写十六进制SHA替换"
+  },
+  "sources": [],
+  "operation": {
+    "kind": "split_segment",
+    "segment_id": "段ID",
+    "after_point_indices": [120, 250]
+  }
+}
+```
+
+operation 还支持 prune（segment_id 和半开 ranges）、reverse（segment_id）、draw（after_segment_id、WGS84 coordinates，可明确吸附）、compose（按序 version_id/segment_id/reverse 和 default_connect）、presentation（完整 settings）、split_journey（每个输出 path/category/segment_ids）、restore_version（version_id/presentation_id）。完整契约见 [API](api.md) 和 `src/shared/track-edit.ts`。未知字段、重复/遗漏段、非法范围和倒向连接均拒绝。
+
+整组撤销请求为 `{schema:1,archive_id,operation:{kind:"restore_group",operation_id,expected:[…]}}`，expected 从 `track operation` 各 effect.after 取出上述五个目标引用字段。全部成员仍与原操作结果一致才能撤销；生成的新行程保留为历史来源，原行程恢复活动状态。恢复历史版本同样先预览，不删除后续版本。
+
+预览保存在状态目录的 tasks.sqlite3，24 小时有效，不改轨迹库；应用从该库读取并核验产物，不重新运行编辑算法。默认状态目录与配置文件同目录下的 web 一致；网页指定了 --state-dir 时，CLI 使用相同路径即可共用预览。`--archive` 可显式指定 CLI 的库，库身份必须匹配。`track preview --dry-run` 仅在内存准备，不保存预览；`track apply --dry-run` 只读检查已有清单，不提交。下载版本继续用 `kml download --entry-id ENTRY_ID --version VERSION_ID`。
 
 ## 目录比较与重复文件查找：使用 fclones
 
@@ -203,12 +248,31 @@ tracktool config set track_tag.Default "徒步,爬山"  # 不带符号 = 整表�
 tracktool archive import-zip /old/Archive.zip /new/tracks
 tracktool config set archive_path /new/tracks
 tracktool kml push "2026-10-01 徒步.kml" --keep
+tracktool kml download "2026-10-01 徒步" --output /downloads
+tracktool --dry-run kml delete "2026-10-01 徒步"  # 查看范围与依赖
+tracktool kml delete "2026-10-01 徒步"            # 删除条目及全部历史
 tracktool archive status
-tracktool archive backup              # SQLite → Archive.zip
+tracktool archive backup              # 当前活动 KML → Archive.zip（不含历史）
+tracktool archive full-backup --output /backup/tracks.sqlite3
+tracktool archive restore-backup /backup/tracks.sqlite3 /fresh/tracks
+tracktool archive migrate             # 完整备份后显式升级 schema 4
 tracktool archive rebuild             # SQLite → 聚合 KML
 tracktool archive recover             # 完成中断文件操作
 ```
 
-只有成员变化使备份过期，项目/索引更新不影响内容修订。push/pop 不改 ZIP/集合。`--zip` 保留为所在目录的定位方式，ZIP 本身可以不存在；不作为另一个可修改的真源。
+当前版本、默认展示或状态变化使日常导出过期；历史来源和项目变化通过 storage_revision 使完整备份过期，解析缓存不影响修订。push/delete 不改 ZIP/集合。`--zip` 保留为所在目录的定位方式，ZIP 本身可以不存在；不作为另一个可修改的真源。
 
-`archive undo` 已退休，会明确报错并提示替代操作：pop 取回原件，push 重新归档，recover 完成中断，或把旧备份 ZIP 导入另一个新目录。`archive log` 仅查看保留的旧 history.jsonl。只备份 ZIP 即可在全新机器恢复成员路径和原字节；不承诺恢复项目、历史、内部 ID 或瓦片。
+`archive undo` 已退休，会明确报错并提示替代操作：download 下载当前原字节，recover 完成中断，或把旧备份 ZIP 导入另一个新目录。`archive log` 仅查看保留的旧 history.jsonl。schema 3/4 的 ZIP 包含当前可见段及连接线，导入只恢复这份展示结果；无法解析的旧成员以原字节保留并警告。恢复原件、隐藏段、项目、版本和内部 ID 请使用 full-backup / restore-backup。两种方式都不包含瓦片或配置。
+
+`kml download` 不修改归档，默认下载当前版本完整原字节；`--entry-id` 可定位非活动来源条目，`--version` 指定该条目的历史版本，`--output` 为目录且不覆盖已有文件。`kml delete` 需要 schema 4；预览和执行都检查项目、来源与待恢复操作依赖，删除只清理无引用对象。没有 pop 命令或兼容别名。已有下载和备份保留，已删除历史只能从之前的完整备份恢复。
+
+### 按展示导出 KML
+
+```sh
+tracktool track export ENTRY_ID --archive /tracks --output /exports/trip.kml
+tracktool track export ENTRY_ID --version VERSION_ID --presentation PRESENTATION_ID --output /exports/history.kml
+```
+
+导出可见段、补绘及启用的连接线，保留实测时间、高程、样式和扩展字段。目标是文件，不覆盖已有目标；`--dry-run` 校验并计算输出但不创建文件。历史版本省略 `--presentation` 时使用该版本第一份展示快照；当前版本默认使用当前快照。原字节请用 `kml download`，完整历史用 `archive full-backup`。网页出图项目的“导出展示 KML”包含该项目的独立覆盖。
+
+`archive backup` 保留原命令名，用于当前库默认展示 ZIP；`archive rebuild` 生成桌面和手机集合。两者不套用任何项目私有覆盖。导出的 Tracktool 元数据记录来源种类、段顺序和显式连线；再次导入时连接线不会成为实测采样，也不会重复补线。

@@ -20,6 +20,7 @@ export const ErrorCodeSchema = z.enum([
 export const ErrorSchema = z.object({
   code: ErrorCodeSchema,
   message: z.string(),
+  reason: z.string().optional(),
   exitCode: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(130)]),
 });
 export const ErrorResponseSchema = z.object({ error: ErrorSchema });

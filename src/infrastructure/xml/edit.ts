@@ -2,13 +2,7 @@ import { XmlElement, type XmlDocument, type XmlNode } from "libxml2-wasm";
 import { withDocument, namespaces } from "./document.js";
 import { AppError } from "../../domain/errors.js";
 import type { Content } from "../../domain/archive.js";
-import {
-  driftIndices,
-  editTime,
-  splitIndices,
-  kmlRoot,
-  xmlText,
-} from "../../domain/kml-edit.js";
+import { driftIndices, editTime, splitIndices } from "../../domain/kml-edit.js";
 import type { EditOperation, EditResult } from "../../domain/kml-edit.js";
 const ns = (doc: XmlDocument) => ({
   ...namespaces,
@@ -249,41 +243,6 @@ export function executeEdit(
           count: remove.size,
         };
       }
-      case "to-multigeom": {
-        const coordinates = doc.find(
-          "//kml:LineString/kml:coordinates",
-          namespaces,
-        );
-        if (!coordinates.length)
-          return { outputs: [], warnings: ["No LineString coordinates found"] };
-        const container =
-          doc.get("/kml:kml/kml:Document", namespaces) ??
-          doc.get("/kml:kml/kml:Folder", namespaces);
-        const name = container?.get("./kml:name", namespaces)?.content;
-        const styles =
-          container
-            ?.find("./kml:Style | ./kml:StyleMap", namespaces)
-            .map((n) => n.canonicalizeToString())
-            .join("") ?? "";
-        const lines = coordinates
-          .map((n) => {
-            const name = n.parent?.parent?.get(
-              "./kml:name",
-              namespaces,
-            )?.content;
-            return `<LineString${name ? ` id="${xmlText(name)}"` : ""}><coordinates>${xmlText(directText(n).trim())}</coordinates></LineString>`;
-          })
-          .join("");
-        return {
-          outputs: [
-            {
-              xml: kmlRoot(
-                `<Folder>${name ? `<name>${xmlText(name)}</name>` : ""}${styles}<Placemark><MultiGeometry>${lines}</MultiGeometry></Placemark></Folder>`,
-              ),
-            },
-          ],
-        };
-      }
       case "altitude-targets":
       case "altitude-apply": {
         const nodes = altitudeNodes(doc);
@@ -325,5 +284,6 @@ export function executeEdit(
           : { outputs: [], count: 0 };
       }
     }
+    throw new AppError("USER_INPUT", "Unsupported or retired XML operation");
   });
 }

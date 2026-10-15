@@ -22,8 +22,27 @@ import type {
   Category,
 } from "../../domain/archive.js";
 import { DEFAULTS, tagMap } from "../../domain/config.js";
-import { connect, rawObject, snapshot, transaction } from "./database.js";
-import { SCHEMA, MIGRATE_1 } from "./schema.js";
+import {
+  activeEntries,
+  schemaVersion,
+  connect,
+  rawObject,
+  snapshot,
+  transaction,
+} from "./database.js";
+import { SCHEMA_4 } from "./schema-v4.js";
+import { downloadFile } from "./download.js";
+import { previewDeletion, deleteEntry, type DeleteFault } from "./deletion.js";
+import { migrateArchive, type MigrationFault } from "./migrate.js";
+import { fullBackup, restoreBackup, type BackupFault } from "./full-backup.js";
+import {
+  addVersionedEntry,
+  archiveId,
+  currentEntry,
+  checkRef,
+  publishVersions,
+  type SourceLocation,
+} from "./versions.js";
 import {
   digest,
   exclusive,
@@ -37,7 +56,11 @@ import { readZip, writeZip } from "./zip.js";
 import { XmlWorkers } from "../xml/client.js";
 import type { XmlPort } from "../../services/ports.js";
 import { rebuild } from "./collections.js";
+import { exportDisplay } from "./display-export.js";
 export type FaultPoint =
+  | Parameters<DeleteFault>[0]
+  | Parameters<MigrationFault>[0]
+  | Parameters<BackupFault>[0]
   | "intent-committed"
   | "target-durable"
   | "source-removed"
@@ -51,7 +74,10 @@ export function addEntry(
   name: string,
   raw: Uint8Array,
   category: Category | null,
+  location?: SourceLocation,
 ): Entry {
+  if (schemaVersion(db) >= 3)
+    return addVersionedEntry(db, name, raw, category, location);
   memberName(name);
   if (!name.toLowerCase().endsWith(".kml"))
     throw new AppError("USER_INPUT", "Archive entries must be KML");
@@ -96,9 +122,19 @@ export class ArchiveWriter {
           message: "Archive status",
           status: this.status(request.database),
         };
-      case "migrate":
-        this.migrate(request.database);
-        return { message: "Schema 2 ready" };
+      case "migrate": {
+        const backup = await this.migrate(request.database);
+        return {
+          message: backup
+            ? `Schema 4 ready; pre-migration backup: ${backup}`
+            : "Schema 4 ready",
+          paths: backup ? [backup] : [],
+        };
+      }
+      case "full-backup":
+        return fullBackup(request.database, request.output, this.fault);
+      case "restore-backup":
+        return restoreBackup(request.backup, request.directory, this.fault);
       case "recover":
         return {
           message: "Recovery completed",
@@ -110,21 +146,41 @@ export class ArchiveWriter {
         return rebuild(request.database, request.output, this.xml);
       case "push":
         return this.push(request);
-      case "pop":
-        return this.pop(request);
+      case "download":
+        return downloadFile(
+          request.database,
+          request,
+          request.output,
+          request.preview,
+        );
+      case "delete-preview":
+        return {
+          message: "Deletion preview; archive unchanged",
+          deletion_preview: previewDeletion(request.database, request),
+        };
+      case "delete":
+        return {
+          message: "Track and its history deleted",
+          deletion: deleteEntry(request.database, request.request),
+        };
+      default:
+        throw new AppError("USER_INPUT", "Unsupported archive operation");
     }
   }
   status(file: string): ArchiveStatus {
     return transaction(file, false, (db) => {
       const meta = db
         .prepare(
-          "SELECT revision,zip_revision,zip_target,views_revision FROM archive_meta",
+          `SELECT revision,zip_revision,zip_target,views_revision,${schemaVersion(db) >= 3 ? "storage_revision" : "NULL AS storage_revision"} FROM archive_meta`,
         )
         .get() as Omit<ArchiveStatus, "entries" | "pending" | "zip_fresh">;
       return {
         ...meta,
+        schema: schemaVersion(db),
         entries: (
-          db.prepare("SELECT count(*) AS n FROM archive_entries").get() as {
+          db
+            .prepare(`SELECT count(*) AS n FROM ${activeEntries(db)}`)
+            .get() as {
             n: number;
           }
         ).n,
@@ -141,29 +197,8 @@ export class ArchiveWriter {
       };
     });
   }
-  migrate(file: string): void {
-    if (!existsSync(file))
-      throw new AppError("USER_INPUT", `Database missing: ${file}`);
-    const db = new Database(file, { fileMustExist: true, timeout: 30_000 });
-    try {
-      db.pragma("foreign_keys=ON");
-      db.pragma("synchronous=FULL");
-      db.exec("BEGIN EXCLUSIVE");
-      const version = db.pragma("user_version", { simple: true });
-      if (version === 1) db.exec(MIGRATE_1);
-      else if (version !== 2)
-        throw new AppError(
-          "USER_INPUT",
-          `Unsupported database schema ${String(version)}`,
-        );
-      if ((db.pragma("foreign_key_check") as unknown[]).length)
-        throw new AppError("USER_INPUT", "Foreign key check failed");
-      db.exec("COMMIT");
-      db.pragma("journal_mode=WAL");
-    } finally {
-      if (db.inTransaction) db.exec("ROLLBACK");
-      db.close();
-    }
+  migrate(file: string): Promise<string | undefined> {
+    return migrateArchive(file, this.fault);
   }
   async init(directory: string, zip?: string): Promise<ArchiveResult> {
     const target = path.join(directory, "archive.sqlite3");
@@ -187,8 +222,7 @@ export class ArchiveWriter {
       db.pragma("foreign_keys=ON");
       db.pragma("synchronous=FULL");
       db.exec("BEGIN");
-      db.exec(SCHEMA);
-      db.exec(MIGRATE_1);
+      db.exec(SCHEMA_4);
       db.prepare(
         "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,?)",
       ).run(randomUUID().replaceAll("-", ""));
@@ -209,7 +243,13 @@ export class ArchiveWriter {
               if (!(e instanceof AppError) || e.code !== "USER_INPUT") throw e;
             }
           }
-          addEntry(db, name, bytes, category);
+          addEntry(db, name, bytes, category, {
+            container: resolvePath(zip),
+            member: name,
+            display_name: path.basename(name),
+            source_role: "imported_file",
+            evidence: {},
+          });
         });
       if (
         db.pragma("integrity_check", { simple: true }) !== "ok" ||
@@ -257,7 +297,7 @@ export class ArchiveWriter {
     }
   }
   async recover(file: string): Promise<number> {
-    const db = connect(file, true);
+    const db = connect(file, true, [1, 2, 3, 4]);
     try {
       const operations = db
         .prepare("SELECT * FROM file_operations ORDER BY rowid")
@@ -268,8 +308,21 @@ export class ArchiveWriter {
         sha256: string;
         source: string | null;
         target: string;
+        expected_generation?: number;
       }[];
       for (const op of operations) {
+        const current =
+          schemaVersion(db) >= 3 ? currentEntry(db, op.entry_id) : null;
+        if (current)
+          checkRef(
+            db,
+            {
+              ...current,
+              generation: op.expected_generation!,
+              sha256: op.sha256,
+            },
+            true,
+          );
         const raw = rawObject(db, op.sha256);
         exclusive(op.target, raw, true);
         await this.fault("target-durable");
@@ -289,15 +342,28 @@ export class ArchiveWriter {
           await this.fault("source-removed");
         }
         db.prepare("DELETE FROM file_operations WHERE id=?").run(op.id);
-        if (op.operation === "pop")
+        if (op.operation === "pop" && current)
+          publishVersions(db, {
+            archive_id: archiveId(db),
+            request_key: `file-pop:${op.id}`,
+            kind: "withdraw",
+            algorithm_version: "pop-v1",
+            params: { file_operation: op.id },
+            inputs: [current],
+            outputs: [
+              { kind: "state", entry_id: current.entry_id, state: "withdrawn" },
+            ],
+          });
+        else if (op.operation === "pop")
           db.prepare("DELETE FROM archive_entries WHERE id=? AND sha256=?").run(
             op.entry_id,
             op.sha256,
           );
       }
-      db.exec(
-        "DELETE FROM kml_objects WHERE sha256 NOT IN (SELECT sha256 FROM archive_entries) AND sha256 NOT IN (SELECT sha256 FROM file_operations)",
-      );
+      if (schemaVersion(db) < 3)
+        db.exec(
+          "DELETE FROM kml_objects WHERE sha256 NOT IN (SELECT sha256 FROM archive_entries) AND sha256 NOT IN (SELECT sha256 FROM file_operations)",
+        );
       db.exec("COMMIT");
       return operations.length;
     } finally {
@@ -320,7 +386,13 @@ export class ArchiveWriter {
         const bytes = readFileSync(input.source);
         if (digest(bytes) !== input.sha256)
           throw new AppError("USER_INPUT", `Source changed: ${input.source}`);
-        const entry = addEntry(db, input.member, bytes, input.category);
+        const entry = addEntry(db, input.member, bytes, input.category, {
+          container: resolvePath(input.source),
+          member: null,
+          display_name: path.basename(input.source),
+          source_role: "imported_file",
+          evidence: {},
+        });
         if (!request.move) continue;
         const target = path.join(
           resolvePath(request.backup),
@@ -332,13 +404,16 @@ export class ArchiveWriter {
           continue;
         }
         db.prepare(
-          "INSERT OR IGNORE INTO file_operations VALUES (?, 'push', ?, ?, ?, ?)",
+          `INSERT OR IGNORE INTO file_operations(id,operation,entry_id,sha256,source,target${schemaVersion(db) >= 3 ? ",expected_generation" : ""}) VALUES (?, 'push', ?, ?, ?, ?${schemaVersion(db) >= 3 ? ",?" : ""})`,
         ).run(
           randomUUID().replaceAll("-", ""),
           entry.id,
           entry.sha256,
           input.source,
           target,
+          ...(schemaVersion(db) >= 3
+            ? [currentEntry(db, entry.id).generation]
+            : []),
         );
       }
     });
@@ -351,79 +426,6 @@ export class ArchiveWriter {
       warnings,
     };
   }
-  async pop(
-    request: Extract<ArchiveRequest, { kind: "pop" }>,
-  ): Promise<ArchiveResult> {
-    if (/[\\/]/.test(request.name))
-      throw new AppError(
-        "USER_INPUT",
-        "Use an exact filename or stem, without a directory",
-      );
-    let output = "";
-    const select = (db: Database.Database): Entry => {
-      const rows = (
-        db
-          .prepare(
-            "SELECT id,path,sha256,category FROM archive_entries ORDER BY path",
-          )
-          .all() as (Entry & { category: Category | null })[]
-      ).filter(
-        (e) =>
-          (!request.category || e.category === request.category) &&
-          [
-            path.basename(e.path),
-            path.basename(e.path, path.extname(e.path)),
-          ].includes(request.name),
-      );
-      if (rows.length !== 1)
-        throw new AppError(
-          "USER_INPUT",
-          rows.length
-            ? `Ambiguous name; use --type: ${rows.map((e) => e.path).join(", ")}`
-            : `Entry not found: ${request.name}`,
-        );
-      const entry = rows[0]!;
-      output = path.join(request.output, path.basename(entry.path));
-      if (present(output))
-        throw new AppError(
-          "USER_INPUT",
-          `Refusing to overwrite existing target: ${output}`,
-        );
-      return entry;
-    };
-    if (request.preview) {
-      const db = new Database(request.database, {
-        readonly: true,
-        fileMustExist: true,
-        timeout: 30_000,
-      });
-      try {
-        select(db);
-      } finally {
-        db.close();
-      }
-      return { message: "Would pop track", paths: [output] };
-    }
-    await this.recover(request.database);
-    transaction(request.database, true, (db) => {
-      const entry = select(db);
-      if (
-        db
-          .prepare("SELECT 1 FROM file_operations WHERE entry_id=?")
-          .get(entry.id)
-      )
-        throw new AppError(
-          "USER_INPUT",
-          "Entry has a pending file operation; run archive recover and retry",
-        );
-      db.prepare(
-        "INSERT INTO file_operations VALUES (?, 'pop', ?, ?, NULL, ?)",
-      ).run(randomUUID().replaceAll("-", ""), entry.id, entry.sha256, output);
-    });
-    await this.fault("intent-committed");
-    await this.recover(request.database);
-    return { message: "Track popped", paths: [output] };
-  }
   async backup(file: string, output: string): Promise<ArchiveResult> {
     if (!output.toLowerCase().endsWith(".zip") || output === file)
       throw new AppError("USER_INPUT", "Backup target must be a .zip file");
@@ -432,6 +434,7 @@ export class ArchiveWriter {
     const previous = temporary(output);
     let published = false;
     let retained = false;
+    const warnings: string[] = [];
     try {
       const revision = await snapshot(file, async (db) => {
         const rev = (
@@ -440,11 +443,30 @@ export class ArchiveWriter {
           }
         ).revision;
         const entries = db
-          .prepare("SELECT path,sha256 FROM archive_entries ORDER BY path")
+          .prepare(`SELECT path,sha256 FROM ${activeEntries(db)} ORDER BY path`)
           .all() as Entry[];
+        const expectedHashes: string[] = [];
         function* originals() {
-          for (const e of entries)
-            yield { path: e.path, raw: rawObject(db, e.sha256) };
+          for (const e of entries) {
+            const unavailable =
+              schemaVersion(db) >= 3 &&
+              (db
+                .prepare(
+                  "SELECT v.manifest_status FROM archive_entries e JOIN track_versions v ON v.id=e.current_version_id WHERE e.path=?",
+                )
+                .get(e.path) as { manifest_status: string } | false);
+            const fallback =
+              unavailable && unavailable.manifest_status !== "ready";
+            if (fallback)
+              warnings.push(
+                `${e.path}: 段清单不可用，ZIP 中保留原字节，未应用展示设置`,
+              );
+            const raw = fallback
+              ? rawObject(db, e.sha256)
+              : exportDisplay(db, e.path);
+            expectedHashes.push(digest(raw));
+            yield { path: e.path, raw };
+          }
         }
         await writeZip(stage, originals());
         let index = 0;
@@ -453,7 +475,7 @@ export class ArchiveWriter {
           if (
             !expected ||
             expected.path !== name ||
-            expected.sha256 !== digest(raw)
+            expectedHashes[index - 1] !== digest(raw)
           )
             throw new AppError("USER_INPUT", "ZIP verification failed");
         });
@@ -465,7 +487,9 @@ export class ArchiveWriter {
       const db = connect(file, true);
       try {
         const newer = db
-          .prepare("SELECT revision FROM export_receipts WHERE target=?")
+          .prepare(
+            `SELECT revision FROM export_receipts WHERE target=?${schemaVersion(db) >= 3 ? " AND kind='kml_zip'" : ""}`,
+          )
           .get(output) as { revision: number } | undefined;
         if (newer && newer.revision > revision)
           throw new AppError(
@@ -488,7 +512,9 @@ export class ArchiveWriter {
           "UPDATE archive_meta SET zip_revision=?,zip_target=? WHERE singleton=1",
         ).run(revision, output);
         db.prepare(
-          "INSERT INTO export_receipts VALUES (?,?) ON CONFLICT(target) DO UPDATE SET revision=excluded.revision",
+          schemaVersion(db) >= 3
+            ? "INSERT INTO export_receipts VALUES (?,'kml_zip',?,NULL) ON CONFLICT(target,kind) DO UPDATE SET revision=excluded.revision"
+            : "INSERT INTO export_receipts VALUES (?,?) ON CONFLICT(target) DO UPDATE SET revision=excluded.revision",
         ).run(output, revision);
         await this.fault("before-export-commit");
         db.exec("COMMIT");
@@ -512,7 +538,11 @@ export class ArchiveWriter {
         if (db.inTransaction) db.exec("ROLLBACK");
         db.close();
       }
-      return { message: "ZIP backup complete", paths: [output] };
+      return {
+        message: "Display ZIP export complete",
+        paths: [output],
+        warnings,
+      };
     } finally {
       rmSync(stage, { force: true });
       if (!retained) rmSync(previous, { force: true });

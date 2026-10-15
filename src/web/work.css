@@ -122,3 +122,44 @@ input[type="file"] {
 .work-map .map-stage {
   min-height: 300px;
 }
+
+.track-editor {
+  min-width: 0;
+}
+.track-editor > * {
+  margin-bottom: 12px;
+}
+.track-editor label {
+  display: block;
+  margin: 8px 0;
+}
+.track-editor label > .ant-select {
+  min-width: 140px;
+  max-width: 100%;
+}
+.edit-segment {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 10px 0;
+  overflow-wrap: anywhere;
+}
+.track-editor .ant-select {
+  max-width: 100%;
+}
+.track-editor .ant-space {
+  max-width: 100%;
+}
+.track-editor .ant-space-item {
+  max-width: 100%;
+}
+.track-editor .work-map {
+  height: 420px;
+  min-width: 0;
+}
+@media (max-width: 600px) {
+  .track-editor .work-map {
+    height: 320px;
+  }
+  .track-editor .ant-card-body {
+    padding: 12px;
+  }
+}
