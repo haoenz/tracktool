@@ -6,7 +6,7 @@ import { AppError, checkCancelled } from "../domain/errors.js";
 import { TAGS as T } from "../domain/tags.js";
 import { coordinate, gpsTags } from "../domain/media.js";
 import { parseMediaTime, formatWall } from "../domain/media-time.js";
-import { resolveApiKey } from "../domain/config.js";
+import { resolveApiKey, tagMap } from "../domain/config.js";
 import type { ConfigStore } from "../services/ports.js";
 import type { WorkRunner } from "../services/work-ports.js";
 import type { WorkRequest, WorkOutput } from "../shared/work.js";
@@ -277,7 +277,62 @@ export class BusinessRunner implements WorkRunner {
         return {
           output: {
             paths: [],
-            data: await this.edits.create(file, p.id, p.request, signal),
+            data: await this.edits.create(
+              file,
+              p.id,
+              p.request,
+              signal,
+              async (raw, operation) => {
+                const config = await this.config.load();
+                const xml = new XmlWorkers();
+                try {
+                  if (operation.kind === "set_tag") {
+                    if (!tagMap(config).has(operation.tag))
+                      throw new AppError(
+                        "USER_INPUT",
+                        "未知活动标签，请刷新后重新选择",
+                      );
+                    const result = await xml.run(
+                      raw,
+                      {
+                        kind: "edit",
+                        operation: {
+                          kind: "set-tag",
+                          tag: operation.tag,
+                          create: true,
+                        },
+                      },
+                      signal,
+                    );
+                    return Buffer.from(result.edit!.outputs[0]!.xml);
+                  }
+                  const locations = (
+                    await xml.run(
+                      raw,
+                      { kind: "edit", operation: { kind: "altitude-targets" } },
+                      signal,
+                    )
+                  ).edit!.locations!;
+                  if (!locations.length) return raw;
+                  const values = await new GoogleElevation().get(
+                    locations,
+                    resolveApiKey(config, this.envKey),
+                    signal,
+                  );
+                  const result = await xml.run(
+                    raw,
+                    {
+                      kind: "edit",
+                      operation: { kind: "altitude-apply", values },
+                    },
+                    signal,
+                  );
+                  return Buffer.from(result.edit!.outputs[0]!.xml);
+                } finally {
+                  await xml.close();
+                }
+              },
+            ),
           },
         };
       }

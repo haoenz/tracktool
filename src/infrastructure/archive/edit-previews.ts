@@ -16,6 +16,7 @@ import {
   type EditPreview,
   type EntrySnapshot,
 } from "../../shared/track-edit.js";
+import { readManifest } from "../xml/manifest.js";
 import { digest } from "../durable-files.js";
 import { readTransaction } from "./database.js";
 import { canonical, hashJson } from "./identity.js";
@@ -118,6 +119,13 @@ export class EditPreviews {
     id: string,
     input: EditRequest,
     signal?: AbortSignal,
+    transform?: (
+      raw: Uint8Array,
+      operation: Extract<
+        EditRequest["operation"],
+        { kind: "set_tag" | "fill_altitude" }
+      >,
+    ) => Promise<Uint8Array>,
   ): Promise<EditPreview> {
     const request = EditRequestSchema.parse(input);
     const prior = this.db
@@ -233,7 +241,77 @@ export class EditPreviews {
           "请通过撤销原操作组恢复非活动行程，避免新旧行程同时展示",
         );
       const op = request.operation;
-      if (op.kind === "restore_version") {
+      if (op.kind === "set_tag" || op.kind === "fill_altitude") {
+        if (!transform || request.sources.length)
+          throw new AppError(
+            "USER_INPUT",
+            "轨迹属性编辑未初始化或包含额外来源",
+          );
+        const source = readTransaction(file, (db) =>
+          versionInput(
+            db,
+            request.target.entry_id,
+            request.target.version_id,
+            request.target.presentation_id,
+          ),
+        );
+        const raw = await transform(source.raw, op);
+        const manifest = readManifest(
+          raw,
+          (i) => source.segments[i]?.segment_id ?? `unexpected-${i}`,
+        );
+        if (
+          manifest.status !== "ready" ||
+          manifest.segments.length !== source.segments.length ||
+          manifest.segments.some(
+            (s, i) => s.point_count !== source.segments[i]!.point_count,
+          )
+        )
+          throw new AppError("USER_INPUT", "属性编辑意外改变了轨迹分段或点数");
+        const segments = manifest.segments.map((s, i) => ({
+          ...s,
+          source_kind: source.segments[i]!.source_kind,
+        }));
+        publish = {
+          archive_id: request.archive_id,
+          request_key: id,
+          kind: op.kind,
+          algorithm_version: "track-properties-v1",
+          params: { operation: op },
+          inputs: [request.target],
+          outputs: [
+            {
+              kind: "version",
+              entry_id: request.target.entry_id,
+              path: before[0]!.path,
+              category: before[0]!.category,
+              raw,
+              segment_ids: segments.map((s) => s.segment_id),
+              source_kinds: Object.fromEntries(
+                segments.map((s) => [s.ordinal, s.source_kind]),
+              ),
+              settings: source.settings,
+              sources: segments.map((s) => ({
+                ordinal: s.ordinal,
+                source_version_id: request.target.version_id,
+                source_segment_id: s.segment_id,
+                start: 0,
+                end_exclusive: s.point_count,
+                evidence_kind: "exact" as const,
+                evidence: { operation: op.kind },
+              })),
+            },
+          ],
+        };
+        artifacts.push({
+          raw,
+          segments,
+          settings: source.settings,
+          path: before[0]!.path,
+          state: "active",
+        });
+        changes.push(noChanges());
+      } else if (op.kind === "restore_version") {
         if (request.sources.length)
           throw new AppError("USER_INPUT", "恢复版本不接受额外来源");
         const source = readTransaction(file, (db) =>

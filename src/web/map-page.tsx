@@ -15,7 +15,7 @@ import {
 } from "antd";
 import { Link, useSearchParams } from "react-router-dom";
 import { WorkspaceContext, type Panel } from "./workspace.js";
-import type { WorkTask } from "../shared/work.js";
+import { operationLabel, type Operation } from "../shared/work.js";
 import type {
   Catalog,
   Cities,
@@ -25,7 +25,6 @@ import type {
 } from "../shared/map.js";
 import { useOverview, rememberedCamera, rememberCamera } from "./overview.js";
 import type { OverviewVisibility } from "./overview-layer.js";
-import { TRACK_STYLES } from "../shared/track-style.js";
 import type { OverviewStatus } from "../shared/overview.js";
 import type { Project } from "../shared/project.js";
 import { frames } from "../drawing/core.js";
@@ -42,7 +41,11 @@ import { ProjectPresentation } from "./project-presentation.js";
 import type { Presentation } from "../shared/track-edit.js";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map.css";
-const WorkPage = lazy(() => import("./work-page.js"));
+import projectIcon from "./project-icon.svg";
+const TrackProperties = lazy(() => import("./track-properties.js"));
+const ArchiveAction = lazy(() =>
+  import("./work-page.js").then((m) => ({ default: m.FileWorkPage })),
+);
 const TasksPage = lazy(() =>
   import("./work-page.js").then((m) => ({ default: m.TasksPage })),
 );
@@ -133,7 +136,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       ...initial.state,
       camera: rememberedCamera(initial.initialArchive) ?? initial.state.camera,
     })),
-    [browseTracks, setBrowseTracks] = useState<SelectedTrack[]>([]),
     [projectState, setProjectState] = useState<Project>(),
     [projectTracks, setProjectTracks] = useState<SelectedTrack[]>([]),
     [baseline, setBaseline] = useState(""),
@@ -159,7 +161,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
   const setFilter = inProject ? setProjectFilter : setBrowseFilter;
   const kind = inProject ? projectKind : browseKind;
   const setKind = inProject ? setProjectKind : setBrowseKind;
-  const tracks = inProject ? projectTracks : browseTracks;
+  const tracks = projectTracks;
   const dirty = inProject && JSON.stringify(projectState) !== baseline;
   const setState = (update: Project | ((prev: Project) => Project)) => {
     if (inProject)
@@ -168,22 +170,23 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       );
     else setBrowseState(update);
   };
-  const setTracks = inProject ? setProjectTracks : setBrowseTracks;
+  const setTracks = setProjectTracks;
   const browsePanel = useRef("library");
   const [params, setParams] = useSearchParams();
-  const rawPanel = params.get("panel") ?? "library";
+  const rawPanel = params.get("panel") ?? "none";
   const panel = Object.hasOwn(panels, rawPanel)
-    ? rawPanel === "style"
-      ? "settings"
-      : (rawPanel as Panel)
-    : undefined;
-  const trackPanel = useRef<Panel>("library");
-  const group =
-    panel === "archive" || panel === "library"
+    ? ["archive", "tracks"].includes(rawPanel)
       ? "library"
-      : panel === "tracks" || panel === "tasks"
-        ? "processing"
-        : "export";
+      : rawPanel === "style"
+        ? "settings"
+        : (rawPanel as Panel)
+    : undefined;
+  const [archiveAction, setArchiveAction] = useState<Operation>();
+  const [detailAction, setDetailAction] = useState<{
+    operation: Operation;
+    entry: string;
+  }>();
+  const [menuExpanded, setMenuExpanded] = useState(!!panel);
   const exportPanel = panel === "export" || panel === "project";
   const [visited, setVisited] = useState<Set<Panel>>(new Set());
   const [inspection, setInspection] = useState<{
@@ -192,19 +195,9 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     camera: Project["camera"];
   }>();
   const inspectionSequence = useRef(0);
-  const activeTasks = useQuery({
-    queryKey: ["tasks"],
-    queryFn: ({ signal }) =>
-      api<{ tasks: WorkTask[] }>("/api/work/tasks", undefined, signal),
-    refetchInterval: 3000,
-  });
-  const running =
-    activeTasks.data?.tasks.filter(
-      (t) =>
-        !t.request.operation.startsWith("exif:") &&
-        ["queued", "running"].includes(t.status),
-    ).length ?? 0;
   const openPanel = (next: Panel, task?: string) => {
+    setArchiveAction(undefined);
+    setDetailAction(undefined);
     if (!inProject && !exportPanel && (next === "export" || next === "project"))
       browsePanel.current = rawPanel;
     setParams(
@@ -215,8 +208,8 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
   };
   useEffect(() => {
     if (panel) {
+      setMenuExpanded(true);
       setVisited((old) => new Set([...old, panel]));
-      if (panel !== "settings") trackPanel.current = panel;
     }
   }, [panel]);
   const refreshCatalog = async (path: string) => {
@@ -281,7 +274,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
   );
   const overview = inProject ? projectOverview : browseOverview;
   const fitted = useRef(!!rememberedCamera(initial.initialArchive));
-  const browsing = !inProject && !inspection;
+  const browsing = (!inProject || panel === "library") && !inspection;
   useEffect(() => {
     if (
       !fitted.current &&
@@ -424,23 +417,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       browseOverview.setId("");
       browseOverview.setCandidates([]);
     }
-    const entries = next.all ? [] : Object.values(next.exceptions);
-    // Visibility uses vector tile filters, so selecting the whole archive never
-    // downloads every track. Detailed geometry remains bounded for editing/export.
-    if (!next.all && entries.length <= 200) void select(entries);
-    else {
-      selection.current?.abort();
-      operations.current++;
-      setBusy(false);
-      setBrowseTracks([]);
-      setBrowseState((s) => ({ ...s, tracks: [] }));
-      setSourceErrors([]);
-      setNotice(
-        next.all
-          ? "已更新地图显示"
-          : `已显示 ${entries.length} 条轨迹；处理或出图请选不超过 200 条。`,
-      );
-    }
+    setNotice("已更新地图显示");
   };
   const toggleBrowse = (id: string, entry: string, checked: boolean) => {
     const exceptions = { ...browseVisibility.exceptions };
@@ -626,28 +603,11 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     setBusy(true);
     setError("");
     try {
-      const entries = browseTracks.length
-        ? browseTracks.map((t) => t.entry)
-        : overview.selected
-          ? [overview.selected.entry]
-          : [];
-      const result = entries.length
-        ? await api<Selection>("/api/selection", {
-            archive: catalog?.archive,
-            entries,
-          })
-        : { tracks: [], errors: [] };
-      if (result.errors.length)
-        throw new Error(
-          result.errors.map((e) => `${e.entry}：${e.error}`).join("；"),
-        );
       const next = structuredClone(initial.state);
       next.archive = catalog?.archive ?? initial.initialArchive;
       next.camera = structuredClone(browseState.camera);
       next.style = structuredClone(browseState.style);
-      next.tracks = result.tracks.map(
-        (t) => t.reference ?? { entry: t.entry, sha256: t.sha256 },
-      );
+      next.tracks = [];
       next.schema = next.tracks.every((t) => t.entry_id) ? 3 : 2;
       if (!exportPanel) browsePanel.current = rawPanel;
       fitted.current = true;
@@ -656,13 +616,13 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       projectOverview.setId("");
       projectOverview.setOffset(0);
       setProjectState(next);
-      setProjectTracks(result.tracks);
+      setProjectTracks([]);
       setBaseline(JSON.stringify(next));
       setName("");
       setSourceErrors([]);
       setVersionChanged(false);
       setPreview(true);
-      setNotice("已新建出图工程；带入当前视野与所选轨迹。");
+      setNotice("已新建出图工程；请在轨迹导出中选择出图范围。");
       openPanel("export");
     } catch (e) {
       setError(message(e));
@@ -781,18 +741,27 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       <div className="map-app">
         {messageHolder}
         <header className="map-header">
-          <div className="map-brand">
-            <span className="brand">TRACKTOOL</span>
-            <h1>轨迹地图</h1>
-          </div>
-          <nav aria-label="地图工具">
+          <button
+            className="project-icon"
+            type="button"
+            aria-label={menuExpanded ? "收起项目菜单" : "展开项目菜单"}
+            aria-expanded={menuExpanded}
+            aria-controls="map-tools"
+            onClick={() => {
+              setMenuExpanded(!menuExpanded);
+              if (menuExpanded) setParams({ panel: "none" });
+            }}
+          >
+            <img src={projectIcon} alt="" width="40" height="40" />
+          </button>
+          <nav id="map-tools" aria-label="地图工具" hidden={!menuExpanded}>
             <Button
               type={panel && panel !== "settings" ? "primary" : "text"}
               aria-pressed={!!panel && panel !== "settings"}
               onClick={() =>
                 panel && panel !== "settings"
                   ? setParams({ panel: "none" })
-                  : openPanel(trackPanel.current)
+                  : openPanel("library")
               }
             >
               轨迹
@@ -816,85 +785,28 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             hidden={!panel}
             aria-label="地图控制面板"
           >
-            <div className="panel-heading">
-              <div className="panel-title">
-                <h2>{panel === "settings" ? "设置" : "轨迹"}</h2>
-                <Button
-                  aria-label="收起控制面板"
-                  onClick={() => setParams({ panel: "none" })}
-                >
-                  收起
-                </Button>
+            {(exportPanel || panel === "tasks") && (
+              <div className="library-actions">
+                <Button onClick={() => openPanel("library")}>返回轨迹库</Button>
               </div>
-              {panel !== "settings" && (
-                <nav
-                  className="track-tabs"
-                  aria-label="轨迹功能"
-                  role="tablist"
-                >
-                  {(
-                    [
-                      ["library", "轨迹库"],
-                      ["processing", "轨迹处理"],
-                      ["export", "轨迹导出"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <Button
-                      key={key}
-                      role="tab"
-                      aria-selected={group === key}
-                      type={group === key ? "primary" : "text"}
-                      onClick={() =>
-                        openPanel(key === "processing" ? "tracks" : key)
-                      }
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </nav>
-              )}
-            </div>
+            )}
             {panel !== "settings" && (
               <>
                 <span className="save-state">
                   {inProject ? (dirty ? "未保存" : "出图工程") : "浏览地图"}
                 </span>
-                {group === "library" && (
-                  <nav className="panel-subnav" aria-label="轨迹库操作">
-                    <Button
-                      type={panel === "library" ? "primary" : "default"}
-                      onClick={() => openPanel("library")}
-                    >
-                      查看
-                    </Button>
-                    <Button
-                      type={panel === "archive" ? "primary" : "default"}
-                      onClick={() => openPanel("archive")}
-                    >
-                      管理轨迹库
-                    </Button>
-                  </nav>
-                )}
-                {group === "processing" && (
-                  <nav className="panel-subnav" aria-label="轨迹处理操作">
-                    <Button
-                      type={panel === "tracks" ? "primary" : "default"}
-                      onClick={() => openPanel("tracks")}
-                    >
-                      处理轨迹
-                    </Button>
-                    <Button
-                      type={panel === "tasks" ? "primary" : "default"}
-                      onClick={() => openPanel("tasks")}
-                    >
-                      处理记录{running ? ` · ${running} 项进行中` : ""}
-                    </Button>
-                  </nav>
-                )}
               </>
             )}
             {exportPanel && (
               <section className="project-entry">
+                <div className="library-actions">
+                  <Button onClick={() => setArchiveAction("archive:backup")}>
+                    导出 ZIP
+                  </Button>
+                  <Button onClick={() => setArchiveAction("archive:rebuild")}>
+                    聚合导出
+                  </Button>
+                </div>
                 <h3>地图出图</h3>
                 {inProject ? (
                   <Button
@@ -908,19 +820,11 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 ) : (
                   <>
                     <p className="overview-hint">
-                      选择轨迹并制作地图图片；新建时带入当前视野与选择。
+                      新建工程后单独选择出图轨迹，地图上的显示勾选不影响出图范围。
                     </p>
                     <Button
                       type="primary"
-                      disabled={
-                        busy ||
-                        !!switching ||
-                        !!inspection ||
-                        !catalog ||
-                        (!browseTracks.length &&
-                          !!overview.id &&
-                          !overview.selected)
-                      }
+                      disabled={busy || !!switching || !!inspection || !catalog}
                       onClick={() => void newProject()}
                     >
                       新建出图工程
@@ -936,28 +840,34 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               </section>
             )}
             <section hidden={panel !== "library"}>
-              <details className="category-legend">
-                <summary>轨迹分类图例</summary>
-                {Object.entries(TRACK_STYLES).map(([key, style]) => (
-                  <div key={key}>
-                    <span
-                      className="legend-line"
-                      style={{
-                        background: style.color,
-                        opacity: style.opacity,
-                      }}
-                    />
-                    <span>{style.label}</span>
-                    <small>
-                      {Math.round(style.opacity * 1000) / 10}% 不透明度
-                    </small>
-                  </div>
-                ))}
-              </details>
+              <div className="library-actions">
+                <Button
+                  aria-label="归档状态"
+                  title="归档状态"
+                  onClick={() => setArchiveAction("archive:status")}
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    aria-hidden="true"
+                  >
+                    <ellipse cx="12" cy="5" rx="8" ry="3" />
+                    <path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0" />
+                  </svg>
+                </Button>
+                <Button onClick={() => setArchiveAction("archive:push")}>
+                  上传轨迹
+                </Button>
+                <Button onClick={() => openPanel("export")}>轨迹导出</Button>
+              </div>
               <div className="library-intro">
                 <p>
                   {catalog
-                    ? `${overview.query.data?.summary?.entries ?? catalog.entries.length} 条轨迹 · 已选 ${tracks.length} 条`
+                    ? `${overview.query.data?.summary?.entries ?? catalog.entries.length} 条轨迹`
                     : busy
                       ? "正在读取后台配置的轨迹库。"
                       : "未能读取轨迹库，请检查后台配置。"}
@@ -969,7 +879,9 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               {overview.query.data?.summary?.entries === 0 && (
                 <p>
                   轨迹库为空，可以导入 KML 开始浏览。
-                  <Button onClick={() => openPanel("archive")}>导入 KML</Button>
+                  <Button onClick={() => setArchiveAction("archive:push")}>
+                    导入 KML
+                  </Button>
                 </p>
               )}
               {!!overview.query.data?.summary?.invalid && (
@@ -989,9 +901,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               {catalog && (
                 <>
                   <p className="overview-hint">
-                    {inProject
-                      ? "勾选需要出图的轨迹；地图只显示工程所选轨迹。"
-                      : "勾选控制地图显示，初始全选。搜索只筛选列表；清空后可只勾选要查看的轨迹。"}
+                    勾选仅控制地图显示，初始全部显示。搜索只筛选列表，不影响显示范围。
                   </p>
                   <label htmlFor="filter">筛选轨迹</label>
                   <Input
@@ -1018,25 +928,11 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       >
                         <Checkbox
                           checked={
-                            inProject
-                              ? state.tracks.some((t) => t.entry === e.entry)
-                              : browseVisibility.all !==
-                                Object.hasOwn(browseVisibility.exceptions, e.id)
+                            browseVisibility.all !==
+                            Object.hasOwn(browseVisibility.exceptions, e.id)
                           }
-                          disabled={busy}
                           onChange={(v) =>
-                            inProject
-                              ? void select(
-                                  v.target.checked
-                                    ? [
-                                        ...state.tracks.map((t) => t.entry),
-                                        e.entry,
-                                      ]
-                                    : state.tracks
-                                        .filter((t) => t.entry !== e.entry)
-                                        .map((t) => t.entry),
-                                )
-                              : toggleBrowse(e.id, e.entry, v.target.checked)
+                            toggleBrowse(e.id, e.entry, v.target.checked)
                           }
                         >
                           {e.entry}
@@ -1078,113 +974,44 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                     hideOnSinglePage
                   />
                   <div className="map-actions">
-                    {!inProject && (
-                      <Button
-                        disabled={busy}
-                        onClick={() =>
-                          chooseBrowse({ all: true, exceptions: {} })
-                        }
-                      >
-                        全选轨迹
-                      </Button>
-                    )}
                     <Button
+                      onClick={() =>
+                        chooseBrowse({ all: true, exceptions: {} })
+                      }
+                    >
+                      显示全部
+                    </Button>
+                    <Button
+                      disabled={!visible.length}
+                      onClick={() =>
+                        chooseBrowse({
+                          all: false,
+                          exceptions: Object.fromEntries(
+                            visible.map((e) => [e.id, e.entry]),
+                          ),
+                        })
+                      }
+                    >
+                      仅显示本页
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        chooseBrowse({ all: false, exceptions: {} })
+                      }
+                    >
+                      隐藏全部
+                    </Button>
+                    <Button
+                      disabled={!overview.query.data?.bounds}
                       onClick={() => {
                         const bounds = overview.query.data?.bounds;
                         if (bounds) viewport.current?.fitOverview(bounds);
                       }}
-                      disabled={!overview.query.data?.bounds}
                     >
                       查看全库
                     </Button>
-                    <Button
-                      disabled={busy || !visible.length || visible.length > 200}
-                      onClick={() =>
-                        inProject
-                          ? void select(visible.map((e) => e.entry))
-                          : chooseBrowse({
-                              all: false,
-                              exceptions: Object.fromEntries(
-                                visible.map((e) => [e.id, e.entry]),
-                              ),
-                            })
-                      }
-                    >
-                      选择本页轨迹
-                    </Button>
-                    <Button
-                      disabled={busy}
-                      onClick={() =>
-                        inProject
-                          ? void select([])
-                          : chooseBrowse({ all: false, exceptions: {} })
-                      }
-                    >
-                      清空选择
-                    </Button>
-                    <Button
-                      onClick={() => viewport.current?.fit(tracks)}
-                      disabled={!tracks.length}
-                    >
-                      适合轨迹
-                    </Button>
                   </div>
                 </>
-              )}
-              {!!tracks.length && (
-                <>
-                  <h2>已选轨迹</h2>
-                  <div className="map-track-list">
-                    {tracks.map((t) => (
-                      <div key={t.entry}>
-                        <span>{t.entry}</span>
-                        <div className="map-actions">
-                          <Button
-                            size="small"
-                            aria-label={`定位 ${t.entry}`}
-                            onClick={() => viewport.current?.fit([t])}
-                          >
-                            定位
-                          </Button>
-                          <Button
-                            size="small"
-                            aria-label={`移除 ${t.entry}`}
-                            disabled={busy}
-                            onClick={() =>
-                              inProject
-                                ? void select(
-                                    state.tracks
-                                      .filter((s) => s.entry !== t.entry)
-                                      .map((s) => s.entry),
-                                  )
-                                : chooseBrowse({
-                                    ...browseVisibility,
-                                    exceptions: Object.fromEntries(
-                                      Object.entries(
-                                        browseVisibility.exceptions,
-                                      ).filter(
-                                        ([, entry]) => entry !== t.entry,
-                                      ),
-                                    ),
-                                  })
-                            }
-                          >
-                            移除
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-              {!!tracks.length && (
-                <Button
-                  type="primary"
-                  block
-                  onClick={() => openPanel("tracks")}
-                >
-                  处理已选轨迹 · {tracks.length}
-                </Button>
               )}
             </section>
             <section hidden={panel !== "settings"}>
@@ -1325,10 +1152,35 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               </Settings>
             </section>
             <section hidden={!exportPanel || !inProject}>
+              <label htmlFor="export-tracks">出图轨迹（最多 200 条）</label>
+              <Select
+                virtual={false}
+                id="export-tracks"
+                aria-label="出图轨迹"
+                mode="multiple"
+                showSearch
+                optionFilterProp="label"
+                maxCount={200}
+                maxTagCount="responsive"
+                style={{ width: "100%" }}
+                value={state.tracks.map((t) => t.entry)}
+                disabled={busy}
+                onChange={(entries: string[]) => void select(entries)}
+                options={catalog?.entries.map((e) => ({
+                  value: e.entry,
+                  label: e.entry,
+                }))}
+              />
+              <p className="overview-hint">
+                出图范围独立保存，不受轨迹库显示勾选影响。
+              </p>
+              <Button
+                disabled={!tracks.length}
+                onClick={() => viewport.current?.fit(tracks)}
+              >
+                适合出图轨迹
+              </Button>
               <div className="map-actions">
-                <Button onClick={() => openPanel("library")}>
-                  选择轨迹 · {tracks.length}
-                </Button>
                 <Button onClick={() => openPanel("settings")}>调整底图</Button>
               </div>
               <h3>工程样式</h3>
@@ -1538,15 +1390,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               />
             </section>
             <Suspense fallback={<Spin />}>
-              {(["archive", "tracks"] as const).map(
-                (group) =>
-                  (visited.has(group) || panel === group) && (
-                    <section key={group} hidden={panel !== group}>
-                      <h3>{panels[group]}</h3>
-                      <WorkPage group={group} />
-                    </section>
-                  ),
-              )}
               {(visited.has("tasks") || panel === "tasks") && (
                 <section hidden={panel !== "tasks"}>
                   <h3>处理记录</h3>
@@ -1564,8 +1407,10 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             }
             config={config}
             cities={cities.labels}
-            tracks={inspection?.tracks ?? (inProject ? tracks : [])}
-            preview={inProject && preview && !inspection}
+            tracks={
+              inspection?.tracks ?? (inProject && !browsing ? tracks : [])
+            }
+            preview={inProject && preview && !inspection && !browsing}
             overview={overview.query.data}
             overviewSelected={overview.id}
             overviewVisibility={browseVisibility}
@@ -1685,46 +1530,126 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             </Button>
           ))}
         </Modal>
-        {overview.id && browsing && (!panel || panel === "library") && (
-          <div className="overview-detail" role="region" aria-label="轨迹详情">
-            <Button
-              className="detail-close"
-              size="small"
-              onClick={() => overview.setId("")}
-            >
-              关闭详情
-            </Button>
-            <strong>{overview.selected?.name ?? "正在读取轨迹…"}</strong>
-            <p>{overview.selected?.entry}</p>
-            {overview.selected && (
-              <p>
-                {overview.selected.points.toLocaleString()} 个点 ·{" "}
-                {overview.selected.segments} 段 · {overview.selected.kind}
-              </p>
-            )}
-            {overview.detail.isFetching && <span>正在读取详情…</span>}
-            {(overview.detail.error ?? overview.matching.error) && (
-              <p role="alert">
-                {(overview.detail.error ?? overview.matching.error)?.message}
-                <Button
-                  size="small"
-                  onClick={() => {
-                    void overview.detail.refetch();
-                    void overview.matching.refetch();
-                  }}
-                >
-                  重试详情
-                </Button>
-              </p>
-            )}
-            <Button
-              disabled={!overview.selectedTrack}
-              onClick={() => viewport.current?.fit([overview.selectedTrack!])}
-            >
-              定位此轨迹
-            </Button>
-          </div>
+        {overview.id && (!panel || panel === "library") && (
+          <Modal
+            open
+            title="轨迹详情"
+            closable={{ "aria-label": "关闭详情" }}
+            footer={null}
+            width={800}
+            onCancel={() => {
+              overview.setId("");
+              setDetailAction(undefined);
+            }}
+          >
+            <div role="region" aria-label="轨迹详情">
+              <strong>{overview.selected?.name ?? "正在读取轨迹…"}</strong>
+              <p>{overview.selected?.entry}</p>
+              {overview.selected && (
+                <p>
+                  {overview.selected.points.toLocaleString()} 个点 ·{" "}
+                  {overview.selected.segments} 段 · {overview.selected.kind}
+                </p>
+              )}
+              {overview.detail.isFetching && <span>正在读取详情…</span>}
+              {(overview.detail.error ?? overview.matching.error) && (
+                <p role="alert">
+                  {(overview.detail.error ?? overview.matching.error)?.message}
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void overview.detail.refetch();
+                      void overview.matching.refetch();
+                    }}
+                  >
+                    重试详情
+                  </Button>
+                </p>
+              )}
+              <Button
+                disabled={!overview.selectedTrack}
+                onClick={() => viewport.current?.fit([overview.selectedTrack!])}
+              >
+                定位此轨迹
+              </Button>
+              <Button
+                disabled={!overview.selected}
+                onClick={() =>
+                  setDetailAction({
+                    operation: "archive:download",
+                    entry: overview.selected!.entry,
+                  })
+                }
+              >
+                下载轨迹
+              </Button>
+              <Button
+                danger
+                disabled={!overview.selected}
+                onClick={() =>
+                  setDetailAction({
+                    operation: "archive:delete",
+                    entry: overview.selected!.entry,
+                  })
+                }
+              >
+                删除轨迹
+              </Button>
+              <Suspense fallback={<Spin />}>
+                <TrackProperties key={overview.id} entryId={overview.id} />
+              </Suspense>
+              {detailAction && (
+                <Suspense fallback={<Spin />}>
+                  <ArchiveAction
+                    key={`${overview.id}:${detailAction.operation}`}
+                    group="archive"
+                    fixedOperation={detailAction.operation}
+                    entry={detailAction.entry}
+                  />
+                </Suspense>
+              )}
+            </div>
+          </Modal>
         )}
+        <Modal
+          open={!!archiveAction}
+          title={archiveAction ? operationLabel(archiveAction) : ""}
+          footer={null}
+          width={900}
+          destroyOnHidden
+          onCancel={() => setArchiveAction(undefined)}
+        >
+          {archiveAction === "archive:status" && (
+            <div className="archive-maintenance">
+              <p>维护工具仅在存在未完成的文件操作或轨迹库版本过旧时使用。</p>
+              <Button onClick={() => setArchiveAction("archive:recover")}>
+                恢复中断操作
+              </Button>
+              <Button onClick={() => setArchiveAction("archive:migrate")}>
+                升级数据库
+              </Button>
+            </div>
+          )}
+          {archiveAction === "archive:recover" && (
+            <p>
+              完成异常退出后遗留的文件写入或移动，使文件与数据库记录一致；不是恢复已删除的轨迹，也不是重跑所有失败任务。
+            </p>
+          )}
+          {archiveAction === "archive:migrate" && (
+            <p>
+              先完整备份，再将旧版数据库结构升级到当前版本。已是当前版本时无需升级；如有中断的文件操作，需先恢复。
+            </p>
+          )}
+          {archiveAction && (
+            <Suspense fallback={<Spin />}>
+              <ArchiveAction
+                key={archiveAction}
+                group="archive"
+                fixedOperation={archiveAction}
+              />
+            </Suspense>
+          )}
+        </Modal>
         {inspection && (
           <div
             className="inspection-banner"

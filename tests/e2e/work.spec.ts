@@ -31,7 +31,9 @@ test("media links return to the map with no web media tools", async ({
 }) => {
   await page.goto("/media");
   await expect(page).toHaveURL(/\/map$/);
-  await expect(page.getByRole("heading", { name: "轨迹地图" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "展开项目菜单" }),
+  ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "媒体", exact: true }),
   ).toHaveCount(0);
@@ -40,7 +42,10 @@ test("archive upload, backup, read-only download and real deletion use separate 
   page,
 }) => {
   await page.goto("/archive");
-  await choose(page, "轨迹入库");
+  await expect(page.getByText("轨迹分类图例")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "管理轨迹库" })).toHaveCount(0);
+  await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
+  await expect(page.getByLabel("操作", { exact: true })).toHaveCount(0);
   await page.locator("#option-category").click();
   await page.getByRole("option", { name: "Default", exact: true }).click();
   await page.getByText("保留入库的源文件", { exact: true }).click();
@@ -54,12 +59,12 @@ test("archive upload, backup, read-only download and real deletion use separate 
   await expect(page.getByText("已完成", { exact: true })).toBeVisible({
     timeout: 20000,
   });
-  await page.getByRole("button", { name: "刷新归档" }).click();
-  await page.getByLabel("筛选归档轨迹").fill("网页归档");
-  await expect(
-    page.getByText("2026-10-01 网页归档.kml", { exact: true }),
-  ).toBeVisible();
-  await choose(page, "导出展示 ZIP");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "关闭", exact: true })
+    .click();
+  await tool(page, "轨迹导出");
+  await page.getByRole("button", { name: "导出 ZIP", exact: true }).click();
   await page.getByRole("button", { name: "生成操作预览" }).click();
   await confirm(page);
   const event = page.waitForEvent("download");
@@ -69,40 +74,46 @@ test("archive upload, backup, read-only download and real deletion use separate 
     .first()
     .click();
   expect((await event).suggestedFilename()).toBe("Archive.zip");
-  const row = page
-    .getByRole("row")
-    .filter({ hasText: "2026-10-01 网页归档.kml" });
-  await row.getByRole("button", { name: "下载", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "关闭", exact: true })
+    .click();
+  await tool(page, "轨迹库");
+  await page.getByLabel("筛选轨迹", { exact: true }).fill("网页归档");
+  await page
+    .getByRole("button", {
+      name: "查看 Default/2026-10/2026-10-01 网页归档.kml",
+      exact: true,
+    })
+    .click();
+  await page.getByRole("button", { name: "下载轨迹", exact: true }).click();
   await expect(page.getByLabel("输出路径（可选）")).toHaveCount(0);
   await page.getByRole("button", { name: "生成操作预览" }).click();
-  await page.getByRole("button", { name: "确认执行此预览" }).click();
-  await expect(page.getByText("已完成", { exact: true })).toBeVisible();
-  const artifact = page
-    .locator(".task-detail")
-    .getByRole("button", { name: "下载", exact: true });
+  await confirm(page);
   const downloading = page.waitForEvent("download");
-  await artifact.click();
+  await page
+    .locator(".task-detail")
+    .getByRole("button", { name: "下载", exact: true })
+    .click();
   const downloaded = await downloading;
   expect(downloaded.suggestedFilename()).toBe("2026-10-01 网页归档.kml");
   expect(await readFile((await downloaded.path())!)).toEqual(
     await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml"),
   );
-  await page.getByRole("button", { name: "刷新归档" }).click();
-  await expect(row).toBeVisible();
-  await row.getByRole("button", { name: "删除", exact: true }).click();
+  await page.getByRole("button", { name: "删除轨迹", exact: true }).click();
   await page.getByRole("button", { name: "生成操作预览" }).click();
   await expect(
     page.getByText(/将删除 .*网页归档.kml 及 1 个版本/),
   ).toBeVisible();
   await page.getByRole("button", { name: "确认执行此预览" }).click();
   await expect(page.getByText("已完成", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "关闭详情", exact: true }).click();
   await expect(
-    page
-      .locator(".task-detail")
-      .getByRole("button", { name: "下载", exact: true }),
+    page.getByRole("button", {
+      name: "查看 Default/2026-10/2026-10-01 网页归档.kml",
+      exact: true,
+    }),
   ).toHaveCount(0);
-  await page.getByRole("button", { name: "刷新归档" }).click();
-  await expect(row).toHaveCount(0);
 });
 test("track editing reports malformed input as partial and allows a fresh retry", async ({
   page,
@@ -210,4 +221,44 @@ test("selected library tracks can be processed as copies and inspected without l
   await expect(
     page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
   ).toBeChecked();
+});
+
+test("library entry points and favicon work on mobile", async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/map");
+  const icon = await page.locator('link[rel="icon"]').getAttribute("href");
+  expect(icon).toBeTruthy();
+  const response = await page.request.get(icon!);
+  expect(response.ok()).toBe(true);
+  expect(await response.text()).toContain("<svg");
+  await tool(page, "轨迹库");
+  await page.getByRole("button", { name: "归档状态", exact: true }).click();
+  await page.getByRole("button", { name: "开始检查", exact: true }).click();
+  await expect(page.getByText("已完成", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "恢复中断操作", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("不是恢复已删除的轨迹");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "关闭", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "查看 Train/same.kml", exact: true })
+    .click();
+  await page.getByRole("button", { name: "下载轨迹", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "生成操作预览" }),
+  ).toBeVisible();
+  expect(
+    await page
+      .getByRole("dialog")
+      .evaluate((el) => el.scrollWidth <= el.clientWidth),
+  ).toBe(true);
+  await page.screenshot({ path: info.outputPath("track-detail-mobile.png") });
+  await page.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await tool(page, "轨迹导出");
+  await page.getByRole("button", { name: "聚合导出", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("聚合导出");
+  await expect(page.getByLabel("操作", { exact: true })).toHaveCount(0);
 });

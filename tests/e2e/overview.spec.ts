@@ -178,7 +178,7 @@ test("style reload restores the overview; export preview excludes it; mobile pan
   await tool(page, "返回浏览");
   await expect.poll(() => overviewSource(page)).toBeTruthy();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "收起控制面板" }).click();
+  await page.getByRole("button", { name: "收起项目菜单" }).click();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -240,7 +240,7 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
   page,
 }) => {
   await loaded(page);
-  await page.getByRole("button", { name: "收起控制面板" }).click();
+  await page.getByRole("button", { name: "收起项目菜单" }).click();
   await page.evaluate(() =>
     window.renderer!.map.jumpTo({ center: [101, 27], zoom: 8 }),
   );
@@ -363,7 +363,7 @@ test("category colors and alpha match original KML while selection preserves cat
     ),
   ).toEqual(paint.color);
   await page.getByRole("button", { name: "定位此轨迹", exact: true }).click();
-  await page.getByRole("button", { name: "收起控制面板", exact: true }).click();
+  await page.getByRole("button", { name: "收起项目菜单", exact: true }).click();
   await page.waitForFunction(() => window.renderer!.map.areTilesLoaded());
   await expect(page.locator(".map-status")).toHaveCount(0, { timeout: 10000 });
   await page.screenshot({

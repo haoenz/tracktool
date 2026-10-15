@@ -749,3 +749,70 @@ it("regroup preserves ignored segments and their latent connections without addi
   expect(p.changes[0]!.before_edges).toHaveLength(1);
   expect(p.changes[0]!.after_edges).toHaveLength(1);
 });
+
+it.each(["set_tag", "fill_altitude"] as const)(
+  "%s previews preserve segment settings, history and reject stale apply",
+  async (kind) => {
+    const f = await fixture();
+    const request = f.request(
+      kind === "set_tag" ? { kind, tag: "徒步" } : { kind },
+    );
+    const transformed = Buffer.from(
+      raw
+        .toString()
+        .replace("<name>A</name>", "<name>徒步</name>")
+        .replace("120,30 ", "120,30,42 "),
+    );
+    const before = snap(f.file);
+    const p = await f.previews.create(
+      f.file,
+      randomUUID(),
+      request,
+      undefined,
+      async () => transformed,
+    );
+    const stale = await f.previews.create(
+      f.file,
+      randomUUID(),
+      request,
+      undefined,
+      async () => transformed,
+    );
+    expect(snap(f.file)).toEqual(before);
+    expect(p.outputs[0]!.settings).toEqual(f.detail.settings);
+    expect(p.outputs[0]!.segments.map((s) => s.segment_id)).toEqual(
+      f.detail.segments.map((s) => s.segment_id),
+    );
+    const result = f.previews.apply(f.file, apply(p));
+    expect(result.entries[0]!.entry_id).toBe(f.id);
+    expect(
+      Buffer.from(downloadBytes(f.file, { entry_id: f.id }).bytes),
+    ).toEqual(transformed);
+    expect(
+      Buffer.from(
+        downloadBytes(f.file, {
+          entry_id: f.id,
+          version_id: f.detail.entry.version_id,
+        }).bytes,
+      ),
+    ).toEqual(raw);
+    expect(trackHistory(f.file, f.id).versions).toHaveLength(2);
+    expect(() => f.previews.apply(f.file, apply(stale))).toThrow();
+    expect(f.previews.apply(f.file, apply(p))).toEqual(result);
+  },
+);
+
+it("property transforms reject unexpected geometry changes without modifying the archive", async () => {
+  const f = await fixture(),
+    before = snap(f.file);
+  await expect(
+    f.previews.create(
+      f.file,
+      randomUUID(),
+      f.request({ kind: "fill_altitude" }),
+      undefined,
+      async () => Buffer.from(raw.toString().replace("120.01,30 ", "")),
+    ),
+  ).rejects.toThrow("分段或点数");
+  expect(snap(f.file)).toEqual(before);
+});

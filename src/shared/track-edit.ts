@@ -137,6 +137,10 @@ export const HistoricalRefSchema = ArchiveRefSchema.omit({ generation: true });
 const targetOperation = z.discriminatedUnion("kind", [
   ...SegmentEditSchema.options,
   z
+    .object({ kind: z.literal("set_tag"), tag: z.string().min(1).max(200) })
+    .strict(),
+  z.object({ kind: z.literal("fill_altitude") }).strict(),
+  z
     .object({
       kind: z.literal("split_journey"),
       outputs: z

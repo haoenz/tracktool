@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -105,6 +105,26 @@ export function TaskDetail({
       void cache.invalidateQueries({ queryKey: ["uploads"] });
     }
   }, [cache, task?.id, task?.mode, task?.status]);
+  const refreshedTask = useRef("");
+  useEffect(() => {
+    if (
+      task?.mode !== "apply" ||
+      task.status !== "succeeded" ||
+      ![
+        "archive:push",
+        "archive:delete",
+        "archive:recover",
+        "archive:migrate",
+      ].includes(task.request.operation) ||
+      !task.request.archive ||
+      refreshedTask.current === task.id
+    )
+      return;
+    refreshedTask.current = task.id;
+    void workspace.refresh(task.request.archive).catch(setError);
+    void cache.invalidateQueries({ queryKey: ["overview"] });
+    void cache.invalidateQueries({ queryKey: ["overview-entries"] });
+  }, [task, workspace, cache]);
   async function act(action: string) {
     setBusy(true);
     setError(undefined);
@@ -768,7 +788,15 @@ function CatalogPanel({
     </Card>
   );
 }
-function FileWorkPage({ group }: { group: "archive" | "tracks" }) {
+export function FileWorkPage({
+  group,
+  fixedOperation,
+  entry,
+}: {
+  group: "archive" | "tracks";
+  fixedOperation?: Operation;
+  entry?: string;
+}) {
   const workspace = useWorkspace();
   const bootstrap = useQuery({
     queryKey: ["work-bootstrap"],
@@ -780,30 +808,34 @@ function FileWorkPage({ group }: { group: "archive" | "tracks" }) {
       ),
   });
   const [operation, setOperation] = useState<Operation>(
-      group === "archive" ? "archive:status" : "kml:type",
+      fixedOperation ?? (group === "archive" ? "archive:status" : "kml:type"),
     ),
     [inputs, setInputs] = useState(""),
     [output, setOutput] = useState(""),
-    [options, setOptions] = useState<Record<string, unknown>>({}),
+    [options, setOptions] = useState<Record<string, unknown>>(
+      entry ? { name: entry } : {},
+    ),
     [special, setSpecial] = useState<Record<string, string>>({}),
     [error, setError] = useState<unknown>(),
     [busy, setBusy] = useState(false),
     [params, setParams] = useSearchParams();
   const archivePath = workspace.archive || bootstrap.data?.archive || "";
   const [id, setId] = useState<string | null>(() =>
-    params.get("panel") === group ? params.get("task") : null,
+    !fixedOperation && params.get("panel") === group
+      ? params.get("task")
+      : null,
   );
   useEffect(() => {
-    if (params.get("panel") !== group) return;
+    if (fixedOperation || params.get("panel") !== group) return;
     const requested = params.get("task");
     if (requested) setId(requested);
     else if (id) setParams({ panel: group, task: id }, { replace: true });
-  }, [params, group, id, setParams]);
+  }, [params, group, id, setParams, fixedOperation]);
   const [usingSelection, setUsingSelection] = useState(false);
   const [copying, setCopying] = useState(false);
   const setTask = (next: string) => {
     setId(next);
-    setParams({ panel: group, task: next });
+    if (!fixedOperation) setParams({ panel: group, task: next });
   };
   async function useSelection() {
     setCopying(true);
@@ -884,9 +916,11 @@ function FileWorkPage({ group }: { group: "archive" | "tracks" }) {
   return (
     <>
       <div className="work-main">
-        <Typography.Title level={1}>
-          {group === "archive" ? "轨迹库管理" : "轨迹处理"}
-        </Typography.Title>
+        {!fixedOperation && (
+          <Typography.Title level={1}>
+            {group === "archive" ? "轨迹库管理" : "轨迹处理"}
+          </Typography.Title>
+        )}
         <Typography.Paragraph type="secondary">
           选择对象和参数，先查看预览，再确认执行。任务保存在服务端，关闭页面后仍可继续查看。
         </Typography.Paragraph>
@@ -913,28 +947,44 @@ function FileWorkPage({ group }: { group: "archive" | "tracks" }) {
                   <Alert
                     type="info"
                     title="正在处理轨迹副本"
-                    description="库中原件保留不变。结果可下载并在主地图检查；需要保存到轨迹库时，请通过库管理入库。"
+                    description="库中原件保留不变。结果可下载并在主地图检查；需要保存到轨迹库时，请通过轨迹库的上传按钮入库。"
                   />
                 )}
               </Card>
             )}
             <div className="work-grid">
               <section>
-                <Card title="处理操作">
-                  <label className="work-label" htmlFor="work-operation">
-                    操作
-                  </label>
-                  <Select
-                    virtual={false}
-                    id="work-operation"
-                    value={operation}
-                    onChange={choose}
-                    options={names.map(([value, label]) => ({ value, label }))}
-                    style={{ width: "100%" }}
-                  />
-                  {!["archive:download", "archive:delete"].includes(
-                    operation,
-                  ) && (
+                <Card
+                  title={
+                    fixedOperation ? operationLabel(fixedOperation) : "处理操作"
+                  }
+                >
+                  {!fixedOperation && (
+                    <>
+                      <label className="work-label" htmlFor="work-operation">
+                        操作
+                      </label>
+                      <Select
+                        virtual={false}
+                        id="work-operation"
+                        value={operation}
+                        onChange={choose}
+                        options={names.map(([value, label]) => ({
+                          value,
+                          label,
+                        }))}
+                        style={{ width: "100%" }}
+                      />
+                    </>
+                  )}
+                  {![
+                    "archive:download",
+                    "archive:delete",
+                    "archive:push",
+                    "archive:status",
+                    "archive:recover",
+                    "archive:migrate",
+                  ].includes(operation) && (
                     <>
                       <label className="work-label" htmlFor="work-output">
                         输出路径（可选）
@@ -952,114 +1002,121 @@ function FileWorkPage({ group }: { group: "archive" | "tracks" }) {
                     </>
                   )}
                   <div className="work-fields">
-                    {(fields[operation] ?? []).map((key) =>
-                      booleanFields[key] ? (
-                        <Checkbox
-                          key={key}
-                          checked={!!options[key]}
-                          onChange={(e) => update(key, e.target.checked)}
-                        >
-                          {booleanFields[key]}
-                        </Checkbox>
-                      ) : (
-                        <div key={key}>
-                          <label
-                            className="work-label"
-                            htmlFor={"option-" + key}
+                    {(fields[operation] ?? [])
+                      .filter(
+                        (key) => !entry || !["name", "category"].includes(key),
+                      )
+                      .map((key) =>
+                        booleanFields[key] ? (
+                          <Checkbox
+                            key={key}
+                            checked={!!options[key]}
+                            onChange={(e) => update(key, e.target.checked)}
                           >
-                            {textFields[key] ??
-                              numberFields[key] ??
-                              (
-                                {
-                                  category: "轨迹分类",
-                                  policy: "已有时区的处理方式",
-                                  tags: "自定义标签（每行 NAME=VALUE）",
-                                  points: "处理点（每行一个时间或坐标）",
-                                  missingTags: "需要检查的标签（每行一个）",
-                                } as Record<string, string>
-                              )[key]}
-                          </label>
-                          {key === "category" ? (
-                            <Select
-                              virtual={false}
-                              id={"option-" + key}
-                              allowClear
-                              value={options[key] as string | undefined}
-                              onChange={(v) => update(key, v)}
-                              options={["Default", "Train", "Flight"].map(
-                                (v) => ({ value: v, label: v }),
-                              )}
-                            />
-                          ) : key === "policy" ? (
-                            <Select
-                              virtual={false}
-                              id={"option-" + key}
-                              value={(options[key] as string) || "auto"}
-                              onChange={(v) => update(key, v)}
-                              options={[
-                                {
-                                  value: "auto",
-                                  label: "自动检查，有时区则等待决定",
-                                },
-                                { value: "keep", label: "保留已有时间点" },
-                                { value: "force", label: "按指定时区重新解释" },
-                              ]}
-                            />
-                          ) : ["tags", "points", "missingTags"].includes(
-                              key,
-                            ) ? (
-                            <Input.TextArea
-                              id={"option-" + key}
-                              value={special[key] ?? ""}
-                              onChange={(e) =>
-                                setSpecial((v) => ({
-                                  ...v,
-                                  [key]: e.target.value,
-                                }))
-                              }
-                              rows={3}
-                            />
-                          ) : numberFields[key] ? (
-                            <InputNumber
-                              id={"option-" + key}
-                              value={options[key] as number | undefined}
-                              onChange={(v) => update(key, v ?? undefined)}
-                            />
-                          ) : key === "tag" ? (
-                            <Select
-                              virtual={false}
-                              id={"option-" + key}
-                              showSearch
-                              value={options[key] as string | undefined}
-                              onChange={(v) => update(key, v)}
-                              options={["Default", "Train", "Flight"].flatMap(
-                                (c) =>
-                                  (
-                                    bootstrap.data!.config[
-                                      ("track_tag." + c) as keyof PublicConfig
-                                    ] as string[]
-                                  ).map((v) => ({ label: v, value: v })),
-                              )}
-                            />
-                          ) : (
-                            <Input
-                              id={"option-" + key}
-                              value={(options[key] as string) ?? ""}
-                              onChange={(e) =>
-                                update(key, e.target.value || undefined)
-                              }
-                              placeholder={
-                                key === "offset"
-                                  ? "+08:00"
-                                  : key === "language"
-                                    ? "en"
-                                    : undefined
-                              }
-                            />
-                          )}
-                        </div>
-                      ),
-                    )}
+                            {booleanFields[key]}
+                          </Checkbox>
+                        ) : (
+                          <div key={key}>
+                            <label
+                              className="work-label"
+                              htmlFor={"option-" + key}
+                            >
+                              {textFields[key] ??
+                                numberFields[key] ??
+                                (
+                                  {
+                                    category: "轨迹分类",
+                                    policy: "已有时区的处理方式",
+                                    tags: "自定义标签（每行 NAME=VALUE）",
+                                    points: "处理点（每行一个时间或坐标）",
+                                    missingTags: "需要检查的标签（每行一个）",
+                                  } as Record<string, string>
+                                )[key]}
+                            </label>
+                            {key === "category" ? (
+                              <Select
+                                virtual={false}
+                                id={"option-" + key}
+                                allowClear
+                                value={options[key] as string | undefined}
+                                onChange={(v) => update(key, v)}
+                                options={["Default", "Train", "Flight"].map(
+                                  (v) => ({ value: v, label: v }),
+                                )}
+                              />
+                            ) : key === "policy" ? (
+                              <Select
+                                virtual={false}
+                                id={"option-" + key}
+                                value={(options[key] as string) || "auto"}
+                                onChange={(v) => update(key, v)}
+                                options={[
+                                  {
+                                    value: "auto",
+                                    label: "自动检查，有时区则等待决定",
+                                  },
+                                  { value: "keep", label: "保留已有时间点" },
+                                  {
+                                    value: "force",
+                                    label: "按指定时区重新解释",
+                                  },
+                                ]}
+                              />
+                            ) : ["tags", "points", "missingTags"].includes(
+                                key,
+                              ) ? (
+                              <Input.TextArea
+                                id={"option-" + key}
+                                value={special[key] ?? ""}
+                                onChange={(e) =>
+                                  setSpecial((v) => ({
+                                    ...v,
+                                    [key]: e.target.value,
+                                  }))
+                                }
+                                rows={3}
+                              />
+                            ) : numberFields[key] ? (
+                              <InputNumber
+                                id={"option-" + key}
+                                value={options[key] as number | undefined}
+                                onChange={(v) => update(key, v ?? undefined)}
+                              />
+                            ) : key === "tag" ? (
+                              <Select
+                                virtual={false}
+                                id={"option-" + key}
+                                showSearch
+                                value={options[key] as string | undefined}
+                                onChange={(v) => update(key, v)}
+                                options={["Default", "Train", "Flight"].flatMap(
+                                  (c) =>
+                                    (
+                                      bootstrap.data!.config[
+                                        ("track_tag." + c) as keyof PublicConfig
+                                      ] as string[]
+                                    ).map((v) => ({ label: v, value: v })),
+                                )}
+                              />
+                            ) : (
+                              <Input
+                                id={"option-" + key}
+                                value={(options[key] as string) ?? ""}
+                                onChange={(e) =>
+                                  update(key, e.target.value || undefined)
+                                }
+                                placeholder={
+                                  key === "offset"
+                                    ? "+08:00"
+                                    : key === "language"
+                                      ? "en"
+                                      : undefined
+                                }
+                              />
+                            )}
+                          </div>
+                        ),
+                      )}
                   </div>
                   <ErrorBox error={error} />
                   <Button
@@ -1102,7 +1159,7 @@ function FileWorkPage({ group }: { group: "archive" | "tracks" }) {
                 )}
               </section>
             </div>
-            {group === "archive" && archivePath && (
+            {group === "archive" && !fixedOperation && archivePath && (
               <CatalogPanel
                 archive={archivePath}
                 onAction={(action, name) => {

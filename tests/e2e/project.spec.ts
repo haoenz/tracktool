@@ -135,7 +135,7 @@ test("explicit project entry preserves browse camera, selection and filter; only
   await expect(
     page.getByRole("button", { name: "返回浏览", exact: true }),
   ).toBeEnabled();
-  await page.getByRole("button", { name: "收起控制面板", exact: true }).click();
+  await page.getByRole("button", { name: "收起项目菜单", exact: true }).click();
   await expect(
     page.getByRole("complementary", { name: "地图控制面板" }),
   ).toHaveCount(0);

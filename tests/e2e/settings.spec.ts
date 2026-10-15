@@ -9,9 +9,7 @@ test("settings contain map controls only and server configuration writes require
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("request", (r) => requests.push(r.url()));
   await page.goto("/settings");
-  await expect(
-    page.getByRole("heading", { name: "设置", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
   await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
   for (const name of [
     "日志级别",

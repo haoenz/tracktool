@@ -650,3 +650,91 @@
 .panel-heading .track-tabs {
   margin: 12px 0 0;
 }
+
+/* Compact project menu keeps the map visible on every screen size. */
+.map-header {
+  width: auto;
+  padding: 5px;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+.map-header .project-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: #245c4b;
+  color: white;
+  cursor: pointer;
+}
+.project-icon img {
+  display: block;
+  width: 40px;
+  height: 40px;
+}
+.project-icon:hover {
+  background: #31755f;
+}
+.project-icon:focus-visible {
+  outline: 2px solid #245c4b;
+  outline-offset: 3px;
+}
+.map-header nav {
+  width: auto;
+  gap: 4px;
+}
+.map-header nav[hidden] {
+  display: none;
+}
+.panel-heading .track-tabs {
+  margin-top: 0;
+}
+.map-controls {
+  scroll-padding-top: 80px;
+}
+@media (max-width: 700px) {
+  .map-controls,
+  .map-controls.wide {
+    top: 72px;
+  }
+}
+
+.library-actions,
+.archive-maintenance {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+.archive-maintenance p {
+  flex-basis: 100%;
+}
+
+.track-properties {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #edf1ee;
+}
+.property-form,
+.property-preview {
+  margin: 16px 0;
+  padding: 16px;
+  background: #f6f9f7;
+  border-radius: 10px;
+}
+.property-form label {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+.property-form .ant-select {
+  width: 100%;
+}
+.track-properties .ant-alert {
+  margin-block: 10px;
+}

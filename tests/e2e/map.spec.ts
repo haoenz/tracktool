@@ -38,7 +38,9 @@ test("archive → selection → styling → save/reopen → JSON → independent
   await page.goto("/map");
   await tool(page, "新建出图工程");
   await tool(page, "轨迹库");
-  await expect(page.getByRole("heading", { name: "轨迹地图" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "收起项目菜单" }),
+  ).toBeVisible();
   await expect(
     page.getByRole("checkbox", {
       name: "Default/2026-10-01 中文.kml",
@@ -111,7 +113,7 @@ test("archive → selection → styling → save/reopen → JSON → independent
       camera: previewReport!.camera,
     });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "收起控制面板" }).click();
+  await page.getByRole("button", { name: "收起项目菜单" }).click();
   await expect(page.getByLabel("地图预览")).toBeVisible();
   expect(
     await page.evaluate(
@@ -119,10 +121,8 @@ test("archive → selection → styling → save/reopen → JSON → independent
     ),
   ).toBe(true);
   await page.screenshot({ path: info.outputPath("map-mobile.png") });
-  await page.getByRole("button", { name: "设置", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "设置", exact: true }),
-  ).toBeVisible();
+  await tool(page, "设置");
+  await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => !!window.renderer)).toBe(true);
   expect(errors).toEqual([]);
 });
@@ -382,10 +382,8 @@ test("panels preserve the map, selection and unfinished edits on desktop and mob
   await page.getByLabel("标题", { exact: true }).fill("切换面板保留的草稿");
   const camera = await page.evaluate(() => window.renderer!.state.camera);
   const canvas = await page.locator(".maplibregl-canvas").elementHandle();
-  await page.getByRole("button", { name: "设置", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "设置", exact: true }),
-  ).toBeVisible();
+  await tool(page, "设置");
+  await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
   await tool(page, "处理记录");
   await expect(
     page.getByRole("heading", { name: "处理记录", exact: true }),
@@ -403,7 +401,7 @@ test("panels preserve the map, selection and unfinished edits on desktop and mob
     camera,
   );
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "收起控制面板", exact: true }).click();
+  await page.getByRole("button", { name: "收起项目菜单", exact: true }).click();
   await expect(
     page.getByRole("complementary", { name: "地图控制面板" }),
   ).toHaveCount(0);
@@ -464,4 +462,38 @@ test("the configured library stays fixed when importing a project from another m
   await expect(
     page.getByRole("option", { name: "轨迹入库", exact: true }),
   ).toBeVisible();
+});
+
+test("project icon expands tools and collapses the active panel", async ({
+  page,
+}) => {
+  await page.goto("/map");
+  const expand = page.getByRole("button", {
+    name: "展开项目菜单",
+    exact: true,
+  });
+  const nav = page.getByRole("navigation", { name: "地图工具", exact: true });
+  await expect(expand).toBeVisible();
+  await expect(nav).toBeHidden();
+  await expect(page.getByLabel("地图控制面板", { exact: true })).toBeHidden();
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const name of ["轨迹", "设置"]) {
+      await expand.click();
+      await nav.getByRole("button", { name, exact: true }).click();
+      await expect(
+        page.getByLabel("地图控制面板", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name, exact: true }),
+      ).toHaveCount(0);
+      await page
+        .getByRole("button", { name: "收起项目菜单", exact: true })
+        .click();
+      await expect(nav).toBeHidden();
+      await expect(
+        page.getByLabel("地图控制面板", { exact: true }),
+      ).toBeHidden();
+    }
+  }
 });
