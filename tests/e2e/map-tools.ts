@@ -17,6 +17,7 @@ export async function tool(page: Page, name: string) {
   const tracks = nav.getByRole("button", { name: "轨迹", exact: true });
   if ((await tracks.getAttribute("aria-pressed")) !== "true")
     await tracks.click();
+  await expect(tracks).toHaveAttribute("aria-pressed", "true");
   if (name === "轨迹库") {
     const back = page.getByRole("button", { name: "返回轨迹库", exact: true });
     if (await back.isVisible()) await back.click();

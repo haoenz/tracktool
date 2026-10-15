@@ -738,3 +738,26 @@
 .track-properties .ant-alert {
   margin-block: 10px;
 }
+
+.map-resource-error,
+.overview-resource-error {
+  position: absolute;
+  z-index: 6;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 10px 14px;
+  border: 1px solid #e6d7b8;
+  border-radius: 10px;
+  background: #fffaf0;
+  color: #73551a;
+  box-shadow: 0 3px 14px #19332a12;
+}
+.overview-resource-error {
+  bottom: 68px;
+}
+.map-resource-error button {
+  margin-left: 10px;
+  cursor: pointer;
+}

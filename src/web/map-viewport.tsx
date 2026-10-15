@@ -1,4 +1,10 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import {
   OverviewLayer,
   type OverviewHit,
@@ -55,6 +61,7 @@ export const MapViewport = forwardRef<Viewport, Props>(
       candidate = useRef<MapCanvas | undefined>(undefined),
       serial = useRef(0),
       latest = useRef(props);
+    const [resourceError, setResourceError] = useState("");
     const transition = useRef<Transition | undefined>(undefined);
     const layers = useRef(new Map<MapCanvas, OverviewLayer>());
     latest.current = props;
@@ -156,13 +163,15 @@ export const MapViewport = forwardRef<Viewport, Props>(
           }
         },
         (message) => {
-          if (current.current === map) latest.current.onError(message);
+          if (current.current === map) setResourceError(message);
         },
         (event) => {
           if (!layer.current?.handlesError(event)) return false;
-          if (current.current === map)
-            latest.current.onOverviewError?.(event.error.message);
           return true;
+        },
+        (message) => {
+          if (current.current === map)
+            latest.current.onOverviewError?.(message);
         },
       );
       layer.current = new OverviewLayer(
@@ -179,6 +188,7 @@ export const MapViewport = forwardRef<Viewport, Props>(
           if (current.current === map)
             latest.current.onOverviewVersion?.(version);
         },
+        (id) => map.resources.errors(id).length > 0,
       );
       layers.current.set(map, layer.current);
       map.map.on("click", (event) => {
@@ -203,7 +213,7 @@ export const MapViewport = forwardRef<Viewport, Props>(
       if (latest.current.exposeRenderer !== false) window.renderer = map;
       layout();
       void map
-        .ready()
+        .ready(undefined, false)
         .then(() => {
           if (!map.destroyed) {
             highlight(map);
@@ -211,12 +221,22 @@ export const MapViewport = forwardRef<Viewport, Props>(
           }
         })
         .catch((e: unknown) => {
-          if (!map.destroyed)
-            latest.current.onError(e instanceof Error ? e.message : String(e));
+          if (!map.destroyed) setResourceError("地图加载未完成，请重试");
+          console.warn("[地图初始化]", e);
         });
+      const online = () => {
+        const active = current.current;
+        if (
+          active &&
+          (active.errors.length || layers.current.get(active)?.hasErrors)
+        )
+          active.retryResources();
+      };
+      window.addEventListener("online", online);
       const observer = new ResizeObserver(layout);
       observer.observe(stage.current!);
       return () => {
+        window.removeEventListener("online", online);
         observer.disconnect();
         cancel();
         destroy(map);
@@ -267,7 +287,11 @@ export const MapViewport = forwardRef<Viewport, Props>(
         ),
       fit: (tracks) => current.current?.fit(tracks),
       cancel,
-      ready: async () => current.current?.ready(),
+      ready: async () => {
+        const map = current.current;
+        if (map?.errors.length) map.retryResources();
+        return map?.ready();
+      },
       stage: async (state, overview, options) => {
         cancel();
         transition.current = options;
@@ -287,6 +311,7 @@ export const MapViewport = forwardRef<Viewport, Props>(
           candidate.current = undefined;
           transition.current = undefined;
           next.frame.classList.remove("staging");
+          setResourceError("");
           destroy(old);
           old?.frame.remove();
           window.renderer = next;
@@ -312,6 +337,17 @@ export const MapViewport = forwardRef<Viewport, Props>(
       >
         <div className="frame-holder" ref={holder} />
         <div className="viewport-credit" ref={credit} />
+        {resourceError && (
+          <div className="map-resource-error" role="alert">
+            {resourceError}
+            <button
+              type="button"
+              onClick={() => current.current?.retryResources()}
+            >
+              重试地图
+            </button>
+          </div>
+        )}
       </div>
     );
   },

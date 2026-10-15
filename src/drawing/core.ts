@@ -8,6 +8,7 @@ import type {
   TrackGeoJSON,
   Position,
 } from "../shared/map.js";
+import { ResourceHealth, type ResourceEvent } from "./resource-health.js";
 export interface DrawnLabel {
   id: string;
   name: string;
@@ -43,7 +44,10 @@ export class MapCanvas {
   crs: string;
   onCamera?: (camera: Project["camera"]) => void;
   onError?: (message: string) => void;
-  errors: string[];
+  readonly resources: ResourceHealth;
+  get errors() {
+    return this.resources.errors();
+  }
   data: TrackGeoJSON;
   displayData?: TrackGeoJSON;
   labels: DrawnLabel[];
@@ -58,7 +62,7 @@ export class MapCanvas {
   credit: HTMLDivElement;
   map: maplibregl.Map;
   fontReady: Promise<void>;
-  private handledErrors = new WeakSet<Error>();
+  private fontFailed = false;
 
   constructor(
     frame: HTMLElement,
@@ -71,6 +75,7 @@ export class MapCanvas {
       error: Error;
       sourceId?: string;
     }) => boolean,
+    onOverviewError?: (message: string) => void,
   ) {
     this.frame = frame;
     this.state = state;
@@ -80,7 +85,6 @@ export class MapCanvas {
     this.cities = cities;
     this.onCamera = onCamera;
     this.onError = onError;
-    this.errors = [];
     this.data = empty;
     this.labels = [];
     this.loadedFont = false;
@@ -122,15 +126,39 @@ export class MapCanvas {
       pixelRatio: devicePixelRatio,
     });
     this.map.touchZoomRotate.disableRotation();
+    const notify = () => {
+      const blocked = ["base", "satellite", "tracks"].find((id) =>
+        this.resources.blocked(id),
+      );
+      this.onError?.(
+        blocked === "tracks"
+          ? "轨迹显示加载失败，请重试"
+          : blocked
+            ? "底图加载失败，请重试"
+            : "",
+      );
+      const overviewBlocked = Object.keys(
+        this.map.getStyle()?.sources ?? {},
+      ).some((id) => id.startsWith("overview-") && this.resources.blocked(id));
+      onOverviewError?.(overviewBlocked ? "轨迹概览加载失败，请重试" : "");
+    };
+    this.resources = new ResourceHealth(
+      (id) => !!this.map.getSource(id),
+      (id, tile) => {
+        if (!this.destroyed && this.map.getSource(id))
+          this.map.refreshTiles(id, tile ? [tile.tileID.canonical] : undefined);
+      },
+      notify,
+    );
     this.map.on("error", (event) => {
-      if (handleResourceError?.(event)) {
-        this.handledErrors.add(event.error);
-        return;
-      }
-      const message = event.error?.message || "地图资源加载失败";
-      this.errors.push(message);
-      this.onError?.(message);
+      handleResourceError?.(event);
+      this.resources.fail(event as unknown as ResourceEvent);
     });
+    this.map.on("sourcedata", (event) =>
+      this.resources.loaded(event as unknown as ResourceEvent),
+    );
+    this.map.on("idle", notify);
+    this.map.on("dataabort", notify);
     this.map.on("render", () => this.draw());
     this.map.on("moveend", () => {
       if (this.resizing) return;
@@ -150,22 +178,31 @@ export class MapCanvas {
       if (this.surroundSize) this.setSurround(...this.surroundSize);
       this.draw();
     });
-    this.fontReady = document.fonts
+    this.fontReady = this.loadFont();
+    this.updateCredit();
+  }
+  private loadFont() {
+    const pending = document.fonts
       .load("16px MapNoto", "中文地图")
       .then((fonts) => {
-        if (!fonts.length)
-          throw new Error("中文字体加载失败，请重新安装前端资源");
+        if (!fonts.length) throw new Error("中文字体加载失败，请重试");
         this.loadedFont = true;
+        this.fontFailed = false;
         if (!this.destroyed) this.draw();
-      })
-      .catch((error) => {
-        this.errors.push(error.message);
-        this.onError?.(error.message);
-        throw error;
       });
-    // Retain a rejection handler even before an export/ready caller attaches.
-    this.fontReady.catch(() => {});
-    this.updateCredit();
+    void pending.catch((error: unknown) => {
+      this.fontFailed = true;
+      console.warn("[地图字体]", error);
+    });
+    return pending;
+  }
+  retryResources() {
+    this.resources.clear();
+    this.onError?.("");
+    if (!this.loadedFont) this.fontReady = this.loadFont();
+    this.map.setStyle(mapStyle(this.state, this.config, this.displayData), {
+      diff: false,
+    });
   }
   // In the editor the map extends beyond the export frame. Symmetric extra
   // space preserves the frame's center and logical-pixel scale. Export uses 0.
@@ -309,6 +346,7 @@ export class MapCanvas {
       this.preset = basemapPreset(state, this.config);
       this.crs = this.preset?.crs || "wgs84";
       this.displayData = displayGeometry(this.data, this.crs);
+      this.resources.clear();
       this.map.setStyle(mapStyle(state, this.config, this.displayData));
       this.resizing = true;
       try {
@@ -527,8 +565,12 @@ export class MapCanvas {
   }
   async ready(
     deadline = performance.now() + 65000,
+    strict = true,
   ): Promise<RenderReport | undefined> {
-    await this.fontReady;
+    if (strict) {
+      if (this.fontFailed) this.fontReady = this.loadFont();
+      await this.fontReady;
+    }
     if (this.destroyed) return;
     if (performance.now() >= deadline)
       throw new Error("地图资源等待超时；请检查网络并重试");
@@ -545,20 +587,20 @@ export class MapCanvas {
       const cleanup = () => {
         clearTimeout(timer);
         this.map.off("idle", check);
-        this.map.off("error", failed);
+        clearInterval(poll);
         this.map.off("remove", cancelled);
       };
       const cancelled = () => {
         cleanup();
         resolve();
       };
-      const failed = (event?: { error: Error }) => {
-        if (event && this.handledErrors.has(event.error)) return;
-        cleanup();
-        reject(new Error(this.errors.join("; ")));
-      };
       const check = () => {
-        if (this.errors.length) return failed();
+        if (strict && this.resources.pending()) return;
+        if (strict && this.errors.length) {
+          cleanup();
+          reject(new Error("地图资源不完整，请重试后再导出或切换底图"));
+          return;
+        }
         if (
           this.map.loaded() &&
           this.map.areTilesLoaded() &&
@@ -569,7 +611,7 @@ export class MapCanvas {
         }
       };
       this.map.on("idle", check);
-      this.map.on("error", failed);
+      const poll = setInterval(check, 100);
       this.map.on("remove", cancelled);
       check();
     });
@@ -581,14 +623,16 @@ export class MapCanvas {
     // A candidate can follow a camera/style edit during the two frame flush.
     // Recheck readiness against that final extent before allowing adoption.
     if (!this.map.loaded() || !this.map.areTilesLoaded() || this.map.isMoving())
-      return this.ready(deadline);
+      return this.ready(deadline, strict);
     this.draw();
-    if (this.errors.length) throw new Error(this.errors.join("; "));
+    if (strict && this.errors.length)
+      throw new Error("地图资源不完整，请重试后再导出或切换底图");
     return { labels: this.labels, camera: this.state.camera };
   }
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.resources.clear();
     this.map.remove();
     this.credit.remove();
   }

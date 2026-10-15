@@ -696,9 +696,10 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     setNotice("");
   }, [notice, messages]);
   const overviewError = browsing
-    ? (overview.query.error?.message ??
-      overview.query.data?.error ??
-      overview.tileError)
+    ? overview.tileError ||
+      (!overview.query.data?.version
+        ? (overview.query.error?.message ?? overview.query.data?.error ?? "")
+        : "")
     : "";
   const loadingText = exporting
     ? "正在导出地图…"
@@ -790,12 +791,10 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 <Button onClick={() => openPanel("library")}>返回轨迹库</Button>
               </div>
             )}
-            {panel !== "settings" && (
-              <>
-                <span className="save-state">
-                  {inProject ? (dirty ? "未保存" : "出图工程") : "浏览地图"}
-                </span>
-              </>
+            {exportPanel && inProject && (
+              <span className="save-state">
+                {dirty ? "未保存" : "出图工程"}
+              </span>
             )}
             {exportPanel && (
               <section className="project-entry">
@@ -864,15 +863,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 </Button>
                 <Button onClick={() => openPanel("export")}>轨迹导出</Button>
               </div>
-              <div className="library-intro">
-                <p>
-                  {catalog
-                    ? `${overview.query.data?.summary?.entries ?? catalog.entries.length} 条轨迹`
-                    : busy
-                      ? "正在读取后台配置的轨迹库。"
-                      : "未能读取轨迹库，请检查后台配置。"}
-                </p>
-              </div>
               {overview.query.data?.state === "unconfigured" && (
                 <p>后台尚未配置轨迹库</p>
               )}
@@ -900,9 +890,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               )}
               {catalog && (
                 <>
-                  <p className="overview-hint">
-                    勾选仅控制地图显示，初始全部显示。搜索只筛选列表，不影响显示范围。
-                  </p>
                   <label htmlFor="filter">筛选轨迹</label>
                   <Input
                     id="filter"
@@ -955,7 +942,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                     ))}
                   </div>
                   {overview.list.isFetching && <span>正在读取轨迹列表…</span>}
-                  {overview.list.error && (
+                  {overview.list.error && !overview.list.data && (
                     <div role="alert">
                       {overview.list.error.message}
                       <Button onClick={() => void overview.list.refetch()}>
@@ -982,33 +969,11 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       显示全部
                     </Button>
                     <Button
-                      disabled={!visible.length}
-                      onClick={() =>
-                        chooseBrowse({
-                          all: false,
-                          exceptions: Object.fromEntries(
-                            visible.map((e) => [e.id, e.entry]),
-                          ),
-                        })
-                      }
-                    >
-                      仅显示本页
-                    </Button>
-                    <Button
                       onClick={() =>
                         chooseBrowse({ all: false, exceptions: {} })
                       }
                     >
                       隐藏全部
-                    </Button>
-                    <Button
-                      disabled={!overview.query.data?.bounds}
-                      onClick={() => {
-                        const bounds = overview.query.data?.bounds;
-                        if (bounds) viewport.current?.fitOverview(bounds);
-                      }}
-                    >
-                      查看全库
                     </Button>
                   </div>
                 </>
@@ -1420,7 +1385,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             onOverviewVersion={browseOverview.published}
             onOverviewError={(error) => {
               overview.setTileError(error);
-              void overview.query.refetch();
+              if (error) void overview.query.refetch();
             }}
             onCamera={(camera) => {
               if (inspection) {
@@ -1621,6 +1586,11 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
         >
           {archiveAction === "archive:status" && (
             <div className="archive-maintenance">
+              <p>
+                {catalog
+                  ? `${overview.query.data?.summary?.entries ?? catalog.entries.length} 条轨迹`
+                  : "正在读取轨迹库…"}
+              </p>
               <p>维护工具仅在存在未完成的文件操作或轨迹库版本过旧时使用。</p>
               <Button onClick={() => setArchiveAction("archive:recover")}>
                 恢复中断操作
@@ -1678,20 +1648,19 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             <Spin size="small" /> {loadingText}
           </div>
         )}
+        {overviewError && (
+          <div className="overview-resource-error" role="alert">
+            轨迹概览暂时不可用
+            <Button size="small" onClick={() => void retryOverview()}>
+              重试概览
+            </Button>
+          </div>
+        )}
+
         <div
           className="map-errors"
-          hidden={
-            !error && !sourceErrors.length && !versionChanged && !overviewError
-          }
+          hidden={!error && !sourceErrors.length && !versionChanged}
         >
-          {overviewError && (
-            <div role="alert">
-              概览加载失败：{overviewError}
-              <Button size="small" onClick={() => void retryOverview()}>
-                重试概览
-              </Button>
-            </div>
-          )}
           {error && (
             <div role="alert" className="map-error">
               {error}

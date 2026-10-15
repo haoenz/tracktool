@@ -72,7 +72,8 @@ export function useOverview(
     queryFn: ({ signal }) =>
       api<OverviewStatus>(`/api/overview?crs=${crs}`, undefined, signal),
     refetchInterval: active ? 2000 : false,
-    retry: false,
+    retry: (count, error) => count < 2 && !error.message.includes("版本已过期"),
+    retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 2000),
   });
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -92,7 +93,8 @@ export function useOverview(
         undefined,
         signal,
       ),
-    retry: false,
+    retry: (count, error) => count < 2 && !error.message.includes("版本已过期"),
+    retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 2000),
   });
   const matching = useQuery({
     queryKey: [
@@ -109,7 +111,8 @@ export function useOverview(
         undefined,
         signal,
       ),
-    retry: false,
+    retry: (count, error) => count < 2 && !error.message.includes("版本已过期"),
+    retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 2000),
   });
   const detail = useQuery({
     queryKey: ["overview-detail", listVersion, id],
@@ -120,9 +123,27 @@ export function useOverview(
         undefined,
         signal,
       ),
-    retry: false,
+    retry: (count, error) => count < 2 && !error.message.includes("版本已过期"),
+    retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 2000),
     gcTime: 0,
   });
+  const loggedErrors = useRef(new Map<string, string>());
+  useEffect(() => {
+    for (const [resource, error] of [
+      ["overview", query.error],
+      ["list", list.error],
+      ["matching", matching.error],
+      ["detail", detail.error],
+    ] as const) {
+      if (!error) {
+        loggedErrors.current.delete(resource);
+        continue;
+      }
+      if (loggedErrors.current.get(resource) === error.message) continue;
+      loggedErrors.current.set(resource, error.message);
+      console.warn("[轨迹资源]", { resource, error });
+    }
+  }, [query.error, list.error, matching.error, detail.error]);
   const selected =
     matching.data?.entries.find((e) => e.id === id) ?? detail.data?.entry;
   const selectedTrack: SelectedTrack | undefined = detail.data

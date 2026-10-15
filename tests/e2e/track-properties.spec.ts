@@ -26,7 +26,6 @@ test("visibility has no processing or project-selection side effects", async ({
   await page
     .getByRole("checkbox", { name: "Train/same.kml", exact: true })
     .check();
-  await page.getByRole("button", { name: "仅显示本页", exact: true }).click();
   await page.getByRole("button", { name: "显示全部", exact: true }).click();
   expect(selectionRequests).toEqual([]);
   await expect(page.getByRole("button", { name: /处理已选轨迹/ })).toHaveCount(

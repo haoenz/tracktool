@@ -34,13 +34,13 @@ export class OverviewLayer {
   private visibility?: OverviewVisibility;
   private serial = 0;
   private scale = 1;
-  private failed = new Set<string>();
   constructor(
     private map: LibreMap,
     private crs: string,
     private onPick: (hits: OverviewHit[]) => void,
     private onLoading: (loading: boolean) => void,
     private onVersion: (version: string) => void,
+    private resourceErrors: (source: string) => boolean = () => false,
   ) {
     map.setTransformRequest((url) => {
       const parsed = new URL(url, location.href);
@@ -66,7 +66,6 @@ export class OverviewLayer {
   }
   handlesError(event: { sourceId?: string }) {
     if (!event.sourceId?.startsWith("overview-")) return false;
-    this.failed.add(event.sourceId);
     this.onLoading(false);
     return true;
   }
@@ -91,17 +90,17 @@ export class OverviewLayer {
   retry() {
     this.remove(this.pending);
     this.pending = undefined;
-    this.failed.clear();
     if (this.map.isStyleLoaded()) this.install(true);
   }
   get hasErrors() {
-    return this.failed.size > 0;
+    return [this.current, this.pending].some(
+      (id) => !!id && this.resourceErrors(id),
+    );
   }
   private restore = () => {
     for (const id of Object.keys(this.map.getStyle().sources))
       if (id.startsWith("overview-")) this.remove(id);
     this.current = this.pending = undefined;
-    this.failed.clear();
     this.install();
   };
   private install(force = false) {
@@ -174,7 +173,7 @@ export class OverviewLayer {
       this.onLoading(true);
   };
   private loaded = (event: { sourceId: string; isSourceLoaded?: boolean }) => {
-    if (!event.isSourceLoaded || this.failed.has(event.sourceId)) return;
+    if (!event.isSourceLoaded || this.resourceErrors(event.sourceId)) return;
     if (event.sourceId === this.pending) {
       const old = this.current;
       this.current = this.pending;
@@ -282,7 +281,6 @@ export class OverviewLayer {
       if (this.map.getLayer(`${id}-${kind}`))
         this.map.removeLayer(`${id}-${kind}`);
     if (this.map.getSource(id)) this.map.removeSource(id);
-    this.failed.delete(id);
   }
   destroy() {
     this.map.off("style.load", this.restore);
