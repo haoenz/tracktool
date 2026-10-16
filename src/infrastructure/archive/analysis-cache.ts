@@ -52,6 +52,13 @@ const summarySchema = z
       .nullable(),
     elevation_coverage: ratio,
     time_complete: z.boolean(),
+    time_issues: z
+      .object({
+        missing: z.boolean(),
+        duplicate: z.boolean(),
+        reversed: z.boolean(),
+      })
+      .strict(),
     excluded_speed_intervals: count,
     sampled: z.boolean(),
   })

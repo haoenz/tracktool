@@ -86,9 +86,9 @@ for (const width of [1280, 390])
       ).toBeVisible();
       await expect(panel.locator(".track-detail-link small")).toHaveCount(0);
       await expect(panel.locator(".track-file-info")).toHaveCount(0);
-      await expect(
-        panel.locator(".track-analysis + .analysis-more"),
-      ).toHaveCount(1);
+      await expect(panel.getByRole("region", { name: "更多统计" })).toHaveCount(
+        0,
+      );
       await expect(panel.locator(".track-stats > div")).toHaveCount(2);
       await expect(panel).not.toContainText(fixture.path);
       await expect(panel.locator(".track-stats")).not.toContainText(
@@ -104,14 +104,15 @@ for (const width of [1280, 390])
       await expect(
         panel.getByRole("region", { name: "数据质量", exact: true }),
       ).toContainText("轨迹点数");
-      await expect(panel.locator(".analysis-more")).toContainText(
-        "运动平均速度",
-      );
-      await expect(panel.locator(".analysis-more")).toContainText("平路占比");
+      await expect(analysis).toContainText("平路占比");
+      await expect(analysis).not.toContainText("运动耗时");
       await analysis
         .getByRole("group", { name: "图表指标" })
         .getByRole("button", { name: "速度", exact: true })
         .click();
+      await expect(analysis).toContainText("运动耗时");
+      await expect(analysis).toContainText("运动平均速度");
+      await expect(analysis).not.toContainText("平路占比");
       const chart = analysis.getByRole("img", { name: /速度变化图/ });
       await expect(chart).toBeVisible();
       await chart.focus();
@@ -193,6 +194,7 @@ test("tracks without time and elevation retain explicit missing-data states", as
       "没有可用的海拔数据",
     );
     await expect(panel.locator(".track-stats")).toContainText("无数据");
+    await expect(panel.locator(".analysis-quality")).toContainText("存在缺失");
     const coloring = panel.getByRole("group", { name: "地图着色" });
     await expect(
       coloring.getByRole("button", { name: "速度", exact: true }),
@@ -324,6 +326,8 @@ test("interior duplicate timestamps do not hide elapsed time", async ({
       .getByRole("button", { name: `查看 ${fixture.path}`, exact: true })
       .click();
     const panel = page.getByRole("region", { name: "轨迹详情", exact: true });
+    await expect(panel.locator(".analysis-quality")).toContainText("存在重复");
+    await expect(panel.locator(".analysis-quality")).not.toContainText("倒退");
     await expect(
       panel.locator(".track-stats > div").filter({ hasText: "耗时" }),
     ).toContainText("1小时19分");

@@ -26,6 +26,55 @@ const data = (...segments: TrackSegment[]): TrackData => ({
 });
 
 describe("track statistics", () => {
+  test("reports each time issue independently and retains combined issues", () => {
+    const issues = (times?: number[]) =>
+      analyzeTrack(data(segment([0, 0.001, 0.002], undefined, times)))
+        .time_issues;
+    expect(issues([0, 30, 60])).toEqual({
+      missing: false,
+      duplicate: false,
+      reversed: false,
+    });
+    expect(issues()).toEqual({
+      missing: true,
+      duplicate: false,
+      reversed: false,
+    });
+    expect(issues([0, 0, 60])).toEqual({
+      missing: false,
+      duplicate: true,
+      reversed: false,
+    });
+    expect(issues([0, -10, 60])).toEqual({
+      missing: false,
+      duplicate: false,
+      reversed: true,
+    });
+    expect(
+      analyzeTrack(
+        data(
+          segment([0, 0.001, 0.002], undefined, [10, 10, 5]),
+          segment([0.003]),
+        ),
+      ).time_issues,
+    ).toEqual({ missing: true, duplicate: true, reversed: true });
+    expect(
+      analyzeTrack(
+        data(
+          segment([0, 0.001], undefined, [0, 30]),
+          segment([0.002, 0.003], undefined, [20, 60]),
+        ),
+      ).time_issues.reversed,
+    ).toBe(true);
+    expect(
+      analyzeTrack(
+        data(
+          segment([0, 0.001], undefined, [0, 30]),
+          segment([0.002, 0.003], undefined, [30, 60]),
+        ),
+      ).time_complete,
+    ).toBe(true);
+  });
   test("includes segment bridges in distance and elevation, but not movement", () => {
     const value = analyzeTrack(
       data(

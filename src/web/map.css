@@ -1215,16 +1215,10 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.analysis-more,
 .track-analysis,
 .analysis-quality {
   border-bottom: 1px solid #e7ece8;
   padding-bottom: 20px;
-}
-.analysis-more h4 {
-  margin: 20px 0 16px;
-  font-size: 13px;
-  font-weight: 600;
 }
 .analysis-heading,
 .analysis-overlay-controls,
@@ -1350,7 +1344,7 @@
   flex-basis: 100%;
   margin-top: 4px;
 }
-.analysis-more .analysis-stat-list + .analysis-stat-list {
+.track-analysis .analysis-stat-list + .analysis-stat-list {
   margin-top: 12px;
 }
 .analysis-quality {
@@ -1362,7 +1356,6 @@
   margin-top: 12px;
 }
 
-.analysis-more > h3,
 .analysis-quality > h3 {
   margin: 0 0 16px;
   font-size: 14px;

@@ -128,6 +128,13 @@ export function TrackInsights({
   const sameEndpoint = startLabel === endLabel;
   const tag = <span className="track-tag">{entry.tags || "未设置 tag"}</span>;
   const data = query.data;
+  const timeIssues = [
+    data?.time_issues.duplicate && "重复",
+    data?.time_issues.missing && "缺失",
+    data?.time_issues.reversed && "倒退",
+  ]
+    .filter(Boolean)
+    .join("、");
   const pendingText = query.isError ? (
     "计算失败"
   ) : (
@@ -266,9 +273,19 @@ export function TrackInsights({
                 ))}
               </div>
             </div>
-            <Stats
-              rows={metric === "altitude" ? heightRows : timeRows.slice(1)}
-            />
+            <Stats rows={metric === "altitude" ? heightRows : timeRows} />
+            {metric === "altitude" &&
+              (data.terrain ? (
+                <Stats
+                  rows={[
+                    ["爬升占比", number(data.terrain.ascent * 100, "%")],
+                    ["下降占比", number(data.terrain.descent * 100, "%")],
+                    ["平路占比", number(data.terrain.flat * 100, "%")],
+                  ]}
+                />
+              ) : (
+                <p className="analysis-muted">地形占比无数据</p>
+              ))}
             <div className="analysis-chart-controls">
               <span>{unit(metric)}</span>
               <div
@@ -357,31 +374,20 @@ export function TrackInsights({
               </div>
             )}
           </section>
-          <section className="analysis-more" aria-label="更多统计">
-            <h3>更多统计</h3>
-            <h4>时间与速度</h4>
-            <Stats rows={timeRows} />
-            <h4>海拔与地形</h4>
-            <Stats rows={heightRows} />
-            {data.terrain ? (
-              <Stats
-                rows={[
-                  ["爬升占比", number(data.terrain.ascent * 100, "%")],
-                  ["下降占比", number(data.terrain.descent * 100, "%")],
-                  ["平路占比", number(data.terrain.flat * 100, "%")],
-                ]}
-              />
-            ) : (
-              <p className="analysis-muted">地形占比无数据</p>
-            )}
-          </section>
           <section className="analysis-quality" aria-label="数据质量">
             <h3>数据质量</h3>
             <Stats
               rows={[
                 ["轨迹点数", data.points.toLocaleString("zh-CN")],
                 ["海拔覆盖率", number(data.elevation_coverage * 100, "%")],
-                ["时间记录", data.time_complete ? "完整" : "缺失或顺序异常"],
+                [
+                  "时间记录",
+                  timeIssues
+                    ? `存在${timeIssues}${data.points < 2 ? "、轨迹点不足" : ""}`
+                    : data.points < 2
+                      ? "轨迹点不足"
+                      : "完整",
+                ],
                 [
                   "速度统计排除",
                   `${data.excluded_speed_intervals.toLocaleString("zh-CN")} 个区间`,

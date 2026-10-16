@@ -6,7 +6,7 @@ import type {
 } from "../shared/track-analysis.js";
 
 // Bump for changes to algorithm semantics or persisted result format.
-export const ANALYSIS_VERSION = 4;
+export const ANALYSIS_VERSION = 10;
 export const ANALYSIS_PARAMS = Object.freeze({
   moving_kmh: 1,
   maximum_interval_s: 300,
@@ -51,6 +51,7 @@ export function analyzeTrack(
     terrain: null,
     elevation_coverage: 0,
     time_complete: count > 1,
+    time_issues: { missing: false, duplicate: false, reversed: false },
     excluded_speed_intervals: 0,
     sampled: stride > 1,
     samples: [],
@@ -133,7 +134,10 @@ export function analyzeTrack(
       const time = segment.time_us ? Number(segment.time_us[i]!) / 1000 : null;
       if (global === 0) result.start_ms = time;
       if (global === count - 1) result.end_ms = time;
-      if (time === null || (previousTime !== null && time < previousTime))
+      if (time === null) result.time_issues.missing = true;
+      if (time !== null && previousTime !== null && time < previousTime)
+        result.time_issues.reversed = true;
+      if (result.time_issues.missing || result.time_issues.reversed)
         result.time_complete = false;
       previousTime = time;
       let speed: number | null = null;
@@ -159,6 +163,9 @@ export function analyzeTrack(
           }
         } else {
           result.excluded_speed_intervals++;
+          if (seconds === 0) result.time_issues.duplicate = true;
+          if (seconds !== null && seconds < 0)
+            result.time_issues.reversed = true;
           if (seconds !== null && seconds <= 0) result.time_complete = false;
         }
       }

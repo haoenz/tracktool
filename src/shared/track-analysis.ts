@@ -26,6 +26,7 @@ export type TrackAnalysis = {
   terrain: { ascent: number; descent: number; flat: number } | null;
   elevation_coverage: number;
   time_complete: boolean;
+  time_issues: { missing: boolean; duplicate: boolean; reversed: boolean };
   excluded_speed_intervals: number;
   sampled: boolean;
   samples: AnalysisSample[];
