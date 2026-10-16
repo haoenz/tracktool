@@ -573,3 +573,27 @@ it("direct import rejects changed or malformed input without committing earlier 
     expect(writer.status(file)).toMatchObject({ entries: 0, revision: 0, pending: 0 });
   }
 });
+
+it("selected ZIP and collections export only selected entries without marking full exports fresh", async () => {
+  const { directory, writer, file } = await initialized(2);
+  const selected = "Default/2026-10-01 selected.kml";
+  const excluded = "Default/2026-10-02 excluded.kml";
+  transaction(file, true, (db) => {
+    addEntry(db, selected, raw, "Default");
+    addEntry(db, excluded, raw, "Default");
+  });
+  const zip = path.join(directory, "selected.zip");
+  await writer.execute({ kind: "backup", database: file, output: zip, entries: [selected] });
+  const names: string[] = [];
+  await readZip(zip, (name) => { names.push(name); });
+  expect(names).toEqual([selected]);
+  transaction(file, false, (db) => {
+    expect(db.prepare("SELECT zip_target FROM archive_meta").get()).toMatchObject({ zip_target: null });
+  });
+  const output = path.join(directory, "selected-collections");
+  await writer.execute({ kind: "rebuild", database: file, output, entries: [selected] });
+  const content = readFileSync(path.join(output, "Default.kml"), "utf8");
+  expect(content).toContain("selected");
+  expect(content).not.toContain("excluded");
+  await expect(writer.execute({ kind: "backup", database: file, output: path.join(directory, "missing.zip"), entries: ["missing.kml"] })).rejects.toThrow("重新选择");
+});

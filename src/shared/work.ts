@@ -62,6 +62,7 @@ export const WorkRequestSchema = z
         create: z.boolean().optional(),
         keep: z.boolean().optional(),
         name: text.optional(),
+        entries: z.array(text.min(1)).min(1).optional(),
         entryId: text.optional(),
         versionId: text.optional(),
         deletion: DeleteRequestSchema.optional(),

@@ -144,9 +144,9 @@ export class ArchiveWriter {
           count: await this.recover(request.database),
         };
       case "backup":
-        return this.backup(request.database, request.output);
+        return this.backup(request.database, request.output, request.entries);
       case "rebuild":
-        return rebuild(request.database, request.output, this.xml);
+        return rebuild(request.database, request.output, this.xml, request.entries);
       case "push":
         return this.push(request);
       case "download":
@@ -443,7 +443,7 @@ export class ArchiveWriter {
       warnings,
     };
   }
-  async backup(file: string, output: string): Promise<ArchiveResult> {
+  async backup(file: string, output: string, selected?: string[]): Promise<ArchiveResult> {
     if (!output.toLowerCase().endsWith(".zip") || output === file)
       throw new AppError("USER_INPUT", "Backup target must be a .zip file");
     mkdirSync(path.dirname(output), { recursive: true });
@@ -459,9 +459,15 @@ export class ArchiveWriter {
             revision: number;
           }
         ).revision;
-        const entries = db
+        let entries = db
           .prepare(`SELECT path,sha256 FROM ${activeEntries(db)} ORDER BY path`)
           .all() as Entry[];
+        if (selected) {
+          const requested = new Set(selected);
+          entries = entries.filter((e) => requested.has(e.path));
+          if (!requested.size || entries.length !== requested.size)
+            throw new AppError("USER_INPUT", "部分所选轨迹已不存在，请返回列表重新选择");
+        }
         const expectedHashes: string[] = [];
         function* originals() {
           for (const e of entries) {
@@ -525,6 +531,7 @@ export class ArchiveWriter {
         published = true;
         syncDirectory(path.dirname(output));
         await this.fault("export-published");
+        if (!selected) {
         db.prepare(
           "UPDATE archive_meta SET zip_revision=?,zip_target=? WHERE singleton=1",
         ).run(revision, output);
@@ -533,6 +540,7 @@ export class ArchiveWriter {
             ? "INSERT INTO export_receipts VALUES (?,'kml_zip',?,NULL) ON CONFLICT(target,kind) DO UPDATE SET revision=excluded.revision"
             : "INSERT INTO export_receipts VALUES (?,?) ON CONFLICT(target) DO UPDATE SET revision=excluded.revision",
         ).run(output, revision);
+        }
         await this.fault("before-export-commit");
         db.exec("COMMIT");
       } catch (error) {

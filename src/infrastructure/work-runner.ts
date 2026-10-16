@@ -566,6 +566,7 @@ export class BusinessRunner implements WorkRunner {
           const target = request.output || path.join(directory, "Archive.zip");
           output.data = await kml.archiveOperation(ctx, {
             kind: "backup",
+            entries: o.entries,
             database,
             output: target,
           });
@@ -574,6 +575,7 @@ export class BusinessRunner implements WorkRunner {
           const target = request.output || directory;
           output.data = await kml.archiveOperation(ctx, {
             kind: "rebuild",
+            entries: o.entries,
             database,
             output: target,
           });

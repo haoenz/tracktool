@@ -1112,7 +1112,7 @@ function TrackEditor({
                   </div>
                 )}
               </fieldset>
-              <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t bg-background py-3">
+              <div className="flex flex-wrap items-center gap-2 border-t bg-background py-3">
                 <span className="mr-auto text-sm">
                   {busy || active
                     ? "正在处理…"

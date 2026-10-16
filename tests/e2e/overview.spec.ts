@@ -59,7 +59,7 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
     ),
   ).toBe(false);
   expect(await page.evaluate(() => window.renderer!.state.tracks)).toEqual([]);
-  await expect(page.locator(".save-state")).toHaveText("浏览地图");
+  await expect(page.getByRole("region", { name: "当前出图工程" })).toBeHidden();
   await expect(
     page.getByRole("button", { name: "隐藏 索引未命中", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
@@ -73,7 +73,7 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
   );
   await expect(page.getByRole("button", { name: "定位轨迹" })).toBeEnabled();
   await page.getByRole("button", { name: "定位轨迹" }).click();
-  await expect(page.locator(".save-state")).toHaveText("浏览地图");
+  await expect(page.getByRole("region", { name: "当前出图工程" })).toBeHidden();
   expect(await page.evaluate(() => window.renderer!.state.tracks)).toEqual([]);
   const source = await overviewSource(page);
   const selected = await page.evaluate(
@@ -103,7 +103,7 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
   await expect
     .poll(() => page.evaluate(() => window.renderer!.state.camera))
     .toEqual(camera);
-  await expect(page.locator(".save-state")).toHaveText("浏览地图");
+  await expect(page.getByRole("region", { name: "当前出图工程" })).toBeHidden();
   expect(errors).toEqual([]);
 });
 test("new versions keep visible old tiles until the replacement is ready and retry failed tiles", async ({
@@ -433,6 +433,7 @@ test("browse eye buttons filter map lines and points, survive searches and style
   await loaded(page);
   const source = await overviewSource(page);
   await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
+  await expect(page.getByRole("button", { name: "切换当前列表可见性", exact: true })).toHaveAttribute("data-visibility", "none");
   const checkbox = page.getByRole("button", {
     name: /^(隐藏|显示) 索引未命中$/,
     exact: true,
@@ -449,6 +450,7 @@ test("browse eye buttons filter map lines and points, survive searches and style
     ]);
   await expect(checkbox).toBeEnabled();
   await checkbox.click();
+  await expect(page.getByRole("button", { name: "切换当前列表可见性", exact: true })).toHaveAttribute("data-visibility", "mixed");
   await expect(page.locator("[data-sonner-toaster]")).toContainText(
     "已更新地图显示",
   );
@@ -497,6 +499,9 @@ test("browse eye buttons filter map lines and points, survive searches and style
     }),
   ).toHaveAttribute("aria-pressed", "false");
   await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
+  await expect(checkbox).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "切换当前列表可见性", exact: true })).toHaveAttribute("data-visibility", "none");
+  await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
   await expect(
     page.getByRole("button", {
       name: /^(显示|隐藏) 原始中文$/,
@@ -518,4 +523,170 @@ test("browse eye buttons filter map lines and points, survive searches and style
       }),
     )
     .toContain('["!",["in"');
+});
+
+test("list toolbar and page jump keep pagination at the desktop panel bottom", async ({
+  page,
+}) => {
+  await page.route("**/api/overview/entries?*", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ response, json: { ...body, total: 150 } });
+  });
+  await loaded(page);
+  const panel = page.getByRole("complementary", { name: "地图控制面板" });
+  await expect(panel.locator(".panel-header")).toHaveCount(0);
+  const batch = panel
+    .locator(".list-visibility-toolbar")
+    .getByRole("button", { name: "批量操作" });
+  await batch.click();
+  await expect(batch).toHaveAttribute("aria-pressed", "true");
+  await batch.click();
+  const jump = panel.getByRole("spinbutton", { name: "跳转页码" });
+  await jump.fill("3");
+  const request = page.waitForRequest(
+    (request) =>
+      request.url().includes("/api/overview/entries?") &&
+      new URL(request.url()).searchParams.get("offset") === "100",
+  );
+  await jump.press("Enter");
+  await request;
+  await expect(jump).toHaveValue("3");
+  await expect(
+    panel.getByRole("button", { name: "下一页", exact: true }),
+  ).toBeDisabled();
+  const panelBounds = await panel.boundingBox();
+  const footerBounds = await panel
+    .getByRole("navigation", { name: "分页" })
+    .boundingBox();
+  expect(panelBounds).not.toBeNull();
+  expect(footerBounds).not.toBeNull();
+  expect(
+    Math.abs(
+      panelBounds!.y +
+        panelBounds!.height -
+        footerBounds!.y -
+        footerBounds!.height,
+    ),
+  ).toBeLessThan(3);
+});
+
+test("multi-select separates selection scope from actions and preserves other pages", async ({
+  page,
+}) => {
+  await page.route("**/api/overview/entries?*", async (route) => {
+    const fixtureUrl = new URL(route.request().url());
+    fixtureUrl.searchParams.set("offset", "0");
+    const response = await route.fetch({ url: fixtureUrl.toString() });
+    const body = await response.json();
+    const url = new URL(route.request().url());
+    const entries = Array.from({ length: 51 }, (_, index) => ({
+      ...body.entries[0],
+      id: `batch-${index}`,
+      name: `批量轨迹 ${index}`,
+      entry: `batch/${index}.kml`,
+    }));
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 50);
+    await route.fulfill({
+      response,
+      json: {
+        ...body,
+        total: entries.length,
+        entries: entries.slice(offset, offset + limit),
+      },
+    });
+  });
+  await loaded(page);
+  const panel = page.getByRole("complementary", { name: "地图控制面板" });
+  const visibility = panel.getByRole("button", { name: "切换当前列表可见性", exact: true });
+  await expect(visibility).toHaveAttribute("data-visibility", "all");
+  await panel.getByRole("button", { name: "隐藏 批量轨迹 0", exact: true }).click();
+  await expect(visibility).toHaveAttribute("data-visibility", "mixed");
+  await panel.getByRole("button", { name: "下一页", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "隐藏 批量轨迹 50", exact: true })).toBeVisible();
+  await expect(visibility).toHaveAttribute("data-visibility", "mixed");
+  await panel.getByRole("button", { name: "上一页", exact: true }).click();
+  await visibility.click();
+  await expect(visibility).toHaveAttribute("data-visibility", "none");
+  await expect(visibility).toHaveAttribute("title", "全部隐藏：点击全部显示（包含所有分页）");
+  await visibility.click();
+  await expect(visibility).toHaveAttribute("data-visibility", "all");
+  await panel.getByRole("button", { name: "批量操作", exact: true }).click();
+  const actions = panel.getByRole("region", { name: "所选轨迹操作" });
+  const scope = panel.getByRole("region", { name: "多选范围" });
+  const all = scope.getByRole("checkbox", { name: "全选本页" });
+  await expect(actions).toBeHidden();
+  await panel.getByRole("button", { name: "勾选全部筛选结果", exact: true }).click();
+  await expect(actions).toContainText("已选 51 条");
+  await expect(panel.getByRole("button", { name: "切换当前列表可见性", exact: true })).toHaveCount(0);
+  await panel.getByRole("button", { name: "清空全部勾选", exact: true }).click();
+  await expect(actions).toBeHidden();
+  await expect(scope).toHaveText("全选本页");
+
+  await panel
+    .getByRole("button", { name: "选择 batch/0.kml", exact: true })
+    .click();
+  await expect(
+    panel.getByRole("checkbox", { name: "选择 批量轨迹 0", exact: true }),
+  ).toBeChecked();
+  await expect(all).toHaveAttribute("data-state", "indeterminate");
+  await expect(panel.getByRole("button", { name: "勾选全部筛选结果", exact: true })).toHaveAttribute("aria-pressed", "mixed");
+  await expect(actions).toContainText("已选 1 条");
+  await expect(panel.getByRole("region", { name: "轨迹详情" })).toBeHidden();
+  await all.click();
+  await expect(actions).toContainText("已选 50 条");
+  await panel.getByRole("button", { name: "勾选全部筛选结果", exact: true }).click();
+  await expect(actions).toContainText("已选 51 条");
+  await panel.getByRole("button", { name: "下一页", exact: true }).click();
+  await expect(
+    panel.getByRole("checkbox", { name: "选择 批量轨迹 50", exact: true }),
+  ).toBeChecked();
+  await all.click();
+  await expect(actions).toContainText("已选 50 条");
+  await expect(panel.getByRole("button", { name: "勾选全部筛选结果", exact: true })).toHaveAttribute("aria-pressed", "mixed");
+  await panel.getByRole("button", { name: "勾选全部筛选结果", exact: true }).click();
+  await expect(actions).toContainText("已选 51 条");
+  await panel.getByRole("button", { name: "清空全部勾选", exact: true }).click();
+  await expect(actions).toBeHidden();
+  await expect(scope).toBeVisible();
+  await panel
+    .getByRole("button", { name: "选择 batch/50.kml", exact: true })
+    .click();
+  await panel.getByRole("button", { name: "批量操作", exact: true }).click();
+  await panel.getByRole("button", { name: "批量操作", exact: true }).click();
+  await expect(scope).toHaveText("全选本页");
+  await expect(actions).toBeHidden();
+  await panel.getByRole("button", { name: "勾选全部筛选结果", exact: true }).click();
+  await expect(actions.getByRole("button")).toHaveCount(1);
+  await actions.getByRole("button", { name: "导出", exact: true }).click();
+  await expect(page).toHaveURL(/panel=export/);
+  await expect(panel).toContainText("已选择 51 条轨迹用于导出");
+  await page.route("**/api/work/preview", (route) => route.abort());
+  for (const kind of ["ZIP", "聚合KML"]) {
+    await panel.getByRole("combobox", { name: "导出类型", exact: true }).click();
+    await page.getByRole("option", { name: kind, exact: true }).click();
+    const pending = page.waitForRequest("**/api/work/preview");
+    await panel.getByRole("button", { name: "导出", exact: true }).click();
+    const request = await pending;
+    expect(request.postDataJSON().options.entries).toHaveLength(51);
+    expect(request.postDataJSON().options.entries).toContain("batch/50.kml");
+    expect(request.postDataJSON().operation).toBe(kind === "ZIP" ? "archive:backup" : "archive:rebuild");
+  }
+
+});
+
+test("selected export loads only selected tracks after choosing PNG", async ({ page }) => {
+  await loaded(page);
+  const panel = page.getByRole("complementary", { name: "地图控制面板" });
+  const entry = "Default/2026-10-01 中文.kml";
+  await panel.getByRole("button", { name: "批量操作", exact: true }).click();
+  await panel.getByRole("button", { name: `选择 ${entry}`, exact: true }).click();
+  await panel.getByRole("region", { name: "所选轨迹操作" }).getByRole("button", { name: "导出", exact: true }).click();
+  await expect(panel).toContainText("已选择 1 条轨迹用于导出");
+  await expect(page.getByRole("region", { name: "当前出图工程" })).toBeHidden();
+  await panel.getByRole("combobox", { name: "导出类型", exact: true }).click();
+  await page.getByRole("option", { name: "PNG图像", exact: true }).click();
+  await expect(page.getByRole("region", { name: "当前出图工程" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.renderer!.state.tracks.map((track) => track.entry))).toEqual([entry]);
 });

@@ -872,19 +872,23 @@ function CatalogPanel({
 export function ArchiveWorkPage({
   fixedOperation,
   entry,
+  entries,
 }: {
   fixedOperation?: Operation;
   entry?: string;
+  entries?: string[];
 }) {
   if (fixedOperation === "archive:push") return <ImportPanel />;
-  return <FileOperation fixedOperation={fixedOperation} entry={entry} />;
+  return <FileOperation fixedOperation={fixedOperation} entry={entry} entries={entries} />;
 }
 function FileOperation({
   fixedOperation,
   entry,
+  entries,
 }: {
   fixedOperation?: Operation;
   entry?: string;
+  entries?: string[];
 }) {
   const workspace = useWorkspace();
   const bootstrap = useQuery({
@@ -954,7 +958,7 @@ function FileOperation({
         output: ["archive:download", "archive:delete"].includes(operation)
           ? undefined
           : output || undefined,
-        options,
+        options: { ...options, ...(entries ? { entries } : {}) },
       });
       const task = await api<WorkTask>("/api/work/preview", body);
       setTask(task.id);

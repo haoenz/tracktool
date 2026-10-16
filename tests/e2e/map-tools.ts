@@ -2,36 +2,23 @@ import { expect, type Page } from "@playwright/test";
 /** Navigate only through visible workspace controls. */
 export async function tool(page: Page, name: string) {
   await expect(page.locator(".project-icon")).toBeVisible();
-  const expand = page.getByRole("button", {
-    name: "展开项目菜单",
-    exact: true,
-  });
-  if (await expand.isVisible()) await expand.click();
-  const nav = page.getByRole("navigation", { name: "地图工具", exact: true });
   if (["地图样式", "设置"].includes(name)) {
-    const settings = nav.getByRole("button", { name: "设置", exact: true });
-    if ((await settings.getAttribute("aria-pressed")) !== "true")
+    const settings = page.getByRole("button", { name: "设置", exact: true });
+    if ((await settings.getAttribute("aria-expanded")) !== "true")
       await settings.click();
-    await expect(settings).toHaveAttribute("aria-pressed", "true");
+    await expect(settings).toHaveAttribute("aria-expanded", "true");
     return;
   }
   if (name === "返回浏览") {
     await page.getByRole("button", { name: "退出工程", exact: true }).click();
     return;
   }
-  const tracks = nav.getByRole("button", { name: "轨迹", exact: true });
-  if ((await tracks.getAttribute("aria-pressed")) !== "true")
+  const tracks = page.locator(".project-icon");
+  if ((await tracks.getAttribute("aria-expanded")) !== "true")
     await tracks.click();
-  await expect(tracks).toHaveAttribute("aria-pressed", "true");
+  await expect(tracks).toHaveAttribute("aria-expanded", "true");
   if (name === "轨迹库") {
-    const back = page
-      .getByRole("button", {
-        name: /^(返回轨迹库|从轨迹库添加)$/,
-      })
-      .first();
-    if (await back.isVisible()) await back.click();
-    const list = page.getByRole("button", { name: "轨迹列表", exact: true });
-    if (await list.isVisible()) await list.click();
+    await page.getByRole("button", { name: "打开轨迹列表", exact: true }).click();
     return;
   }
   const currentPanel = new URL(page.url()).searchParams.get("panel");

@@ -13,7 +13,14 @@ import { Toaster } from "./components/ui/sonner.js";
 import "./style.css";
 const MapPage = lazy(() => import("./map-page.js"));
 const client = new QueryClient({
-  defaultOptions: { queries: { staleTime: 30_000, retry: false } },
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: false,
+      // Returning to the tab should preserve the current detail/editor view.
+      refetchOnWindowFocus: false,
+    },
+  },
 });
 function LegacyPanel({ panel }: { panel: string }) {
   const { search } = useLocation();

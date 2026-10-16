@@ -657,12 +657,14 @@ export function Pagination({
   total,
   onChange,
   hideOnSinglePage,
+  showQuickJumper,
 }: {
   current: number;
   pageSize: number;
   total: number;
   onChange: (page: number) => void;
   hideOnSinglePage?: boolean;
+  showQuickJumper?: boolean;
 }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   if (hideOnSinglePage && pages === 1) return null;
@@ -676,9 +678,37 @@ export function Pagination({
       >
         <ChevronLeftIcon />
       </Button>
-      <span className="text-xs tabular-nums text-muted-foreground">
-        {current} / {pages}
-      </span>
+      {showQuickJumper ? (
+        <form
+          key={`${current}:${pages}`}
+          className="flex items-center gap-2 text-xs text-muted-foreground"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const value = new FormData(event.currentTarget).get("page");
+            const page = Number(value);
+            if (Number.isInteger(page) && page >= 1 && page <= pages)
+              onChange(page);
+          }}
+        >
+          <Input
+            name="page"
+            type="number"
+            aria-label="跳转页码"
+            title="输入页码后按回车跳转"
+            min={1}
+            max={pages}
+            step={1}
+            required
+            defaultValue={current}
+            className="h-8 w-16 text-center tabular-nums"
+          />
+          <span>/ {pages}</span>
+        </form>
+      ) : (
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {current} / {pages}
+        </span>
+      )}
       <Button
         size="icon-sm"
         aria-label="下一页"

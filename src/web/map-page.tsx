@@ -1,8 +1,9 @@
 import { toast } from "sonner";
-import { Eye, Funnel, ArrowDownUp } from "lucide-react";
+import { Eye, EyeOff, Square, SquareCheck, SquareMinus, LoaderCircle, Funnel, ListChecks, ArrowDownWideNarrow, Settings as SettingsIcon, List, Upload, FileOutput } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover.js";
 import { PanelHeader } from "./components/panel-header.js";
 import {
+  Fragment,
   lazy,
   Suspense,
   useEffect,
@@ -223,7 +224,10 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
   const setFilter = inProject ? setProjectFilter : setBrowseFilter;
   const kind = inProject ? projectKind : browseKind;
   const setKind = inProject ? setProjectKind : setBrowseKind;
-  const dates = inProject ? projectDates : browseDates;
+  const savedDates = inProject ? projectDates : browseDates;
+  const dates = savedDates.sort === "name"
+    ? { ...savedDates, sort: "date-desc" }
+    : savedDates;
   const setDates = inProject ? setProjectDates : setBrowseDates;
   const [filterDraft, setFilterDraft] = useState<{
     kind: string;
@@ -272,7 +276,8 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
   const editorTitles = { edit: "编辑轨迹", display: "调整显示", history: "查看历史操作" };
   const controls = useRef<HTMLElement>(null);
   const scrollPositions = useRef(new Map<string, number>());
-  const [menuExpanded, setMenuExpanded] = useState(!!panel);
+  const [menuExpanded, setMenuExpanded] = useState(!!panel && panel !== "settings");
+  const [exportEntries, setExportEntries] = useState<string[]>();
   const [exportKind, setExportKind] = useState<"zip" | "kml" | "png">();
   const exportPage = panel === "export" || panel === "project";
   const exportPanel = exportPage && (exportKind === "png" || panel === "project");
@@ -303,11 +308,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
         : { panel: next },
     );
   };
-  useEffect(() => {
-    if (panel) {
-      setMenuExpanded(true);
-    }
-  }, [panel]);
   const refreshCatalog = async (path: string) => {
     if (
       catalog &&
@@ -376,6 +376,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     projectDates,
   );
   const overview = inProject ? projectOverview : browseOverview;
+  const listVisible = panel === "library" && !(overview.id && detailOpen) && overview.candidates.length <= 1 && !archiveAction;
   const scrollKey = `${inProject}:${panel}:${panel === "library" && detailOpen && overview.id ? overview.id : "list"}:${panel === "library" ? (archiveAction ?? (libraryList ? "list" : "home")) : ""}:${exportPanel ? projectTab : ""}:${panel === "library" && editing}`;
   useLayoutEffect(() => {
     const el = controls.current;
@@ -530,6 +531,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       setNotice(
         `已选择 ${result.tracks.length} 条轨迹，共 ${result.tracks.reduce((n, t) => n + t.points, 0).toLocaleString()} 个点`,
       );
+      return true;
     } catch (e) {
       if (!controller.signal.aborted) setError(message(e));
     } finally {
@@ -892,15 +894,17 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     const timer = setTimeout(() => setShowLoading(true), 180);
     return () => clearTimeout(timer);
   }, [loading]);
-  async function allMatching(): Promise<OverviewEntry[]> {
+  async function allMatching(signal?: AbortSignal): Promise<OverviewEntry[]> {
     if (!overview.version) throw new Error("请等待列表加载完成");
     const rows: OverviewEntry[] = [];
     for (let offset = 0; ; offset += 500) {
       const result = await api<{ entries: OverviewEntry[]; total: number }>(
         `/api/overview/entries?${new URLSearchParams({ version: overview.version, q: filter, kind, ...dates, offset: String(offset), limit: "500" })}`,
+        undefined,
+        signal,
       );
       rows.push(...result.entries);
-      if (rows.length >= result.total) return rows;
+      if (rows.length >= result.total || !result.entries.length) return rows;
     }
   }
   const [visibilityBusy, setVisibilityBusy] = useState(false);
@@ -914,7 +918,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       const rows = await allMatching();
       if (visibilityScopeRef.current !== visibilityScope || !rows.length) return;
       setBrowseVisibility((previous) => {
-        const show = !rows.every(
+        const show = !rows.some(
           (row) => previous.all !== Object.hasOwn(previous.exceptions, row.id),
         );
         if (!filter && kind === "all" && !dates.from && !dates.to)
@@ -933,28 +937,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       setVisibilityBusy(false);
     }
   }
-  async function downloadBatch() {
-    if (Object.keys(batch).length > 200) {
-      setError("每批最多下载 200 条原件，请分批选择；未截断下载。");
-      return;
-    }
-    setBusy(true);
-    setActivity("正在准备所选原始 KML 下载…");
-    setError("");
-    try {
-      const response = await request("/api/tracks/download", {
-        ids: Object.keys(batch),
-      });
-      download(await response.blob(), "tracktool-originals.zip");
-      setNotice(
-        "所选原始 KML 已打包到浏览器下载目录；保留完整原件与归档路径。",
-      );
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  }
   const fitTracks = (selected: SelectedTrack[]) => {
     // A near-full mobile sheet leaves too little map to locate a track safely.
     if (window.innerWidth <= 700 && sheet === "full") {
@@ -962,7 +944,67 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       requestAnimationFrame(() => viewport.current?.fit(selected));
     } else viewport.current?.fit(selected);
   };
+  const [batchSelecting, setBatchSelecting] = useState(false);
+  const batchRequest = useRef(0);
+  function clearBatch(exit = false) {
+    batchRequest.current++;
+    setBatchSelecting(false);
+    setBatch({});
+    if (exit) setBatchMode(false);
+  }
+  function toggleBatchEntry(entry: OverviewEntry) {
+    setBatch((old) => {
+      const next = { ...old };
+      if (Object.hasOwn(next, entry.id)) delete next[entry.id];
+      else next[entry.id] = entry.entry;
+      return next;
+    });
+  }
+  async function selectAllMatching(checked = true) {
+    const request = ++batchRequest.current;
+    const scope = visibilityScope;
+    setBatchSelecting(true);
+    try {
+      const rows = await allMatching();
+      if (request !== batchRequest.current || scope !== visibilityScopeRef.current) return;
+      setBatch((old) => {
+        const next = { ...old };
+        for (const row of rows) {
+          if (checked) next[row.id] = row.entry;
+          else delete next[row.id];
+        }
+        return next;
+      });
+    } catch (e) {
+      if (request === batchRequest.current) setError(message(e));
+    } finally {
+      if (request === batchRequest.current) setBatchSelecting(false);
+    }
+  }
   const visible = overview.list.data?.entries ?? [];
+  const needsVisibilityRows = Object.keys(browseVisibility.exceptions).length > 0 && (overview.list.data?.total ?? 0) > visible.length;
+  const visibilityRows = useQuery({
+    queryKey: ["overview-visibility-rows", overview.version, filter, kind, dates],
+    enabled: listVisible && (needsVisibilityRows || (batchMode && (overview.list.data?.total ?? 0) > visible.length)) && !!overview.version,
+    queryFn: ({ signal }) => allMatching(signal),
+  });
+  const visibilityPending = overview.list.isFetching || (needsVisibilityRows && visibilityRows.isPending);
+  const visibilityEntries = needsVisibilityRows ? visibilityRows.data : visible;
+  const visibleCount = visibilityEntries?.filter((e) => browseVisibility.all !== Object.hasOwn(browseVisibility.exceptions, e.id)).length ?? 0;
+  const listVisibility = visibilityPending || (needsVisibilityRows && visibilityRows.isError)
+    ? undefined
+    : !needsVisibilityRows && !Object.keys(browseVisibility.exceptions).length
+      ? browseVisibility.all ? "all" : "none"
+      : !visibleCount ? "none" : visibleCount === visibilityEntries?.length ? "all" : "mixed";
+  const visibilityLabel = listVisibility === "all" ? "全部显示" : listVisibility === "none" ? "全部隐藏" : listVisibility === "mixed" ? "部分显示" : "正在确认显示状态";
+  const batchCount = Object.keys(batch).length;
+  const batchEntries = (overview.list.data?.total ?? 0) > visible.length ? visibilityRows.data : visible;
+  const batchPending = overview.list.isFetching || ((overview.list.data?.total ?? 0) > visible.length && visibilityRows.isPending);
+  const selectedInFilter = batchEntries?.filter((e) => Object.hasOwn(batch, e.id)).length ?? 0;
+  const batchAllSelected = !!batchEntries?.length && selectedInFilter === batchEntries.length;
+  const batchMixed = selectedInFilter > 0 && !batchAllSelected;
+  const selectedOnPage = visible.filter((e) => Object.hasOwn(batch, e.id)).length;
+  const pageSelected = visible.length > 0 && selectedOnPage === visible.length;
   const invalid = sourceErrors.length > 0 || versionChanged;
   return (
     <WorkspaceContext.Provider
@@ -1004,31 +1046,61 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
           </button>
           <nav id="map-tools" aria-label="地图工具" hidden={!menuExpanded}>
             <Button
-              variant={panel && panel !== "settings" ? "default" : "ghost"}
-              aria-pressed={!!panel && panel !== "settings"}
-              onClick={() =>
-                panel && panel !== "settings"
-                  ? setParams({ panel: "none" })
-                  : openPanel("library")
-              }
+              variant={panel === "library" && !archiveAction ? "default" : "ghost"}
+              aria-label="打开轨迹列表"
+              title="轨迹列表"
+              onClick={() => {
+                openPanel("library");
+                setLibraryList(true);
+                setArchiveAction(undefined);
+                setDetailOpen(false);
+                overview.setCandidates([]);
+              }}
             >
-              轨迹
+              <List size={22} aria-hidden="true" />
             </Button>
             <Button
-              variant={panel === "settings" ? "default" : "ghost"}
-              aria-pressed={panel === "settings"}
-              onClick={() =>
-                panel === "settings"
-                  ? setParams({ panel: "none" })
-                  : openPanel("settings")
-              }
+              variant={panel === "library" && archiveAction === "archive:push" ? "default" : "ghost"}
+              aria-label="上传轨迹"
+              title="上传轨迹"
+              onClick={() => {
+                openPanel("library");
+                setDetailOpen(false);
+                overview.setCandidates([]);
+                setArchiveAction("archive:push");
+              }}
             >
-              设置
+              <Upload size={22} aria-hidden="true" />
+            </Button>
+            <Button
+              variant={exportPage ? "default" : "ghost"}
+              aria-label="导出轨迹"
+              title="导出轨迹"
+              onClick={() => {
+                setExportKind(undefined);
+                setParams({ panel: "export" });
+              }}
+            >
+              <FileOutput size={22} aria-hidden="true" />
             </Button>
           </nav>
-          {!inProject && <span className="save-state">浏览地图</span>}
           {hasDraft && <span className="draft-status">编辑草稿保留</span>}
         </header>
+        <Button
+          className="map-settings-button"
+          variant={panel === "settings" ? "default" : "outline"}
+          aria-label="设置"
+          title="设置"
+          aria-expanded={panel === "settings"}
+          aria-controls="map-panel"
+          onClick={() =>
+            panel === "settings"
+              ? setParams({ panel: "none" })
+              : openPanel("settings")
+          }
+        >
+          <SettingsIcon size={22} aria-hidden="true" />
+        </Button>
         {inProject && (
           <div className="project-bar" role="region" aria-label="当前出图工程">
             <strong>{currentName || "未命名工程"}</strong>
@@ -1071,14 +1143,16 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
         )}
         <div className="map-content">
           <aside
+            id="map-panel"
             ref={controls}
             onScroll={(e) =>
               scrollPositions.current.set(scrollKey, e.currentTarget.scrollTop)
             }
-            className={`map-controls${panel && ["archive", "settings"].includes(panel) ? " wide" : ""}`}
+            className={`map-controls${listVisible ? " track-list-panel" : ""}${panel && ["archive", "settings"].includes(panel) ? " wide" : ""}`}
             hidden={!panel}
             aria-label="地图控制面板"
           >
+            {!listVisible && (
             <PanelHeader
               title={
                 panel === "library" && archiveAction
@@ -1123,6 +1197,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                           : undefined
               }
             />
+            )}
             <div className="sheet-controls" aria-label="面板高度">
               <Button onClick={() => setSheet("collapsed")}>收起</Button>
               <Button onClick={() => setSheet("half")}>半屏</Button>
@@ -1130,11 +1205,13 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             </div>
             {exportPage && (
               <section aria-label="轨迹导出类型">
+                {exportEntries && <p>已选择 {exportEntries.length} 条轨迹用于导出。</p>}
                 <label htmlFor="track-export-kind">导出类型</label>
                 <Select
                   id="track-export-kind"
                   aria-label="导出类型"
                   placeholder="请选择导出类型"
+                  disabled={busy}
                   value={panel === "project" ? "png" : exportKind}
                   options={[
                     { value: "zip", label: "ZIP" },
@@ -1142,6 +1219,15 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                     { value: "png", label: "PNG图像" },
                   ]}
                   onChange={(value) => {
+                    if (value === "png" && exportEntries) {
+                      if (exportEntries.length > 200) {
+                        setError("PNG 出图最多支持 200 条轨迹，请缩小选择范围，或选择 ZIP / 聚合 KML。");
+                        return;
+                      }
+                      if (inProject) void select(exportEntries).then((ok) => { if (ok) setExportKind("png"); });
+                      else void newProject(exportEntries);
+                      return;
+                    }
                     setExportKind(value as "zip" | "kml" | "png");
                     if (panel === "project") setParams({ panel: "export" });
                   }}
@@ -1149,7 +1235,8 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 {(exportKind === "zip" || exportKind === "kml") && panel !== "project" && (
                   <Suspense fallback={<Spin />}>
                     <ArchiveAction
-                      key={exportKind}
+                      key={`${exportKind}:${JSON.stringify(exportEntries)}`}
+                      entries={exportEntries}
                       fixedOperation={exportKind === "zip" ? "archive:backup" : "archive:rebuild"}
                     />
                   </Suspense>
@@ -1171,7 +1258,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                     <Button
                       variant="default"
                       disabled={busy || !!switching || !!inspection || !catalog}
-                      onClick={() => void newProject()}
+                      onClick={() => void newProject(exportEntries)}
                     >
                       新建出图工程
                     </Button>
@@ -1185,6 +1272,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               </section>
             )}
             <section
+              className="track-list-section"
               hidden={
                 panel !== "library" ||
                 (!!overview.id && detailOpen) ||
@@ -1192,16 +1280,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 !!archiveAction
               }
             >
-              <div className="library-actions" hidden={libraryList}>
-                <Button onClick={() => setLibraryList(true)}>轨迹列表</Button>
-                <Button onClick={() => setArchiveAction("archive:push")}>上传轨迹</Button>
-                <Button onClick={() => {
-                  setExportKind(undefined);
-                  setParams({ panel: "export" });
-                }}>导出轨迹</Button>
-              </div>
-              <div hidden={!libraryList}>
-                <Button onClick={() => setBatchMode(!batchMode)}>批量操作</Button>
+              <div className="track-list-content">
               {overview.query.data?.state === "unconfigured" && (
                 <p>后台尚未配置轨迹库</p>
               )}
@@ -1230,16 +1309,44 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               {catalog && (
                 <>
                   <div className="list-visibility-toolbar">
+                    {batchMode ? (
+                      <Button
+                        variant="ghost"
+                        className="list-visibility-button"
+                        aria-label={batchAllSelected ? "清空全部勾选" : "勾选全部筛选结果"}
+                        title={batchAllSelected ? "取消当前筛选的全部勾选（包含所有分页）" : "勾选当前筛选的全部轨迹（包含所有分页）"}
+                        aria-pressed={batchMixed ? "mixed" : batchAllSelected}
+                        aria-busy={batchSelecting || batchPending || undefined}
+                        disabled={batchSelecting || batchPending || !overview.list.data?.total || !batchEntries}
+                        onClick={() => void selectAllMatching(!batchAllSelected)}
+                      >
+                        {batchAllSelected ? <SquareCheck size={20} aria-hidden="true" /> : batchMixed ? <SquareMinus size={20} aria-hidden="true" /> : <Square size={20} aria-hidden="true" />}
+                        {(batchSelecting || batchPending) && (
+                          <span className="visibility-loading-mask" aria-hidden="true">
+                            <LoaderCircle size={20} className="animate-spin" />
+                          </span>
+                        )}
+                      </Button>
+                    ) : (
                     <Button
                       variant="ghost"
                       aria-label="切换当前列表可见性"
-                      title="当前列表全部可见时隐藏，否则全部显示（包含所有分页）"
-                      loading={visibilityBusy}
-                      disabled={visibilityBusy || overview.list.isFetching || !overview.list.data?.total}
+                      className="list-visibility-button"
+                      title={`${visibilityLabel}：点击${listVisibility === "none" ? "全部显示" : "全部隐藏"}（包含所有分页）`}
+                      aria-pressed={listVisibility === undefined ? undefined : listVisibility === "mixed" ? "mixed" : listVisibility === "all"}
+                      aria-busy={visibilityBusy || visibilityPending || undefined}
+                      data-visibility={listVisibility ?? "pending"}
+                      disabled={visibilityBusy || visibilityPending || !overview.list.data?.total}
                       onClick={() => void toggleListVisibility()}
                     >
-                      <Eye size={20} aria-hidden="true" />
+                      {listVisibility === "none" ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}
+                      {(visibilityBusy || visibilityPending) && (
+                        <span className="visibility-loading-mask" aria-hidden="true">
+                          <LoaderCircle size={20} className="animate-spin" />
+                        </span>
+                      )}
                     </Button>
+                    )}
                     <Button
                       className="list-filter-button"
                       variant={filtersApplied ? "secondary" : "ghost"}
@@ -1261,7 +1368,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                     <Popover open={sortOpen} onOpenChange={setSortOpen}>
                       <PopoverTrigger asChild>
                         <Button variant={dates.sort === "date-desc" ? "ghost" : "secondary"} aria-label="排序" title="排序">
-                          <ArrowDownUp size={20} aria-hidden="true" />
+                          <ArrowDownWideNarrow size={20} aria-hidden="true" />
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent align="end" className="list-sort-menu" aria-label="排序">
@@ -1272,178 +1379,134 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                           options={[
                             { value: "date-desc", label: "日期从新到旧" },
                             { value: "date-asc", label: "日期从旧到新" },
-                            { value: "name", label: "名称" },
                           ]}
                         />
                       </PopoverContent>
                     </Popover>
+                    <Button
+                      variant={batchMode ? "secondary" : "ghost"}
+                      aria-label="批量操作"
+                      title="批量操作"
+                      aria-pressed={batchMode}
+                      onClick={() => { if (batchMode) clearBatch(true); else setBatchMode(true); }}
+                    >
+                      <ListChecks size={20} aria-hidden="true" />
+                    </Button>
                   </div>
                   {batchMode && (
-                    <div
-                      className="batch-actions"
-                      role="region"
-                      aria-label="批量操作"
-                    >
-                      <strong>
-                        已选 {Object.keys(batch).length} 条（跨页保留）
-                      </strong>
-                      <Button
-                        onClick={() =>
-                          setBatch((old) => ({
-                            ...old,
-                            ...Object.fromEntries(
-                              visible.map((e) => [e.id, e.entry]),
-                            ),
-                          }))
-                        }
-                      >
-                        选择当前页
-                      </Button>
-                      <Button
-                        onClick={() =>
-                          void allMatching()
-                            .then((rows) =>
-                              setBatch(
-                                Object.fromEntries(
-                                  rows.map((e) => [e.id, e.entry]),
-                                ),
-                              ),
-                            )
-                            .catch((e) => setError(message(e)))
-                        }
-                      >
-                        选择全部筛选结果（{overview.list.data?.total ?? 0}）
-                      </Button>
-                      <Button
-                        disabled={!Object.keys(batch).length || busy}
-                        onClick={() =>
-                          void (inProject
-                            ? select([
-                                ...new Set([
-                                  ...state.tracks.map((t) => t.entry),
-                                  ...Object.values(batch),
-                                ]),
-                              ])
-                            : newProject(Object.values(batch)))
-                        }
-                      >
-                        {inProject ? "加入当前工程" : "加入新建工程"}
-                      </Button>
-                      <Button
-                        disabled={!Object.keys(batch).length || busy}
-                        onClick={() => void downloadBatch()}
-                      >
-                        下载所选原始 KML
-                      </Button>
-
-                      <Button
-                        onClick={() => {
-                          setBatch({});
-                          setBatchMode(false);
-                        }}
-                      >
-                        取消选择
-                      </Button>
+                    <div className="batch-selection" role="region" aria-label="多选范围">
+                      <div className="batch-selection-row">
+                        <Checkbox
+                          checked={pageSelected ? true : selectedOnPage > 0 ? "indeterminate" : false}
+                          disabled={!visible.length || overview.list.isFetching || batchSelecting}
+                          onCheckedChange={(checked) => {
+                            setBatch((old) => {
+                              const next = { ...old };
+                              for (const e of visible) {
+                                if (checked) next[e.id] = e.entry;
+                                else delete next[e.id];
+                              }
+                              return next;
+                            });
+                          }}
+                        >全选本页</Checkbox>
+                      </div>
                     </div>
                   )}
                   <div className="map-track-list">
                     {visible.map((e, index) => (
-                      <div
-                        key={e.id}
-                        className={`overview-row${overview.id === e.id ? " selected" : ""}`}
-                      >
-                        {dates.sort !== "name" &&
-                          (index === 0 ||
+                      <Fragment key={e.id}>
+                        {(index === 0 ||
                             e.date.slice(0, 7) !==
                               visible[index - 1]!.date.slice(0, 7)) && (
                             <h4 className="month-heading">
                               {e.date.slice(0, 7) || "日期未知"}
                             </h4>
                           )}
-                        {batchMode ? (
-                          <Checkbox
-                            aria-label={`选择 ${e.name}`}
-                            checked={Object.hasOwn(batch, e.id)}
-                            onCheckedChange={(v) =>
-                              setBatch((old) => {
-                                const next = { ...old };
-                                if (v) next[e.id] = e.entry;
-                                else delete next[e.id];
-                                return next;
-                              })
-                            }
-                          />
-                        ) : (
-                          <Button
-                            aria-label={`${browseVisibility.all !== Object.hasOwn(browseVisibility.exceptions, e.id) ? "隐藏" : "显示"} ${e.name}`}
-                            aria-pressed={
-                              browseVisibility.all !==
-                              Object.hasOwn(browseVisibility.exceptions, e.id)
-                            }
-                            onClick={() =>
-                              toggleBrowse(
-                                e.id,
-                                e.entry,
-                                !(
-                                  browseVisibility.all !==
-                                  Object.hasOwn(
-                                    browseVisibility.exceptions,
-                                    e.id,
-                                  )
-                                ),
+                        <div
+                          className={`overview-row${(batchMode ? Object.hasOwn(batch, e.id) : overview.id === e.id) ? " selected" : ""}`}
+                        >
+                          <button
+                            className="track-row-name"
+                            aria-label={`${batchMode ? "选择" : "查看"} ${e.entry}`}
+                            disabled={batchMode && batchSelecting}
+                            aria-pressed={batchMode ? Object.hasOwn(batch, e.id) : overview.id === e.id}
+                            onClick={() => {
+                              if (batchMode) { toggleBatchEntry(e); return; }
+                              overview.setCandidates([]);
+                              if (
+                                e.id !== overview.id &&
+                                hasDraft &&
+                                !window.confirm(
+                                  "当前轨迹有编辑草稿，切换轨迹将放弃草稿。是否继续？",
+                                )
                               )
-                            }
+                                return;
+                              overview.setId(e.id);
+                              setDetailOpen(true);
+                              setEditing(false);
+                            }}
                           >
-                            <svg
-                              width="20"
-                              height="20"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                              aria-hidden="true"
-                            >
-                              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
-                              <circle cx="12" cy="12" r="3" />
-                              {!(
+                            <strong title={e.name.replace(/\.kml$/i, "")}>{e.name.replace(/\.kml$/i, "")}</strong>
+                            {e.distance_m !== undefined && (
+                              <span className="track-distance">
+                                {(e.distance_m / 1000).toFixed(1)} km
+                              </span>
+                            )}
+                          </button>
+                          {batchMode ? (
+                            <Checkbox
+                              aria-label={`选择 ${e.name}`}
+                              checked={Object.hasOwn(batch, e.id)}
+                              disabled={batchSelecting}
+                              onCheckedChange={() => toggleBatchEntry(e)}
+                            />
+                          ) : (
+                            <Button
+                              className="track-row-visibility"
+                              variant="ghost"
+                              aria-label={`${browseVisibility.all !== Object.hasOwn(browseVisibility.exceptions, e.id) ? "隐藏" : "显示"} ${e.name}`}
+                              aria-pressed={
                                 browseVisibility.all !==
                                 Object.hasOwn(browseVisibility.exceptions, e.id)
-                              ) && <path d="M3 3l18 18" />}
-                            </svg>
-                          </Button>
-                        )}
-                        <button
-                          className="track-row-name"
-                          aria-label={`查看 ${e.entry}`}
-                          aria-pressed={overview.id === e.id}
-                          onClick={() => {
-                            overview.setCandidates([]);
-                            if (
-                              e.id !== overview.id &&
-                              hasDraft &&
-                              !window.confirm(
-                                "当前轨迹有编辑草稿，切换轨迹将放弃草稿。是否继续？",
-                              )
-                            )
-                              return;
-                            overview.setId(e.id);
-                            setDetailOpen(true);
-                            setEditing(false);
-                          }}
-                        >
-                          <strong>{e.name.replace(/\.kml$/i, "")}</strong>
-                          <small>
-                            {e.date || "行程日期未知"} · {e.kind}
-                            {e.tags ? ` · ${e.tags}` : ""}
-                            {e.distance_m !== undefined
-                              ? ` · ${(e.distance_m / 1000).toFixed(1)} km`
-                              : ""}
-                          </small>
-                        </button>
-                        {e.error && (
-                          <span className="map-error">{e.error}</span>
-                        )}
-                      </div>
+                              }
+                              onClick={() =>
+                                toggleBrowse(
+                                  e.id,
+                                  e.entry,
+                                  !(
+                                    browseVisibility.all !==
+                                    Object.hasOwn(
+                                      browseVisibility.exceptions,
+                                      e.id,
+                                    )
+                                  ),
+                                )
+                              }
+                            >
+                              <svg
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                aria-hidden="true"
+                              >
+                                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                                <circle cx="12" cy="12" r="3" />
+                                {!(
+                                  browseVisibility.all !==
+                                  Object.hasOwn(browseVisibility.exceptions, e.id)
+                                ) && <path d="M3 3l18 18" />}
+                              </svg>
+                            </Button>
+                          )}
+                          {e.error && (
+                            <span className="map-error">{e.error}</span>
+                          )}
+                        </div>
+                      </Fragment>
                     ))}
                   </div>
                   {overview.list.isFetching && <span>正在读取轨迹列表…</span>}
@@ -1461,8 +1524,23 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                     pageSize={50}
                     total={overview.list.data?.total ?? 0}
                     onChange={(page) => overview.setOffset((page - 1) * 50)}
+                    showQuickJumper
                     hideOnSinglePage
                   />
+                  {batchMode && batchCount > 0 && (
+                    <div className="batch-action-bar" role="region" aria-label="所选轨迹操作">
+                      <span aria-live="polite">已选 {batchCount} 条</span>
+                      <Button
+                        variant="default"
+                        disabled={busy || batchSelecting}
+                        onClick={() => {
+                          setExportEntries(Object.values(batch));
+                          openPanel("export");
+                          setExportKind(undefined);
+                        }}
+                      >导出</Button>
+                    </div>
+                  )}
 
                 </>
               )}
@@ -2180,11 +2258,15 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               <div className="list-filter-dates">
                 <div>
                   <label htmlFor="filter-from">起始日期</label>
-                  <Input id="filter-from" type="date" value={filterDraft.from} onChange={(e) => setFilterDraft({ ...filterDraft, from: e.target.value })} />
+                  <div className="filter-date-input" data-empty={!filterDraft.from}>
+                    <Input id="filter-from" type="date" value={filterDraft.from} onChange={(e) => setFilterDraft({ ...filterDraft, from: e.target.value })} />
+                  </div>
                 </div>
                 <div>
                   <label htmlFor="filter-to">截止日期</label>
-                  <Input id="filter-to" type="date" value={filterDraft.to} onChange={(e) => setFilterDraft({ ...filterDraft, to: e.target.value })} />
+                  <div className="filter-date-input" data-empty={!filterDraft.to}>
+                    <Input id="filter-to" type="date" value={filterDraft.to} onChange={(e) => setFilterDraft({ ...filterDraft, to: e.target.value })} />
+                  </div>
                 </div>
               </div>
               {invalidDateRange && <p role="alert">截止日期不能早于起始日期。</p>}

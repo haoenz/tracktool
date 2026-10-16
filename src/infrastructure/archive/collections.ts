@@ -27,6 +27,7 @@ export async function rebuild(
   file: string,
   output: string,
   xml: XmlPort,
+  selected?: string[],
 ): Promise<ArchiveResult> {
   const warnings: string[] = [];
   const staged: { stage: string; target: string }[] = [];
@@ -37,11 +38,17 @@ export async function rebuild(
           revision: number;
         }
       ).revision;
-      const rows = db
+      let rows = db
         .prepare(
           `SELECT path,sha256,category FROM ${activeEntries(db)} ORDER BY path`,
         )
         .all() as { path: string; sha256: string; category: Category | null }[];
+      if (selected) {
+        const requested = new Set(selected);
+        rows = rows.filter((row) => requested.has(row.path));
+        if (!requested.size || rows.length !== requested.size)
+          throw new AppError("USER_INPUT", "部分所选轨迹已不存在，请返回列表重新选择");
+      }
       const items = new Map<
         Category,
         { name: string; date: string; content?: Content; display?: string }[]
@@ -182,7 +189,7 @@ export async function rebuild(
         );
       for (const f of staged) renameSync(f.stage, f.target);
       syncDirectory(output);
-      if (output === path.dirname(file))
+      if (!selected && output === path.dirname(file))
         db.prepare("UPDATE archive_meta SET views_revision=?").run(revision);
     });
     return {

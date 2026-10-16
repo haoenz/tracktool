@@ -282,13 +282,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 8px 4px;
+  padding: 0 4px;
   border-radius: 6px;
   align-items: center;
 }
 .overview-row.selected {
   background: #eaf3ff;
-  outline: 1px solid #88b9ed;
 }
 .overview-detail {
   position: absolute;
@@ -410,13 +409,29 @@
   outline: 2px solid #245c4b;
   outline-offset: 3px;
 }
-.map-header nav {
+#map-tools {
   display: flex;
+  align-items: center;
   gap: 4px;
-  width: auto;
 }
-.map-header nav[hidden] {
+#map-tools[hidden] {
   display: none;
+}
+#map-tools [data-slot="button"] {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+}
+.map-settings-button {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 6;
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  border-radius: 14px;
+  box-shadow: 0 5px 24px #19332a15;
 }
 .library-actions,
 .archive-maintenance {
@@ -531,20 +546,42 @@
   outline-offset: 2px;
 }
 .track-row-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   min-width: 0;
   text-align: left;
   border: 0;
   background: transparent;
-  padding: 8px;
+  padding: 4px 0;
   cursor: pointer;
   color: inherit;
   min-height: 44px;
 }
-.track-row-name small {
-  display: block;
+.track-row-name strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-distance {
+  flex-shrink: 0;
+  border-radius: 4px;
+  padding: 2px 6px;
+  background: #eef2f0;
   color: #65746d;
-  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+@media (min-width: 701px) {
+  .map-controls .overview-row > [data-slot="button"],
+  .map-controls .overview-row .ui-checkbox,
+  .track-row-name {
+    min-height: 36px;
+  }
 }
 .overview-row .ui-checkbox {
   display: flex;
@@ -552,6 +589,24 @@
   justify-content: center;
   margin: 0;
   flex: 0 0 44px;
+}
+.overview-row .track-row-visibility {
+  flex: 0 0 44px;
+  width: 44px;
+  padding: 0;
+  color: #65746d;
+}
+.overview-row > .map-error {
+  flex-basis: 100%;
+}
+@media (min-width: 701px) and (hover: hover) and (pointer: fine) {
+  .track-row-visibility[aria-pressed="true"] {
+    opacity: 0;
+  }
+  .overview-row:hover .track-row-visibility,
+  .overview-row:focus-within .track-row-visibility {
+    opacity: 1;
+  }
 }
 .overview-row [data-slot="checkbox"] {
   position: relative;
@@ -561,34 +616,56 @@
   position: absolute;
   inset: -14px;
 }
-.overview-row:hover {
+@media (min-width: 701px) {
+  .overview-row [data-slot="checkbox"]::after {
+    inset: -10px;
+  }
+}
+.overview-row:hover:not(.selected) {
   background: #edf4f0;
 }
 .month-heading {
-  flex-basis: 100%;
   margin: 8px 0;
+  padding-inline: 4px;
   color: #69796f;
 }
-.batch-actions {
-  position: sticky;
-  top: 0;
-  background: #eff6ff;
-  padding: 8px;
-  z-index: 4;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  border-radius: 8px;
+.batch-selection {
+  border-bottom: 1px solid #edf1ee;
+  padding-bottom: 4px;
 }
-.batch-actions strong {
-  flex-basis: 100%;
+.batch-selection-row,
+.batch-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.batch-selection-row {
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.batch-selection-row .ui-checkbox {
+  margin-right: auto;
+}
+.batch-action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: white;
+  border-top: 1px solid #dbe4df;
+  padding: 10px 0;
+  flex-wrap: wrap;
+}
+.batch-action-bar > span {
+  flex: 1;
+  font-size: 12px;
+  white-space: nowrap;
 }
 .project-bar {
   position: absolute;
   z-index: 7;
   top: 16px;
-  right: 16px;
-  max-width: calc(100% - 390px);
+  right: 78px;
+  max-width: calc(100% - 452px);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -663,6 +740,10 @@
   }
 }
 @media (max-width: 700px) {
+  .map-settings-button {
+    top: 8px;
+    right: 8px;
+  }
   .map-header {
     top: 8px;
     left: 8px;
@@ -711,8 +792,7 @@
     z-index: 8;
     border-bottom: 1px solid #edf1ee;
   }
-  .project-tabs,
-  .batch-actions {
+  .project-tabs {
     top: 53px;
   }
   .project-bar {
@@ -837,4 +917,61 @@
   min-width: 0;
   width: 100%;
   margin-top: 8px;
+}
+
+/* Keep the desktop list footer at the panel edge while rows scroll. */
+@media (min-width: 701px) {
+  .map-controls.track-list-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+  .track-list-section,
+  .track-list-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .track-list-content > .map-track-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .track-list-content > :not(.map-track-list) {
+    flex-shrink: 0;
+  }
+  .track-list-content > nav {
+    margin: 0;
+    padding: 10px 0;
+    border-top: 1px solid #edf1ee;
+  }
+}
+
+.visibility-loading-mask {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: rgb(255 255 255 / 85%);
+}
+.map-controls .list-visibility-button[aria-busy="true"] {
+  opacity: 1;
+}
+
+.filter-date-input {
+  position: relative;
+  margin-top: 8px;
+}
+.list-filter-dates .filter-date-input input {
+  margin-top: 0;
+}
+.filter-date-input[data-empty="true"]:not(:focus-within) input {
+  color: transparent;
+}
+.filter-date-input[data-empty="true"]:not(:focus-within) input::-webkit-datetime-edit {
+  opacity: 0;
 }

@@ -467,36 +467,33 @@ test("the configured library stays fixed when importing a project from another m
   ).toBeVisible();
 });
 
-test("project icon expands tools and collapses the active panel", async ({
-  page,
-}) => {
+test("map icons directly toggle panels on desktop and mobile", async ({ page }) => {
   await page.goto("/map");
-  const expand = page.getByRole("button", {
-    name: "展开项目菜单",
-    exact: true,
-  });
+  const tracks = page.locator(".project-icon");
+  const settings = page.getByRole("button", { name: "设置", exact: true });
+  const panel = page.getByLabel("地图控制面板", { exact: true });
   const nav = page.getByRole("navigation", { name: "地图工具", exact: true });
-  await expect(expand).toBeVisible();
-  await expect(nav).toBeHidden();
-  await expect(page.getByLabel("地图控制面板", { exact: true })).toBeHidden();
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
-    for (const name of ["轨迹", "设置"]) {
-      await expand.click();
-      await nav.getByRole("button", { name, exact: true }).click();
-      await expect(
-        page.getByLabel("地图控制面板", { exact: true }),
-      ).toBeVisible();
-      await expect(
-        page.getByRole("heading", { name, exact: true }),
-      ).toHaveCount(0);
-      await page
-        .getByRole("button", { name: "收起项目菜单", exact: true })
-        .click();
-      await expect(nav).toBeHidden();
-      await expect(
-        page.getByLabel("地图控制面板", { exact: true }),
-      ).toBeHidden();
-    }
+    await expect(panel).toBeHidden();
+    await expect(nav).toBeHidden();
+    await tracks.click();
+    await expect(panel).toBeHidden();
+    await expect(nav.getByRole("button")).toHaveCount(3);
+    await expect(page.locator(".map-header")).not.toContainText(/轨迹|设置|浏览地图/);
+    await nav.getByRole("button", { name: "打开轨迹列表", exact: true }).click();
+    await expect(page.getByLabel("筛选轨迹", { exact: true })).toBeVisible();
+    await nav.getByRole("button", { name: "上传轨迹", exact: true }).click();
+    await expect(page.getByRole("region", { name: "轨迹库操作", exact: true })).toBeVisible();
+    await nav.getByRole("button", { name: "导出轨迹", exact: true }).click();
+    await expect(page.getByRole("combobox", { name: "导出类型", exact: true })).toBeVisible();
+    await settings.click();
+    await expect(settings).toHaveAttribute("aria-expanded", "true");
+    const bounds = await settings.boundingBox();
+    expect(bounds!.x + bounds!.width).toBeGreaterThan(width - 24);
+    await settings.click();
+    await expect(panel).toBeHidden();
+    await tracks.click();
+    await expect(nav).toBeHidden();
   }
 });

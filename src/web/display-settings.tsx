@@ -246,7 +246,7 @@ export function DisplaySettings({
         )}
       </fieldset>
       <div
-        className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t bg-background py-3"
+        className="flex flex-wrap items-center gap-2 border-t bg-background py-3"
         role="group"
         aria-label="保存显示设置"
       >
