@@ -55,7 +55,7 @@ export function rememberCamera(archive: string, camera: Project["camera"]) {
 export function useOverview(
   crs: OverviewCrs,
   search: string,
-  kind: string,
+  kind: string[],
   active = true,
   dates: { from: string; to: string; sort: string } = {
     from: "",
@@ -67,7 +67,6 @@ export function useOverview(
   const [id, setId] = useState("");
   const [candidates, setCandidates] = useState<string[]>([]);
   const [offset, setOffset] = useState(0);
-  const [candidateOffset, setCandidateOffset] = useState(0);
   const [queryText, setQueryText] = useState(search);
   const [tileError, setTileError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -89,33 +88,82 @@ export function useOverview(
   }, [search]);
   useEffect(
     () => setOffset(0),
-    [kind, version, dates.from, dates.to, dates.sort],
+    [kind, version, dates.from, dates.to, dates.sort, candidates],
   );
   const listVersion = version ?? query.data?.version;
+  async function fetchEntries(
+    params: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<OverviewEntries> {
+    const fetch = (query: Record<string, string>) =>
+      api<OverviewEntries>(
+        `/api/overview/entries?${new URLSearchParams(query)}`,
+        undefined,
+        signal,
+      );
+    if (!candidates.length) return fetch(params);
+    const entries: OverviewEntry[] = [];
+    for (let i = 0; i < candidates.length; i += 100) {
+      const result = await fetch({
+        ...params,
+        ids: candidates.slice(i, i + 100).join(","),
+        offset: "0",
+        limit: "100",
+      });
+      entries.push(...result.entries);
+    }
+    entries.sort((a, b) =>
+      params.sort === "name"
+        ? a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
+        : !a.date
+          ? !b.date
+            ? a.id.localeCompare(b.id)
+            : 1
+          : !b.date
+            ? -1
+            : (params.sort === "date-asc"
+                ? a.date.localeCompare(b.date)
+                : b.date.localeCompare(a.date)) || a.id.localeCompare(b.id),
+    );
+    const offset = Number(params.offset ?? 0);
+    return {
+      version: params.version!,
+      total: entries.length,
+      entries: entries.slice(offset, offset + Number(params.limit ?? 50)),
+    };
+  }
   const list = useQuery({
-    queryKey: ["overview-entries", listVersion, queryText, kind, offset, dates],
+    queryKey: [
+      "overview-entries",
+      listVersion,
+      queryText,
+      kind,
+      offset,
+      dates,
+      candidates,
+    ],
     enabled: active && !!listVersion,
     queryFn: ({ signal }) =>
-      api<OverviewEntries>(
-        `/api/overview/entries?${new URLSearchParams({ version: listVersion!, q: queryText, kind, ...dates, offset: String(offset), limit: "50" })}`,
-        undefined,
+      fetchEntries(
+        {
+          version: listVersion!,
+          q: queryText,
+          kinds: JSON.stringify(kind),
+          ...dates,
+          offset: String(offset),
+          limit: "50",
+        },
         signal,
       ),
     retry: (count, error) => count < 2 && !error.message.includes("版本已过期"),
     retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 2000),
   });
   const matching = useQuery({
-    queryKey: [
-      "overview-candidates",
-      listVersion,
-      candidates,
-      candidateOffset,
-      id,
-    ],
-    enabled: active && !!listVersion && (!!candidates.length || !!id),
+    queryKey: ["overview-candidates", listVersion, id],
+    enabled: active && !!listVersion && !!id,
     queryFn: ({ signal }) =>
       api<OverviewEntries>(
-        `/api/overview/entries?${new URLSearchParams({ version: listVersion!, ids: (candidates.length ? candidates.slice(candidateOffset, candidateOffset + 100) : [id]).join(",") })}`,
+        `/api/overview/entries?${new URLSearchParams({ version: listVersion!, ids: id })}`,
         undefined,
         signal,
       ),
@@ -185,8 +233,7 @@ export function useOverview(
     setId,
     candidates,
     setCandidates,
-    candidateOffset,
-    setCandidateOffset,
+    fetchEntries,
     matching,
     offset,
     setOffset,
@@ -200,7 +247,7 @@ export function useOverview(
       setTileError("");
     },
     pick: (ids: string[]) => {
-      setCandidateOffset(0);
+      setOffset(0);
       setCandidates(ids.length > 1 ? ids : []);
       setId(ids.length === 1 ? ids[0]! : "");
     },

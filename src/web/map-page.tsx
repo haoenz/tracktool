@@ -7,6 +7,7 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useMemo,
   useCallback,
   useLayoutEffect,
   useRef,
@@ -160,12 +161,12 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       `tracktool:${initial.initialArchive}:search`,
       "",
     ),
-    [browseKind, setBrowseKind] = useSessionState(
+    [savedBrowseKind, setBrowseKind] = useSessionState<string | string[]>(
       `tracktool:${initial.initialArchive}:kind`,
-      "all",
+      [],
     ),
     [projectFilter, setProjectFilter] = useState(""),
-    [projectKind, setProjectKind] = useState("all"),
+    [projectKind, setProjectKind] = useState<string[]>([]),
     [names, setNames] = useState<string[]>([]),
     [name, setName] = useState(""),
     [currentName, setCurrentName] = useState(""),
@@ -222,6 +223,8 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     : setLibraryVisibility;
   const filter = inProject ? projectFilter : browseFilter;
   const setFilter = inProject ? setProjectFilter : setBrowseFilter;
+  const browseKind = useMemo(() => Array.isArray(savedBrowseKind)
+    ? savedBrowseKind : savedBrowseKind === "all" ? [] : [savedBrowseKind], [savedBrowseKind]);
   const kind = inProject ? projectKind : browseKind;
   const setKind = inProject ? setProjectKind : setBrowseKind;
   const savedDates = inProject ? projectDates : browseDates;
@@ -230,16 +233,17 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     : savedDates;
   const setDates = inProject ? setProjectDates : setBrowseDates;
   const [filterDraft, setFilterDraft] = useState<{
-    kind: string;
+    kind: string[];
     from: string;
     to: string;
+    candidates: string[];
   }>();
   const [sortOpen, setSortOpen] = useState(false);
-  const filtersApplied = !!(kind !== "all" || dates.from || dates.to);
   const invalidDateRange = !!(filterDraft?.from && filterDraft.to && filterDraft.from > filterDraft.to);
   function applyListFilters() {
     if (!filterDraft || invalidDateRange) return;
     setKind(filterDraft.kind);
+    overview.setCandidates(filterDraft.candidates);
     setDates({ ...dates, from: filterDraft.from, to: filterDraft.to });
     overview.setOffset(0);
     setFilterDraft(undefined);
@@ -295,7 +299,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     if (task === "imported") {
       setArchiveAction(undefined);
       setFilter("");
-      setKind("all");
+      setKind([]);
       setDates({ from: "", to: "", sort: "date-desc" });
       setDetailOpen(false);
     }
@@ -376,7 +380,8 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     projectDates,
   );
   const overview = inProject ? projectOverview : browseOverview;
-  const listVisible = panel === "library" && !(overview.id && detailOpen) && overview.candidates.length <= 1 && !archiveAction;
+  const filtersApplied = !!(kind.length > 0 || dates.from || dates.to || overview.candidates.length);
+  const listVisible = panel === "library" && !(overview.id && detailOpen) && !archiveAction;
   const scrollKey = `${inProject}:${panel}:${panel === "library" && detailOpen && overview.id ? overview.id : "list"}:${panel === "library" ? (archiveAction ?? (libraryList ? "list" : "home")) : ""}:${exportPanel ? projectTab : ""}:${panel === "library" && editing}`;
   useLayoutEffect(() => {
     const el = controls.current;
@@ -687,7 +692,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       if (!inProject && !exportPanel) browsePanel.current = rawPanel;
       fitted.current = true;
       setProjectFilter("");
-      setProjectKind("all");
+      setProjectKind([]);
       projectOverview.setId("");
       projectOverview.setOffset(0);
       setProjectState(result.state);
@@ -777,7 +782,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       if (!exportPanel) browsePanel.current = rawPanel;
       fitted.current = true;
       setProjectFilter("");
-      setProjectKind("all");
+      setProjectKind([]);
       projectOverview.setId("");
       projectOverview.setOffset(0);
       setProjectState(next);
@@ -898,17 +903,13 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     if (!overview.version) throw new Error("请等待列表加载完成");
     const rows: OverviewEntry[] = [];
     for (let offset = 0; ; offset += 500) {
-      const result = await api<{ entries: OverviewEntry[]; total: number }>(
-        `/api/overview/entries?${new URLSearchParams({ version: overview.version, q: filter, kind, ...dates, offset: String(offset), limit: "500" })}`,
-        undefined,
-        signal,
-      );
+      const result = await overview.fetchEntries({ version: overview.version, q: filter, kinds: JSON.stringify(kind), ...dates, offset: String(offset), limit: "500" }, signal);
       rows.push(...result.entries);
       if (rows.length >= result.total || !result.entries.length) return rows;
     }
   }
   const [visibilityBusy, setVisibilityBusy] = useState(false);
-  const visibilityScope = JSON.stringify([inProject, overview.version, filter, kind, dates]);
+  const visibilityScope = JSON.stringify([inProject, overview.version, filter, kind, dates, overview.candidates]);
   const visibilityScopeRef = useRef(visibilityScope);
   visibilityScopeRef.current = visibilityScope;
   async function toggleListVisibility() {
@@ -921,7 +922,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
         const show = !rows.some(
           (row) => previous.all !== Object.hasOwn(previous.exceptions, row.id),
         );
-        if (!filter && kind === "all" && !dates.from && !dates.to)
+        if (!overview.candidates.length && !filter && !kind.length && !dates.from && !dates.to)
           return { all: show, exceptions: {} };
         const exceptions = { ...previous.exceptions };
         for (const row of rows) {
@@ -984,7 +985,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
   const visible = overview.list.data?.entries ?? [];
   const needsVisibilityRows = Object.keys(browseVisibility.exceptions).length > 0 && (overview.list.data?.total ?? 0) > visible.length;
   const visibilityRows = useQuery({
-    queryKey: ["overview-visibility-rows", overview.version, filter, kind, dates],
+    queryKey: ["overview-visibility-rows", overview.version, filter, kind, dates, overview.candidates],
     enabled: listVisible && (needsVisibilityRows || (batchMode && (overview.list.data?.total ?? 0) > visible.length)) && !!overview.version,
     queryFn: ({ signal }) => allMatching(signal),
   });
@@ -1048,13 +1049,18 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             <Button
               variant={panel === "library" && !archiveAction ? "default" : "ghost"}
               aria-label="打开轨迹列表"
+              aria-expanded={panel === "library" && !archiveAction}
+              aria-controls="map-panel"
               title="轨迹列表"
               onClick={() => {
+                if (panel === "library" && !archiveAction) {
+                  setParams({ panel: "none" });
+                  return;
+                }
                 openPanel("library");
                 setLibraryList(true);
+                if (archiveAction) setDetailOpen(false);
                 setArchiveAction(undefined);
-                setDetailOpen(false);
-                overview.setCandidates([]);
               }}
             >
               <List size={22} aria-hidden="true" />
@@ -1157,8 +1163,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               title={
                 panel === "library" && archiveAction
                   ? operationLabel(archiveAction)
-                  : panel === "library" && overview.candidates.length > 1
-                    ? `此处有 ${overview.candidates.length} 条轨迹`
                     : panel === "library" && overview.id && detailOpen
                       ? editing ? editorTitles[editorView] : overview.selected?.name ?? "正在读取轨迹…"
                       : panel === "library" && libraryList ? "轨迹列表" : exportPage ? "导出轨迹" : panel ? panels[panel] : ""
@@ -1167,8 +1171,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               backLabel={
                 panel === "library" && archiveAction
                   ? "返回轨迹库"
-                  : panel === "library" && overview.candidates.length > 1
-                  ? "返回列表"
                   : panel === "library" && overview.id && detailOpen
                     ? editing ? "返回详情" : "返回列表"
                     : inProject && !exportPage ? "回到工程" : "返回轨迹库"
@@ -1176,8 +1178,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               onBack={
                 panel === "library" && archiveAction
                   ? () => setArchiveAction(undefined)
-                  : panel === "library" && overview.candidates.length > 1
-                    ? () => { overview.setCandidates([]); setLibraryList(true); }
                     : panel === "library" && overview.id && detailOpen
                       ? () => {
                           if (editing) {
@@ -1276,7 +1276,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               hidden={
                 panel !== "library" ||
                 (!!overview.id && detailOpen) ||
-                overview.candidates.length > 1 ||
                 !!archiveAction
               }
             >
@@ -1353,7 +1352,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       aria-label="筛选"
                       aria-haspopup="dialog"
                       title={filtersApplied ? "筛选：已设置" : "筛选"}
-                      onClick={() => setFilterDraft({ kind, from: dates.from, to: dates.to })}
+                      onClick={() => setFilterDraft({ kind, from: dates.from, to: dates.to, candidates: overview.candidates })}
                     >
                       <Funnel size={20} aria-hidden="true" />
                       {filtersApplied && <span className="filter-indicator" aria-label="已设置" />}
@@ -1393,28 +1392,13 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       <ListChecks size={20} aria-hidden="true" />
                     </Button>
                   </div>
-                  {batchMode && (
-                    <div className="batch-selection" role="region" aria-label="多选范围">
-                      <div className="batch-selection-row">
-                        <Checkbox
-                          checked={pageSelected ? true : selectedOnPage > 0 ? "indeterminate" : false}
-                          disabled={!visible.length || overview.list.isFetching || batchSelecting}
-                          onCheckedChange={(checked) => {
-                            setBatch((old) => {
-                              const next = { ...old };
-                              for (const e of visible) {
-                                if (checked) next[e.id] = e.entry;
-                                else delete next[e.id];
-                              }
-                              return next;
-                            });
-                          }}
-                        >全选本页</Checkbox>
-                      </div>
-                    </div>
-                  )}
-                  <div className="map-track-list">
-                    {visible.map((e, index) => (
+                  <div className="map-track-list" aria-busy={overview.list.isFetching}>
+                    {overview.list.isFetching ? (
+                      <div className="track-list-status" role="status">正在读取轨迹列表…</div>
+                    ) : overview.list.data?.total === 0 ? (
+                      <div className="track-list-status" role="status">无匹配</div>
+                    ) : null}
+                    {!overview.list.isFetching && visible.map((e, index) => (
                       <Fragment key={e.id}>
                         {(index === 0 ||
                             e.date.slice(0, 7) !==
@@ -1433,7 +1417,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                             aria-pressed={batchMode ? Object.hasOwn(batch, e.id) : overview.id === e.id}
                             onClick={() => {
                               if (batchMode) { toggleBatchEntry(e); return; }
-                              overview.setCandidates([]);
                               if (
                                 e.id !== overview.id &&
                                 hasDraft &&
@@ -1509,7 +1492,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       </Fragment>
                     ))}
                   </div>
-                  {overview.list.isFetching && <span>正在读取轨迹列表…</span>}
                   {overview.list.error && !overview.list.data && (
                     <div role="alert">
                       {overview.list.error.message}
@@ -1518,15 +1500,36 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       </Button>
                     </div>
                   )}
-                  {overview.list.data?.total === 0 && <p>没有匹配的轨迹。</p>}
-                  <Pagination
-                    current={Math.floor(overview.offset / 50) + 1}
-                    pageSize={50}
-                    total={overview.list.data?.total ?? 0}
-                    onChange={(page) => overview.setOffset((page - 1) * 50)}
-                    showQuickJumper
-                    hideOnSinglePage
-                  />
+                  {(batchMode || (overview.list.data?.total ?? 0) > 50) && (
+                    <div className="track-list-footer">
+                      {batchMode && (
+                        <div className="page-selection" role="region" aria-label="多选范围">
+                          <Checkbox
+                            checked={pageSelected ? true : selectedOnPage > 0 ? "indeterminate" : false}
+                            disabled={!visible.length || overview.list.isFetching || batchSelecting}
+                            onCheckedChange={(checked) => {
+                              setBatch((old) => {
+                                const next = { ...old };
+                                for (const e of visible) {
+                                  if (checked) next[e.id] = e.entry;
+                                  else delete next[e.id];
+                                }
+                                return next;
+                              });
+                            }}
+                          >全选本页</Checkbox>
+                        </div>
+                      )}
+                      <Pagination
+                        current={Math.floor(overview.offset / 50) + 1}
+                        pageSize={50}
+                        total={overview.list.data?.total ?? 0}
+                        onChange={(page) => overview.setOffset((page - 1) * 50)}
+                        showQuickJumper
+                        hideOnSinglePage
+                      />
+                    </div>
+                  )}
                   {batchMode && batchCount > 0 && (
                     <div className="batch-action-bar" role="region" aria-label="所选轨迹操作">
                       <span aria-live="polite">已选 {batchCount} 条</span>
@@ -1983,57 +1986,11 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 />
               </div>
             </section>
-            <section
-              hidden={panel !== "library" || overview.candidates.length < 2}
-              aria-label="重叠轨迹候选"
-            >
-              <p>选择要查看的轨迹；重叠的轨迹均保留。</p>
-              {overview.matching.isPending && <Spin />}
-              {overview.matching.error && (
-                <p role="alert">
-                  {overview.matching.error.message}
-                  <Button onClick={() => void overview.matching.refetch()}>
-                    重试候选
-                  </Button>
-                </p>
-              )}
-              <Pagination
-                pageSize={100}
-                current={overview.candidateOffset / 100 + 1}
-                total={overview.candidates.length}
-                onChange={(page) =>
-                  overview.setCandidateOffset((page - 1) * 100)
-                }
-                hideOnSinglePage
-              />
-              {overview.matching.data?.entries.map((e) => (
-                <Button
-                  block
-                  key={e.id}
-                  onClick={() => {
-                    if (
-                      e.id !== overview.id &&
-                      hasDraft &&
-                      !window.confirm(
-                        "当前轨迹有编辑草稿，切换轨迹将放弃草稿。是否继续？",
-                      )
-                    )
-                      return;
-                    overview.setId(e.id);
-                    overview.setCandidates([]);
-                    setDetailOpen(true);
-                  }}
-                >
-                  {e.name}
-                </Button>
-              ))}
-            </section>
             {overview.id && (
               <section
                 hidden={
                   panel !== "library" ||
                   !detailOpen ||
-                  overview.candidates.length > 1 ||
                   !!archiveAction
                 }
               >
@@ -2199,8 +2156,16 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 )
               )
                 return;
+              setFilter("");
+              setKind([]);
+              setDates({ ...dates, from: "", to: "" });
+              setFilterDraft(undefined);
               overview.pick(hits.map((h) => h.id));
-              setDetailOpen(true);
+              setDetailOpen(hits.length === 1);
+              setMenuExpanded(true);
+              setLibraryList(true);
+              setArchiveAction(undefined);
+              setSheet("half");
               openPanel("library");
               setEditing(false);
             }}
@@ -2240,20 +2205,26 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
           open={!!filterDraft}
           onCancel={() => setFilterDraft(undefined)}
           footer={[
-            <Button key="reset" onClick={() => setFilterDraft({ kind: "all", from: "", to: "" })}>重置</Button>,
+            <Button key="reset" onClick={() => setFilterDraft({ kind: [], from: "", to: "", candidates: [] })}>重置</Button>,
             <Button key="cancel" onClick={() => setFilterDraft(undefined)}>取消</Button>,
             <Button key="apply" variant="default" disabled={invalidDateRange} onClick={applyListFilters}>应用</Button>,
           ]}
         >
           {filterDraft && (
             <div className="list-filter-fields">
+              {filterDraft.candidates.length > 0 && (
+                <div className="list-location-filter" role="group" aria-label="位置筛选">
+                  <span className="filter-category">位置</span>
+                  <span className="filter-result">点选附近：{filterDraft.candidates.length}条</span>
+                  <Button size="sm" variant="outline" aria-label="清除位置筛选" onClick={() => setFilterDraft({ ...filterDraft, candidates: [] })}>清除</Button>
+                </div>
+              )}
               <label htmlFor="filter-kind">轨迹分类</label>
-              <Select id="filter-kind" aria-label="轨迹分类" value={filterDraft.kind}
+              <Select id="filter-kind" aria-label="轨迹分类" multiple clearable placeholder="全部分类" value={filterDraft.kind}
                 options={[
-                  { value: "all", label: "全部分类" },
                   ...Array.from(new Set(catalog?.entries.map((e) => e.kind) ?? [])).map((value) => ({ value, label: value })),
                 ]}
-                onChange={(kind) => setFilterDraft({ ...filterDraft, kind })}
+                onChange={(kind) => setFilterDraft({ ...filterDraft, kind: kind ?? [] })}
               />
               <div className="list-filter-dates">
                 <div>

@@ -97,6 +97,19 @@ export function overviewRoutes(
         sort: z.enum(["date-desc", "date-asc", "name"]).default("date-desc"),
         q: z.string().max(200).default(""),
         kind: z.string().max(200).default("all"),
+        kinds: z
+          .preprocess(
+            (value) => {
+              if (typeof value !== "string") return value;
+              try {
+                return JSON.parse(value);
+              } catch {
+                return value;
+              }
+            },
+            z.array(z.string().max(200)).max(100),
+          )
+          .optional(),
         ids: z
           .string()
           .max(20100)
@@ -114,7 +127,9 @@ export function overviewRoutes(
         (e) =>
           (!query.from || (!!e.date && e.date >= query.from)) &&
           (!query.to || (!!e.date && e.date <= query.to)) &&
-          (query.kind === "all" || e.kind === query.kind) &&
+          (query.kinds
+            ? !query.kinds.length || query.kinds.includes(e.kind)
+            : query.kind === "all" || e.kind === query.kind) &&
           (!query.ids || query.ids.split(",").includes(e.id)) &&
           (!text ||
             `${e.name} ${e.entry} ${e.kind} ${e.date} ${e.tags ?? ""}`

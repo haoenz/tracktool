@@ -491,7 +491,7 @@ for (const width of [1280, 390]) {
     await dialog.getByLabel("起始日期", { exact: true }).fill("2099-01-01");
     await dialog.getByRole("button", { name: "应用", exact: true }).click();
     await expect(
-      page.getByText("没有匹配的轨迹。", { exact: true }),
+      page.getByText("无匹配", { exact: true }),
     ).toBeVisible();
     await expect(filter).toHaveAttribute("title", "筛选：已设置");
     await filter.click();
