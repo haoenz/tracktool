@@ -1,14 +1,6 @@
 import { useMemo, useState } from "react";
-import {
-  ArrowDown,
-  ArrowUp,
-  Eye,
-  EyeOff,
-  GripVertical,
-  Link,
-  Unlink,
-} from "lucide-react";
-import { Button, Space } from "./components/controls.js";
+import { Eye, EyeOff, Link, Unlink, Plus } from "lucide-react";
+import { Button } from "./components/controls.js";
 import type {
   EditGeometry,
   Presentation,
@@ -26,6 +18,8 @@ export function DisplaySettings({
   onSelect,
   onSave,
   onDiscard,
+  onInsert,
+  insertDisabled,
 }: {
   settings: Presentation;
   segments: SegmentManifest[];
@@ -37,10 +31,10 @@ export function DisplaySettings({
   onSelect: (id: string) => void;
   onSave: () => void;
   onDiscard: () => void;
+  onInsert: (after: string) => void;
+  insertDisabled: boolean;
 }) {
-  const [dragging, setDragging] = useState<string>(),
-    [limit, setLimit] = useState(100),
-    [notice, setNotice] = useState("");
+  const [limit, setLimit] = useState(100);
   const distances = useMemo(
     () =>
       new Map(
@@ -69,6 +63,9 @@ export function DisplaySettings({
     settings.connections.find((e) => e.from === from && e.to === to)?.connect ??
     (settings.order.indexOf(to) === settings.order.indexOf(from) + 1 &&
       settings.default_connect);
+  const allConnected =
+    visible.length > 1 &&
+    visible.slice(1).every((to, i) => connected(visible[i]!, to));
   function connect(from: string, to: string, value: boolean) {
     onChange({
       ...settings,
@@ -77,23 +74,6 @@ export function DisplaySettings({
         { from, to, connect: value },
       ],
     });
-  }
-  function reorder(id: string, to: string) {
-    const fromIndex = settings.order.indexOf(id),
-      toIndex = settings.order.indexOf(to);
-    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
-    const order = [...settings.order];
-    order.splice(fromIndex, 1);
-    order.splice(toIndex, 0, id);
-    const connections = settings.connections.filter(
-      (e) => order.indexOf(e.from) < order.indexOf(e.to),
-    );
-    onChange({ ...settings, order, connections });
-    setNotice(
-      connections.length < settings.connections.length
-        ? "顺序已调整；方向不再符合新顺序的连接已取消，请检查地图。"
-        : "顺序已调整。",
-    );
   }
   function batch(value: boolean) {
     onChange({
@@ -108,22 +88,8 @@ export function DisplaySettings({
   }
   return (
     <section aria-label="分段管理" className="space-y-3">
-      <p>
-        拖动排列片段，点击眼睛显示或隐藏，点击片段间的连接按钮切换连线。只改变展示，原始轨迹数据保留。
-      </p>
       <fieldset disabled={busy} className="min-w-0 space-y-3">
-        <Space wrap>
-          <Button disabled={visible.length < 2} onClick={() => batch(true)}>
-            全部连接
-          </Button>
-          <Button onClick={() => batch(false)}>全部断开</Button>
-        </Space>
-        {notice && (
-          <p role="status" className="text-sm">
-            {notice}
-          </p>
-        )}
-        <ol className="space-y-2" aria-label="显示片段列表">
+        <ol className="space-y-1" aria-label="显示片段列表">
           {settings.order.slice(0, limit).map((id, i) => {
             const hidden = settings.ignored.includes(id),
               segment = segments.find((s) => s.segment_id === id)!;
@@ -135,33 +101,9 @@ export function DisplaySettings({
             return (
               <li key={id} data-display-segment={id}>
                 <div
-                  className={`rounded-md border p-2 ${selected === id ? "border-primary bg-accent" : "border-border"} ${hidden ? "opacity-50" : ""} ${dragging === id ? "ring-2 ring-primary" : ""}`}
+                  className={`rounded-md border p-2 ${selected === id ? "border-primary bg-accent" : "border-border"} ${hidden ? "opacity-50" : ""}`}
                 >
                   <div className="flex items-center gap-1">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label={`拖动${name(id)}`}
-                      className="touch-none cursor-grab shrink-0"
-                      onPointerDown={(e) => {
-                        if (busy) return;
-                        setDragging(id);
-                        e.currentTarget.setPointerCapture(e.pointerId);
-                      }}
-                      onPointerCancel={() => setDragging(undefined)}
-                      onPointerUp={(e) => {
-                        if (dragging) {
-                          const to = document
-                            .elementFromPoint(e.clientX, e.clientY)
-                            ?.closest<HTMLElement>("[data-display-segment]")
-                            ?.dataset.displaySegment;
-                          if (to) reorder(dragging, to);
-                        }
-                        setDragging(undefined);
-                      }}
-                    >
-                      <GripVertical size={16} />
-                    </Button>
                     <Button
                       size="icon"
                       variant="ghost"
@@ -199,42 +141,53 @@ export function DisplaySettings({
                         </span>
                       </span>
                     </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label={`上移${name(id)}`}
-                      disabled={!i}
-                      onClick={() => reorder(id, settings.order[i - 1]!)}
-                    >
-                      <ArrowUp size={16} />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label={`下移${name(id)}`}
-                      disabled={i === settings.order.length - 1}
-                      onClick={() => reorder(id, settings.order[i + 1]!)}
-                    >
-                      <ArrowDown size={16} />
-                    </Button>
                   </div>
                 </div>
-                {next && (
-                  <div className="py-1 pl-8">
-                    <Button
-                      variant="ghost"
-                      aria-label={`${name(id)}与${name(next)}${connected(id, next) ? "已连接" : "未连接"}`}
-                      aria-pressed={connected(id, next)}
-                      onClick={() => connect(id, next, !connected(id, next))}
-                    >
-                      {connected(id, next) ? (
-                        <Link size={14} />
-                      ) : (
-                        <Unlink size={14} />
-                      )}
-                      {connected(id, next) ? "已连接" : "未连接"} · 到
-                      {name(next)}
-                    </Button>
+                {(next || settings.order[i + 1]) && (
+                  <div className="flex items-center gap-1">
+                    {next && (
+                      <div className="ml-8 flex w-8 flex-col items-center">
+                        <span
+                          aria-hidden="true"
+                          className="h-1 w-px bg-border"
+                        />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-6"
+                          aria-label={`${name(id)}与${name(next)}${connected(id, next) ? "已连接" : "未连接"}`}
+                          aria-pressed={connected(id, next)}
+                          onClick={() =>
+                            connect(id, next, !connected(id, next))
+                          }
+                        >
+                          {connected(id, next) ? (
+                            <Link size={14} />
+                          ) : (
+                            <Unlink size={14} />
+                          )}
+                        </Button>
+                        <span
+                          aria-hidden="true"
+                          className="h-1 w-px bg-border"
+                        />
+                      </div>
+                    )}
+                    {settings.order[i + 1] && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-6"
+                        aria-label={`在${name(id)}与${name(settings.order[i + 1]!)}之间补绘轨迹`}
+                        title={
+                          dirty ? "请先保存或取消分段修改" : "插入补绘轨迹"
+                        }
+                        disabled={insertDisabled || dirty}
+                        onClick={() => onInsert(id)}
+                      >
+                        <Plus size={14} />
+                      </Button>
+                    )}
                   </div>
                 )}
               </li>
@@ -250,17 +203,15 @@ export function DisplaySettings({
         role="group"
         aria-label="保存显示设置"
       >
-        <span className="mr-auto text-sm">
-          {dirty ? "未保存修改" : "已保存"}
-        </span>
         <Button
-          disabled={busy || !dirty}
-          onClick={() => {
-            onDiscard();
-            setNotice("");
-          }}
+          className="mr-auto"
+          disabled={busy || visible.length < 2}
+          onClick={() => batch(!allConnected)}
         >
-          放弃修改
+          {allConnected ? "全部断开" : "全部连接"}
+        </Button>
+        <Button disabled={busy || !dirty} onClick={onDiscard}>
+          取消
         </Button>
         <Button
           variant="default"

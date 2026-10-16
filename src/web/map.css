@@ -1124,30 +1124,6 @@
   color: #344b3d;
   overflow-wrap: anywhere;
 }
-.track-editor-context {
-  margin-bottom: 20px;
-  font-size: 13px;
-}
-.track-editor-context p {
-  margin-top: 8px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #647469;
-}
-.track-editor-context-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.track-editor-context-heading strong {
-  min-width: 0;
-}
-.map-controls .track-editor-context-heading button {
-  width: 44px;
-  height: 44px;
-  padding: 0;
-}
 
 /* Track details: summary first, optional statistics and analysis below. */
 .track-stats {

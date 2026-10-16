@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, LoaderCircle } from "lucide-react";
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Alert, Button, Modal, Space, Spin } from "./components/controls.js";
 import { api, request, waitForWorkTask } from "./api.js";
 import { TrackEditorMap } from "./track-editor-map.js";
@@ -32,7 +37,7 @@ export function TrackHistory({
   const workspace = useWorkspace(),
     cache = useQueryClient();
   const [cursor, setCursor] = useState(0),
-    [selected, setSelected] = useState<HistoryEvent>(),
+    [selection, setSelected] = useState<HistoryEvent>(),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
@@ -49,6 +54,8 @@ export function TrackHistory({
         `/api/tracks/${entryId}/history?cursor=${cursor}`,
       ),
   });
+  const selected =
+    selection ?? history.data?.events.find((event) => event.current);
   const geometry = useQuery({
     queryKey: [
       "history-geometry",
@@ -61,6 +68,7 @@ export function TrackHistory({
         `/api/tracks/${entryId}/geometry?${new URLSearchParams({ version_id: selected!.after.version_id, presentation_id: selected!.after.presentation_id })}`,
       ),
     enabled: !!selected && active,
+    placeholderData: keepPreviousData,
   });
   async function download() {
     if (!selected) return;
@@ -163,7 +171,6 @@ export function TrackHistory({
   }
   return (
     <div className="work-main track-history">
-      <p>点击记录查看当时的轨迹，不会修改当前轨迹。</p>
       {(error || history.error) && (
         <Alert type="error" title={error || history.error!.message} />
       )}
@@ -177,44 +184,19 @@ export function TrackHistory({
       )}
       {selected && (
         <section className="space-y-3" aria-label="历史状态">
-          <p>
-            <strong>
-              {selected.current ? "正在查看当前状态" : "正在查看历史状态"}
-            </strong>{" "}
-            · {time(selected.created_at)} · {selected.title}
-          </p>
-          <Space wrap>
-            <Button onClick={() => setSelected(undefined)}>回到当前</Button>
-            <Button disabled={busy} onClick={() => void download()}>
-              下载此时的 KML
+          {selected.kind === "split_journey" && (
+            <Button
+              disabled={busy}
+              onClick={() => void prepare(selected, true)}
+            >
+              撤销拆分
             </Button>
-            {!selected.current && selected.kind !== "split_journey" && (
-              <Button
-                disabled={busy}
-                onClick={() => void prepare(selected, false)}
-              >
-                恢复到此状态
-              </Button>
-            )}
-            {selected.kind === "split_journey" && (
-              <Button
-                disabled={busy}
-                onClick={() => void prepare(selected, true)}
-              >
-                撤销拆分
-              </Button>
-            )}
-          </Space>
-          <p className="text-sm text-muted-foreground">
-            地图包含当时的显示设置；KML 下载保留完整轨迹数据。
-          </p>
-          {geometry.isFetching && <Spin />}
+          )}
           {geometry.error && (
             <Alert type="error" title={geometry.error.message} />
           )}
           {geometry.data && (
             <TrackEditorMap
-              key={selected.id}
               geometry={geometry.data}
               active={active}
               autoFit
@@ -227,9 +209,13 @@ export function TrackHistory({
       {history.data && !history.data.events.length && <p>暂无历史操作。</p>}
       <ol className="space-y-2" aria-label="操作时间线">
         {history.data?.events.map((event) => (
-          <li key={event.id}>
+          <li
+            key={event.id}
+            className={`flex items-center gap-1 rounded-md border ${selected?.id === event.id ? "border-primary bg-accent" : "border-border"}`}
+          >
             <Button
-              className="h-auto w-full justify-start whitespace-normal text-left"
+              variant="ghost"
+              className="h-auto min-w-0 flex-1 justify-start whitespace-normal text-left"
               aria-pressed={selected?.id === event.id}
               onClick={() => {
                 setSelected(event);
@@ -245,6 +231,28 @@ export function TrackHistory({
                 </span>
               </span>
             </Button>
+            <div className="mr-1 flex size-9 shrink-0 items-center justify-center">
+              {selected?.id === event.id && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="shrink-0"
+                  aria-label="下载此时的 KML"
+                  title="下载此时的 KML"
+                  disabled={busy}
+                  onClick={() => void download()}
+                >
+                  {geometry.isFetching ? (
+                    <LoaderCircle
+                      className="animate-spin"
+                      aria-label="正在加载历史轨迹"
+                    />
+                  ) : (
+                    <Download aria-hidden="true" />
+                  )}
+                </Button>
+              )}
+            </div>
           </li>
         ))}
       </ol>

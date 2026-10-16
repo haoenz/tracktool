@@ -180,6 +180,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     [candidateCamera, setCandidateCamera] = useState<Project["camera"]>(),
     [sheet, setSheet] = useState("half"),
     [editing, setEditing] = useState(false),
+    [drawHeader, setDrawHeader] = useState<{ onBack: () => void }>(),
     [detailOpen, setDetailOpen] = useState(true),
     [projectTab, setProjectTab] = useState("content"),
     [projectSearch, setProjectSearch] = useState(""),
@@ -1087,7 +1088,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               <FileOutput size={22} aria-hidden="true" />
             </Button>
           </nav>
-          {hasDraft && <span className="draft-status">编辑草稿保留</span>}
         </header>
         <Button
           className="map-settings-button"
@@ -1162,7 +1162,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 panel === "library" && archiveAction
                   ? operationLabel(archiveAction)
                     : panel === "library" && overview.id && detailOpen
-                      ? editing ? editorTitles[editorView] : overview.selected?.name ?? "正在读取轨迹…"
+                      ? editing ? drawHeader && editorView === "display" ? "补绘轨迹" : editorTitles[editorView] : overview.selected?.name ?? "正在读取轨迹…"
                       : panel === "library" && libraryList ? "轨迹列表" : exportPage ? "导出轨迹" : panel ? panels[panel] : ""
               }
               headingClassName={panel === "library" && overview.id && detailOpen ? "track-detail-heading" : undefined}
@@ -1170,7 +1170,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 panel === "library" && archiveAction
                   ? "返回轨迹库"
                   : panel === "library" && overview.id && detailOpen
-                    ? editing ? "返回详情" : "返回列表"
+                    ? editing ? drawHeader && editorView === "display" ? "返回分段管理" : "返回详情" : "返回列表"
                     : inProject && !exportPage ? "回到工程" : "返回轨迹库"
               }
               onBack={
@@ -1179,7 +1179,9 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                     : panel === "library" && overview.id && detailOpen
                       ? () => {
                           if (editing) {
-                            if (editorView === "display" && hasDraft && !window.confirm("显示设置尚未保存，返回后会保留草稿。是否返回？")) return;
+                            if (drawHeader && editorView === "display") {
+                              drawHeader.onBack(); return;
+                            }
                             setEditing(false); return;
                           }
                           setDetailOpen(false);
@@ -2153,44 +2155,19 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       </TrackInsights>
                     )}
                   </div>
-                  {editing && (
-                    <div className="track-editor-context">
-                      <div className="track-editor-context-heading">
-                        <strong>{overview.selected?.name}</strong>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          aria-label="定位轨迹"
-                          title="定位轨迹"
-                          disabled={
-                            editMap
-                              ? !editMap.tracks.some((track) => track.points > 0)
-                              : !overview.selectedTrack
-                          }
-                          onClick={() =>
-                            fitTracks(editMap ? editMap.tracks : [overview.selectedTrack!])
-                          }
-                        >
-                          <LocateFixed aria-hidden="true" />
-                        </Button>
-                      </div>
-                      {editorView !== "history" && (
-                        <p>编辑会生成新版本，工程固定的历史版本保持不变。</p>
-                      )}
-                    </div>
-                  )}
                   <Suspense fallback={<Spin />}>
                     <div hidden={!editing}>
-                      <TrackEditor
+                      {(editorView === "edit" || (editing && detailOpen && panel === "library" && !archiveAction)) && <TrackEditor
                         key={`${overview.id}:${editorView}`}
                         view={editorView}
+                        onDrawHeaderChange={setDrawHeader}
                         initialEntry={overview.id}
                         onEntryChange={(id) => {
                           overview.setId(id);
                           setEditing(false);
                         }}
                         active={editing && detailOpen && panel === "library" && !archiveAction}
-                      />
+                      />}
                     </div>
                   </Suspense>
                   {detailAction && (

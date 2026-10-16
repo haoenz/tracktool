@@ -1,4 +1,5 @@
 import { DisplaySettings } from "./display-settings.js";
+import { samePresentation } from "../shared/presentation-equality.js";
 import { editTracks } from "./track-editor-map.js";
 import { TrackHistory } from "./track-history.js";
 import "./work.css";
@@ -73,11 +74,13 @@ function TrackEditor({
   view = "edit",
   active: visible = true,
   onEntryChange,
+  onDrawHeaderChange,
 }: {
   initialEntry: string;
   view?: "edit" | "display" | "history";
   active?: boolean;
   onEntryChange?: (id: string) => void;
+  onDrawHeaderChange?: (header: { onBack: () => void } | undefined) => void;
 }) {
   const workspace = useWorkspace(),
     cache = useQueryClient();
@@ -217,6 +220,7 @@ function TrackEditor({
       setIndices("");
       setDrawing([]);
       setCandidates([]);
+      if (view === "display") setMode("");
       setStart(0);
       setEnd(0);
       setTag(undefined);
@@ -244,10 +248,19 @@ function TrackEditor({
     !!indices.trim() ||
     end > start ||
     !!candidates.length ||
-    (!!settings &&
-      !!d &&
-      JSON.stringify(settings) !== JSON.stringify(d.settings));
+    (!!settings && !!d && !samePresentation(settings, d.settings));
   const draftKey = `editor:${entryId}`;
+  useEffect(() => {
+    if (view !== "display" || mode !== "draw") return;
+    onDrawHeaderChange?.({
+      onBack: () => {
+        if (busy || active) return;
+        resetDraft();
+        setMode("");
+      },
+    });
+    return () => onDrawHeaderChange?.(undefined);
+  }, [view, mode, busy, active, d, onDrawHeaderChange]);
   useEffect(() => {
     workspace.draft?.(draftKey, draftDirty);
     return () => workspace.draft?.(draftKey, false);
@@ -496,7 +509,13 @@ function TrackEditor({
       });
   }
   function pick(p: [number, number]) {
-    if (view !== "edit" || busy || active || !mode || (preview && !showBefore))
+    if (
+      (view !== "edit" && !(view === "display" && mode === "draw")) ||
+      busy ||
+      active ||
+      !mode ||
+      (preview && !showBefore)
+    )
       return;
     if (mode === "draw") {
       const endpoint = geometry.data?.segments
@@ -731,7 +750,7 @@ function TrackEditor({
               description={d.manifest_error}
             />
           )}
-          {view === "display" && (
+          {view === "display" && !mode && (
             <DisplaySettings
               settings={settings}
               segments={d.segments}
@@ -739,6 +758,14 @@ function TrackEditor({
               selected={segmentId}
               busy={busy || !!active}
               dirty={draftDirty}
+              insertDisabled={
+                d.entry.state !== "active" || d.manifest_status !== "ready"
+              }
+              onInsert={(id) => {
+                resetDraft();
+                setAfter(id);
+                setMode("draw");
+              }}
               onChange={setSettings}
               onSelect={(id) => {
                 setSegment(id);
@@ -762,42 +789,46 @@ function TrackEditor({
           )}
           {view === "edit" && !mode && (
             <div className="grid grid-cols-2 gap-2" aria-label="选择编辑操作">
-              {Object.entries(editActions).map(([key, label]) => (
-                <Button
-                  key={key}
-                  className="h-auto min-h-12 whitespace-normal"
-                  onClick={() => {
-                    resetDraft();
-                    setMode(key);
-                  }}
-                >
-                  {label}
-                </Button>
-              ))}
+              {Object.entries(editActions)
+                .filter(([key]) => key !== "draw")
+                .map(([key, label]) => (
+                  <Button
+                    key={key}
+                    className="h-auto min-h-12 whitespace-normal"
+                    onClick={() => {
+                      resetDraft();
+                      setMode(key);
+                    }}
+                  >
+                    {label}
+                  </Button>
+                ))}
             </div>
           )}
-          {view === "edit" && mode && (
+          {(view === "edit" || view === "display") && mode && (
             <section aria-label={editActions[mode]} className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label="返回编辑操作"
-                  disabled={busy || !!active}
-                  onClick={() => {
-                    if (
-                      draftDirty &&
-                      !window.confirm("有未保存的修改，是否放弃并返回？")
-                    )
-                      return;
-                    resetDraft();
-                    setMode("");
-                  }}
-                >
-                  <ArrowLeft size={18} />
-                </Button>
-                <strong>{editActions[mode]}</strong>
-              </div>
+              {view !== "display" && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label="返回编辑操作"
+                    disabled={busy || !!active}
+                    onClick={() => {
+                      if (
+                        draftDirty &&
+                        !window.confirm("有未保存的修改，是否放弃并返回？")
+                      )
+                        return;
+                      resetDraft();
+                      setMode("");
+                    }}
+                  >
+                    <ArrowLeft size={18} />
+                  </Button>
+                  <strong>{editActions[mode]}</strong>
+                </div>
+              )}
               <fieldset
                 disabled={busy || !!active || !!preview}
                 className="min-w-0 space-y-3"
@@ -901,26 +932,6 @@ function TrackEditor({
                 )}
                 {mode === "draw" && (
                   <>
-                    <label>
-                      在哪里补绘
-                      <Select
-                        aria-label="补绘位置"
-                        value={after ?? "first"}
-                        onChange={(v) => {
-                          setAfter(v === "first" ? null : v);
-                          setDrawing([]);
-                          setSnapStart(undefined);
-                          setSnapEnd(undefined);
-                        }}
-                        options={[
-                          { value: "first", label: "轨迹最前面" },
-                          ...segmentOptions.map((o) => ({
-                            value: o.value,
-                            label: `${o.label}之后`,
-                          })),
-                        ]}
-                      />
-                    </label>
                     <p>
                       点击地图依次画线，至少两个点。靠近已有端点时会自动吸附；手绘部分没有时间信息。
                     </p>
@@ -1124,7 +1135,7 @@ function TrackEditor({
                   disabled={busy || !!active || !draftDirty}
                   onClick={resetDraft}
                 >
-                  放弃修改
+                  取消
                 </Button>
                 <Button
                   variant="default"
@@ -1233,6 +1244,7 @@ export default function TrackEditorView(props: {
   view?: "edit" | "display" | "history";
   active?: boolean;
   onEntryChange?: (id: string) => void;
+  onDrawHeaderChange?: (header: { onBack: () => void } | undefined) => void;
 }) {
   return props.view === "history" ? (
     <TrackHistory entryId={props.initialEntry} active={props.active ?? true} />

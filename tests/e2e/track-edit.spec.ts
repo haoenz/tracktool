@@ -27,7 +27,7 @@ async function save(page: Page, label = "保存") {
   ).toBeVisible({ timeout: 20000 });
 }
 for (const width of [1280, 390])
-  test(`version editing, drawing, visibility and restoration at ${width}px`, async ({
+  test(`version editing, drawing, visibility and history preview at ${width}px`, async ({
     page,
   }) => {
     test.setTimeout(90000);
@@ -41,23 +41,50 @@ for (const width of [1280, 390])
       {},
     );
     try {
-      const openEditor = async () => {
+      const openEditor = async (view = "编辑轨迹") => {
         await tool(page, "轨迹库");
         await filterTracks(page, fixture.path.split("/").at(-1)!);
         await page
           .getByRole("button", { name: `查看 ${fixture.path}`, exact: true })
           .click();
-        await page
-          .getByRole("button", { name: "编辑轨迹", exact: true })
-          .click();
+        await page.getByRole("button", { name: view, exact: true }).click();
       };
       await openEditor();
       await page.getByRole("button", { name: "断开轨迹", exact: true }).click();
       await pickEditorPoint(page, 1);
       await save(page);
       await page.reload();
-      await openEditor();
-      await page.getByRole("button", { name: "补绘轨迹", exact: true }).click();
+      await openEditor("分段管理");
+      const insert = page.getByRole("button", {
+        name: "在片段 1与片段 2之间补绘轨迹",
+        exact: true,
+      });
+      const connection = page.getByRole("button", { name: /^片段 1与片段 2/ });
+      const originalConnection = await connection.getAttribute("aria-pressed");
+      await connection.click();
+      await expect(insert).toBeDisabled();
+      await connection.click();
+      await expect(insert).toBeEnabled();
+      await connection.click();
+      await page.getByRole("button", { name: "返回详情", exact: true }).click();
+      await page.getByRole("button", { name: "分段管理", exact: true }).click();
+      await expect(connection).toHaveAttribute(
+        "aria-pressed",
+        originalConnection!,
+      );
+      await expect(insert).toBeEnabled();
+      await page
+        .getByRole("button", {
+          name: "在片段 1与片段 2之间补绘轨迹",
+          exact: true,
+        })
+        .click();
+      await expect(
+        page.getByRole("heading", { name: "补绘轨迹", exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "返回分段管理", exact: true }),
+      ).toHaveCount(1);
       const map = page.getByRole("region", { name: "段编辑地图" });
       await expect(map).toHaveAttribute("data-status", "ready", {
         timeout: 20000,
@@ -95,51 +122,17 @@ for (const width of [1280, 390])
           exact: true,
         }),
       ).toBeVisible();
-      await display
-        .getByRole("button", { name: "下移片段 1", exact: true })
-        .click();
       await expect(
-        display
-          .getByRole("listitem")
-          .first()
-          .getByRole("button", { name: "拖动片段 4", exact: true }),
-      ).toBeVisible();
-      await display
-        .getByRole("button", { name: "放弃修改", exact: true })
-        .click();
+        display.getByRole("button", { name: /拖动|上移|下移/ }),
+      ).toHaveCount(0);
+      await expect(
+        display.getByRole("button", { name: /之间补绘轨迹/ }).first(),
+      ).toBeDisabled();
+      await display.getByRole("button", { name: "取消", exact: true }).click();
       await expect(displaySave).toBeDisabled();
       await expect(
-        display
-          .getByRole("listitem")
-          .first()
-          .getByRole("button", { name: "拖动片段 1", exact: true }),
-      ).toBeVisible();
-      const handle = display.getByRole("button", {
-        name: "拖动片段 1",
-        exact: true,
-      });
-      const destination = display.getByRole("listitem").nth(1);
-      if (width <= 700)
-        await page.getByRole("button", { name: /调整面板高度/ }).press("End");
-      await handle.scrollIntoViewIfNeeded();
-      const sourceBox = await handle.boundingBox(),
-        targetBox = await destination.boundingBox();
-      await page.mouse.move(
-        sourceBox!.x + sourceBox!.width / 2,
-        sourceBox!.y + sourceBox!.height / 2,
-      );
-      await page.mouse.down();
-      await page.mouse.move(targetBox!.x + 20, targetBox!.y + 20, { steps: 5 });
-      await page.mouse.up();
-      await expect(
-        display
-          .getByRole("listitem")
-          .first()
-          .getByRole("button", { name: "拖动片段 4", exact: true }),
-      ).toBeVisible();
-      await display
-        .getByRole("button", { name: "放弃修改", exact: true })
-        .click();
+        display.getByRole("button", { name: /之间补绘轨迹/ }).first(),
+      ).toBeEnabled();
 
       await page
         .getByRole("button", { name: "隐藏片段 4", exact: true })
@@ -155,11 +148,9 @@ for (const width of [1280, 390])
       await save(page, "保存");
       await expect(
         page.getByRole("button", { name: "定位轨迹", exact: true }),
-      ).toBeDisabled();
+      ).toHaveCount(0);
       await page.getByRole("button", { name: "返回详情", exact: true }).click();
-      await page
-        .getByRole("button", { name: "历史记录", exact: true })
-        .click();
+      await page.getByRole("button", { name: "历史记录", exact: true }).click();
       const timeline = page.getByRole("list", { name: "操作时间线" });
       await expect(timeline.getByRole("button").first()).toContainText(
         "当前状态",
@@ -167,13 +158,16 @@ for (const width of [1280, 390])
       await expect(
         timeline.getByRole("button", { name: /调整显示/ }),
       ).toHaveCount(2);
-      await timeline.getByRole("button").last().click();
-      await expect(
-        page.getByText("正在查看历史状态", { exact: true }),
-      ).toBeVisible();
+      const oldest = timeline
+        .getByRole("listitem")
+        .last()
+        .getByRole("button")
+        .first();
+      await oldest.click();
+      await expect(oldest).toHaveAttribute("aria-pressed", "true");
       await expect(
         page.getByRole("button", { name: "恢复到此状态", exact: true }),
-      ).toBeVisible();
+      ).toHaveCount(0);
       const download = page.waitForEvent("download");
       await page
         .getByRole("button", { name: "下载此时的 KML", exact: true })
@@ -182,29 +176,17 @@ for (const width of [1280, 390])
       expect(await readFile((await file.path())!, "utf8")).toContain(
         "120,30 120.01,30 120.02,30 120.03,30",
       );
-      await page
-        .getByRole("button", { name: "恢复到此状态", exact: true })
-        .click();
-      await expect(
-        page.getByRole("button", { name: "确认恢复", exact: true }),
-      ).toBeEnabled();
-      await page.getByRole("button", { name: "取消", exact: true }).click();
-      await expect(timeline.getByRole("button").first()).toContainText(
-        "调整显示",
-      );
-      await page
-        .getByRole("button", { name: "恢复到此状态", exact: true })
-        .click();
-      await expect(
-        page.getByRole("button", { name: "确认恢复", exact: true }),
-      ).toBeEnabled();
-      await page.getByRole("button", { name: "确认恢复", exact: true }).click();
-      await expect(page.getByRole("dialog")).toHaveCount(0);
-      await expect(timeline.getByRole("button").first()).toContainText(
-        "恢复历史状态",
+      await page.getByRole("button", { name: "返回详情", exact: true }).click();
+      await page.getByRole("button", { name: "历史记录", exact: true }).click();
+      await expect(timeline.getByRole("button").first()).toHaveAttribute(
+        "aria-pressed",
+        "true",
       );
       await expect(timeline.getByRole("button").first()).toContainText(
         "当前状态",
+      );
+      await expect(timeline.getByRole("button").first()).toContainText(
+        "调整显示",
       );
       await expect(page.getByText("编辑任务", { exact: true })).toHaveCount(0);
       expect(
