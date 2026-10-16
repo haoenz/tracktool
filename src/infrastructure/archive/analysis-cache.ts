@@ -28,6 +28,7 @@ const sampleSchema = z
     time_ms: finite.nullable(),
     altitude: finite.nullable(),
     speed: nonnegative.nullable(),
+    speed_spike: z.boolean().optional(),
   })
   .strict();
 const summarySchema = z

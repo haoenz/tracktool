@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { analyzeTrack } from "../../src/domain/track-analysis.js";
+import {
+  analyzeTrack,
+  ANALYSIS_PARAMS,
+} from "../../src/domain/track-analysis.js";
 import type { TrackData, TrackSegment } from "../../src/domain/trackdata.js";
 
 const segment = (
@@ -247,4 +250,67 @@ describe("track statistics", () => {
     expect(value.sampled).toBe(true);
     expect(value.distance_m).toBeCloseTo(22262.78, 0);
   });
+});
+
+const speedTrack = (
+  speeds: number[],
+  seconds = speeds.map((_, i) => i * 2),
+) => {
+  let lon = 0;
+  const longitudes = seconds.map((time, i) => {
+    if (i)
+      lon += ((speeds[i]! / 3.6) * (time - seconds[i - 1]!)) / 111319.490793;
+    return lon;
+  });
+  return segment(longitudes, undefined, seconds);
+};
+
+test("flags raw local speed outliers before profile sampling without changing statistics", () => {
+  const speeds = [
+    ...Array<number>(30).fill(120),
+    809,
+    296,
+    ...Array<number>(30).fill(120),
+  ];
+  const track = data(speedTrack(speeds));
+  const full = analyzeTrack(track);
+  expect(full.samples[30]?.speed_spike).toBe(true);
+  expect(full.samples[31]?.speed_spike).toBe(true);
+  const sampled = analyzeTrack(track, {
+    ...ANALYSIS_PARAMS,
+    profile_target_points: 21,
+  });
+  expect(sampled.samples.find((s) => s.time_ms === 60000)?.speed_spike).toBe(
+    true,
+  );
+  expect(sampled.max_kmh).toBe(full.max_kmh);
+  expect(full.max_kmh).toBeCloseTo(809);
+  expect(sampled.average_kmh).toBe(full.average_kmh);
+});
+
+test("does not infer speed outliers across segment boundaries", () => {
+  const result = analyzeTrack(
+    data(
+      speedTrack(Array<number>(30).fill(10)),
+      speedTrack(
+        Array<number>(30).fill(500),
+        Array.from({ length: 30 }, (_, i) => 60 + i * 2),
+      ),
+    ),
+  );
+  expect(result.samples.some((s) => s.speed_spike)).toBe(false);
+});
+
+test("detects a high observation before a recording gap using preceding context", () => {
+  const speeds = [
+    ...Array<number>(30).fill(118),
+    498,
+    ...Array<number>(30).fill(114),
+  ];
+  const seconds = speeds.map((_, i) =>
+    i < 30 ? i * 2 : i === 30 ? 64 : 221 + (i - 31) * 2,
+  );
+  const result = analyzeTrack(data(speedTrack(speeds, seconds)));
+  expect(result.samples[30]?.speed_spike).toBe(true);
+  expect(result.samples[31]?.speed_spike).not.toBe(true);
 });

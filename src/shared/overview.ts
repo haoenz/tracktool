@@ -15,6 +15,10 @@ export const OverviewEntry = z.object({
   name: z.string(),
   kind: z.string(),
   date: z.string(),
+  start_time_us: z
+    .string()
+    .regex(/^-?\d+$/)
+    .optional(),
   tags: z.string().optional(),
   distance_m: z.number().nonnegative().optional(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -50,4 +54,24 @@ export interface OverviewStatus {
   error?: string;
   tiles?: string;
   maxZoom: number;
+}
+
+/** Shared by server pagination and client-side candidate merging. */
+export function compareOverviewEntries(
+  a: OverviewEntry,
+  b: OverviewEntry,
+  sort: string,
+): number {
+  if (sort === "name")
+    return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+  if (!a.date || !b.date)
+    return (a.date ? -1 : b.date ? 1 : 0) || a.id.localeCompare(b.id);
+  const time = (entry: OverviewEntry) =>
+    entry.start_time_us !== undefined
+      ? BigInt(entry.start_time_us)
+      : BigInt(Date.parse(`${entry.date}T00:00:00+08:00`)) * 1000n;
+  const left = time(a),
+    right = time(b);
+  const order = left < right ? -1 : left > right ? 1 : 0;
+  return (sort === "date-asc" ? order : -order) || a.id.localeCompare(b.id);
 }

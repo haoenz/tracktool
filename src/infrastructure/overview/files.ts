@@ -52,7 +52,7 @@ export function fingerprint(stamp: SourceStamp, crs: OverviewCrs) {
       crs,
       format: FORMAT,
       parser: PARSER_VERSION,
-      coordinates: 2,
+      coordinates: 3,
       tiling: OVERVIEW_TILING,
     }),
   );
@@ -88,6 +88,10 @@ const Coordinates = z.object({
   name: z.string(),
   tags: z.string(),
   date: z.string(),
+  start_time_us: z
+    .string()
+    .regex(/^-?\d+$/)
+    .nullable(),
   segments: z.array(
     z.array(z.tuple([z.number().finite(), z.number().finite()])),
   ),

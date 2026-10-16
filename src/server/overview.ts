@@ -8,7 +8,11 @@ import { OVERVIEW_TILING } from "../domain/overview.js";
 import { databasePath } from "../infrastructure/archive/database.js";
 import { OverviewService } from "../infrastructure/overview/service.js";
 import { digest } from "../infrastructure/overview/files.js";
-import { OverviewCrs, OverviewVersion } from "../shared/overview.js";
+import {
+  compareOverviewEntries,
+  OverviewCrs,
+  OverviewVersion,
+} from "../shared/overview.js";
 
 export function overviewRoutes(
   app: FastifyInstance,
@@ -136,19 +140,7 @@ export function overviewRoutes(
               .toLocaleLowerCase()
               .includes(text)),
       );
-    rows.sort((a, b) =>
-      query.sort === "name"
-        ? a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
-        : !a.date
-          ? !b.date
-            ? a.id.localeCompare(b.id)
-            : 1
-          : !b.date
-            ? -1
-            : (query.sort === "date-desc"
-                ? b.date.localeCompare(a.date)
-                : a.date.localeCompare(b.date)) || a.id.localeCompare(b.id),
-    );
+    rows.sort((a, b) => compareOverviewEntries(a, b, query.sort));
     return {
       version: m.version,
       total: rows.length,

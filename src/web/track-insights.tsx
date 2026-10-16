@@ -1,3 +1,4 @@
+import { speedChartMaximum } from "../shared/speed-chart.js";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Spin } from "./components/controls.js";
@@ -41,7 +42,10 @@ export function metricRange(
     p[metric] === null ? [] : [p[metric]!],
   );
   if (!values.length) return undefined;
-  return [Math.min(...values), Math.max(...values)];
+  return [
+    Math.min(...values),
+    metric === "speed" ? speedChartMaximum(data.samples) : Math.max(...values),
+  ];
 }
 function Stats({ rows }: { rows: [string, ReactNode][] }) {
   return (
@@ -159,7 +163,16 @@ export function TrackInsights({
   const currentAxis = data?.time_complete ? axis : "distance";
   const range = data && metricRange(data, metric);
   const overlayRange =
-    data && overlay !== "original" ? metricRange(data, overlay) : undefined;
+    data && overlay !== "original"
+      ? (() => {
+          const values = data.samples.flatMap((p) =>
+            p[overlay] === null ? [] : [p[overlay]!],
+          );
+          return values.length
+            ? [Math.min(...values), Math.max(...values)]
+            : undefined;
+        })()
+      : undefined;
   const timeRows: [string, string][] = [
     ["运动耗时", duration(data?.moving_s)],
     ["平均速度", number(data?.average_kmh, " km/h")],
@@ -432,7 +445,9 @@ function ProfileChart({
       : (p.time_ms ?? data.start_ms ?? 0) - (data.start_ms ?? 0);
   const x = (p: AnalysisSample) => left + (xValue(p) / extent) * (right - left);
   const y = (v: number) =>
-    bottom - (max === min ? 0.5 : (v - min) / (max - min)) * (bottom - top);
+    bottom -
+    (max === min ? 0.5 : (Math.min(v, max) - min) / (max - min)) *
+      (bottom - top);
   const paths = useMemo(() => {
     const groups: AnalysisSample[][] = [];
     let current: AnalysisSample[] = [];
@@ -554,6 +569,18 @@ function ProfileChart({
           </g>
         );
       })}
+      {metric === "speed" &&
+        data.samples
+          .filter((p) => p.speed !== null && p.speed > max)
+          .map((p, index) => (
+            <path
+              key={`overflow-${index}`}
+              d={`M${x(p)},${top - 4} l-3,5 h6 Z`}
+              fill="#b45309"
+            >
+              <title>{`超出纵轴范围：${number(p.speed, " km/h")}`}</title>
+            </path>
+          ))}
       <text x={left} y="150">
         0
       </text>

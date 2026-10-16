@@ -6,6 +6,7 @@ export type AnalysisSample = {
   distance_m: number;
   time_ms: number | null;
   altitude: number | null;
+  speed_spike?: boolean; // Local statistical speed outlier; display only.
   speed: number | null; // km/h, preceding interval within this segment
 };
 export type TrackAnalysis = {

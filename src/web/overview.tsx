@@ -1,3 +1,4 @@
+import { compareOverviewEntries } from "../shared/overview.js";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -113,17 +114,7 @@ export function useOverview(
       entries.push(...result.entries);
     }
     entries.sort((a, b) =>
-      params.sort === "name"
-        ? a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
-        : !a.date
-          ? !b.date
-            ? a.id.localeCompare(b.id)
-            : 1
-          : !b.date
-            ? -1
-            : (params.sort === "date-asc"
-                ? a.date.localeCompare(b.date)
-                : b.date.localeCompare(a.date)) || a.id.localeCompare(b.id),
+      compareOverviewEntries(a, b, params.sort ?? "date-desc"),
     );
     const offset = Number(params.offset ?? 0);
     return {

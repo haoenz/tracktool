@@ -1,3 +1,7 @@
+import {
+  compareOverviewEntries,
+  type OverviewEntry,
+} from "../../dist/node/shared/overview.js";
 import { afterEach, expect, it } from "vitest";
 import {
   mkdtemp,
@@ -603,12 +607,50 @@ it("overview dates use measured time before filename metadata and never invent m
   insert(
     db,
     "timed",
-    '<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><Placemark><gx:Track><when>2020-04-05T10:00:00Z</when><when>2020-04-05T10:01:00Z</when><gx:coord>116 39 0</gx:coord><gx:coord>116.1 39 0</gx:coord></gx:Track></Placemark></Document></kml>',
+    '<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><Placemark><gx:Track><when>2020-04-05T16:00:00.000001Z</when><when>2020-04-05T15:59:59Z</when><gx:coord>116 39 0</gx:coord><gx:coord>116.1 39 0</gx:coord></gx:Track></Placemark></Document></kml>',
   );
   db.close();
   const s = service(source, cache);
   const status = await ready(s);
   const m = await s.manifest(status.version!);
   expect(m.entries.find((e) => e.id === "normal")?.date).toBe("");
-  expect(m.entries.find((e) => e.id === "timed")?.date).toBe("2020-04-05");
+  expect(m.entries.find((e) => e.id === "timed")?.date).toBe("2020-04-06");
+  expect(m.entries.find((e) => e.id === "timed")?.start_time_us).toBe(
+    "1586102400000001",
+  );
+});
+
+it("sorts complete start times including microseconds, with UTC+8 filename fallback and unknown dates last", () => {
+  const row = (
+    id: string,
+    date: string,
+    start_time_us?: string,
+  ): OverviewEntry => ({
+    id,
+    date,
+    start_time_us,
+    name: id,
+    entry: id,
+    kind: "Default",
+    sha256: "a".repeat(64),
+    points: 1,
+    segments: 1,
+  });
+  const rows = [
+    row("a-later", "2020-04-06", "1586102400000002"),
+    row("z-earlier", "2020-04-06", "1586102400000001"),
+    row("filename", "2020-04-06"),
+    row("unknown", ""),
+    row("previous", "2020-04-05", "1586102399999999"),
+  ];
+  expect(
+    [...rows]
+      .sort((a, b) => compareOverviewEntries(a, b, "date-asc"))
+      .map((e) => e.id),
+  ).toEqual(["previous", "filename", "z-earlier", "a-later", "unknown"]);
+  expect(
+    [...rows]
+      .sort((a, b) => compareOverviewEntries(a, b, "date-desc"))
+      .map((e) => e.id),
+  ).toEqual(["a-later", "z-earlier", "filename", "previous", "unknown"]);
 });

@@ -393,3 +393,41 @@ it("preserves unparseable imported originals without fabricating analysis", asyn
   expect(downloadBytes(file, { entry_id: entry.id }).bytes).toEqual(invalid);
   expect(rows(file)).toHaveLength(1);
 });
+
+it("persists local speed outlier flags across ingestion and cache reads", async () => {
+  const { file } = await fixture();
+  const speeds = [
+    ...Array<number>(20).fill(120),
+    809,
+    296,
+    ...Array<number>(20).fill(120),
+  ];
+  let longitude = 0;
+  const points = speeds.map((speed, i) => {
+    if (i) longitude += ((speed / 3.6) * 2) / 111319.490793;
+    return {
+      longitude,
+      time: new Date(Date.UTC(2026, 9, 16) + i * 2000).toISOString(),
+    };
+  });
+  const bytes = Buffer.from(
+    `<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><Placemark><gx:Track>${points.map((p) => `<when>${p.time}</when>`).join("")}${points.map((p) => `<gx:coord>${p.longitude} 0 0</gx:coord>`).join("")}</gx:Track></Placemark></Document></kml>`,
+  );
+  const entry = transaction(file, true, (db) =>
+    addEntry(db, "speed-outliers.kml", bytes, "Default"),
+  );
+  const run = vi
+    .fn<XmlPort["run"]>()
+    .mockRejectedValue(new Error("must use ingestion cache"));
+  const result = await new TrackAnalysisCache({ run }).get(
+    file,
+    entry.id,
+    entry.sha256,
+  );
+  expect(result.samples[20]?.speed_spike).toBe(true);
+  expect(result.samples[21]?.speed_spike).toBe(true);
+  expect(result.samples[10]?.speed_spike).not.toBe(true);
+  expect(result.max_kmh).toBeCloseTo(809);
+  expect(run).not.toHaveBeenCalled();
+  expect(downloadBytes(file, { entry_id: entry.id }).bytes).toEqual(bytes);
+});

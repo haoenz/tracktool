@@ -1,3 +1,4 @@
+import { speedSpikes, SPEED_OUTLIER_DEFAULTS } from "./speed-spikes.js";
 import type { TrackData } from "./trackdata.js";
 import { distance } from "./kml-edit.js";
 import type {
@@ -11,6 +12,11 @@ export const ANALYSIS_PARAMS = Object.freeze({
   moving_kmh: 1,
   maximum_interval_s: 300,
   maximum_kmh: 1500,
+  speed_outlier_radius_s: SPEED_OUTLIER_DEFAULTS.radius_s,
+  speed_outlier_sigma: SPEED_OUTLIER_DEFAULTS.sigma,
+  speed_outlier_relative_scale: SPEED_OUTLIER_DEFAULTS.relative_scale,
+  speed_outlier_minimum_neighbors: SPEED_OUTLIER_DEFAULTS.minimum_neighbors,
+  speed_outlier_maximum_neighbors: SPEED_OUTLIER_DEFAULTS.maximum_neighbors,
   altitude_median_radius: 2,
   altitude_deadband_m: 3,
   flat_slope: 0.03,
@@ -116,6 +122,9 @@ export function analyzeTrack(
     };
     let previousAltitude: number | null = null,
       heightAnchor: number | null = null;
+    const speeds = new Float64Array(n).fill(NaN);
+    const times = new Float64Array(n).fill(NaN);
+    const sampledPoints = new Map<number, AnalysisSample>();
     let previousSample: AnalysisSample | undefined;
     let invalidSpeedSinceSample = false,
       invalidAltitudeSinceSample = false;
@@ -169,6 +178,9 @@ export function analyzeTrack(
           if (seconds !== null && seconds <= 0) result.time_complete = false;
         }
       }
+      speeds[i] = speed ?? NaN;
+      // Associate interval speeds with their observation times for local windows.
+      times[i] = time ?? NaN;
       const altitude = finite(segment.altitude?.[i]);
       if (altitude !== null) {
         result.min_altitude = Math.min(
@@ -214,10 +226,21 @@ export function analyzeTrack(
           speed: invalidSpeedSinceSample || !previousSample ? null : speed,
         };
         result.samples.push(sample);
+        sampledPoints.set(i, sample);
         previousSample = sample;
         invalidSpeedSinceSample = false;
         invalidAltitudeSinceSample = false;
       }
+    }
+    for (const index of speedSpikes(speeds, times, {
+      radius_s: params.speed_outlier_radius_s,
+      sigma: params.speed_outlier_sigma,
+      relative_scale: params.speed_outlier_relative_scale,
+      minimum_neighbors: params.speed_outlier_minimum_neighbors,
+      maximum_neighbors: params.speed_outlier_maximum_neighbors,
+    })) {
+      const sample = sampledPoints.get(index);
+      if (sample && sample.speed !== null) sample.speed_spike = true;
     }
   }
   // Elapsed time only needs valid endpoints; interior anomalies affect interval statistics.

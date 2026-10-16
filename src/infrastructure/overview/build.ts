@@ -141,19 +141,20 @@ export async function buildOverview(
           data ??= withDocument(rawObject(db, row.sha256), (doc) =>
             readTrackData(doc),
           );
+          // The first point in track order, even when later timestamps go backwards.
+          const first = data.tracks
+            .flatMap((t) => t.segments)
+            .find((s) => s.longitude.length > 0)?.time_us?.[0];
           value = {
             name: data.name,
             tags: data.track_tags,
-            date: (() => {
-              let first: bigint | undefined;
-              for (const t of data.tracks)
-                for (const s of t.segments)
-                  for (const time of s.time_us ?? [])
-                    if (first === undefined || time < first) first = time;
-              return first === undefined
+            start_time_us: first?.toString() ?? null,
+            date:
+              first === undefined
                 ? ""
-                : new Date(Number(first / 1000n)).toISOString().slice(0, 10);
-            })(),
+                : new Date(Math.floor(Number(first) / 1000) + 8 * 3600_000)
+                    .toISOString()
+                    .slice(0, 10),
             points: pointCount(data),
             segments: data.tracks.flatMap((t) =>
               t.segments.map((s) =>
@@ -172,6 +173,7 @@ export async function buildOverview(
         }
         entry.tags = value.tags;
         entry.date = value.date || entry.date;
+        entry.start_time_us = value.start_time_us ?? undefined;
         entry.distance_m = value.segments.reduce(
           (total, segment) =>
             total +
@@ -218,6 +220,7 @@ export async function buildOverview(
               name: value.name,
               tags: value.tags,
               date: value.date,
+              start_time_us: value.start_time_us,
               points: pointCount(data),
               segments: data.tracks.flatMap((t) =>
                 t.segments.map((s) =>
