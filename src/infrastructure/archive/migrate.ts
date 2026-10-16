@@ -9,6 +9,7 @@ import { syncFile, syncDirectory, temporary } from "../durable-files.js";
 import { readManifest } from "../xml/manifest.js";
 import { rawObject, schemaVersion } from "./database.js";
 import { hashJson, stableId } from "./identity.js";
+import { MIGRATE_5 } from "./schema-v6.js";
 import { MIGRATE_4 } from "./schema-v5.js";
 import { MIGRATE_3 } from "./schema-v4.js";
 import { MIGRATE_1 } from "./schema.js";
@@ -43,11 +44,17 @@ export async function migrateArchive(
     db.pragma("foreign_keys=ON");
     db.pragma("synchronous=FULL");
     const version = schemaVersion(db);
-    if (version === 5) {
+    if (version === 6) {
       verifyArchive(db);
       return;
     }
-    if (version !== 1 && version !== 2 && version !== 3 && version !== 4)
+    if (
+      version !== 1 &&
+      version !== 2 &&
+      version !== 3 &&
+      version !== 4 &&
+      version !== 5
+    )
       throw new AppError(
         "USER_INPUT",
         `Unsupported database schema ${version}`,
@@ -74,9 +81,10 @@ export async function migrateArchive(
         "USER_INPUT",
         "Archive changed during migration backup; retry migration",
       );
-    if (version === 3 || version === 4) {
+    if (version === 3 || version === 4 || version === 5) {
       if (version === 3) db.exec(MIGRATE_3);
-      db.exec(MIGRATE_4);
+      if (version < 5) db.exec(MIGRATE_4);
+      db.exec(MIGRATE_5);
       db.exec(
         version === 3
           ? "UPDATE archive_meta SET revision=revision+1,storage_revision=storage_revision+1 WHERE singleton=1"
@@ -194,6 +202,7 @@ export async function migrateArchive(
     db.pragma("user_version=3");
     db.exec(MIGRATE_3);
     db.exec(MIGRATE_4);
+    db.exec(MIGRATE_5);
     verifyArchive(db);
     await fault("migration-before-commit");
     db.exec("COMMIT");

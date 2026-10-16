@@ -222,7 +222,7 @@ it.each([1, 2])(
     ).toEqual([{ connected: 0 }, { connected: 0 }]);
     const db = new Database(file);
     expect(verifyArchive(db)).toMatchObject({
-      schema: 5,
+      schema: 6,
       revision: 3,
       storage_revision: 1,
     });

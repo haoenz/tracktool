@@ -1,3 +1,4 @@
+import { endpointLocations } from "./endpoint-locations.js";
 import type Database from "better-sqlite3";
 import { AppError } from "../../domain/errors.js";
 import { validatePresentation } from "../../domain/track-version.js";
@@ -138,6 +139,7 @@ export function trackDetail(
       archive_id: archiveId(db),
       entry,
       settings,
+      endpoint_locations: endpointLocations(db, selected),
       segments: segments.slice(cursor, cursor + 500),
       next_cursor: segments.length > cursor + 500 ? cursor + 500 : null,
       ...row,

@@ -315,7 +315,7 @@ it("migrates schema 4 with a complete backup, rollback and no eager analysis", a
   expect(downloadBytes(backup!, { entry_id: entry.id }).bytes).toEqual(raw);
   expect(
     readTransaction(file, (db) => db.pragma("user_version", { simple: true })),
-  ).toBe(5);
+  ).toBe(6);
   expect(rows(file)).toHaveLength(0);
   const after = stamp(file) as { revision: number };
   expect(after.revision).toBe((before as { revision: number }).revision);

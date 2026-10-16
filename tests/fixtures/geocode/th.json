@@ -1,0 +1,625 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "types": [
+        "establishment",
+        "lodging",
+        "point_of_interest"
+      ],
+      "place_id": "ChIJPfeHijq44jARW7bwbPBz3v4",
+      "address_components": [
+        {
+          "long_name": "Khwaeng Thung Maha Mek",
+          "short_name": "Khwaeng Thung Maha Mek",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Khet Sathon",
+          "short_name": "Khet Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Krung Thep Maha Nakhon",
+          "short_name": "Krung Thep Maha Nakhon",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address",
+        "subpremise"
+      ],
+      "place_id": "ChIJFz9b_i-f4jARBRzpsCgrLUo",
+      "address_components": [
+        {
+          "long_name": "Khwaeng Thung Maha Mek",
+          "short_name": "Khwaeng Thung Maha Mek",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Khet Sathon",
+          "short_name": "Khet Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Krung Thep Maha Nakhon",
+          "short_name": "Krung Thep Maha Nakhon",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "premise",
+        "street_address"
+      ],
+      "place_id": "ChIJBT_y_y-f4jARVOvlJXExYgE",
+      "address_components": [
+        {
+          "long_name": "Khwaeng Thung Maha Mek",
+          "short_name": "Khwaeng Thung Maha Mek",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Khet Sathon",
+          "short_name": "Khet Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Krung Thep Maha Nakhon",
+          "short_name": "Krung Thep Maha Nakhon",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "ChIJcxaT9S-f4jARA-PiGPDfcgA",
+      "address_components": [
+        {
+          "long_name": "Khwaeng Thung Maha Mek",
+          "short_name": "Khwaeng Thung Maha Mek",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Khet Sathon",
+          "short_name": "Khet Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Krung Thep Maha Nakhon",
+          "short_name": "Krung Thep Maha Nakhon",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "ElYyMiBTb2kgTnVudGhhLCBLaHdhZW5nIFRodW5nIE1haGEgTWVrLCBLaGV0IFNhdGhvbiwgS3J1bmcgVGhlcCBNYWhhIE5ha2hvbiAxMDEyMOazsOWbvSIaEhgKFAoSCXNYcFEln-IwEda3D0Ql9XkBEBY",
+      "address_components": [
+        {
+          "long_name": "Khwaeng Thung Maha Mek",
+          "short_name": "Khwaeng Thung Maha Mek",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Khet Sathon",
+          "short_name": "Khet Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Krung Thep Maha Nakhon",
+          "short_name": "Krung Thep Maha Nakhon",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "plus_code"
+      ],
+      "place_id": "Egs3UDUyUEdGUis3OSImOiQKCg0f_i0IFTxU7TsQChoUChIJ82ENKDJgHTERIEjiXbIAAQE",
+      "address_components": [
+        {
+          "long_name": "曼谷",
+          "short_name": "กทม",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "曼谷都会区",
+          "short_name": "曼谷都会区",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "bus_station",
+        "establishment",
+        "point_of_interest",
+        "transit_station"
+      ],
+      "place_id": "ChIJSciKky-f4jARhZFOa1uXytA",
+      "address_components": [
+        {
+          "long_name": "Khwaeng Thung Maha Mek",
+          "short_name": "Khwaeng Thung Maha Mek",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Khet Sathon",
+          "short_name": "Khet Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Krung Thep Maha Nakhon",
+          "short_name": "Krung Thep Maha Nakhon",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "route"
+      ],
+      "place_id": "ChIJc1hwUSWf4jAR17cPRCX1eQE",
+      "address_components": [
+        {
+          "long_name": "Khwaeng Thung Maha Mek",
+          "short_name": "Khwaeng Thung Maha Mek",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Khet Sathon",
+          "short_name": "Khet Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Krung Thep Maha Nakhon",
+          "short_name": "Krung Thep Maha Nakhon",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_3",
+        "political"
+      ],
+      "place_id": "ChIJtUw5wTmf4jARqMTqGKDO78Q",
+      "address_components": [
+        {
+          "long_name": "Thung Mahamek",
+          "short_name": "Thung Mahamek",
+          "types": [
+            "administrative_area_level_3",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Thung Maha Mek",
+          "short_name": "Thung Maha Mek",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Sathon",
+          "short_name": "Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Bangkok",
+          "short_name": "Bangkok",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "political",
+        "sublocality",
+        "sublocality_level_2"
+      ],
+      "place_id": "ChIJE_JExDmf4jAREI7iXbIAAQQ",
+      "address_components": [
+        {
+          "long_name": "Thung Maha Mek",
+          "short_name": "Thung Maha Mek",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Sathon",
+          "short_name": "Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Bangkok",
+          "short_name": "Bangkok",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_2",
+        "political"
+      ],
+      "place_id": "ChIJaVUOPjWf4jARtVquUFqWE58",
+      "address_components": [
+        {
+          "long_name": "Sathon",
+          "short_name": "Sathon",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Sathon",
+          "short_name": "Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Bangkok",
+          "short_name": "Bangkok",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "political",
+        "sublocality",
+        "sublocality_level_1"
+      ],
+      "place_id": "ChIJ0QH_PjWf4jARQE_iXbIAAQM",
+      "address_components": [
+        {
+          "long_name": "Sathon",
+          "short_name": "Sathon",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Bangkok",
+          "short_name": "Bangkok",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "postal_code"
+      ],
+      "place_id": "ChIJaV95Qq6Y4jARYHpDebUAARw",
+      "address_components": [
+        {
+          "long_name": "曼谷",
+          "short_name": "กทม",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "曼谷都会区",
+          "short_name": "曼谷都会区",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "locality",
+        "political"
+      ],
+      "place_id": "ChIJ82ENKDJgHTERIEjiXbIAAQE",
+      "address_components": [
+        {
+          "long_name": "曼谷",
+          "short_name": "กทม",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "曼谷都会区",
+          "short_name": "曼谷都会区",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_1",
+        "political"
+      ],
+      "place_id": "ChIJ82ENKDJgHTERxw-LhWOFRTY",
+      "address_components": [
+        {
+          "long_name": "曼谷都会区",
+          "short_name": "曼谷都会区",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "曼谷",
+          "short_name": "กทม",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "country",
+        "political"
+      ],
+      "place_id": "ChIJsU1CR_eNTTARAuhXB4gs154",
+      "address_components": [
+        {
+          "long_name": "泰国",
+          "short_name": "TH",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    }
+  ]
+}

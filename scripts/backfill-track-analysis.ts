@@ -21,8 +21,8 @@ if (!file)
 const reportFile = process.argv[3];
 const key = CURRENT_ANALYSIS_KEY;
 const objects = readTransaction(file, (db) => {
-  if (schemaVersion(db) !== 5)
-    throw new Error("Statistics backfill requires schema 5");
+  if (schemaVersion(db) < 5)
+    throw new Error("Statistics backfill requires schema 5 or newer");
   return db
     .prepare(
       `SELECT o.sha256, c.sha256 IS NOT NULL AS cached FROM kml_objects o

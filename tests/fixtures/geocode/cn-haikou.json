@@ -1,0 +1,163 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "types": [
+        "plus_code"
+      ],
+      "place_id": "Egs3UEZHVzRNNytDNyImOiQKCg1BnuELFWTwoUEQChoUChIJ0bh5To5-UTERiBhLOnSHDo4",
+      "address_components": [
+        {
+          "long_name": "海口市",
+          "short_name": "海口市",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "海南省",
+          "short_name": "海南省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "route"
+      ],
+      "place_id": "ChIJYXtcyuonUjERcLYvbr7621s",
+      "address_components": [
+        {
+          "long_name": "澄迈县",
+          "short_name": "澄迈县",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "海南省",
+          "short_name": "海南省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "postal_code"
+      ],
+      "place_id": "ChIJ4STrpx2IUTERTNDlSMhpVgQ",
+      "address_components": [
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "political",
+        "sublocality",
+        "sublocality_level_1"
+      ],
+      "place_id": "ChIJuWV_22-SUTERqGGh4aglYKg",
+      "address_components": [
+        {
+          "long_name": "澄迈县",
+          "short_name": "澄迈县",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "海南省",
+          "short_name": "海南省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_1",
+        "political"
+      ],
+      "place_id": "ChIJpdA4dTgDTzER9tAWQRQTSbg",
+      "address_components": [
+        {
+          "long_name": "海南省",
+          "short_name": "海南省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "country",
+        "political"
+      ],
+      "place_id": "ChIJwULG5WSOUDERbzafNHyqHZU",
+      "address_components": [
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    }
+  ]
+}

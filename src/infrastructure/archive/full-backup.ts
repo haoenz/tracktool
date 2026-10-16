@@ -31,7 +31,7 @@ export type ArchiveStamp = {
 };
 export function verifyArchive(db: Database.Database): ArchiveStamp {
   const schema = schemaVersion(db);
-  if (![1, 2, 3, 4, 5].includes(schema))
+  if (![1, 2, 3, 4, 5, 6].includes(schema))
     throw new AppError("USER_INPUT", `Unsupported backup schema ${schema}`);
   if (
     db.pragma("integrity_check", { simple: true }) !== "ok" ||

@@ -33,7 +33,7 @@ tracktool archive backup                         # 默认写归档目录 / Archi
 tracktool archive backup --output /backup/Archive.zip
 tracktool archive full-backup --output /backup/tracks-2026-10-14.sqlite3
 tracktool archive restore-backup /backup/tracks-2026-10-14.sqlite3 /fresh/restored
-tracktool archive migrate                        # 完整备份后升级 schema 1/2/3 → 4
+tracktool archive migrate                        # 完整备份后升级至当前 schema 6
 tracktool archive rebuild                        # SQLite → 桌面/手机聚合 KML
 tracktool archive recover                        # 完成上次中断的文件操作
 ```
@@ -94,7 +94,7 @@ push 会先尝试恢复未完成操作，也可以显式 `archive recover`。旧
 
 ## schema 5：轨迹分析缓存
 
-运行 `tracktool archive migrate` 可从旧库显式升级到 schema 5。沿用先生成完整 SQLite 备份、再事务迁移的机制；失败回滚，不批量计算轨迹。schema 4 → 5 不改变业务 `revision`，只因结构升级推进一次 `storage_revision`。
+运行 `tracktool archive migrate` 在引入此缓存时升级到 schema 5；当前命令会继续升级至 schema 6。沿用先生成完整 SQLite 备份、再事务迁移的机制；失败回滚，不批量计算轨迹。schema 4 → 5 不改变业务 `revision`，只因结构升级推进一次 `storage_revision`。
 
 `track_analysis_cache` 的联合主键为 `(sha256, parser_version, analysis_version, params_hash)`。`sha256` 外键关联 `kml_objects`，使用 `ON DELETE CASCADE`。其他字段为：
 
@@ -110,3 +110,13 @@ push 会先尝试恢复未完成操作，也可以显式 `archive recover`。旧
 新入库和编辑后发布的新内容版本，在 schema 5 中会于发布事务内完成统计计算并写入缓存；相同内容与算法参数复用现有缓存。正常可解析轨迹的统计写入失败会回滚本次发布，避免入库成功但统计未保存。为兼容原始文件归档，无法解析的导入成员仍保留原字节，不伪造统计。旧 schema 不在写入时自动迁移。
 
 已有数据可运行 `node scripts/backfill-track-analysis.ts <archive.sqlite3> [report.json]` 补算。该脚本使用当前算法，覆盖当前和历史内容、按内容哈希去重，分批短事务落库；已存在的当前版本缓存复用，失败项写入报告并返回非零退出码。读取时的计算仅作为旧数据、算法升级或缓存损坏的兜底。
+
+## schema 6：端点行政区
+
+`track_endpoint_locations` 以 `(presentation_id, endpoint, provider, language, resolver_version)` 为主键。展示快照不可变，通过它关联版本和轨迹；坐标使用明确的 latitude、longitude 列，不做近似舍入。`location_json` 保存国家、省、市、区县、选中结果的地址组件与字段来源；另存完整性状态和真实查询时间。跨轨迹复用时保留原查询时间。
+
+旧快照结果不会冒充当前结果；新快照首次补全时可复用相同端点坐标的已有结果。查询在事务外进行，提交前检查当前轨迹身份、版本和展示快照，变化则放弃该次写入并提示重试。每个端点原子提交，已完成结果在中断后保留。
+
+结果变更推进 `storage_revision`，不推进业务 `revision`、不新建轨迹历史。完整 SQLite 备份包含此表；KML/ZIP 原件导出不包含。受控删除展示快照时通过外键级联清理对应行。schema 5 → 6 先完整备份后事务迁移，保留统计缓存，不调用网络服务。
+
+解析器 v2 无需新增表或升级 SQLite schema：继续以 `resolver_version` 区分派生版本，读取每个端点不高于当前解析器版本的最新结果。`location_json` 新增 `raw_response`、`raw_source`、`resolution`；新响应完整保留全部 Google 候选及元数据，旧数据仅有选中组件时明确标注局限，不能恢复成伪造的完整响应。离线重算不改变真实查询时间，也不读取或重写原轨迹。缺少某层、当地不适用和候选冲突分别记录；候选冲突自动退到共同上级，保留完整证据以便以后重算。

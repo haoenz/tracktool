@@ -164,7 +164,7 @@ function archiveCommand(
       backup: "从一致快照导出当前展示 KML ZIP（不含隐藏段和历史）",
       "full-backup": "完整备份 SQLite：原件、版本、展示设置、来源及项目",
       recover: "恢复中断的文件操作",
-      migrate: "完整备份后显式升级数据库到 schema 5",
+      migrate: "完整备份后显式升级数据库到 schema 6",
       rebuild: "重新生成桌面与手机集合 KML",
     }[kind];
     static flags = {
@@ -323,7 +323,15 @@ class SetTag extends BusinessCommand {
 class Push extends BusinessCommand {
   static description = "整批校验并入库，默认保留源文件且不创建 Backup";
   static args = { paths };
-  static flags = { type: category(), zip, keep: Flags.boolean(), move: Flags.boolean({ description: "显式将源文件移入 Backup（旧搬移流程）", exclusive: ["keep"] }) };
+  static flags = {
+    type: category(),
+    zip,
+    keep: Flags.boolean(),
+    move: Flags.boolean({
+      description: "显式将源文件移入 Backup（旧搬移流程）",
+      exclusive: ["keep"],
+    }),
+  };
   async run() {
     const { args, flags } = await this.parse(Push);
     await this.using(flags, async (ctx, s) => {
@@ -474,7 +482,10 @@ class Merge extends BusinessCommand {
     output: Flags.string({ char: "o", required: true }),
     connected: Flags.boolean(),
     keep: Flags.boolean(),
-    move: Flags.boolean({ description: "显式将源文件移入 Backup", exclusive: ["keep"] }),
+    move: Flags.boolean({
+      description: "显式将源文件移入 Backup",
+      exclusive: ["keep"],
+    }),
   };
   async run() {
     const { args, flags } = await this.parse(Merge);

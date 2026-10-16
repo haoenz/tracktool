@@ -107,7 +107,7 @@ export function DisplaySettings({
     });
   }
   return (
-    <section aria-label="调整显示" className="space-y-3">
+    <section aria-label="分段管理" className="space-y-3">
       <p>
         拖动排列片段，点击眼睛显示或隐藏，点击片段间的连接按钮切换连线。只改变展示，原始轨迹数据保留。
       </p>

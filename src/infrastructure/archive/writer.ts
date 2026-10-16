@@ -30,7 +30,7 @@ import {
   snapshot,
   transaction,
 } from "./database.js";
-import { SCHEMA_5 } from "./schema-v5.js";
+import { SCHEMA_6 } from "./schema-v6.js";
 import { downloadFile } from "./download.js";
 import { previewDeletion, deleteEntry, type DeleteFault } from "./deletion.js";
 import { migrateArchive, type MigrationFault } from "./migrate.js";
@@ -129,8 +129,8 @@ export class ArchiveWriter {
         const backup = await this.migrate(request.database);
         return {
           message: backup
-            ? `Schema 4 ready; pre-migration backup: ${backup}`
-            : "Schema 4 ready",
+            ? `Schema 6 ready; pre-migration backup: ${backup}`
+            : "Schema 6 ready",
           paths: backup ? [backup] : [],
         };
       }
@@ -146,7 +146,12 @@ export class ArchiveWriter {
       case "backup":
         return this.backup(request.database, request.output, request.entries);
       case "rebuild":
-        return rebuild(request.database, request.output, this.xml, request.entries);
+        return rebuild(
+          request.database,
+          request.output,
+          this.xml,
+          request.entries,
+        );
       case "push":
         return this.push(request);
       case "download":
@@ -225,7 +230,7 @@ export class ArchiveWriter {
       db.pragma("foreign_keys=ON");
       db.pragma("synchronous=FULL");
       db.exec("BEGIN");
-      db.exec(SCHEMA_5);
+      db.exec(SCHEMA_6);
       db.prepare(
         "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,?)",
       ).run(randomUUID().replaceAll("-", ""));
@@ -300,7 +305,7 @@ export class ArchiveWriter {
     }
   }
   async recover(file: string): Promise<number> {
-    const db = connect(file, true, [1, 2, 3, 4, 5]);
+    const db = connect(file, true, [1, 2, 3, 4, 5, 6]);
     try {
       const operations = db
         .prepare("SELECT * FROM file_operations ORDER BY rowid")
@@ -392,8 +397,14 @@ export class ArchiveWriter {
           throw new AppError("USER_INPUT", `Source changed: ${input.source}`);
         if (!request.move) {
           const manifest = readManifest(bytes, (ordinal) => String(ordinal));
-          if (manifest.status !== "ready" || !manifest.segments.some((segment) => segment.point_count > 0))
-            throw new AppError("USER_INPUT", `Invalid track: ${input.source}: ${manifest.error ?? "no track points"}`);
+          if (
+            manifest.status !== "ready" ||
+            !manifest.segments.some((segment) => segment.point_count > 0)
+          )
+            throw new AppError(
+              "USER_INPUT",
+              `Invalid track: ${input.source}: ${manifest.error ?? "no track points"}`,
+            );
         }
         const entry = addEntry(db, input.member, bytes, input.category, {
           container: resolvePath(input.source),
@@ -443,7 +454,11 @@ export class ArchiveWriter {
       warnings,
     };
   }
-  async backup(file: string, output: string, selected?: string[]): Promise<ArchiveResult> {
+  async backup(
+    file: string,
+    output: string,
+    selected?: string[],
+  ): Promise<ArchiveResult> {
     if (!output.toLowerCase().endsWith(".zip") || output === file)
       throw new AppError("USER_INPUT", "Backup target must be a .zip file");
     mkdirSync(path.dirname(output), { recursive: true });
@@ -466,7 +481,10 @@ export class ArchiveWriter {
           const requested = new Set(selected);
           entries = entries.filter((e) => requested.has(e.path));
           if (!requested.size || entries.length !== requested.size)
-            throw new AppError("USER_INPUT", "部分所选轨迹已不存在，请返回列表重新选择");
+            throw new AppError(
+              "USER_INPUT",
+              "部分所选轨迹已不存在，请返回列表重新选择",
+            );
         }
         const expectedHashes: string[] = [];
         function* originals() {
@@ -532,14 +550,14 @@ export class ArchiveWriter {
         syncDirectory(path.dirname(output));
         await this.fault("export-published");
         if (!selected) {
-        db.prepare(
-          "UPDATE archive_meta SET zip_revision=?,zip_target=? WHERE singleton=1",
-        ).run(revision, output);
-        db.prepare(
-          schemaVersion(db) >= 3
-            ? "INSERT INTO export_receipts VALUES (?,'kml_zip',?,NULL) ON CONFLICT(target,kind) DO UPDATE SET revision=excluded.revision"
-            : "INSERT INTO export_receipts VALUES (?,?) ON CONFLICT(target) DO UPDATE SET revision=excluded.revision",
-        ).run(output, revision);
+          db.prepare(
+            "UPDATE archive_meta SET zip_revision=?,zip_target=? WHERE singleton=1",
+          ).run(revision, output);
+          db.prepare(
+            schemaVersion(db) >= 3
+              ? "INSERT INTO export_receipts VALUES (?,'kml_zip',?,NULL) ON CONFLICT(target,kind) DO UPDATE SET revision=excluded.revision"
+              : "INSERT INTO export_receipts VALUES (?,?) ON CONFLICT(target) DO UPDATE SET revision=excluded.revision",
+          ).run(output, revision);
         }
         await this.fault("before-export-commit");
         db.exec("COMMIT");

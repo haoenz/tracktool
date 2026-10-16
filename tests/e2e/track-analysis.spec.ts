@@ -36,6 +36,33 @@ for (const width of [1280, 390])
       "/api/test/analysis-fixture",
       {},
     );
+    await page.route(`**/api/tracks/${fixture.id}`, async (route) => {
+      const response = await route.fetch();
+      const detail = await response.json();
+      detail.endpoint_locations = [
+        {
+          endpoint: "start",
+          location: {
+            country: "中国",
+            province: "上海市",
+            city: "上海市",
+            district: "普陀区",
+            status: "complete",
+          },
+        },
+        {
+          endpoint: "end",
+          location: {
+            country: "中国",
+            province: width === 390 ? "上海市" : "海南省",
+            city: null,
+            district: width === 390 ? "普陀区" : null,
+            status: "partial",
+          },
+        },
+      ];
+      await route.fulfill({ response, json: detail });
+    });
     try {
       await tool(page, "轨迹库");
       await filterTracks(page, fixture.path.split("/").at(-1)!);
@@ -43,7 +70,25 @@ for (const width of [1280, 390])
         .getByRole("button", { name: `查看 ${fixture.path}`, exact: true })
         .click();
       const panel = page.getByRole("region", { name: "轨迹详情", exact: true });
-      await expect(panel.locator(".track-route")).toHaveText("未知→未知");
+      await expect(panel.locator(".track-route > strong")).toHaveText(
+        width === 390 ? ["上海市 · 普陀区"] : ["上海市 · 普陀区", "海南省"],
+      );
+      await expect(panel.locator(".track-route .track-tag")).toHaveCount(1);
+      await expect(panel.locator(".track-route-connector")).toHaveCount(
+        width === 390 ? 0 : 1,
+      );
+      await expect(panel.locator(".track-route-caption")).toHaveCount(0);
+      await expect(
+        panel.getByRole("button", { name: "分段管理", exact: true }),
+      ).toBeVisible();
+      await expect(
+        panel.getByRole("button", { name: "历史记录", exact: true }),
+      ).toBeVisible();
+      await expect(panel.locator(".track-detail-link small")).toHaveCount(0);
+      await expect(panel.locator(".track-file-info")).toHaveCount(0);
+      await expect(
+        panel.locator(".track-analysis + .analysis-more"),
+      ).toHaveCount(1);
       await expect(panel.locator(".track-stats > div")).toHaveCount(2);
       await expect(panel).not.toContainText(fixture.path);
       await expect(panel.locator(".track-stats")).not.toContainText(
@@ -56,12 +101,13 @@ for (const width of [1280, 390])
       await panel
         .getByRole("button", { name: "定位轨迹", exact: true })
         .click();
-      await panel.locator("summary", { hasText: "更多统计" }).click();
+      await expect(
+        panel.getByRole("region", { name: "数据质量", exact: true }),
+      ).toContainText("轨迹点数");
       await expect(panel.locator(".analysis-more")).toContainText(
         "运动平均速度",
       );
       await expect(panel.locator(".analysis-more")).toContainText("平路占比");
-      await panel.locator("summary", { hasText: "更多统计" }).click();
       await analysis
         .getByRole("group", { name: "图表指标" })
         .getByRole("button", { name: "速度", exact: true })
@@ -115,7 +161,7 @@ for (const width of [1280, 390])
         await panel.evaluate((el) => el.scrollWidth <= el.clientWidth),
       ).toBe(true);
       await page.screenshot({ path: info.outputPath(`analysis-${width}.png`) });
-      await coloring.getByRole("button", { name: "原始", exact: true }).click();
+      await coloring.getByRole("button", { name: "无", exact: true }).click();
       await expect.poll(overlayCount).toBe(0);
       await coloring.getByRole("button", { name: "海拔", exact: true }).click();
       await page.getByRole("button", { name: "返回列表", exact: true }).click();
@@ -195,16 +241,23 @@ for (const complete of [true, false])
       const elapsed = panel
         .locator(".track-stats > div")
         .filter({ hasText: "耗时" });
-      await expect(elapsed).toContainText("计算中...");
-      await expect(panel.locator(".analysis-stat-list").first()).toContainText(
-        "计算中...",
-      );
+      await expect(
+        elapsed.getByRole("status", { name: "正在计算" }),
+      ).toBeVisible();
+      await expect(
+        panel
+          .locator(".analysis-stat-list")
+          .first()
+          .getByRole("status", { name: "正在计算" }),
+      ).toHaveCount(2);
       await expect(panel).not.toContainText("无数据");
       await expect(
         panel.getByRole("region", { name: "轨迹分析" }).getByRole("status"),
-      ).toHaveText("计算中...");
+      ).toContainText("正在计算轨迹统计…");
       release();
-      await expect(elapsed).not.toContainText("计算中...");
+      await expect(
+        elapsed.getByRole("status", { name: "正在计算" }),
+      ).toHaveCount(0);
       if (complete) await expect(elapsed).not.toContainText("无数据");
       else await expect(elapsed).toContainText("无数据");
     } finally {
@@ -245,7 +298,9 @@ test("analysis failure is distinct from missing data and retry computes successf
     await page.unrouteAll();
     await panel.getByRole("button", { name: "重试统计" }).click();
     await expect(elapsed).not.toContainText("计算失败");
-    await expect(elapsed).not.toContainText("计算中...");
+    await expect(elapsed.getByRole("status", { name: "正在计算" })).toHaveCount(
+      0,
+    );
     await expect(elapsed).not.toContainText("无数据");
   } finally {
     await page.unrouteAll();

@@ -24,7 +24,7 @@ export function databasePath(input: string): string {
 export function connect(
   file: string,
   write = false,
-  allowedSchemas = [2, 3, 4, 5],
+  allowedSchemas = [2, 3, 4, 5, 6],
 ): Database.Database {
   let db: Database.Database;
   try {
@@ -44,7 +44,7 @@ export function connect(
     if (!allowedSchemas.includes(version as number))
       throw new AppError(
         "USER_INPUT",
-        `Unsupported database schema ${String(version)}; expected 2, 3, 4 or 5; run archive migrate`,
+        `Unsupported database schema ${String(version)}; expected 2, 3, 4, 5 or 6; run archive migrate`,
       );
     // Concurrent first opens of an older DELETE-mode database can fail journal-mode
     // conversion immediately, before SQLite's normal BEGIN busy timeout applies.
@@ -150,7 +150,7 @@ export function readTransaction<T>(
     timeout: 30000,
   });
   try {
-    if (![2, 3, 4, 5].includes(schemaVersion(db)))
+    if (![2, 3, 4, 5, 6].includes(schemaVersion(db)))
       throw new AppError(
         "USER_INPUT",
         "Unsupported archive schema; run archive migrate",

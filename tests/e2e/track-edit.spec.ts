@@ -76,9 +76,9 @@ for (const width of [1280, 390])
       await canvas.screenshot({ path: test.info().outputPath("drawing.png") });
       await save(page);
       await page.getByRole("button", { name: "返回详情", exact: true }).click();
-      await page.getByRole("button", { name: "调整显示", exact: true }).click();
+      await page.getByRole("button", { name: "分段管理", exact: true }).click();
       const display = page.getByRole("region", {
-        name: "调整显示",
+        name: "分段管理",
         exact: true,
       });
       const displaySave = display.getByRole("button", {
@@ -158,7 +158,7 @@ for (const width of [1280, 390])
       ).toBeDisabled();
       await page.getByRole("button", { name: "返回详情", exact: true }).click();
       await page
-        .getByRole("button", { name: "查看历史操作", exact: true })
+        .getByRole("button", { name: "历史记录", exact: true })
         .click();
       const timeline = page.getByRole("list", { name: "操作时间线" });
       await expect(timeline.getByRole("button").first()).toContainText(

@@ -1,0 +1,556 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "types": [
+        "premise",
+        "street_address"
+      ],
+      "place_id": "ChIJ5aFEycMS2jER2-fan1RHZaU",
+      "address_components": [
+        {
+          "long_name": "Bandar Johor Bahru",
+          "short_name": "Bandar Johor Bahru",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Johor Bahru",
+          "short_name": "Johor Bahru",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Johor Darul Ta'zim",
+          "short_name": "Johor Darul Ta'zim",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "establishment",
+        "gym",
+        "health",
+        "lodging",
+        "point_of_interest"
+      ],
+      "place_id": "ChIJ-1WCU_IT2jERB4i-xzei__U",
+      "address_components": [
+        {
+          "long_name": "Bandar Johor Bahru",
+          "short_name": "Bandar Johor Bahru",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Johor Bahru",
+          "short_name": "Johor Bahru",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Johor Darul Ta'zim",
+          "short_name": "Johor Darul Ta'zim",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address",
+        "subpremise"
+      ],
+      "place_id": "ChIJOxJVz8MS2jERIukTqJazhys",
+      "address_components": [
+        {
+          "long_name": "Bandar Johor Bahru",
+          "short_name": "Bandar Johor Bahru",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Johor Bahru",
+          "short_name": "Johor Bahru",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Johor Darul Ta'zim",
+          "short_name": "Johor Darul Ta'zim",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "establishment",
+        "point_of_interest",
+        "transit_station"
+      ],
+      "place_id": "ChIJAdNlJMIS2jERoJ8KymdQPUs",
+      "address_components": [
+        {
+          "long_name": "Bandar Johor Bahru",
+          "short_name": "Bandar Johor Bahru",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Johor Bahru",
+          "short_name": "Johor Bahru",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Johor",
+          "short_name": "Johor",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "ChIJnbLLKwAT2jER_QoGBrwq18Y",
+      "address_components": [
+        {
+          "long_name": "Bandar Johor Bahru",
+          "short_name": "Bandar Johor Bahru",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Johor Bahru",
+          "short_name": "Johor Bahru",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Johor Darul Ta'zim",
+          "short_name": "Johor Darul Ta'zim",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "EmUxMiwgSmFsYW4gU3llZCBNb2hhbWVkIE11ZnRpLCBCYW5kYXIgSm9ob3IgQmFocnUsIDgwMDAwIEpvaG9yIEJhaHJ1LCBKb2hvciBEYXJ1bCBUYSd6aW0sIOmprOadpeilv-S6miIaEhgKFAoSCZUXwzvCEtoxEczdsP6KJpqbEAw",
+      "address_components": [
+        {
+          "long_name": "Bandar Johor Bahru",
+          "short_name": "Bandar Johor Bahru",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Johor Bahru",
+          "short_name": "Johor Bahru",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Johor Darul Ta'zim",
+          "short_name": "Johor Darul Ta'zim",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "plus_code"
+      ],
+      "place_id": "Egs2UEg1RlE2NSs4SCImOiQKCg0u594AFc5c2D0QChoUChIJJzpr08YS2jER9dSTtR2y9NU",
+      "address_components": [
+        {
+          "long_name": "新山",
+          "short_name": "新山",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "柔佛",
+          "short_name": "柔佛",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "route"
+      ],
+      "place_id": "ChIJlRfDO8IS2jERzd2w_oommps",
+      "address_components": [
+        {
+          "long_name": "Bandar Johor Bahru",
+          "short_name": "Bandar Johor Bahru",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Johor Bahru",
+          "short_name": "Johor Bahru",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Johor Darul Ta'zim",
+          "short_name": "Johor Darul Ta'zim",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "political",
+        "sublocality",
+        "sublocality_level_1"
+      ],
+      "place_id": "ChIJW9ZVc8QS2jERFA6RT3CGEp4",
+      "address_components": [
+        {
+          "long_name": "Bandar Johor Bahru",
+          "short_name": "Bandar Johor Bahru",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_1"
+          ]
+        },
+        {
+          "long_name": "Johor Bahru",
+          "short_name": "Johor Bahru",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Johor",
+          "short_name": "Johor",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "postal_code"
+      ],
+      "place_id": "ChIJz17KqMES2jERcDrhRUNeWTU",
+      "address_components": [
+        {
+          "long_name": "新山",
+          "short_name": "新山",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "柔佛",
+          "short_name": "柔佛",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_4",
+        "political"
+      ],
+      "place_id": "ChIJg-PyfEVt2jERcbuDMPoDgsY",
+      "address_components": [
+        {
+          "long_name": "Bandar Johor Bahru",
+          "short_name": "Bandar Johor Bahru",
+          "types": [
+            "administrative_area_level_4",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Johor Bahru",
+          "short_name": "Johor Bahru",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Johor",
+          "short_name": "Johor",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "locality",
+        "political"
+      ],
+      "place_id": "ChIJJzpr08YS2jER9dSTtR2y9NU",
+      "address_components": [
+        {
+          "long_name": "新山",
+          "short_name": "新山",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "柔佛",
+          "short_name": "柔佛",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_3",
+        "political"
+      ],
+      "place_id": "ChIJnVIWyvc-2jERNs652NKGb9E",
+      "address_components": [
+        {
+          "long_name": "新山县",
+          "short_name": "新山县",
+          "types": [
+            "administrative_area_level_3",
+            "political"
+          ]
+        },
+        {
+          "long_name": "柔佛",
+          "short_name": "柔佛",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_1",
+        "political"
+      ],
+      "place_id": "ChIJn9vtiTLMxDERtK0Mv5sya3s",
+      "address_components": [
+        {
+          "long_name": "柔佛",
+          "short_name": "柔佛",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "country",
+        "political"
+      ],
+      "place_id": "ChIJrzBnX5fTNDAR2BwhKJOWRQc",
+      "address_components": [
+        {
+          "long_name": "马来西亚",
+          "short_name": "MY",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    }
+  ]
+}

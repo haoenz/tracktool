@@ -1,3 +1,9 @@
+import {
+  fillEndpointLocations,
+  currentEndpointLocations,
+} from "../infrastructure/archive/endpoint-locations.js";
+import { GoogleGeocode } from "../infrastructure/geocode.js";
+import { resolveApiKey } from "../domain/config.js";
 import { Args, Flags } from "@oclif/core";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -270,7 +276,80 @@ class TrackExport extends BusinessCommand {
     });
   }
 }
+class TrackFillLocations extends BusinessCommand {
+  static description = "补全当前展示轨迹起终点的省、市、区县；可重跑续传";
+  static flags = {
+    archive,
+    entry: Flags.string({ description: "仅处理此轨迹 ID" }),
+    limit: Flags.integer({
+      min: 1,
+      description: "最多处理多少条需要补全的轨迹",
+    }),
+    language: Flags.string({ default: "zh-CN" }),
+    "api-key": Flags.string(),
+    refresh: Flags.boolean({ description: "重新查询已有结果" }),
+    "complete-evidence": Flags.boolean({
+      description: "仅为旧版降级结果补取完整响应；已保留完整响应的结果不重查",
+    }),
+    offline: Flags.boolean({
+      description: "仅复用或重算已有证据，不访问 Google API",
+    }),
+    "retry-incomplete": Flags.boolean({
+      description: "重新查询不完整或无结果的端点",
+    }),
+  };
+  async run() {
+    const { flags } = await this.parse(TrackFillLocations);
+    await this.using(flags, async (ctx) => {
+      const result = await fillEndpointLocations(
+        databasePath(flags.archive ?? String(ctx.config.archive_path)),
+        ctx.xml!,
+        new GoogleGeocode(),
+        resolveApiKey(
+          ctx.config,
+          process.env.TRACKTOOL_GOOGLE_API_KEY,
+          flags["api-key"],
+        ),
+        ctx.signal,
+        {
+          entry: flags.entry,
+          limit: flags.limit,
+          language: flags.language,
+          dryRun: flags["dry-run"],
+          refresh: flags.refresh,
+          retryIncomplete: flags["retry-incomplete"],
+          offline: flags.offline,
+          completeEvidence: flags["complete-evidence"],
+          onProgress: (value) => this.log(JSON.stringify(value)),
+        },
+      );
+      this.log(JSON.stringify({ summary: result, dry_run: flags["dry-run"] }));
+      if (result.failed) process.exitCode = 1;
+    });
+  }
+}
+class TrackLocations extends BusinessCommand {
+  static description = "读取轨迹当前展示快照的端点行政区（只读）";
+  static args = { entry: Args.string({ required: true }) };
+  static flags = { archive, language: Flags.string({ default: "zh-CN" }) };
+  async run() {
+    const { flags, args } = await this.parse(TrackLocations);
+    await this.using(flags, async (ctx) => {
+      this.log(
+        JSON.stringify(
+          currentEndpointLocations(
+            databasePath(flags.archive ?? String(ctx.config.archive_path)),
+            args.entry,
+            flags.language,
+          ),
+        ),
+      );
+    });
+  }
+}
 export const TRACK_COMMANDS = {
+  "track:fill-locations": TrackFillLocations,
+  "track:locations": TrackLocations,
   "track:list": TrackList,
   "track:show": TrackShow,
   "track:history": TrackHistory,

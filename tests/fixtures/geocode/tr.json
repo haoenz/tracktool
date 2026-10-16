@@ -1,0 +1,480 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "types": [
+        "establishment",
+        "point_of_interest",
+        "subway_station",
+        "transit_station"
+      ],
+      "place_id": "ChIJ2fm3aTr-n0ARYNm7459I_p0",
+      "address_components": [
+        {
+          "long_name": "İmrahor",
+          "short_name": "İmrahor",
+          "types": [
+            "administrative_area_level_4",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Arnavutköy",
+          "short_name": "Arnavutköy",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "İstanbul",
+          "short_name": "İstanbul",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "ChIJqxygZjr-n0ARCHn1oUvhrbg",
+      "address_components": [
+        {
+          "long_name": "İmrahor",
+          "short_name": "İmrahor",
+          "types": [
+            "administrative_area_level_4",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Arnavutköy",
+          "short_name": "Arnavutköy",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "İstanbul",
+          "short_name": "İstanbul",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address",
+        "subpremise"
+      ],
+      "place_id": "ChIJzSEArTD-n0ARXydzr5QpQVM",
+      "address_components": [
+        {
+          "long_name": "Tayakadın",
+          "short_name": "Tayakadın",
+          "types": [
+            "administrative_area_level_4",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Arnavutköy",
+          "short_name": "Arnavutköy",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "İstanbul",
+          "short_name": "İstanbul",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "plus_code"
+      ],
+      "place_id": "Egs4R0hDN1A0VitGMiImOiQKCg2-MpcYFRzGIREQChoUChIJT0D7JGpVtRQRzqQ660UTuxA",
+      "address_components": [
+        {
+          "long_name": "阿尔纳武特柯伊",
+          "short_name": "阿尔纳武特柯伊",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "伊斯坦堡省",
+          "short_name": "伊斯坦堡省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "route"
+      ],
+      "place_id": "ChIJb5gwYjr-n0ARIPjAK-Bvt0M",
+      "address_components": [
+        {
+          "long_name": "İmrahor",
+          "short_name": "İmrahor",
+          "types": [
+            "administrative_area_level_4",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Arnavutköy",
+          "short_name": "Arnavutköy",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "İstanbul",
+          "short_name": "İstanbul",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "airport",
+        "establishment",
+        "point_of_interest"
+      ],
+      "place_id": "ChIJqZW8Cvb_n0ARBuUkyCzgDDg",
+      "address_components": [
+        {
+          "long_name": "Tayakadın",
+          "short_name": "Tayakadın",
+          "types": [
+            "administrative_area_level_4",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Arnavutköy",
+          "short_name": "Arnavutköy",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "İstanbul",
+          "short_name": "İstanbul",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "premise",
+        "street_address"
+      ],
+      "place_id": "ChIJzTdgkTX-n0ARypF8SZ6vWw0",
+      "address_components": [
+        {
+          "long_name": "Tayakadın",
+          "short_name": "Tayakadın",
+          "types": [
+            "administrative_area_level_4",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Arnavutköy",
+          "short_name": "Arnavutköy",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "İstanbul",
+          "short_name": "İstanbul",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "EkfEsG1yYWhvciwgVGVybWluYWwgQ2FkZGVzaSBObzoxLCAzNDI3NSBBcm5hdnV0a8O2eS_EsHN0YW5idWwsIOWcn-iAs-WFtiIaEhgKFAoSCeE1qEE3_p9AEaWj4xKMSMfrEAE",
+      "address_components": [
+        {
+          "long_name": "İmrahor",
+          "short_name": "İmrahor",
+          "types": [
+            "administrative_area_level_4",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Arnavutköy",
+          "short_name": "Arnavutköy",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "İstanbul",
+          "short_name": "İstanbul",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "postal_code"
+      ],
+      "place_id": "ChIJoxyRwe6qyhQRPu5RW4PSRvU",
+      "address_components": [
+        {
+          "long_name": "İmrahor",
+          "short_name": "İmrahor",
+          "types": [
+            "administrative_area_level_4",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Arnavutköy",
+          "short_name": "Arnavutköy",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "İstanbul",
+          "short_name": "İstanbul",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_4",
+        "political"
+      ],
+      "place_id": "ChIJX9RHuzf-n0ARxkhZjzmdK34",
+      "address_components": [
+        {
+          "long_name": "İmrahor",
+          "short_name": "İmrahor",
+          "types": [
+            "administrative_area_level_4",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Arnavutköy",
+          "short_name": "Arnavutköy",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "İstanbul",
+          "short_name": "İstanbul",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_2",
+        "political"
+      ],
+      "place_id": "ChIJT0D7JGpVtRQRzqQ660UTuxA",
+      "address_components": [
+        {
+          "long_name": "阿尔纳武特柯伊",
+          "short_name": "阿尔纳武特柯伊",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "伊斯坦堡省",
+          "short_name": "伊斯坦堡省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_1",
+        "political"
+      ],
+      "place_id": "ChIJexVgWlG2yhQR6B1akfSarCI",
+      "address_components": [
+        {
+          "long_name": "伊斯坦堡省",
+          "short_name": "伊斯坦堡省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "country",
+        "political"
+      ],
+      "place_id": "ChIJcSZPllwVsBQRKl9iKtTb2UA",
+      "address_components": [
+        {
+          "long_name": "土耳其",
+          "short_name": "TR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    }
+  ]
+}

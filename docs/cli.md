@@ -254,7 +254,7 @@ tracktool archive status
 tracktool archive backup              # 当前活动 KML → Archive.zip（不含历史）
 tracktool archive full-backup --output /backup/tracks.sqlite3
 tracktool archive restore-backup /backup/tracks.sqlite3 /fresh/tracks
-tracktool archive migrate             # 完整备份后显式升级 schema 5
+tracktool archive migrate             # 完整备份后显式升级 schema 6
 tracktool archive rebuild             # SQLite → 聚合 KML
 tracktool archive recover             # 完成中断文件操作
 ```
@@ -277,3 +277,29 @@ tracktool track export ENTRY_ID --version VERSION_ID --presentation PRESENTATION
 `archive backup` 保留原命令名，用于当前库默认展示 ZIP；`archive rebuild` 生成桌面和手机集合。两者不套用任何项目私有覆盖。导出的 Tracktool 元数据记录来源种类、段顺序和显式连线；再次导入时连接线不会成为实测采样，也不会重复补线。
 
 旧成果重组也通过 `track preview REQUEST.json` / `track apply`，请求 operation.kind 为 `legacy_regroup`，具体字段见 [API](api.md)。候选需明确完整成员、段顺序、新路径、相同分类和依据；不会按名称自动归组。使用同一持久预览和组级撤销；希望重做时可撤销上一次组级撤销操作，复用原输出，不必创建同名新条目。
+
+## 轨迹起终点行政区
+
+在项目目录中使用 `pnpm cli`：
+
+```bash
+pnpm cli track fill-locations --dry-run
+pnpm cli archive migrate
+pnpm cli track fill-locations --offline    # 本地升级已有结果的解析规则
+pnpm cli track fill-locations --complete-evidence  # 仅为旧版降级结果补齐完整证据
+pnpm cli track fill-locations --limit 3
+pnpm cli track fill-locations
+pnpm cli track locations ENTRY_ID
+```
+
+`fill-locations` 从当前活动轨迹展示快照取首末点，遵循段顺序和隐藏状态。段反转已体现在轨迹版本的坐标顺序中，连接线不作为独立端点。结果存入归档 SQLite，不改 KML 字节或 `PosStartName` / `PosEndName`。
+
+支持 `--archive PATH`、`--entry ID`、`--limit N`（最多处理 N 条需要补全的轨迹）、`--language zh-CN`、`--api-key KEY`。密钥优先级仍为环境变量 `TRACKTOOL_GOOGLE_API_KEY` > 参数 > 配置。网络需要现有 HTTP/HTTPS 代理时，可用 `NODE_USE_ENV_PROXY=1 pnpm cli track fill-locations`。
+
+默认跳过已有结果，精确相同坐标、语言与解析版本复用查询。每个端点单独提交，失败后重跑即可续传；`--retry-incomplete` 重查缺失层级及零结果，`--refresh` 强制查询（与 `--offline` 合用时只重新解析本地证据）。凭证或额度错误立即停止，普通单条失败继续并以非零退出码报告。`--dry-run` 不写入、不迁移、不访问付费 API，其 `queries` 为去重后的预计请求数（不含网络重试）。
+
+输出 JSON 行包含进度与最终 summary。`track locations` 只读当前结果，`track show` 的 `endpoint_locations` 默认返回中文结果；历史快照可用 `track show --version ... --presentation ...` 读取。解析器 v2 保留新查询的完整 `raw_response`（含所有候选、组件类型及位置元数据），再产生规范字段和 `resolution`。`resolution.fields` 区分 `resolved`、`missing`、`not_applicable`、`conflict`；`resolution.hierarchy` 是可直接展示的可靠层级链，`evidence` 标出各字段的候选索引和组件类型。`complete` 表示该地区所需层级已解析（允许不适用），不是“必须填满三级”或权威边界认证。`resolution.mode=fallback` 是正常降级结果，不要求人工确认；`partial` 与网络失败分开处理。
+
+优先选择明确的行政实体候选与自洽层级；同等证据冲突时删除分歧层及下级，保留共同上级，不按候选重复次数投票、不按行政中心距离猜归属。不跨候选随意拼接父子层级。日本区、香港行政区、泰国区等使用地区规则；香港地区中英文名称按已知别名归一。韩国直辖城市、马来西亚州与县等没有中间城市层级时标为不适用，新加坡、香港等也不硬造国内省市县结构。
+
+规则版本变化时，默认复用原查询证据重算。`--offline` 明确禁止访问 API；缺少证据的端点计入 `pending`，不会制造结果。v1 仅保存单组选中组件，重算后标为 `raw_source=legacy_components`；它不等同于完整响应。新查询标为 `full_response`，以后可本地重新解析。重新解析保留原 `queried_at` 和旧解析版本的行。`--complete-evidence` 只为缺少完整响应的旧版降级结果补查；已保留完整响应的降级结果不会因此再次查询。需要主动刷新已查询过的降级结果时才使用 `--retry-incomplete`。

@@ -1,0 +1,300 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "types": [
+        "street_address",
+        "subpremise"
+      ],
+      "place_id": "ChIJIT-bqIsZ2jERWGxZyHLJf14",
+      "address_components": [
+        {
+          "long_name": "Orchard",
+          "short_name": "Orchard",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "新加坡",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "SG",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "premise",
+        "street_address"
+      ],
+      "place_id": "ChIJQ0bbqIsZ2jERHjj4tTQ0kMc",
+      "address_components": [
+        {
+          "long_name": "Orchard",
+          "short_name": "Orchard",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "新加坡",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "SG",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "establishment",
+        "point_of_interest",
+        "transit_station"
+      ],
+      "place_id": "ChIJwYcRu4sZ2jERmwQbAHAe86E",
+      "address_components": [
+        {
+          "long_name": "Orchard",
+          "short_name": "Orchard",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Singapore",
+          "short_name": "Singapore",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "SG",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "ChIJHVtACIsZ2jERAeFhTpG9qys",
+      "address_components": [
+        {
+          "long_name": "Orchard",
+          "short_name": "Orchard",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "新加坡",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "SG",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "EhfmlrDliqDlnaHkuJzpmbXot683N-WPtyIaEhgKFAoSCX9K-QiLGdoxEZ2jCw99uOsqEE0",
+      "address_components": [
+        {
+          "long_name": "东陵",
+          "short_name": "东陵",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "新加坡",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "SG",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "plus_code"
+      ],
+      "place_id": "Egs2UEg1OFI0Rys0NiImOiQKCg3mK8cAFSuF4j0QChoUChIJyY4rtGcX2jERIKTarqz3AAQ",
+      "address_components": [
+        {
+          "long_name": "新加坡",
+          "short_name": "新加坡",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "SG",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "route"
+      ],
+      "place_id": "ChIJ4SdMpIsZ2jERQoNyR2YiL1o",
+      "address_components": [
+        {
+          "long_name": "Orchard",
+          "short_name": "Orchard",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Singapore",
+          "short_name": "Singapore",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "SG",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "neighborhood",
+        "political"
+      ],
+      "place_id": "ChIJEfX89I0Z2jERAKXarqz3AAU",
+      "address_components": [
+        {
+          "long_name": "Orchard",
+          "short_name": "Orchard",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Singapore",
+          "short_name": "Singapore",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "SG",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "locality",
+        "political"
+      ],
+      "place_id": "ChIJyY4rtGcX2jERIKTarqz3AAQ",
+      "address_components": [
+        {
+          "long_name": "新加坡",
+          "short_name": "新加坡",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新加坡",
+          "short_name": "SG",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "country",
+        "political"
+      ],
+      "place_id": "ChIJdZOLiiMR2jERxPWrUs9peIg",
+      "address_components": [
+        {
+          "long_name": "新加坡",
+          "short_name": "SG",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    }
+  ]
+}

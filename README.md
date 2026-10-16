@@ -71,7 +71,7 @@ tracktool exif to-mp4 /数据/视频 --timezone-policy keep
 tracktool config show --public
 ```
 
-使用 `kml download` 只读下载轨迹，`kml delete` 删除条目及其历史；原 pop 已移除。新库使用 schema 5，旧 schema 2/3/4 可继续读取；统计缓存持久化需要升级到 schema 5，旧 schema 2/3 删除前用 `archive migrate` 完整备份后显式升级。ZIP/聚合 KML 是日常导出，完整历史与项目使用 SQLite 完整备份；旧 ZIP 使用 `archive import-zip`。`archive undo` 已退役，`archive log` 只读已有旧日志。
+使用 `kml download` 只读下载轨迹，`kml delete` 删除条目及其历史；原 pop 已移除。新库使用 schema 6，旧 schema 2/3/4/5 可继续读取；统计缓存持久化需要 schema 5 及以上，端点行政区存储需要 schema 6，旧 schema 2/3 删除前用 `archive migrate` 完整备份后显式升级。ZIP/聚合 KML 是日常导出，完整历史与项目使用 SQLite 完整备份；旧 ZIP 使用 `archive import-zip`。`archive undo` 已退役，`archive log` 只读已有旧日志。
 
 入库默认整批校验、事务提交，保留源文件且不创建 Backup 目录；显式 `kml push --move` 或 `kml merge --move` 才启用旧的源文件搬移流程。
 

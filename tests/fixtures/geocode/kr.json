@@ -1,0 +1,358 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "types": [
+        "establishment",
+        "lodging",
+        "point_of_interest"
+      ],
+      "place_id": "ChIJzzgszVfjDDURFqXBhnS5Kec",
+      "address_components": [
+        {
+          "long_name": "Tapdong-ro",
+          "short_name": "Tapdong-ro",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_4"
+          ]
+        },
+        {
+          "long_name": "Samdo 2(i)-dong",
+          "short_name": "Samdo 2(i)-dong",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Cheju",
+          "short_name": "Cheju",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Jeju-do",
+          "short_name": "Jeju-do",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "韩国",
+          "short_name": "KR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "ChIJZ0oyzVfjDDURbRYByCWxtfo",
+      "address_components": [
+        {
+          "long_name": "Samdo 2(i)-dong",
+          "short_name": "Samdo 2(i)-dong",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Cheju",
+          "short_name": "Cheju",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Jeju-do",
+          "short_name": "Jeju-do",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "韩国",
+          "short_name": "KR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "premise",
+        "street_address"
+      ],
+      "place_id": "ChIJ8Z3W16nkDDURvB2gT0KqmMI",
+      "address_components": [
+        {
+          "long_name": "삼도2동",
+          "short_name": "삼도2동",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Cheju",
+          "short_name": "Cheju",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "韩国",
+          "short_name": "KR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "establishment",
+        "point_of_interest",
+        "transit_station"
+      ],
+      "place_id": "ChIJA-OwLajkDDURwcw7jf6JcRw",
+      "address_components": [
+        {
+          "long_name": "Cheju",
+          "short_name": "Cheju",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "韩国",
+          "short_name": "KR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "plus_code"
+      ],
+      "place_id": "GhIJUGs_vinCQEAR8eDdgIWhX0A",
+      "address_components": []
+    },
+    {
+      "types": [
+        "postal_code"
+      ],
+      "place_id": "ChIJVeAD9KnkDDUR5NdABiLjUkY",
+      "address_components": [
+        {
+          "long_name": "济州市",
+          "short_name": "济州市",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "济州特别自治道",
+          "short_name": "济州特别自治道",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "韩国",
+          "short_name": "KR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "political",
+        "sublocality",
+        "sublocality_level_4"
+      ],
+      "place_id": "ChIJ4SyJgKnkDDURzyZH0V0UH2c",
+      "address_components": [
+        {
+          "long_name": "Tapdong-ro",
+          "short_name": "Tapdong-ro",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_4"
+          ]
+        },
+        {
+          "long_name": "Jeju-si",
+          "short_name": "Jeju-si",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Jeju-do",
+          "short_name": "Jeju-do",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "韩国",
+          "short_name": "KR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "political",
+        "sublocality",
+        "sublocality_level_2"
+      ],
+      "place_id": "ChIJB8hCwqrkDDURmxzxJBlniNc",
+      "address_components": [
+        {
+          "long_name": "Samdo 2(i)-dong",
+          "short_name": "Samdo 2(i)-dong",
+          "types": [
+            "political",
+            "sublocality",
+            "sublocality_level_2"
+          ]
+        },
+        {
+          "long_name": "Jeju-si",
+          "short_name": "Jeju-si",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Jeju-do",
+          "short_name": "Jeju-do",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "韩国",
+          "short_name": "KR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "locality",
+        "political"
+      ],
+      "place_id": "ChIJ_XltioXgDDUR4pyR4WmImks",
+      "address_components": [
+        {
+          "long_name": "济州市",
+          "short_name": "济州市",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "济州特别自治道",
+          "short_name": "济州特别自治道",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "韩国",
+          "short_name": "KR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_1",
+        "political"
+      ],
+      "place_id": "ChIJRUDITFTjDDURMb8emNI2vGY",
+      "address_components": [
+        {
+          "long_name": "济州特别自治道",
+          "short_name": "济州特别自治道",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "韩国",
+          "short_name": "KR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "country",
+        "political"
+      ],
+      "place_id": "ChIJm7oRy-tVZDURS9uIugCbJJE",
+      "address_components": [
+        {
+          "long_name": "韩国",
+          "short_name": "KR",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    }
+  ]
+}

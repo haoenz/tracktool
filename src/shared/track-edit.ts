@@ -1,3 +1,4 @@
+import type { EndpointLocation } from "./endpoint-location.js";
 import { z } from "zod";
 import { ArchiveRefSchema } from "./archive-actions.js";
 const id = z.string().min(1).max(200);
@@ -219,6 +220,7 @@ export const EditApplySchema = z
   .strict();
 export type EditApply = z.infer<typeof EditApplySchema>;
 export type TrackDetail = {
+  endpoint_locations?: EndpointLocation[];
   archive_id: string;
   entry: EntrySnapshot;
   settings: Presentation;

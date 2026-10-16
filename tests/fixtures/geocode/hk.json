@@ -1,0 +1,194 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "ChIJrXEhSNXiAzQRakjI-ZPNye4",
+      "address_components": [
+        {
+          "long_name": "離島區",
+          "short_name": "離島區",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新界",
+          "short_name": "新界",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "香港",
+          "short_name": "HK",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "establishment",
+        "point_of_interest",
+        "transit_station"
+      ],
+      "place_id": "ChIJVZDHQ9XiAzQR6t6jtvg1I2U",
+      "address_components": [
+        {
+          "long_name": "香港",
+          "short_name": "HK",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "premise",
+        "street_address"
+      ],
+      "place_id": "ChIJdxNvJtXiAzQRMYTYrejKMck",
+      "address_components": [
+        {
+          "long_name": "離島區",
+          "short_name": "離島區",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新界",
+          "short_name": "新界",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "香港",
+          "short_name": "HK",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "plus_code"
+      ],
+      "place_id": "Egs3UEpNOFg5MitNVyImOiQKCg2Yo00NFU2_60MQChoUChIJc7mfl-3iAzQRIHFN0bPFRhQ",
+      "address_components": [
+        {
+          "long_name": "榄洲",
+          "short_name": "榄洲",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "新界",
+          "short_name": "新界",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "香港",
+          "short_name": "HK",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "route"
+      ],
+      "place_id": "ChIJgfwwKtXiAzQR0Mm0GxH8C-E",
+      "address_components": [
+        {
+          "long_name": "香港",
+          "short_name": "HK",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "street_address"
+      ],
+      "place_id": "EhTpppnmuK_poIbml4Xot68yOeiZnyIaEhgKFAoSCUc07EDU4gM0Ec-Xvp3KSFj2EB0",
+      "address_components": [
+        {
+          "long_name": "香港",
+          "short_name": "HK",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "locality",
+        "political"
+      ],
+      "place_id": "ChIJByjqov3-AzQR2pT0dDW0bUg",
+      "address_components": [
+        {
+          "long_name": "香港",
+          "short_name": "香港",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "香港",
+          "short_name": "HK",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "country",
+        "political"
+      ],
+      "place_id": "ChIJD5gyo-3iAzQRfMnq27qzivA",
+      "address_components": [
+        {
+          "long_name": "香港",
+          "short_name": "HK",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "types": [
+        "establishment",
+        "lodging",
+        "point_of_interest"
+      ],
+      "place_id": "ChIJpQiJtUbEkDcRXEDQDt7iUKk",
+      "address_components": [
+        {
+          "long_name": "海西蒙古族藏族自治州",
+          "short_name": "海西蒙古族藏族自治州",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "青海省",
+          "short_name": "青海省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "plus_code"
+      ],
+      "place_id": "GhIJC9qaYy_ZQkARYpSx66hhV0A",
+      "address_components": []
+    },
+    {
+      "types": [
+        "route"
+      ],
+      "place_id": "ChIJ1bNATkHEkDcRvImSs-UQaUA",
+      "address_components": [
+        {
+          "long_name": "海西蒙古族藏族自治州",
+          "short_name": "海西蒙古族藏族自治州",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "青海省",
+          "short_name": "青海省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "locality",
+        "political"
+      ],
+      "place_id": "ChIJf4b69w_qujcRMI-R1pP8_gA",
+      "address_components": [
+        {
+          "long_name": "海西蒙古族藏族自治州",
+          "short_name": "海西蒙古族藏族自治州",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "青海省",
+          "short_name": "青海省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "administrative_area_level_1",
+        "political"
+      ],
+      "place_id": "ChIJ7Qtie5eHADcRv523fabL7Sg",
+      "address_components": [
+        {
+          "long_name": "青海省",
+          "short_name": "青海省",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "country",
+        "political"
+      ],
+      "place_id": "ChIJwULG5WSOUDERbzafNHyqHZU",
+      "address_components": [
+        {
+          "long_name": "中国",
+          "short_name": "CN",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    }
+  ]
+}

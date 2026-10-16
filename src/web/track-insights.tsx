@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button } from "./components/controls.js";
+import { Button, Spin } from "./components/controls.js";
 import { api } from "./api.js";
+import type { TrackDetail } from "../shared/track-edit.js";
+import type { AdministrativeLocation } from "../shared/endpoint-location.js";
 import type { OverviewEntry } from "../shared/overview.js";
 import type {
   AnalysisMetric,
@@ -41,7 +43,7 @@ export function metricRange(
   if (!values.length) return undefined;
   return [Math.min(...values), Math.max(...values)];
 }
-function Stats({ rows }: { rows: [string, string][] }) {
+function Stats({ rows }: { rows: [string, ReactNode][] }) {
   return (
     <dl className="analysis-stat-list">
       {rows.map(([label, value]) => (
@@ -52,6 +54,13 @@ function Stats({ rows }: { rows: [string, string][] }) {
       ))}
     </dl>
   );
+}
+function endpointLabel(location?: AdministrativeLocation) {
+  if (!location) return "未知";
+  const names = [location.province, location.city, location.district].filter(
+    (name): name is string => !!name,
+  );
+  return [...new Set(names)].join(" · ") || location.country || "未知";
 }
 export function TrackInsights({
   entry,
@@ -85,9 +94,47 @@ export function TrackInsights({
     gcTime: 60_000,
     retry: 1,
   });
+  const locations = useQuery({
+    queryKey: [
+      "track-detail",
+      entry.id,
+      "endpoints",
+      scope,
+      entry.sha256,
+      entry.display_key,
+    ],
+    queryFn: ({ signal }) =>
+      api<TrackDetail>(
+        `/api/tracks/${encodeURIComponent(entry.id)}`,
+        undefined,
+        signal,
+      ),
+    enabled: active,
+    staleTime: 0,
+    gcTime: 60_000,
+    retry: 1,
+  });
+  const endpoints = locations.data?.endpoint_locations;
+  const start = endpoints?.find((e) => e.endpoint === "start")?.location;
+  const end = endpoints?.find((e) => e.endpoint === "end")?.location;
+  const locationLabel = (value?: AdministrativeLocation) =>
+    locations.isError
+      ? "读取失败"
+      : locations.isPending
+        ? "读取中…"
+        : endpointLabel(value);
+  const startLabel = locationLabel(start);
+  const endLabel = locationLabel(end);
+  const sameEndpoint = startLabel === endLabel;
+  const tag = <span className="track-tag">{entry.tags || "未设置 tag"}</span>;
   const data = query.data;
-  const pendingText =
-    query.isFetching || query.isPending ? "计算中..." : "计算失败";
+  const pendingText = query.isError ? (
+    "计算失败"
+  ) : (
+    <span className="track-value-skeleton" role="status" aria-label="正在计算">
+      <span className="sr-only">正在计算</span>
+    </span>
+  );
   const distance = data?.distance_m ?? entry.distance_m;
   useEffect(() => {
     onOverlay(
@@ -120,17 +167,35 @@ export function TrackInsights({
   ];
   return (
     <>
-      <div className="track-route" aria-label="起终点行政区划">
-        <strong>未知</strong>
-        <span aria-hidden="true">→</span>
-        <strong>未知</strong>
-      </div>
-      <p className="analysis-muted track-route-caption">
-        起点 / 终点 · 省、市、区县待补充
-      </p>
-      <div className="track-summary-meta">
-        <span className="track-tag">{entry.tags || "未设置 tag"}</span>
-      </div>
+      {locations.isPending ? (
+        <div className="track-route-loading" role="status">
+          <Spin decorative />
+          <span>正在读取起终点…</span>
+        </div>
+      ) : (
+        <div
+          className={`track-route${sameEndpoint ? " track-route-same" : ""}`}
+          aria-label="起终点行政区划"
+        >
+          <strong>{startLabel}</strong>
+          {sameEndpoint ? (
+            tag
+          ) : (
+            <>
+              <span className="track-route-connector">
+                {tag}
+                <span aria-hidden="true">→</span>
+              </span>
+              <strong>{endLabel}</strong>
+            </>
+          )}
+        </div>
+      )}
+      {locations.isError && (
+        <Button size="sm" onClick={() => void locations.refetch()}>
+          重试行政区
+        </Button>
+      )}
       <dl className="track-stats">
         <div>
           <dt>总里程 / km</dt>
@@ -161,8 +226,9 @@ export function TrackInsights({
           aria-busy="true"
         >
           <h3>轨迹分析</h3>
-          <div className="analysis-empty" role="status">
-            计算中...
+          <div className="analysis-empty track-analysis-loading" role="status">
+            <Spin decorative />
+            <span>正在计算轨迹统计…</span>
           </div>
         </section>
       )}
@@ -176,35 +242,6 @@ export function TrackInsights({
       )}
       {data && (
         <>
-          <details className="analysis-more">
-            <summary>更多统计</summary>
-            <h3>时间与速度</h3>
-            <Stats rows={timeRows} />
-            <h3>海拔与地形</h3>
-            <Stats rows={heightRows} />
-            {data.terrain ? (
-              <>
-                <div className="terrain-bar" aria-hidden="true">
-                  {(["ascent", "descent", "flat"] as const).map((key) => (
-                    <span
-                      key={key}
-                      className={key}
-                      style={{ flexGrow: data.terrain![key] }}
-                    />
-                  ))}
-                </div>
-                <Stats
-                  rows={[
-                    ["爬升占比", number(data.terrain.ascent * 100, "%")],
-                    ["下降占比", number(data.terrain.descent * 100, "%")],
-                    ["平路占比", number(data.terrain.flat * 100, "%")],
-                  ]}
-                />
-              </>
-            ) : (
-              <p className="analysis-muted">地形占比无数据</p>
-            )}
-          </details>
           <section className="track-analysis" aria-label="轨迹分析">
             <div className="analysis-heading">
               <h3>轨迹分析</h3>
@@ -217,7 +254,7 @@ export function TrackInsights({
                   <Button
                     key={value}
                     size="sm"
-                    variant={metric === value ? "secondary" : "ghost"}
+                    variant="ghost"
                     aria-pressed={metric === value}
                     onClick={() => {
                       setMetric(value);
@@ -234,7 +271,11 @@ export function TrackInsights({
             />
             <div className="analysis-chart-controls">
               <span>{unit(metric)}</span>
-              <div role="group" aria-label="图表横轴">
+              <div
+                className="analysis-switch"
+                role="group"
+                aria-label="图表横轴"
+              >
                 <Button
                   size="sm"
                   variant="ghost"
@@ -293,13 +334,13 @@ export function TrackInsights({
                   <Button
                     key={value}
                     size="sm"
-                    variant={overlay === value ? "secondary" : "ghost"}
+                    variant="ghost"
                     aria-pressed={overlay === value}
                     disabled={value !== "original" && !metricRange(data, value)}
                     onClick={() => setOverlay(value)}
                   >
                     {value === "original"
-                      ? "原始"
+                      ? "无"
                       : value === "speed"
                         ? "速度"
                         : "海拔"}
@@ -316,32 +357,38 @@ export function TrackInsights({
               </div>
             )}
           </section>
-          <details className="analysis-method">
-            <summary>统计口径与数据说明</summary>
-            <p>
-              总里程包含按文件顺序连接相邻非空分段首尾点的距离。耗时为有效起止时间之差，包含中途停留和分段间隔；平均速度为总里程除以耗时。
-            </p>
-            <p>
-              运动判定为区间速度 ≥ 1
-              km/h；运动平均速度为这些区间的里程除以运动耗时。段间连接不参与运动和最高速度统计。非正或重叠时间间隔、超过
-              5 分钟的采样间隔、超过 1500 km/h
-              的速度不参与速度统计；这些规则不能识别所有定位漂移。
-            </p>
-            <p>
-              最高、最低海拔取有效原始值。爬升和下降采用最多五点中值平滑、3 m
-              累积阈值；地形按平滑后坡度区分，±3%
-              内为平路，按有效海拔里程计算占比。这些是估算值。
-            </p>
-            <p>
-              有效海拔里程占比：{number(data.elevation_coverage * 100, "%")}。
-              {data.time_complete
-                ? "时间记录完整。"
-                : "部分时间缺失或顺序异常；起止时间有效时仍计算耗时。"}
-              {data.excluded_speed_intervals > 0 &&
-                `有 ${data.excluded_speed_intervals} 个区间不参与速度统计，运动数据仅覆盖有效区间；平均速度仍按总里程除以耗时计算。`}
-            </p>
-            {data.sampled && <p>图表和地图着色已抽样；统计使用完整轨迹点。</p>}
-          </details>
+          <section className="analysis-more" aria-label="更多统计">
+            <h3>更多统计</h3>
+            <h4>时间与速度</h4>
+            <Stats rows={timeRows} />
+            <h4>海拔与地形</h4>
+            <Stats rows={heightRows} />
+            {data.terrain ? (
+              <Stats
+                rows={[
+                  ["爬升占比", number(data.terrain.ascent * 100, "%")],
+                  ["下降占比", number(data.terrain.descent * 100, "%")],
+                  ["平路占比", number(data.terrain.flat * 100, "%")],
+                ]}
+              />
+            ) : (
+              <p className="analysis-muted">地形占比无数据</p>
+            )}
+          </section>
+          <section className="analysis-quality" aria-label="数据质量">
+            <h3>数据质量</h3>
+            <Stats
+              rows={[
+                ["轨迹点数", data.points.toLocaleString("zh-CN")],
+                ["海拔覆盖率", number(data.elevation_coverage * 100, "%")],
+                ["时间记录", data.time_complete ? "完整" : "缺失或顺序异常"],
+                [
+                  "速度统计排除",
+                  `${data.excluded_speed_intervals.toLocaleString("zh-CN")} 个区间`,
+                ],
+              ]}
+            />
+          </section>
         </>
       )}
     </>

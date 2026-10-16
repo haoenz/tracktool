@@ -909,6 +909,13 @@
 
 /* Keep the desktop list footer at the panel edge while rows scroll. */
 @media (min-width: 701px) {
+  .map-controls.track-detail-panel {
+    padding-bottom: 20px;
+  }
+  .track-detail-panel .analysis-quality {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
   .map-controls.track-list-panel {
     display: flex;
     flex-direction: column;
@@ -1132,17 +1139,38 @@
   gap: 16px;
   font-size: 18px;
 }
-.track-route > span {
+.track-route > strong {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.track-route .track-tag {
+  font-size: 13px;
+}
+.track-route-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
   color: #8b9b91;
 }
-.analysis-muted,
-.track-route-caption {
+.track-route-connector .track-tag {
+  max-width: 100px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+.track-route-same {
+  flex-wrap: wrap;
+}
+.track-route-same > strong {
+  flex: 0 1 auto;
+}
+.analysis-muted {
   color: #647469;
   font-size: 12px;
   line-height: 1.6;
-}
-.track-summary .track-route-caption {
-  margin-top: -20px;
 }
 .analysis-stat-list {
   display: grid;
@@ -1166,11 +1194,11 @@
 }
 .analysis-more,
 .track-analysis,
-.analysis-method {
+.analysis-quality {
   border-bottom: 1px solid #e7ece8;
   padding-bottom: 20px;
 }
-.analysis-more h3 {
+.analysis-more h4 {
   margin: 20px 0 16px;
   font-size: 13px;
   font-weight: 600;
@@ -1203,10 +1231,31 @@
   color: #647469;
   font-size: 11px;
 }
-.analysis-chart-controls [aria-pressed="true"] {
-  color: #21634f;
-  text-decoration: underline;
-  text-underline-offset: 4px;
+.map-controls .analysis-switch [data-slot="button"] {
+  height: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #647469;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+  text-decoration: none;
+}
+.map-controls .analysis-switch [data-slot="button"]:hover:not(:disabled) {
+  background: #edf1ed;
+  color: #263d32;
+}
+.map-controls .analysis-switch [aria-pressed="true"],
+.map-controls .analysis-switch [aria-pressed="true"]:hover:not(:disabled) {
+  background: #fff;
+  color: #263d32;
+  box-shadow: 0 1px 3px #19332a1f;
+}
+.map-controls .analysis-switch [data-slot="button"]:disabled {
+  opacity: 0.4;
 }
 .analysis-chart {
   width: 100%;
@@ -1278,28 +1327,64 @@
   flex-basis: 100%;
   margin-top: 4px;
 }
-.terrain-bar {
-  display: flex;
-  height: 8px;
-  gap: 2px;
-  border-radius: 4px;
-  overflow: hidden;
-  margin: 20px 0 16px;
+.analysis-more .analysis-stat-list + .analysis-stat-list {
+  margin-top: 12px;
 }
-.terrain-bar .ascent {
-  background: #bb803c;
-}
-.terrain-bar .descent {
-  background: #4e88b5;
-}
-.terrain-bar .flat {
-  background: #78a58c;
-}
-.analysis-method {
+.analysis-quality {
   font-size: 12px;
   color: #647469;
   line-height: 1.7;
 }
-.analysis-method p + p {
+.analysis-quality .analysis-stat-list {
   margin-top: 12px;
+}
+
+.analysis-more > h3,
+.analysis-quality > h3 {
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #263d32;
+}
+
+.track-detail-loading,
+.track-route-loading,
+.track-analysis-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #647469;
+  font-size: 13px;
+}
+.track-detail-loading {
+  min-height: 240px;
+  flex-direction: column;
+  gap: 12px;
+}
+.track-route-loading {
+  min-height: 60px;
+}
+.track-analysis-loading {
+  min-height: 180px;
+  flex-direction: column;
+  gap: 12px;
+}
+.track-value-skeleton {
+  display: inline-block;
+  width: 88px;
+  height: 1em;
+  border-radius: 5px;
+  background: #edf1ed;
+  vertical-align: middle;
+  animation: track-loading-pulse 1.6s ease-in-out infinite;
+}
+@keyframes track-loading-pulse {
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .track-value-skeleton { animation: none; }
+  .track-detail-loading .animate-spin,
+  .track-route-loading .animate-spin,
+  .track-analysis-loading .animate-spin { animation: none; }
 }

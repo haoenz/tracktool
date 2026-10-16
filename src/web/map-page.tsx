@@ -280,7 +280,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     entry: string;
   }>();
   const [editorView, setEditorView] = useState<"edit" | "display" | "history">("edit");
-  const editorTitles = { edit: "编辑轨迹", display: "调整显示", history: "查看历史操作" };
+  const editorTitles = { edit: "编辑轨迹", display: "分段管理", history: "历史记录" };
   const controls = useRef<HTMLElement>(null);
   const scrollPositions = useRef(new Map<string, number>());
   const [menuExpanded, setMenuExpanded] = useState(!!panel && panel !== "settings");
@@ -1157,7 +1157,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             onScroll={(e) =>
               scrollPositions.current.set(scrollKey, e.currentTarget.scrollTop)
             }
-            className={`map-controls${listVisible ? " track-list-panel" : ""}${panel && ["archive", "settings"].includes(panel) ? " wide" : ""}`}
+            className={`map-controls${panel === "library" && overview.id && detailOpen && !editing && !archiveAction ? " track-detail-panel" : ""}${listVisible ? " track-list-panel" : ""}${panel && ["archive", "settings"].includes(panel) ? " wide" : ""}`}
             hidden={!panel}
             aria-label="地图控制面板"
           >
@@ -1999,7 +1999,12 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               >
                 <div role="region" aria-label="轨迹详情">
                   <div className="track-summary" hidden={editing}>
-                    {overview.detail.isFetching && <span>正在读取详情…</span>}
+                    {!overview.selected && !overview.detail.error && !overview.matching.error && (
+                      <div className="track-detail-loading" role="status">
+                        <Spin decorative />
+                        <span>正在读取轨迹详情…</span>
+                      </div>
+                    )}
                     {(overview.detail.error ?? overview.matching.error) && (
                       <p role="alert">
                         {(overview.detail.error ?? overview.matching.error)?.message}
@@ -2150,11 +2155,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                               )}
                               <span>
                                 <strong>{editorTitles[view]}</strong>
-                                <small>
-                                  {view === "display"
-                                    ? "设置轨迹颜色、线宽与显示方式"
-                                    : "查看变更记录与恢复历史版本"}
-                                </small>
                               </span>
                               <ChevronRight aria-hidden="true" />
                             </Button>
@@ -2162,17 +2162,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                         </div>
                       </TrackInsights>
                     )}
-                    <details className="track-file-info">
-                      <summary>基础信息</summary>
-                      <dl>
-                        <dt>轨迹点数</dt>
-                        <dd>{overview.selected?.points.toLocaleString() ?? "—"}</dd>
-                        <dt>分段数</dt>
-                        <dd>{overview.selected?.segments ?? "—"}</dd>
-                        <dt>轨迹类型</dt>
-                        <dd>{overview.selected?.kind || "—"}</dd>
-                      </dl>
-                    </details>
                   </div>
                   {editing && (
                     <div className="track-editor-context">

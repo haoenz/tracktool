@@ -42,12 +42,14 @@ it("covers the current business commands, excludes pop and resolves every help p
     (n) =>
       !["completion", "data:", "setup:"].some((prefix) => n.startsWith(prefix)),
   );
-  expect(names).toHaveLength(43);
+  expect(names).toHaveLength(45);
   expect(names).not.toContain("kml:pop");
   expect(names).not.toContain("kml:to-multigeom");
   expect(names).toEqual(
     expect.arrayContaining([
       "track:list",
+      "track:fill-locations",
+      "track:locations",
       "track:show",
       "track:history",
       "track:operation",

@@ -298,7 +298,7 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
     .locator(".track-list-section")
     .getByRole("button", { name: "查看 Train/same.kml", exact: true })
     .click();
-  await expect(page.getByRole("region", { name: "轨迹详情" }).locator(".track-route")).toHaveText("未知→未知");
+  await expect(page.getByRole("region", { name: "轨迹详情" }).locator(".track-route > strong")).toHaveText("未知");
   await toggle.click();
   await expect(page.locator("#map-panel")).toBeHidden();
   await toggle.click();
@@ -364,7 +364,7 @@ test("GCJ02 basemap uses its own overview version and a style reload restores se
   await page.waitForFunction(() => window.renderer!.map.isStyleLoaded());
   await expect.poll(() => overviewSource(page)).toBeTruthy();
   await tool(page, "轨迹库");
-  await expect(page.getByRole("region", { name: "轨迹详情" }).locator(".track-route")).toHaveText("未知→未知");
+  await expect(page.getByRole("region", { name: "轨迹详情" }).locator(".track-route > strong")).toHaveText("未知");
 });
 
 test("category colors and alpha match original KML while selection preserves category color", async ({
