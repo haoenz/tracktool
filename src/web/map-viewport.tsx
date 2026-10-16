@@ -314,44 +314,16 @@ export const MapViewport = forwardRef<Viewport, Props>(
       fit: (tracks) => {
         const map = current.current;
         if (!map) return;
-        const panel = document.querySelector<HTMLElement>(
-          ".map-controls:not([hidden])",
-        );
-        const box = panel?.getBoundingClientRect();
         const bounds = stage.current?.getBoundingClientRect();
-        const frame = map.frame.getBoundingClientRect();
         const canvas = map.mapElement.getBoundingClientRect();
         const scale = canvas.width / map.mapElement.clientWidth;
-        if (!bounds || !scale) return;
-        // Fit inside the actual visible canvas, not the smaller export frame's
-        // existing surround padding plus an overlapping sheet (which can leave
-        // a negative fitting area on phones).
-        const area = latest.current.preview ? frame : bounds;
-        const mobile = window.innerWidth <= 700;
-        const headerBottom = Math.max(
-          ...[".map-header", ".project-bar"].map(
-            (selector) =>
-              document.querySelector(selector)?.getBoundingClientRect()
-                .bottom ?? 0,
-          ),
-        );
-        const left =
-          Math.max(area.left, !mobile && box ? box.right : area.left) + 16;
-        const right = area.right - 16;
-        const top =
-          Math.max(
-            area.top,
-            headerBottom,
-            latest.current.preview && map.state.title
-              ? frame.top + 90 * scale
-              : area.top,
-          ) + 16;
-        const bottom =
-          Math.min(area.bottom, mobile && box ? box.top : area.bottom) - 16;
-        if (right <= left || bottom <= top) {
-          latest.current.onError("地图可见区域太小，请收起面板后再定位。");
-          return;
-        }
+        if (!bounds || !scale || bounds.width <= 0 || bounds.height <= 0) return;
+        // Locate within the viewport regardless of floating panels or toolbars.
+        const margin = Math.min(16, bounds.width / 4, bounds.height / 4);
+        const left = bounds.left + margin;
+        const right = bounds.right - margin;
+        const top = bounds.top + margin;
+        const bottom = bounds.bottom - margin;
         map.fit(tracks, {
           left: (left - canvas.left) / scale,
           right: (canvas.right - right) / scale,

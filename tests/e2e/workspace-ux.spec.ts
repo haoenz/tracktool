@@ -212,35 +212,39 @@ test("details preserve list scroll; hover and focus do not repaint map highlight
   await page.getByRole("button", { name: "返回列表", exact: true }).click();
   expect(await controls.evaluate((e) => e.scrollTop)).toBe(scroll);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "收起", exact: true }).click();
-  expect((await controls.boundingBox())!.height).toBeLessThan(60);
-  await page.getByRole("button", { name: "展开", exact: true }).click();
-  expect((await controls.boundingBox())!.height).toBeGreaterThan(600);
-  await page.getByRole("button", { name: "半屏", exact: true }).click();
-  expect((await controls.boundingBox())!.height).toBeLessThan(500);
+  const sheetHandle = page.getByRole("button", { name: /调整面板高度/ });
+  const handleBox = (await sheetHandle.boundingBox())!;
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 22);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 380, { steps: 12 });
+  await page.mouse.up();
+  await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "collapsed");
+  await expect.poll(async () => (await controls.boundingBox())!.height).toBeLessThan(60);
+  await sheetHandle.click();
+  await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "half");
+  await page.getByRole("button", { name: /调整面板高度/ }).press("End");
+  await expect.poll(async () => (await controls.boundingBox())!.height).toBeGreaterThan(600);
+  await page.getByRole("button", { name: /调整面板高度/ }).press("ArrowDown");
+  await expect.poll(async () => (await controls.boundingBox())!.height).toBeLessThan(500);
   expect(await controls.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(
     true,
   );
   await page.screenshot({ path: info.outputPath("library-mobile.png") });
-  await page.getByRole("button", { name: "展开", exact: true }).click();
+  await page.getByRole("button", { name: /调整面板高度/ }).press("End");
   await page
     .getByRole("button", { name: "查看 Train/same.kml", exact: true })
     .click();
   await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
-  await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "half");
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const r = window.renderer!;
-        const p = r.map.project([101, 27]);
-        const box = r.mapElement.getBoundingClientRect();
-        return (
-          box.top + (p.y * box.height) / r.mapElement.clientHeight <
-          document.querySelector(".map-controls")!.getBoundingClientRect().top
-        );
-      }),
-    )
-    .toBe(true);
+  await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "full");
+  const fullCamera = await page.evaluate(() => window.renderer!.state.camera);
+  await sheetHandle.press("Home");
+  await page.getByRole("button", { name: /调整面板高度/ }).click();
+  await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
+  const halfCamera = await page.evaluate(() => window.renderer!.state.camera);
+  expect(halfCamera.zoom).toBeCloseTo(fullCamera.zoom, 8);
+  expect(halfCamera.center[0]).toBeCloseTo(fullCamera.center[0], 8);
+  expect(halfCamera.center[1]).toBeCloseTo(fullCamera.center[1], 8);
+  await expect(page.getByText("地图可见区域太小，请收起面板后再定位。")).toHaveCount(0);
 });
 
 test("map picks real points, marks a range and preserves draft when switching panels", async ({

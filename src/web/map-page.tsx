@@ -3,6 +3,7 @@ import { Popover as PopoverPrimitive } from "radix-ui";
 import { toast } from "sonner";
 import { Eye, EyeOff, Square, SquareCheck, SquareMinus, LoaderCircle, Funnel, ListChecks, ArrowDownWideNarrow, Settings as SettingsIcon, List, Upload, FileOutput, LocateFixed, Download, Ellipsis, Trash2, Pencil, SlidersHorizontal, History, ChevronRight } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover.js";
+import { SheetHandle } from "./components/sheet-handle.js";
 import { PanelHeader } from "./components/panel-header.js";
 import {
   Fragment,
@@ -942,11 +943,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     }
   }
   const fitTracks = (selected: SelectedTrack[]) => {
-    // A near-full mobile sheet leaves too little map to locate a track safely.
-    if (window.innerWidth <= 700 && sheet === "full") {
-      setSheet("half");
-      requestAnimationFrame(() => viewport.current?.fit(selected));
-    } else viewport.current?.fit(selected);
+    viewport.current?.fit(selected);
   };
   const [batchSelecting, setBatchSelecting] = useState(false);
   const batchRequest = useRef(0);
@@ -1161,6 +1158,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             hidden={!panel}
             aria-label="地图控制面板"
           >
+            <SheetHandle panel={controls} value={sheet} onChange={setSheet} />
             {!listVisible && (
             <PanelHeader
               title={
@@ -1201,11 +1199,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               }
             />
             )}
-            <div className="sheet-controls" aria-label="面板高度">
-              <Button onClick={() => setSheet("collapsed")}>收起</Button>
-              <Button onClick={() => setSheet("half")}>半屏</Button>
-              <Button onClick={() => setSheet("full")}>展开</Button>
-            </div>
             {exportPage && (
               <section aria-label="轨迹导出类型">
                 {exportEntries && <p>已选择 {exportEntries.length} 条轨迹用于导出。</p>}

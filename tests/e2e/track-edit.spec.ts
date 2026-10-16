@@ -120,7 +120,7 @@ for (const width of [1280, 390])
       });
       const destination = display.getByRole("listitem").nth(1);
       if (width <= 700)
-        await page.getByRole("button", { name: "展开", exact: true }).click();
+        await page.getByRole("button", { name: /调整面板高度/ }).press("End");
       await handle.scrollIntoViewIfNeeded();
       const sourceBox = await handle.boundingBox(),
         targetBox = await destination.boundingBox();

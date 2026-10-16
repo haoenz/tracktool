@@ -698,7 +698,7 @@
   font-size: 11px;
   color: #65746d;
 }
-.sheet-controls {
+.sheet-handle {
   display: none;
 }
 .upload-drop {
@@ -751,6 +751,8 @@
     width: calc(100% - 16px);
     max-width: none;
     height: 48dvh;
+    transition: height 180ms ease-out;
+    scroll-padding-top: 100px;
     max-height: calc(100dvh - 90px);
     padding: 0 12px 24px;
     border-radius: 16px 16px 8px 8px;
@@ -770,15 +772,34 @@
   .map-app[data-sheet="full"] .map-controls {
     height: calc(100dvh - 90px);
   }
-  .sheet-controls {
+  .sheet-handle {
     display: flex;
     position: sticky;
     top: 0;
-    padding: 4px 0;
+    width: calc(100% + 24px);
+    height: 44px;
+    min-height: 44px;
+    margin: 0 -12px;
+    padding: 0;
+    align-items: center;
     justify-content: center;
+    border: 0;
     background: white;
-    z-index: 8;
-    border-bottom: 1px solid #edf1ee;
+    z-index: 12;
+    touch-action: none;
+    user-select: none;
+    cursor: grab;
+  }
+  .sheet-handle:active { cursor: grabbing; }
+  .sheet-handle-bar {
+    width: 36px;
+    height: 4px;
+    border-radius: 999px;
+    background: #a6b5ad;
+  }
+  .map-controls[data-dragging="true"] { transition: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .map-controls { transition: none; }
   }
   .project-tabs {
     top: 53px;
