@@ -198,17 +198,17 @@ export function TrackInsights({
       )}
       <dl className="track-stats">
         <div>
-          <dt>总里程 / km</dt>
+          <dt className="sr-only">总里程</dt>
           <dd>
             {distance === undefined
               ? data
                 ? "无数据"
                 : pendingText
-              : number(distance / 1000)}
+              : number(distance / 1000, " km")}
           </dd>
         </div>
         <div>
-          <dt>耗时</dt>
+          <dt className="sr-only">耗时</dt>
           <dd>{data ? duration(data.elapsed_s) : pendingText}</dd>
         </div>
       </dl>

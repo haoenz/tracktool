@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Eye, EyeOff, Square, SquareCheck, SquareMinus, LoaderCircle, Funnel, ListChecks, ArrowDownWideNarrow, Settings as SettingsIcon, List, Upload, FileOutput, LocateFixed, Download, Ellipsis, Trash2, Pencil, SlidersHorizontal, History, ChevronRight } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover.js";
 import { SheetHandle } from "./components/sheet-handle.js";
+import { StartupScreen } from "./components/startup-screen.js";
 import { PanelHeader } from "./components/panel-header.js";
 import {
   Fragment,
@@ -135,11 +136,7 @@ export default function MapPage() {
       </div>
     );
   if (!bootstrap.data || !cities.data)
-    return (
-      <div role="status">
-        <Spin decorative /> 正在准备地图与字体…
-      </div>
-    );
+    return <StartupScreen />;
   return <Editor initial={bootstrap.data} cities={cities.data} />;
 }
 function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
