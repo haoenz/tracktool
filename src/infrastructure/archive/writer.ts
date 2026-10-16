@@ -30,7 +30,7 @@ import {
   snapshot,
   transaction,
 } from "./database.js";
-import { SCHEMA_4 } from "./schema-v4.js";
+import { SCHEMA_5 } from "./schema-v5.js";
 import { downloadFile } from "./download.js";
 import { previewDeletion, deleteEntry, type DeleteFault } from "./deletion.js";
 import { migrateArchive, type MigrationFault } from "./migrate.js";
@@ -225,7 +225,7 @@ export class ArchiveWriter {
       db.pragma("foreign_keys=ON");
       db.pragma("synchronous=FULL");
       db.exec("BEGIN");
-      db.exec(SCHEMA_4);
+      db.exec(SCHEMA_5);
       db.prepare(
         "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,?)",
       ).run(randomUUID().replaceAll("-", ""));
@@ -300,7 +300,7 @@ export class ArchiveWriter {
     }
   }
   async recover(file: string): Promise<number> {
-    const db = connect(file, true, [1, 2, 3, 4]);
+    const db = connect(file, true, [1, 2, 3, 4, 5]);
     try {
       const operations = db
         .prepare("SELECT * FROM file_operations ORDER BY rowid")

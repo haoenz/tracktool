@@ -1,3 +1,4 @@
+import { analyzeOnIngest } from "./analysis-ingest.js";
 import type Database from "better-sqlite3";
 import { deflateSync } from "node:zlib";
 import { randomUUID } from "node:crypto";
@@ -177,6 +178,7 @@ export function insertVersion(
     raw.length,
     deflateSync(raw),
   );
+  if (manifest.status === "ready") analyzeOnIngest(db, entry.sha256, raw);
   db.prepare("INSERT INTO track_versions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").run(
     entry.version_id,
     entry.entry_id,

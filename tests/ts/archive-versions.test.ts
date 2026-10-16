@@ -111,11 +111,11 @@ function logical(file: string): unknown {
     db.close();
   }
 }
-async function initialized(version = 4) {
+async function initialized(version = 5) {
   const directory = temporary(),
     file = path.join(directory, "archive.sqlite3"),
     writer = new ArchiveWriter();
-  if (version === 4) await writer.init(directory);
+  if (version === 5) await writer.init(directory);
   else {
     const db = new Database(file);
     db.exec(SCHEMA_3);
@@ -222,7 +222,7 @@ it.each([1, 2])(
     ).toEqual([{ connected: 0 }, { connected: 0 }]);
     const db = new Database(file);
     expect(verifyArchive(db)).toMatchObject({
-      schema: 4,
+      schema: 5,
       revision: 3,
       storage_revision: 1,
     });

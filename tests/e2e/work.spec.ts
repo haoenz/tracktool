@@ -70,7 +70,8 @@ test("archive upload, backup, read-only download and real deletion use separate 
     .click();
   expect((await event).suggestedFilename()).toBe("Archive.zip");
   await page.getByRole("button", { name: "返回轨迹库", exact: true }).click();
-  await tool(page, "轨迹库");
+  if (!(await page.getByLabel("筛选轨迹", { exact: true }).isVisible()))
+    await tool(page, "轨迹库");
   await filterTracks(page, "网页归档");
   await page
     .getByRole("button", {
@@ -92,6 +93,7 @@ test("archive upload, backup, read-only download and real deletion use separate 
   expect(await readFile((await downloaded.path())!)).toEqual(
     await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml"),
   );
+  await page.getByRole("button", { name: "更多轨迹操作", exact: true }).click();
   await page.getByRole("button", { name: "删除轨迹", exact: true }).click();
 
   await expect(

@@ -64,44 +64,65 @@ export function selectEntry(
     );
   return rows[0]!;
 }
+export type DownloadSelector = EntrySelector & {
+  version_id?: string;
+  expected_sha256?: string;
+};
+/** Resolve ownership/version without loading or decompressing original KML. */
+export function downloadReference(
+  db: Database.Database,
+  selector: DownloadSelector,
+): { name: string; sha256: string } {
+  const entry = selectEntry(db, selector);
+  let sha256 = entry.sha256,
+    name = entry.path;
+  if (selector.version_id) {
+    if (schemaVersion(db) < 3)
+      throw new AppError(
+        "USER_INPUT",
+        "Historical download requires a versioned archive",
+      );
+    const row = db
+      .prepare(
+        "SELECT sha256,path FROM track_versions WHERE id=? AND entry_id=?",
+      )
+      .get(selector.version_id, entry.id) as
+      { sha256: string; path: string } | undefined;
+    if (!row)
+      throw new AppError(
+        "USER_INPUT",
+        "Version does not belong to the selected entry",
+      );
+    sha256 = row.sha256;
+    name = row.path;
+  }
+  if (selector.expected_sha256 && sha256 !== selector.expected_sha256) {
+    const historical =
+      schemaVersion(db) >= 3 && !selector.version_id
+        ? (db
+            .prepare(
+              "SELECT sha256,path FROM track_versions WHERE entry_id=? AND sha256=? ORDER BY version_no DESC LIMIT 1",
+            )
+            .get(entry.id, selector.expected_sha256) as
+            { sha256: string; path: string } | undefined)
+        : undefined;
+    if (!historical)
+      throw new AppError(
+        "USER_INPUT",
+        "当前展示的轨迹版本已不可用，请刷新详情后重试",
+      );
+    sha256 = historical.sha256;
+    name = historical.path;
+  }
+  return { name: path.basename(name), sha256 };
+}
 export function downloadBytes(
   file: string,
-  selector: EntrySelector & { version_id?: string; expected_sha256?: string },
+  selector: DownloadSelector,
 ): { name: string; bytes: Uint8Array; sha256: string } {
   return readTransaction(file, (db) => {
-    const entry = selectEntry(db, selector);
-    let sha256 = entry.sha256,
-      name = entry.path;
-    if (selector.version_id) {
-      if (schemaVersion(db) < 3)
-        throw new AppError(
-          "USER_INPUT",
-          "Historical download requires a versioned archive",
-        );
-      const row = db
-        .prepare(
-          "SELECT sha256,path FROM track_versions WHERE id=? AND entry_id=?",
-        )
-        .get(selector.version_id, entry.id) as
-        { sha256: string; path: string } | undefined;
-      if (!row)
-        throw new AppError(
-          "USER_INPUT",
-          "Version does not belong to the selected entry",
-        );
-      sha256 = row.sha256;
-      name = row.path;
-    }
-    if (selector.expected_sha256 && sha256 !== selector.expected_sha256) {
-      const historical = schemaVersion(db) >= 3 && !selector.version_id
-        ? db.prepare("SELECT sha256,path FROM track_versions WHERE entry_id=? AND sha256=? ORDER BY version_no DESC LIMIT 1")
-            .get(entry.id, selector.expected_sha256) as { sha256: string; path: string } | undefined
-        : undefined;
-      if (!historical) throw new AppError("USER_INPUT", "当前展示的轨迹版本已不可用，请刷新详情后重试");
-      sha256 = historical.sha256;
-      name = historical.path;
-    }
-    return { name: path.basename(name), sha256, bytes: rawObject(db, sha256) };
+    const reference = downloadReference(db, selector);
+    return { ...reference, bytes: rawObject(db, reference.sha256) };
   });
 }
 export function downloadFile(

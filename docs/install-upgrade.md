@@ -34,7 +34,7 @@ ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL
 
 配置位置沿用 Linux `$XDG_CONFIG_HOME/tracktool`（默认 `~/.config/tracktool`）、macOS `~/Library/Application Support/tracktool`、Windows `%APPDATA%/tracktool`。网页任务默认存入配置目录的 `web/tasks.sqlite3`，上传存入 `web/uploads/`；可指定 `--state-dir`。不要把状态目录当作永久文件备份。
 
-已有 schema 2/3 归档不自动升级；新库使用 schema 4，`archive migrate` 先生成完整备份再升级。地图项目 JSON schema 3 固定库和版本；schema 1/2 按 path + SHA 唯一关联基线，不自动跟随最新轨迹。渲染器资源版本不同仍需确认后另存。新版展示 ZIP 只保留可见结果，原件和隐藏历史用 full-backup 保留。PNG 的短期出图会话不跨进程恢复。配置密钥读取优先级仍为环境变量 > CLI 参数 > 文件；网页不回显密钥。
+已有 schema 2/3/4 归档不自动升级；新库使用 schema 5，`archive migrate` 先生成完整备份再升级。地图项目 JSON schema 3 固定库和版本；schema 1/2 按 path + SHA 唯一关联基线，不自动跟随最新轨迹。渲染器资源版本不同仍需确认后另存。新版展示 ZIP 只保留可见结果，原件和隐藏历史用 full-backup 保留。PNG 的短期出图会话不跨进程恢复。配置密钥读取优先级仍为环境变量 > CLI 参数 > 文件；网页不回显密钥。
 
 ## 回退
 
@@ -43,3 +43,5 @@ ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL
 停止新服务和 CLI，保留新状态目录以便诊断；使用先前保留的 Python 环境恢复旧命令 PATH。旧程序不能直接使用 schema 3/4 数据库。
 
 在独立目录恢复完整数据库备份及配置，或把 ZIP 导入一个全新归档；不要覆盖当前唯一数据库或把数据库文件单独复制到仍存在不匹配 WAL 的目录。媒体变更需从原件/首次备份恢复。回退应用程序本身不会撤销已经写入的元数据、轨迹或任务结果。
+
+轨迹详情统计在 schema 5 中按内容哈希、解析器版本、分析版本及参数哈希持久缓存。迁移仅增加空缓存表，不预计算历史数据；首次查看时回填。缓存不推进业务或存储修订号，不改变轨迹历史。旧库未迁移或无法写入时仍可按需计算。

@@ -69,7 +69,7 @@ tracktool archive recover
 
 ## 库内行程编辑
 
-`track` 命令操作 schema 4 中的版本化行程。默认内部断开仍是一个 KML；独立行程拆分须明确使用 split_journey。原有 `kml split/prune` 属于独立文件工具，不修改库内版本。`kml to-multigeom` 已移除，没有兼容别名；MultiGeometry 文件仍可正常读取。
+`track` 命令操作 schema 4/5 中的版本化行程。默认内部断开仍是一个 KML；独立行程拆分须明确使用 split_journey。原有 `kml split/prune` 属于独立文件工具，不修改库内版本。`kml to-multigeom` 已移除，没有兼容别名；MultiGeometry 文件仍可正常读取。
 
 ```sh
 tracktool track list --search '2026-10-01'
@@ -254,7 +254,7 @@ tracktool archive status
 tracktool archive backup              # 当前活动 KML → Archive.zip（不含历史）
 tracktool archive full-backup --output /backup/tracks.sqlite3
 tracktool archive restore-backup /backup/tracks.sqlite3 /fresh/tracks
-tracktool archive migrate             # 完整备份后显式升级 schema 4
+tracktool archive migrate             # 完整备份后显式升级 schema 5
 tracktool archive rebuild             # SQLite → 聚合 KML
 tracktool archive recover             # 完成中断文件操作
 ```

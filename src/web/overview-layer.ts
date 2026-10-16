@@ -30,6 +30,7 @@ export class OverviewLayer {
   private current?: string;
   private pending?: string;
   private selected = "";
+  private analysisSelected = false;
   private hidden = false;
   private visibility?: OverviewVisibility;
   private serial = 0;
@@ -74,8 +75,10 @@ export class OverviewLayer {
     selected: string,
     hidden: boolean,
     visibility?: OverviewVisibility,
+    analysisSelected = false,
   ) {
     this.selected = selected;
+    this.analysisSelected = analysisSelected;
     this.hidden = hidden;
     this.visibility = visibility;
     if (status?.crs === this.crs) this.status = status;
@@ -211,7 +214,9 @@ export class OverviewLayer {
     this.map.setPaintProperty(
       `${id}-line`,
       "line-color",
-      categoryPaint("color"),
+      this.analysisSelected
+        ? ["case", selected, "#94a3b8", categoryPaint("color")]
+        : categoryPaint("color"),
     );
     this.map.setPaintProperty(`${id}-line`, "line-width", [
       "case",
@@ -227,7 +232,9 @@ export class OverviewLayer {
     this.map.setPaintProperty(
       `${id}-point`,
       "circle-color",
-      categoryPaint("color"),
+      this.analysisSelected
+        ? ["case", selected, "#94a3b8", categoryPaint("color")]
+        : categoryPaint("color"),
     );
     this.map.setPaintProperty(`${id}-point`, "circle-radius", [
       "case",

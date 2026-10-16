@@ -1,5 +1,7 @@
+import { TrackInsights, type AnalysisOverlay } from "./track-insights.js";
+import { Popover as PopoverPrimitive } from "radix-ui";
 import { toast } from "sonner";
-import { Eye, EyeOff, Square, SquareCheck, SquareMinus, LoaderCircle, Funnel, ListChecks, ArrowDownWideNarrow, Settings as SettingsIcon, List, Upload, FileOutput } from "lucide-react";
+import { Eye, EyeOff, Square, SquareCheck, SquareMinus, LoaderCircle, Funnel, ListChecks, ArrowDownWideNarrow, Settings as SettingsIcon, List, Upload, FileOutput, LocateFixed, Download, Ellipsis, Trash2, Pencil, SlidersHorizontal, History, ChevronRight } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover.js";
 import { PanelHeader } from "./components/panel-header.js";
 import {
@@ -272,6 +274,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
   const [archiveAction, setArchiveAction] = useState<Operation>();
   const [downloadingTrack, setDownloadingTrack] = useState(false);
   const [libraryList, setLibraryList] = useSessionState(`tracktool.library-list:${initial.initialArchive}`, false);
+  const [analysisOverlay, setAnalysisOverlay] = useState<AnalysisOverlay>();
   const [detailAction, setDetailAction] = useState<{
     operation: Operation;
     entry: string;
@@ -1995,103 +1998,219 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 }
               >
                 <div role="region" aria-label="轨迹详情">
-                  <p>{overview.selected?.entry}</p>
-                  {overview.selected && (
-                    <p>
-                      {overview.selected.date || "行程日期未知"} ·{" "}
-                      {overview.selected.tags || "活动标签未知"}
-                      {overview.selected.distance_m !== undefined
-                        ? ` · ${(overview.selected.distance_m / 1000).toFixed(1)} km`
-                        : ""}
-                    </p>
-                  )}
-                  {overview.selected && (
-                    <p>
-                      {overview.selected.points.toLocaleString()} 个点 ·{" "}
-                      {overview.selected.segments} 段 · {overview.selected.kind}
-                    </p>
-                  )}
-                  {overview.detail.isFetching && <span>正在读取详情…</span>}
-                  {(overview.detail.error ?? overview.matching.error) && (
-                    <p role="alert">
-                      {
-                        (overview.detail.error ?? overview.matching.error)
-                          ?.message
-                      }
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          void overview.detail.refetch();
-                          void overview.matching.refetch();
-                        }}
+                  <div className="track-summary" hidden={editing}>
+                    {overview.detail.isFetching && <span>正在读取详情…</span>}
+                    {(overview.detail.error ?? overview.matching.error) && (
+                      <p role="alert">
+                        {(overview.detail.error ?? overview.matching.error)?.message}
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            void overview.detail.refetch();
+                            void overview.matching.refetch();
+                          }}
+                        >
+                          重试详情
+                        </Button>
+                      </p>
+                    )}
+                    {overview.selected && (
+                      <TrackInsights
+                        key={`${initial.initialArchive}:${overview.selected.id}:${overview.selected.sha256}`}
+                        entry={overview.selected}
+                        scope={initial.initialArchive}
+                        active={panel === "library" && detailOpen && !editing && !archiveAction}
+                        onOverlay={setAnalysisOverlay}
                       >
-                        重试详情
-                      </Button>
-                    </p>
-                  )}
-                  <Button
-                    disabled={editMap ? !editMap.tracks.some((track) => track.points > 0) : !overview.selectedTrack}
-                    onClick={() => fitTracks(editMap ? editMap.tracks : [overview.selectedTrack!])}
-                  >
-                    定位轨迹
-                  </Button>
-                  <Button
-                    loading={downloadingTrack}
-                    disabled={!overview.detail.data || overview.detail.data.entry.id !== overview.id || overview.detail.data.entry.sha256 !== overview.selected?.sha256}
-                    onClick={() => {
-                      const entry = overview.detail.data!.entry;
-                      setDownloadingTrack(true);
-                      void request(`/api/tracks/${encodeURIComponent(entry.id)}/download?sha256=${entry.sha256}`)
-                        .then(async (response) => {
-                          const url = URL.createObjectURL(await response.blob());
-                          const anchor = document.createElement("a");
-                          anchor.href = url;
-                          anchor.download = entry.entry.split("/").at(-1) ?? "track.kml";
-                          anchor.click();
-                          setTimeout(() => URL.revokeObjectURL(url), 1000);
-                        })
-                        .catch((error) => toast.error(error instanceof Error ? error.message : "下载失败，请重试"))
-                        .finally(() => setDownloadingTrack(false));
-                    }}
-                  >
-                    下载轨迹
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    disabled={!overview.selected}
-                    onClick={() =>
-                      setDetailAction({
-                        operation: "archive:delete",
-                        entry: overview.selected!.entry,
-                      })
-                    }
-                  >
-                    删除轨迹
-                  </Button>
-                  <p>库内编辑会生成新版本，工程固定的历史版本保持不变。</p>
-                  <div hidden={editing} className="library-actions">
-                    {(["edit", "display", "history"] as const).map((view) => (
-                      <Button key={view} onClick={() => {
-                        if (view !== editorView && hasDraft && !window.confirm("切换编辑功能将放弃当前草稿，是否继续？")) return;
-                        setEditorView(view);
-                        setEditing(true);
-                        setDetailAction(undefined);
-                      }}>{editorTitles[view]}</Button>
-                    ))}
+                        <div className="track-detail-toolbar">
+                          <Button
+                            variant="default"
+                            className="track-edit-primary"
+                            onClick={() => {
+                              if (
+                                editorView !== "edit" &&
+                                hasDraft &&
+                                !window.confirm("切换编辑功能将放弃当前草稿，是否继续？")
+                              )
+                                return;
+                              setEditorView("edit");
+                              setEditing(true);
+                              setDetailAction(undefined);
+                            }}
+                          >
+                            <Pencil aria-hidden="true" />
+                            编辑轨迹
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label="定位轨迹"
+                            title="定位轨迹"
+                            disabled={
+                              editMap
+                                ? !editMap.tracks.some((track) => track.points > 0)
+                                : !overview.selectedTrack
+                            }
+                            onClick={() =>
+                              fitTracks(editMap ? editMap.tracks : [overview.selectedTrack!])
+                            }
+                          >
+                            <LocateFixed aria-hidden="true" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label="下载轨迹"
+                            title="下载轨迹"
+                            loading={downloadingTrack}
+                            disabled={
+                              !overview.detail.data ||
+                              overview.detail.data.entry.id !== overview.id ||
+                              overview.detail.data.entry.sha256 !== overview.selected?.sha256
+                            }
+                            onClick={() => {
+                              const entry = overview.detail.data!.entry;
+                              setDownloadingTrack(true);
+                              void request(
+                                `/api/tracks/${encodeURIComponent(entry.id)}/download?sha256=${entry.sha256}`,
+                              )
+                                .then(async (response) => {
+                                  const url = URL.createObjectURL(await response.blob());
+                                  const anchor = document.createElement("a");
+                                  anchor.href = url;
+                                  anchor.download =
+                                    entry.entry.split("/").at(-1) ?? "track.kml";
+                                  anchor.click();
+                                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                                })
+                                .catch((error) =>
+                                  toast.error(
+                                    error instanceof Error ? error.message : "下载失败，请重试",
+                                  ),
+                                )
+                                .finally(() => setDownloadingTrack(false));
+                            }}
+                          >
+                            {!downloadingTrack && <Download aria-hidden="true" />}
+                          </Button>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                aria-label="更多轨迹操作"
+                                title="更多轨迹操作"
+                              >
+                                <Ellipsis aria-hidden="true" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" className="w-44 p-1">
+                              <PopoverPrimitive.Close asChild>
+                                <Button
+                                  variant="ghost"
+                                  className="w-full justify-start text-destructive"
+                                  disabled={!overview.selected}
+                                  onClick={() =>
+                                    setDetailAction({
+                                      operation: "archive:delete",
+                                      entry: overview.selected!.entry,
+                                    })
+                                  }
+                                >
+                                  <Trash2 aria-hidden="true" />
+                                  删除轨迹
+                                </Button>
+                              </PopoverPrimitive.Close>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                        <div className="track-detail-links">
+                          {(["display", "history"] as const).map((view) => (
+                            <Button
+                              key={view}
+                              variant="ghost"
+                              className="track-detail-link"
+                              aria-label={editorTitles[view]}
+                              onClick={() => {
+                                if (
+                                  view !== editorView &&
+                                  hasDraft &&
+                                  !window.confirm("切换编辑功能将放弃当前草稿，是否继续？")
+                                )
+                                  return;
+                                setEditorView(view);
+                                setEditing(true);
+                                setDetailAction(undefined);
+                              }}
+                            >
+                              {view === "display" ? (
+                                <SlidersHorizontal aria-hidden="true" />
+                              ) : (
+                                <History aria-hidden="true" />
+                              )}
+                              <span>
+                                <strong>{editorTitles[view]}</strong>
+                                <small>
+                                  {view === "display"
+                                    ? "设置轨迹颜色、线宽与显示方式"
+                                    : "查看变更记录与恢复历史版本"}
+                                </small>
+                              </span>
+                              <ChevronRight aria-hidden="true" />
+                            </Button>
+                          ))}
+                        </div>
+                      </TrackInsights>
+                    )}
+                    <details className="track-file-info">
+                      <summary>基础信息</summary>
+                      <dl>
+                        <dt>轨迹点数</dt>
+                        <dd>{overview.selected?.points.toLocaleString() ?? "—"}</dd>
+                        <dt>分段数</dt>
+                        <dd>{overview.selected?.segments ?? "—"}</dd>
+                        <dt>轨迹类型</dt>
+                        <dd>{overview.selected?.kind || "—"}</dd>
+                      </dl>
+                    </details>
                   </div>
+                  {editing && (
+                    <div className="track-editor-context">
+                      <div className="track-editor-context-heading">
+                        <strong>{overview.selected?.name}</strong>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label="定位轨迹"
+                          title="定位轨迹"
+                          disabled={
+                            editMap
+                              ? !editMap.tracks.some((track) => track.points > 0)
+                              : !overview.selectedTrack
+                          }
+                          onClick={() =>
+                            fitTracks(editMap ? editMap.tracks : [overview.selectedTrack!])
+                          }
+                        >
+                          <LocateFixed aria-hidden="true" />
+                        </Button>
+                      </div>
+                      {editorView !== "history" && (
+                        <p>编辑会生成新版本，工程固定的历史版本保持不变。</p>
+                      )}
+                    </div>
+                  )}
                   <Suspense fallback={<Spin />}>
                     <div hidden={!editing}>
                       <TrackEditor
                         key={`${overview.id}:${editorView}`}
                         view={editorView}
                         initialEntry={overview.id}
-                        onEntryChange={(id) => { overview.setId(id); setEditing(false); }}
-                        active={
-                          editing &&
-                          detailOpen &&
-                          panel === "library" &&
-                          !archiveAction
-                        }
+                        onEntryChange={(id) => {
+                          overview.setId(id);
+                          setEditing(false);
+                        }}
+                        active={editing && detailOpen && panel === "library" && !archiveAction}
                       />
                     </div>
                   </Suspense>
@@ -2144,6 +2263,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             overviewSelected={overview.id}
             overviewVisibility={browseVisibility}
             hideOverview={!browsing || !!editMap}
+            analysisOverlay={panel === "library" && detailOpen && !editing && !archiveAction && browsing && !editMap && !inspection && analysisOverlay?.key === (overview.selected ? overview.selected.id + overview.selected.sha256 : "") ? analysisOverlay : undefined}
             highlightSegment={editMap?.segment}
             onPointPick={editMap?.pick}
             onOverviewPick={(hits) => {

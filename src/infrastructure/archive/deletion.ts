@@ -13,7 +13,7 @@ import { selectEntry, type EntrySelector } from "./download.js";
 import { canonical, hashJson } from "./identity.js";
 
 function requireDeletionSchema(db: Database.Database): void {
-  if (schemaVersion(db) !== 4)
+  if (schemaVersion(db) < 4)
     throw new AppError(
       "USER_INPUT",
       "Deletion requires schema 4; run archive migrate explicitly",

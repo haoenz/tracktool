@@ -1,3 +1,4 @@
+import { analyzeTrack } from "../../domain/track-analysis.js";
 import { executeEdit, readContent } from "./edit.js";
 import { editSegments } from "./segment-edit.js";
 import { parentPort, workerData } from "node:worker_threads";
@@ -15,7 +16,17 @@ const { bytes, operation } = workerData as {
 // dispose the worker immediately after receiving a message.
 setImmediate(() => {
   try {
-    if (operation.kind === "tracks") {
+    if (operation.kind === "analysis") {
+      const data = withDocument(bytes, (doc) => readTrackData(doc));
+      parentPort?.postMessage({
+        result: {
+          name: data.name,
+          placemarks: data.tracks.length,
+          coordinateNodes: pointCount(data),
+          analysis: analyzeTrack(data, operation.params),
+        },
+      });
+    } else if (operation.kind === "tracks") {
       const data = withDocument(bytes, (doc) =>
         readTrackData(doc, operation.source),
       );

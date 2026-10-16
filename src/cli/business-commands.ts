@@ -164,7 +164,7 @@ function archiveCommand(
       backup: "从一致快照导出当前展示 KML ZIP（不含隐藏段和历史）",
       "full-backup": "完整备份 SQLite：原件、版本、展示设置、来源及项目",
       recover: "恢复中断的文件操作",
-      migrate: "完整备份后显式升级数据库到 schema 4",
+      migrate: "完整备份后显式升级数据库到 schema 5",
       rebuild: "重新生成桌面与手机集合 KML",
     }[kind];
     static flags = {

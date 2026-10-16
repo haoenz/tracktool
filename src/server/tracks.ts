@@ -1,3 +1,4 @@
+import { TrackAnalysisCache } from "../infrastructure/archive/analysis-cache.js";
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -71,6 +72,29 @@ export function trackRoutes(
       undefined,
       q.cursor,
     );
+  });
+  const analysisWorkers = new XmlWorkers(2, 8);
+  const analysisCache = new TrackAnalysisCache(analysisWorkers);
+  app.addHook("onClose", async () => {
+    await analysisWorkers.close();
+  });
+  app.get("/api/tracks/:entryId/analysis", async (req, reply) => {
+    const { entryId } = z.object({ entryId: id }).parse(req.params);
+    const { sha256 } = z
+      .object({ sha256: z.string().regex(/^[a-f0-9]{64}$/) })
+      .strict()
+      .parse(req.query);
+    const controller = new AbortController();
+    reply.raw.once("close", () => {
+      if (!reply.raw.writableFinished) controller.abort();
+    });
+    const result = await analysisCache.get(
+      (await get()).file,
+      entryId,
+      sha256,
+      controller.signal,
+    );
+    return reply.header("Cache-Control", "no-store").send(result);
   });
   app.get("/api/tracks/:entryId/download", async (req, reply) => {
     const { entryId } = z.object({ entryId: id }).parse(req.params);

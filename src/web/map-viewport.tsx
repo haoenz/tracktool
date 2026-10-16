@@ -1,3 +1,5 @@
+import { AnalysisLayer } from "./analysis-layer.js";
+import type { AnalysisOverlay } from "./track-insights.js";
 import {
   forwardRef,
   useEffect,
@@ -51,6 +53,7 @@ type Props = {
   onPointPick?: (position: [number, number]) => void;
   exposeRenderer?: boolean;
   highlightSegment?: string;
+  analysisOverlay?: AnalysisOverlay;
 };
 export const MapViewport = forwardRef<Viewport, Props>(
   function MapViewport(props, ref) {
@@ -64,6 +67,7 @@ export const MapViewport = forwardRef<Viewport, Props>(
     const [resourceError, setResourceError] = useState("");
     const transition = useRef<Transition | undefined>(undefined);
     const layers = useRef(new Map<MapCanvas, OverviewLayer>());
+    const analysisLayers = useRef(new Map<MapCanvas, AnalysisLayer>());
     latest.current = props;
     const highlight = (map: MapCanvas) => {
       if (latest.current.highlightSegment === undefined) return;
@@ -100,9 +104,13 @@ export const MapViewport = forwardRef<Viewport, Props>(
             latest.current.hideOverview ??
             true,
           latest.current.overviewVisibility,
+          !!latest.current.analysisOverlay &&
+            latest.current.analysisOverlay.metric !== "original",
         );
     const destroy = (map?: MapCanvas) => {
       if (!map) return;
+      analysisLayers.current.get(map)?.destroy();
+      analysisLayers.current.delete(map);
       layers.current.get(map)?.destroy();
       layers.current.delete(map);
       map.destroy();
@@ -127,6 +135,7 @@ export const MapViewport = forwardRef<Viewport, Props>(
           );
         map.frame.style.transform = `scale(${scale})`;
         layers.current.get(map)?.setScale(scale);
+        analysisLayers.current.get(map)?.setScale(scale);
         if (map === current.current) {
           holder.current.style.width = `${frame.width * scale}px`;
           holder.current.style.height = `${frame.height * scale}px`;
@@ -199,6 +208,9 @@ export const MapViewport = forwardRef<Viewport, Props>(
         (id) => map.resources.errors(id).length > 0,
       );
       layers.current.set(map, layer.current);
+      const analysis = new AnalysisLayer(map.map, map.crs);
+      analysisLayers.current.set(map, analysis);
+      analysis.update(latest.current.analysisOverlay);
       map.map.on("click", (event) => {
         if (current.current !== map || !latest.current.onPointPick) return;
         const point = displayCoordinate(
@@ -281,7 +293,12 @@ export const MapViewport = forwardRef<Viewport, Props>(
       props.overviewSelected,
       props.hideOverview,
       props.overviewVisibility,
+      props.analysisOverlay?.metric,
     ]);
+    useEffect(() => {
+      for (const layer of analysisLayers.current.values())
+        layer.update(props.analysisOverlay);
+    }, [props.analysisOverlay]);
     useImperativeHandle(ref, () => ({
       retryOverview: () => {
         if (current.current) layers.current.get(current.current)?.retry();

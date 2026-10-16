@@ -301,7 +301,7 @@ it("CLI full backup and restore preserve the library and refuse to overwrite des
   expect(result.status, result.stderr).toBe(0);
   expect(
     new ArchiveWriter().status(path.join(restored, "archive.sqlite3")),
-  ).toMatchObject({ schema: 4, entries: 1 });
+  ).toMatchObject({ schema: 5, entries: 1 });
   expect(run(dir, "archive", "full-backup", "--output", backup).status).toBe(1);
   expect(run(dir, "archive", "restore-backup", backup, archive).status).toBe(1);
 });

@@ -1,3 +1,4 @@
+import { SCHEMA_4 } from "../../dist/node/infrastructure/archive/schema-v4.js";
 import { afterEach, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import {
@@ -57,15 +58,17 @@ const raw = (x = 121) =>
 afterEach(() =>
   dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true })),
 );
-async function fixture(schema = 4) {
+async function fixture(schema = 5) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "tracktool-delete-"));
   dirs.push(dir);
   const file = path.join(dir, "archive.sqlite3"),
     writer = new ArchiveWriter();
-  if (schema === 4) await writer.init(dir);
+  if (schema === 5) await writer.init(dir);
   else {
     const db = new Database(file);
-    db.exec(schema === 3 ? SCHEMA_3 : SCHEMA + MIGRATE_1);
+    db.exec(
+      schema === 4 ? SCHEMA_4 : schema === 3 ? SCHEMA_3 : SCHEMA + MIGRATE_1,
+    );
     db.prepare(
       "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'fixture')",
     ).run();
@@ -177,7 +180,7 @@ it("rolls back replacement publication and legacy cleanup together on failure", 
   ).toEqual([{ version_no: 1 }, { version_no: 2 }]);
   expect(() => entry(file, id)).toThrow("Entry not found");
 });
-it.each([2, 3, 4])(
+it.each([2, 3, 4, 5])(
   "downloads schema %s with no recovery, database writes or target overwrite",
   async (schema) => {
     const { file, dir, id } = await fixture(schema);
@@ -553,7 +556,7 @@ it("explicitly migrates schema 3 preserving history and can roll back its new DD
   const backup = await migrateArchive(file);
   expect(snapshot(backup!)).toEqual(before);
   const after = snapshot(file);
-  expect(after.schema).toBe(4);
+  expect(after.schema).toBe(5);
   for (const [table, contents] of Object.entries(before.tables))
     if (table !== "archive_meta")
       expect(after.tables[table], table).toEqual(contents);

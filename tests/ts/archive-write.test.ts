@@ -50,10 +50,10 @@ afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   dirs.length = 0;
 });
-async function initialized(version = 4) {
+async function initialized(version = 5) {
   const directory = tmp();
   const writer = new ArchiveWriter();
-  if (version === 4) await writer.init(directory);
+  if (version === 5) await writer.init(directory);
   else {
     const db = new Database(path.join(directory, "archive.sqlite3"));
     db.exec(version === 3 ? SCHEMA_3 : SCHEMA + MIGRATE_1);

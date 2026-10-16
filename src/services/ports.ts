@@ -1,3 +1,5 @@
+import type { AnalysisParams } from "../domain/track-analysis.js";
+import type { TrackAnalysis } from "../shared/track-analysis.js";
 import type { Content } from "../domain/archive.js";
 import type { EditOperation, EditResult } from "../domain/kml-edit.js";
 import type { TrackData } from "../domain/trackdata.js";
@@ -22,6 +24,7 @@ export type XmlOperation =
       additional: SegmentInput[];
     }
   | { kind: "tracks"; source: string }
+  | { kind: "analysis"; params?: AnalysisParams }
   | { kind: "inspect" }
   | { kind: "rename"; name: string };
 export type XmlResult = {
@@ -30,6 +33,7 @@ export type XmlResult = {
   coordinateNodes: number;
   xml?: string;
   tracks?: TrackData;
+  analysis?: TrackAnalysis;
   content?: Content;
   edit?: EditResult;
   segment_edit?: SegmentEditResult;

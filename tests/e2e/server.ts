@@ -73,6 +73,27 @@ app.post("/api/test/edit-fixture", async () => {
   );
   return transaction(archive, true, (db) => addEntry(db, name, raw, "Default"));
 });
+app.post("/api/test/analysis-fixture", async (request) => {
+  const duplicateTime = (request.body as { duplicateTime?: boolean })
+    ?.duplicateTime;
+  const name = `Default/2026-10-14 统计测试-${randomUUID()}.kml`;
+  const segments = [0, 1].map((segment) => {
+    const points = Array.from({ length: 40 }, (_, i) => ({
+      time: new Date(
+        Date.UTC(2026, 9, 14, 8) +
+          (segment * 3600 + (duplicateTime && i === 1 ? 0 : i) * 30) * 1000,
+      ).toISOString(),
+      lon: 120 + segment * 0.05 + i * 0.0004,
+      lat: 30 + Math.sin(i / 8) * 0.003,
+      alt: 100 + segment * 30 + Math.sin(i / 8) * 30,
+    }));
+    return `<gx:Track>${points.map((p) => `<when>${p.time}</when>`).join("")}${points.map((p) => `<gx:coord>${p.lon} ${p.lat} ${p.alt}</gx:coord>`).join("")}</gx:Track>`;
+  });
+  const raw = Buffer.from(
+    `<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><name>山间步道</name><ExtendedData><Data name="TrackTags"><value>徒步</value></Data></ExtendedData><Placemark><MultiGeometry>${segments.join("")}</MultiGeometry></Placemark></Document></kml>`,
+  );
+  return transaction(archive, true, (db) => addEntry(db, name, raw, "Default"));
+});
 app.post("/api/test/edit-cleanup", async (request) => {
   const project = (request.body as { project?: string }).project;
   if (project)
