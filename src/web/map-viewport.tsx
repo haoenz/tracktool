@@ -74,9 +74,17 @@ export const MapViewport = forwardRef<Viewport, Props>(
         if (map.map.getLayer(layer!))
           map.map.setPaintProperty(layer!, property!, [
             "case",
+            ["==", ["get", "segment_id"], "ux-delete"],
+            "#dc2626",
+            ["==", ["get", "segment_id"], "ux-add"],
+            "#16a34a",
+            ["==", ["get", "segment_id"], "ux-break"],
+            "#ea580c",
+            ["has", "edit_color"],
+            ["get", "edit_color"],
             ["==", ["get", "segment_id"], latest.current.highlightSegment],
             "#1677ff",
-            map.state.style.color,
+            "#64748b",
           ]);
       }
     };
@@ -262,6 +270,7 @@ export const MapViewport = forwardRef<Viewport, Props>(
     }, [props.state, props.highlightSegment]);
     useEffect(() => {
       current.current?.setTracks(props.tracks);
+      if (current.current) highlight(current.current);
       if (!transition.current) candidate.current?.setTracks(props.tracks);
     }, [props.tracks]);
     useEffect(() => {
@@ -285,7 +294,54 @@ export const MapViewport = forwardRef<Viewport, Props>(
           ],
           { padding: 65, maxZoom: 15, duration: 0 },
         ),
-      fit: (tracks) => current.current?.fit(tracks),
+      fit: (tracks) => {
+        const map = current.current;
+        if (!map) return;
+        const panel = document.querySelector<HTMLElement>(
+          ".map-controls:not([hidden])",
+        );
+        const box = panel?.getBoundingClientRect();
+        const bounds = stage.current?.getBoundingClientRect();
+        const frame = map.frame.getBoundingClientRect();
+        const canvas = map.mapElement.getBoundingClientRect();
+        const scale = canvas.width / map.mapElement.clientWidth;
+        if (!bounds || !scale) return;
+        // Fit inside the actual visible canvas, not the smaller export frame's
+        // existing surround padding plus an overlapping sheet (which can leave
+        // a negative fitting area on phones).
+        const area = latest.current.preview ? frame : bounds;
+        const mobile = window.innerWidth <= 700;
+        const headerBottom = Math.max(
+          ...[".map-header", ".project-bar"].map(
+            (selector) =>
+              document.querySelector(selector)?.getBoundingClientRect()
+                .bottom ?? 0,
+          ),
+        );
+        const left =
+          Math.max(area.left, !mobile && box ? box.right : area.left) + 16;
+        const right = area.right - 16;
+        const top =
+          Math.max(
+            area.top,
+            headerBottom,
+            latest.current.preview && map.state.title
+              ? frame.top + 90 * scale
+              : area.top,
+          ) + 16;
+        const bottom =
+          Math.min(area.bottom, mobile && box ? box.top : area.bottom) - 16;
+        if (right <= left || bottom <= top) {
+          latest.current.onError("地图可见区域太小，请收起面板后再定位。");
+          return;
+        }
+        map.fit(tracks, {
+          left: (left - canvas.left) / scale,
+          right: (canvas.right - right) / scale,
+          top: (top - canvas.top) / scale,
+          bottom: (canvas.bottom - bottom) / scale,
+        });
+      },
       cancel,
       ready: async () => {
         const map = current.current;

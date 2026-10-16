@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Checkbox, Select } from "antd";
+import { Button, Checkbox, Select } from "./components/controls.js";
 import type { SelectedTrack } from "../shared/map.js";
 import type { Presentation } from "../shared/track-edit.js";
 export function ProjectPresentation({
@@ -58,8 +58,8 @@ export function ProjectPresentation({
       )}
       <Checkbox
         checked={settings.default_connect}
-        onChange={(e) =>
-          setSettings({ ...settings, default_connect: e.target.checked })
+        onCheckedChange={(e) =>
+          setSettings({ ...settings, default_connect: e })
         }
       >
         项目默认连接相邻段
@@ -71,10 +71,10 @@ export function ProjectPresentation({
           <div key={id} className="project-segment">
             <Checkbox
               checked={settings.ignored.includes(id)}
-              onChange={(e) =>
+              onCheckedChange={(e) =>
                 setSettings({
                   ...settings,
-                  ignored: e.target.checked
+                  ignored: e
                     ? [...settings.ignored, id]
                     : settings.ignored.filter((s) => s !== id),
                 })
@@ -83,7 +83,7 @@ export function ProjectPresentation({
               项目忽略{label(id)}
             </Checkbox>
             <Button
-              size="small"
+              size="sm"
               aria-label={`项目上移${label(id)}`}
               disabled={i === 0}
               onClick={() => move(id, -1)}
@@ -91,7 +91,7 @@ export function ProjectPresentation({
               上移
             </Button>
             <Button
-              size="small"
+              size="sm"
               aria-label={`项目下移${label(id)}`}
               disabled={i === settings.order.length - 1}
               onClick={() => move(id, 1)}

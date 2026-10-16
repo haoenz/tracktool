@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Spin } from "antd";
+import { Alert, Button, Spin } from "./components/controls.js";
 import { api } from "./api.js";
 import { MapViewport } from "./map-viewport.js";
 import type { Viewport } from "./map-viewport.js";

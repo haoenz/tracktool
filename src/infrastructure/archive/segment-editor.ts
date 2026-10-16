@@ -139,10 +139,7 @@ export async function prepareSegmentEdit(
     const publish: PublishRequest = {
       archive_id: request.archive_id,
       request_key: request.request_key,
-      kind:
-        request.operation.kind === "reverse"
-          ? "compose"
-          : request.operation.kind,
+      kind: request.operation.kind,
       algorithm_version: "segments-v1",
       params: { operation: request.operation },
       inputs: [request.target],

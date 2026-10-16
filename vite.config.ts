@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
 const backend = "http://127.0.0.1:8766";
 const webRoot = resolve("src/web");
@@ -33,7 +34,8 @@ function injectDevelopmentToken(): Plugin {
 
 export default defineConfig({
   root: webRoot,
-  plugins: [react(), injectDevelopmentToken()],
+  plugins: [react(), tailwindcss(), injectDevelopmentToken()],
+  resolve: { alias: { "@": webRoot } },
   server: {
     host: "0.0.0.0",
     port: 8765,

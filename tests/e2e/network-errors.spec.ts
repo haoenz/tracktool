@@ -55,8 +55,11 @@ test("persistent tile failure blocks export; reconnect reloads and clears only t
   expect(await page.evaluate(() => window.renderer!.errors)).toEqual([]);
   await tool(page, "新建出图工程");
   await page
-    .getByLabel("项目名称", { exact: true })
-    .fill("保存失败不能被地图恢复清除");
+    .getByRole("region", { name: "当前出图工程" })
+    .getByRole("button", { name: "保存", exact: true })
+    .click();
+  const save = page.getByRole("dialog", { name: "另存工程" });
+  await save.getByLabel("另存为名称").fill("保存失败不能被地图恢复清除");
   await page.route("**/api/projects/save", (route) =>
     route.fulfill({
       status: 500,
@@ -65,8 +68,9 @@ test("persistent tile failure blocks export; reconnect reloads and clears only t
       },
     }),
   );
-  await page.getByRole("button", { name: "保存项目", exact: true }).click();
-  await expect(page.locator(".map-errors")).toContainText("模拟保存失败");
+  await save.getByRole("button", { name: "确定", exact: true }).click();
+  await expect(save.getByRole("alert")).toContainText("模拟保存失败");
+  await save.getByRole("button", { name: "取消", exact: true }).click();
   await page.evaluate(() => window.renderer!.map.refreshTiles("base"));
   await page.evaluate(() => window.renderer!.ready());
   await expect(page.locator(".map-errors")).toContainText("模拟保存失败");

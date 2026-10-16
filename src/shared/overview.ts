@@ -15,6 +15,8 @@ export const OverviewEntry = z.object({
   name: z.string(),
   kind: z.string(),
   date: z.string(),
+  tags: z.string().optional(),
+  distance_m: z.number().nonnegative().optional(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   display_key: z
     .string()

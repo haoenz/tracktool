@@ -535,3 +535,41 @@ it("recovers an already committed schema 1 pop before explicit migration", async
     revision: 3,
   });
 });
+
+it.each(["push-entry-written", "push-before-commit"] as FaultPoint[])("direct import rolls back all rows and versions on failure at %s", async (point) => {
+  const { directory, file, writer } = await initialized();
+  const source = path.join(directory, "source.kml");
+  writeFileSync(source, raw);
+  const request = {
+    kind: "push" as const, database: file, move: false, backup: path.join(directory, "Backup"),
+    entries: [0, 1].map((n) => ({ source, sha256: digest(raw), category: null, member: `entry-${n}.kml` })),
+  };
+  const failing = new ArchiveWriter(undefined, (p) => { if (p === point) throw new Error("injected"); });
+  await expect(failing.push(request)).rejects.toThrow("injected");
+  expect(writer.status(file)).toMatchObject({ entries: 0, revision: 0, pending: 0 });
+  transaction(file, false, (db) => {
+    for (const table of ["kml_objects", "track_versions", "track_operations"])
+      expect(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
+  });
+  expect(readFileSync(source)).toEqual(raw);
+  expect(existsSync(request.backup)).toBe(false);
+  await writer.push(request);
+  expect(writer.status(file)).toMatchObject({ entries: 2, pending: 0 });
+});
+
+it("direct import rejects changed or malformed input without committing earlier entries", async () => {
+  const { directory, file, writer } = await initialized();
+  const good = path.join(directory, "good.kml"), bad = path.join(directory, "bad.kml");
+  writeFileSync(good, raw);
+  writeFileSync(bad, "<kml>");
+  for (const sha256 of [digest(raw), digest(Buffer.from("<kml>"))]) {
+    await expect(writer.push({
+      kind: "push", database: file, move: false, backup: path.join(directory, "Backup"),
+      entries: [
+        { source: good, sha256: digest(raw), category: null, member: "good.kml" },
+        { source: bad, sha256, category: null, member: "bad.kml" },
+      ],
+    })).rejects.toThrow();
+    expect(writer.status(file)).toMatchObject({ entries: 0, revision: 0, pending: 0 });
+  }
+});

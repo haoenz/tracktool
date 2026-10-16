@@ -1,4 +1,4 @@
-import { tool } from "./map-tools.js";
+import { tool, selectProjectTrack, saveProject } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 import { test, expect } from "@playwright/test";
 import sharp from "sharp";
@@ -37,36 +37,36 @@ test("archive → selection → styling → save/reopen → JSON → independent
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/map");
   await tool(page, "新建出图工程");
-  await tool(page, "轨迹库");
+  await tool(page, "出图");
   await expect(
     page.getByRole("button", { name: "收起项目菜单" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("checkbox", {
-      name: "Default/2026-10-01 中文.kml",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await page
-    .getByRole("checkbox", { name: "Default/2026-10-01 中文.kml", exact: true })
-    .click();
-  await expect(page.locator(".ant-message")).toContainText("已选择 1 条轨迹");
-  await page.getByRole("button", { name: "适合轨迹" }).click();
+  await selectProjectTrack(page, "Default/2026-10-01 中文.kml");
+  await expect(page.locator("[data-sonner-toaster]")).toContainText(
+    "已选择 1 条轨迹",
+  );
+  await page.getByRole("button", { name: "适合出图轨迹", exact: true }).click();
   await tool(page, "工程样式");
   await page.getByLabel("标题", { exact: true }).fill("中文轨迹 · M3");
   await page.getByRole("spinbutton", { name: "线宽", exact: true }).fill("5");
   await tool(page, "项目");
-  await page.getByLabel("项目名称", { exact: true }).fill("验收项目");
-  await page.getByRole("button", { name: "保存项目", exact: true }).click();
-  await expect(page.locator(".ant-message")).toContainText("项目已保存");
+  await saveProject(page, "验收项目");
+  await expect(page.locator("[data-sonner-toaster]")).toContainText(
+    "已保存到当前轨迹库",
+  );
   await tool(page, "工程样式");
   await page.getByLabel("标题", { exact: true }).fill("未保存的修改");
   await tool(page, "项目");
   page.once("dialog", (dialog) => dialog.accept());
+  await page.getByLabel("已保存项目", { exact: true }).click();
+  await page.getByRole("option", { name: "验收项目", exact: true }).click();
   await page.getByRole("button", { name: "载入项目", exact: true }).click();
-  await expect(page.locator(".ant-message")).toContainText("项目已载入", {
-    timeout: 20000,
-  });
+  await expect(page.locator("[data-sonner-toaster]")).toContainText(
+    "项目已载入",
+    {
+      timeout: 20000,
+    },
+  );
   await tool(page, "工程样式");
   await expect(page.getByLabel("标题", { exact: true })).toHaveValue(
     "中文轨迹 · M3",
@@ -79,9 +79,12 @@ test("archive → selection → styling → save/reopen → JSON → independent
   await page
     .locator("input[type=file]")
     .setInputFiles(info.outputPath("project.json"));
-  await expect(page.locator(".ant-message")).toContainText("项目已载入", {
-    timeout: 20000,
-  });
+  await expect(page.locator("[data-sonner-toaster]")).toContainText(
+    "项目已载入",
+    {
+      timeout: 20000,
+    },
+  );
   await page.waitForFunction(
     () => !!window.renderer?.loadedFont && window.renderer.map.loaded(),
   );
@@ -131,10 +134,7 @@ test("selection updates the GeoJSON source while camera tiles are still pending"
 }) => {
   await page.goto("/map");
   await tool(page, "新建出图工程");
-  await tool(page, "轨迹库");
-  await expect(
-    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
-  ).toBeVisible();
+  await tool(page, "出图");
   await page.waitForFunction(() => window.renderer?.map.loaded());
   let release!: () => void, started!: () => void;
   const waiting = new Promise<void>((r) => {
@@ -151,10 +151,10 @@ test("selection updates the GeoJSON source while camera tiles are still pending"
   try {
     await page.evaluate(() => window.renderer!.map.jumpTo({ zoom: 8 }));
     await begun;
-    await page
-      .getByRole("checkbox", { name: "Train/same.kml", exact: true })
-      .click();
-    await expect(page.locator(".ant-message")).toContainText("已选择 1 条轨迹");
+    await selectProjectTrack(page, "Train/same.kml");
+    await expect(page.locator("[data-sonner-toaster]")).toContainText(
+      "已选择 1 条轨迹",
+    );
     const data = await page.evaluate(async () =>
       (window.renderer!.map.getSource("tracks") as GeoJSONSource).getData(),
     );
@@ -227,9 +227,10 @@ test("outdated resource versions and fingerprints are surfaced before save/expor
 }) => {
   test.setTimeout(60_000);
   await page.goto("/map");
+  await tool(page, "轨迹库");
   await expect(
-    page.getByRole("checkbox", {
-      name: "Default/2026-10-01 中文.kml",
+    page.getByRole("button", {
+      name: "查看 Default/2026-10-01 中文.kml",
       exact: true,
     }),
   ).toBeVisible();
@@ -299,13 +300,19 @@ test("rapid source changes only commit the latest choice", async ({ page }) => {
     config: { basemaps: { id: string; name: string; group: string }[] };
   }>(page, "/api/bootstrap");
   const bing = bootstrap.config.basemaps.find((b) => b.id.startsWith("bing-"))!;
-  await page.getByLabel("底图", { exact: true }).fill(bing.name);
+  await page.getByRole("combobox", { name: "底图", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "搜索底图", exact: true })
+    .fill(bing.name);
   await page.getByText(`${bing.group} · ${bing.name}`, { exact: true }).click();
   await startedPromise;
   expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
     "light",
   );
-  await page.getByLabel("底图", { exact: true }).fill("深色矢量");
+  await page.getByRole("combobox", { name: "底图", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "搜索底图", exact: true })
+    .fill("深色矢量");
   await page.getByText("深色矢量", { exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => window.renderer?.state.style.basemap), {
@@ -343,7 +350,10 @@ test("failed source retains the current map; a later source wins and camera/styl
     ).config as { basemaps: { id: string; name: string; group: string }[] };
   });
   const google = config.basemaps.find((b) => b.id.startsWith("google-"))!;
-  await page.getByLabel("底图", { exact: true }).fill(google.name);
+  await page.getByRole("combobox", { name: "底图", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "搜索底图", exact: true })
+    .fill(google.name);
   await page
     .getByText(`${google.group} · ${google.name}`, { exact: true })
     .click();
@@ -370,28 +380,18 @@ test("panels preserve the map, selection and unfinished edits on desktop and mob
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/map");
   await tool(page, "新建出图工程");
-  await tool(page, "轨迹库");
-  await page
-    .getByRole("checkbox", { name: "Train/same.kml", exact: true })
-    .click();
-  await expect(
-    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
-  ).toBeChecked();
-  await page.getByRole("button", { name: "适合轨迹", exact: true }).click();
+  await selectProjectTrack(page, "Train/same.kml");
+  await page.getByRole("button", { name: "适合出图轨迹", exact: true }).click();
   await tool(page, "工程样式");
   await page.getByLabel("标题", { exact: true }).fill("切换面板保留的草稿");
   const camera = await page.evaluate(() => window.renderer!.state.camera);
   const canvas = await page.locator(".maplibregl-canvas").elementHandle();
   await tool(page, "设置");
   await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
-  await tool(page, "处理记录");
-  await expect(
-    page.getByRole("heading", { name: "处理记录", exact: true }),
-  ).toBeVisible();
   await tool(page, "轨迹库");
   await expect(
-    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
-  ).toBeChecked();
+    page.getByRole("button", { name: "隐藏 索引未命中", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await tool(page, "工程样式");
   await expect(page.getByLabel("标题", { exact: true })).toHaveValue(
     "切换面板保留的草稿",
@@ -411,8 +411,8 @@ test("panels preserve the map, selection and unfinished edits on desktop and mob
   );
   await tool(page, "轨迹库");
   await expect(
-    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
-  ).toBeChecked();
+    page.getByRole("button", { name: "隐藏 索引未命中", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -424,12 +424,12 @@ test("the configured library stays fixed when importing a project from another m
   page,
 }) => {
   await page.goto("/map");
-  const track = page.getByRole("checkbox", {
-    name: "Train/same.kml",
+  await tool(page, "轨迹库");
+  const track = page.getByRole("button", {
+    name: "隐藏 索引未命中",
     exact: true,
   });
-  await track.click();
-  await expect(track).toBeChecked();
+  await expect(track).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByRole("button", { name: "浏览目录", exact: true }),
   ).toHaveCount(0);
@@ -445,22 +445,25 @@ test("the configured library stays fixed when importing a project from another m
       JSON.stringify({ ...state, archive: "/another-machine/archive.sqlite3" }),
     ),
   });
-  await expect(page.locator(".ant-message")).toContainText("项目已载入", {
-    timeout: 20000,
-  });
+  await expect(page.locator("[data-sonner-toaster]")).toContainText(
+    "项目已载入",
+    {
+      timeout: 20000,
+    },
+  );
   expect(await page.evaluate(() => window.renderer!.state.archive)).toBe(
     state.archive,
   );
   await tool(page, "轨迹库");
-  await expect(track).toBeChecked();
-  await page.getByRole("button", { name: "管理轨迹库", exact: true }).click();
+  await expect(track).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "归档状态", exact: true }).click();
   await expect(page.getByLabel("归档目录", { exact: true })).toHaveCount(0);
-  await page.getByLabel("操作", { exact: true }).click();
   await expect(
-    page.getByRole("option", { name: "建立归档", exact: true }),
+    page.getByRole("button", { name: "建立归档", exact: true }),
   ).toHaveCount(0);
+  await page.getByRole("button", { name: "返回列表", exact: true }).click();
   await expect(
-    page.getByRole("option", { name: "轨迹入库", exact: true }),
+    page.getByRole("button", { name: "上传轨迹", exact: true }),
   ).toBeVisible();
 });
 

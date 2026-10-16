@@ -1,4 +1,9 @@
-import { createContext, useContext } from "react";
+import {
+  createContext,
+  useContext,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { SelectedTrack } from "../shared/map.js";
 export type Panel =
   | "library"
@@ -6,13 +11,20 @@ export type Panel =
   | "export"
   | "project"
   | "archive"
-  | "tracks"
-  | "tasks"
   | "settings";
+export interface EditMap {
+  tracks: SelectedTrack[];
+  pick?: (p: [number, number]) => void;
+  segment?: string;
+}
 export interface Workspace {
+  editMap?: Dispatch<SetStateAction<EditMap | undefined>>;
+  fit?: (tracks: SelectedTrack[]) => void;
   archive: string;
   selected: SelectedTrack[];
+  draft?: (key: string, dirty: boolean) => void;
   open: (panel: Panel, task?: string) => void;
+  showTrack?: (id: string) => void;
   inspect: (id: string) => Promise<void>;
   refresh: (archive: string) => Promise<void>;
 }

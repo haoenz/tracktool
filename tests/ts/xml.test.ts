@@ -19,6 +19,16 @@ afterEach(async () => {
 });
 const sample = (name: string) =>
   readFile(new URL(`./fixtures/xml/${name}`, import.meta.url));
+it("accepts XML results after Node watch dependency notifications", async () => {
+  vi.stubEnv("WATCH_REPORT_DEPENDENCIES", "1");
+  try {
+    await expect(
+      pool().run(await sample("complex.kml"), { kind: "inspect" }),
+    ).resolves.toMatchObject({ name: "原始中文", placemarks: 1 });
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
 it("settles ESM initialization before repeated concurrent worker disposal", async () => {
   const bytes = await sample("complex.kml"),
     p = pool(4, 40);

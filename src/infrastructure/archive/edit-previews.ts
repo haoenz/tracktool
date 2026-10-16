@@ -1,3 +1,4 @@
+import { XmlWorkers } from "../xml/client.js";
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -148,6 +149,7 @@ export class EditPreviews {
         : request.operation.expected.map((ref) => checkRef(db, ref));
     });
     let publish: PublishRequest | undefined;
+    let altitude: EditPreview["altitude"];
     const artifacts: Artifact[] = [],
       changes: EditPreview["changes"] = [];
     if (request.operation.kind === "legacy_regroup") {
@@ -256,6 +258,41 @@ export class EditPreviews {
           ),
         );
         const raw = await transform(source.raw, op);
+        if (op.kind === "fill_altitude") {
+          const xml = new XmlWorkers(1, 0);
+          try {
+            const countMissing = async (bytes: Uint8Array) => {
+              const data = (
+                await xml.run(
+                  bytes,
+                  { kind: "tracks", source: "altitude-summary" },
+                  signal,
+                )
+              ).tracks!;
+              return data.tracks.reduce(
+                (n, track) =>
+                  n +
+                  track.segments.reduce(
+                    (n, segment) =>
+                      n +
+                      (segment.altitude
+                        ? Array.from(segment.altitude).filter(
+                            (a) => !Number.isFinite(a) || a === 0,
+                          ).length
+                        : segment.longitude.length),
+                    0,
+                  ),
+                0,
+              );
+            };
+            const before = await countMissing(source.raw),
+              remaining = await countMissing(raw);
+            altitude = { filled: Math.max(0, before - remaining), remaining };
+          } finally {
+            await xml.close();
+          }
+        }
+
         const manifest = readManifest(
           raw,
           (i) => source.segments[i]?.segment_id ?? `unexpected-${i}`,
@@ -449,6 +486,29 @@ export class EditPreviews {
           const output = prepared.publish.outputs[0]!;
           if (output.kind !== "version")
             throw new Error("Expected content output");
+          if (out.tag) {
+            if (!transform)
+              throw new AppError("USER_INPUT", "活动标签处理未初始化");
+            const raw = await transform(output.raw, {
+              kind: "set_tag",
+              tag: out.tag,
+            });
+            const manifest = readManifest(
+              raw,
+              (i) => prepared.result.segments[i]!.segment_id,
+            );
+            if (
+              manifest.status !== "ready" ||
+              manifest.segments.length !== prepared.result.segments.length ||
+              manifest.segments.some(
+                (seg, i) =>
+                  seg.point_count !== prepared.result.segments[i]!.point_count,
+              )
+            )
+              throw new AppError("USER_INPUT", "标签修改改变了轨迹片段");
+            output.raw = raw;
+            prepared.result.raw = raw;
+          }
           const { entry_id: _entry, ...rest } = output;
           void _entry;
           publish.outputs.push({
@@ -536,6 +596,7 @@ export class EditPreviews {
         settings: a.settings,
       })),
       changes,
+      ...(altitude ? { altitude } : {}),
       objects,
       ...(wire ? { publish: wire } : {}),
     };

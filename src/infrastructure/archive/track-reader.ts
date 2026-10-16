@@ -166,6 +166,68 @@ export function trackHistory(file: string, entryId: string, cursor = 0) {
     };
   });
 }
+export function trackTimeline(file: string, entryId: string, cursor = 0) {
+  return readTransaction(file, (db) => {
+    requireVersioned(db);
+    const current = currentEntry(db, entryId);
+    const rows = db
+      .prepare(
+        `SELECT o.id,o.kind,o.created_at,o.params_json,e.after_json
+      FROM track_operation_effects e JOIN track_operations o ON o.id=e.operation_id
+      WHERE e.entry_id=? ORDER BY json_extract(e.after_json,'$.generation') DESC,o.rowid DESC LIMIT 51 OFFSET ?`,
+      )
+      .all(entryId, cursor) as {
+      id: string;
+      kind: string;
+      created_at: string;
+      params_json: string;
+      after_json: string;
+    }[];
+    const labels: Record<string, string> = {
+      import: "导入轨迹",
+      push: "导入轨迹",
+      migration_baseline: "初始轨迹",
+      baseline: "初始轨迹",
+      split_segment: "断开轨迹",
+      prune: "删除轨迹点",
+      fill_altitude: "补充高程",
+      set_tag: "修改活动标签",
+      draw: "插入手绘轨迹",
+      split_journey: "拆成独立行程",
+      presentation: "调整显示",
+      restore_version: "恢复历史状态",
+      restore_group: "撤销拆分",
+      restore: "恢复历史状态",
+      compose: "组合轨迹片段",
+      withdraw: "移出轨迹列表",
+      source_link: "补充来源信息",
+      reindex_manifest: "更新轨迹片段信息",
+      legacy_regroup: "重新整理行程",
+    };
+    return {
+      events: rows.slice(0, 50).map((row) => {
+        const after = JSON.parse(
+          row.after_json,
+        ) as import("../../shared/track-edit.js").EntrySnapshot;
+        const op = JSON.parse(row.params_json).operation;
+        const kind = op?.kind ?? row.kind;
+        const title =
+          kind === "set_tag" && op?.tag
+            ? `修改活动标签为 ${op.tag}`
+            : (labels[kind] ?? "更新轨迹");
+        return {
+          id: row.id,
+          kind,
+          created_at: row.created_at,
+          title,
+          after,
+          current: after.generation === current.generation,
+        };
+      }),
+      next_cursor: rows.length > 50 ? cursor + 50 : null,
+    };
+  });
+}
 export function operationDetail(file: string, id: string) {
   return readTransaction(file, (db) => {
     requireVersioned(db);
@@ -203,6 +265,7 @@ export function operationDetail(file: string, id: string) {
 export async function inputGeometry(
   input: SegmentInput,
   signal?: AbortSignal,
+  raw = false,
 ): Promise<EditGeometry> {
   const xml = new XmlWorkers(1, 0);
   try {
@@ -213,12 +276,10 @@ export async function inputGeometry(
         signal,
       )
     ).tracks!;
-    const display = evaluatePresentation(
-      bindSegments(data, input.segments),
-      input.settings,
-    );
+    const segments = bindSegments(data, input.segments);
+    const display = evaluatePresentation(segments, input.settings);
     return {
-      segments: display.segments.map((s) => ({
+      segments: (raw ? segments : display.segments).map((s) => ({
         segment_id: s.segment_id,
         coordinates: Array.from(
           s.longitude,

@@ -179,13 +179,12 @@ function sampleTemplate(node: XmlElement, count: number) {
       }
     }
     const template = root.toString();
-    return (ranges: PointRange[], reverse = false, newId?: string) => {
+    return (ranges: PointRange[], newId?: string) => {
       let xml = template;
       for (const r of replacements) {
-        let values = ranges.flatMap((range) =>
+        const values = ranges.flatMap((range) =>
           r.values.slice(range.start, range.end),
         );
-        if (reverse) values = values.reverse();
         xml = xml.replace(r.mark, () => values.join(r.separator));
       }
       if (newId || oldId)
@@ -204,7 +203,6 @@ function lineage(
   s: SegmentManifest,
   ordinal: number,
   ranges: PointRange[] = [{ start: 0, end: s.point_count }],
-  reverse = false,
 ): SegmentLineage[] {
   return ranges.map((r) => ({
     ordinal,
@@ -212,8 +210,8 @@ function lineage(
     source_segment_id: s.segment_id,
     start: r.start,
     end_exclusive: r.end,
-    evidence_kind: reverse ? "manual" : "exact",
-    evidence: { reversed: reverse },
+    evidence_kind: "exact",
+    evidence: {},
   }));
 }
 function validateInput(input: SegmentInput) {
@@ -365,15 +363,11 @@ export function editSegments(
         : selected.segment_id;
       outIds.push(id);
       outKinds.push(selected.source_kind);
-      outSources.push(
-        ...lineage(source!, selected, i, undefined, selection.reverse),
-      );
+      outSources.push(...lineage(source!, selected, i));
       const part = composeFragment(
         source!,
         selected,
-        selection.reverse,
         `tt${stableId(`${seed}:xml:${i}`).replaceAll("-", "")}`,
-        changes.warnings,
       );
       fragments.push(part.feature);
       schemas.push(...part.schemas);
@@ -484,7 +478,7 @@ export function editSegments(
           stableId(`${seed}:split:${s.segment_id}:${i}`),
         );
         const fragments = ranges.map((range, i) =>
-          select([range], false, `tt-${children[i]}`),
+          select([range], `tt-${children[i]}`),
         );
         let replacement = fragments.join("");
         const parent = node.parent!;
@@ -520,22 +514,13 @@ export function editSegments(
           ),
         );
       } else {
-        const reverse = op.kind === "reverse",
-          ranges = reverse
-            ? [{ start: 0, end: s.point_count }]
-            : keptRanges(op.ranges, s.point_count);
-        patches.push(patch(node, select(ranges, reverse)));
+        const ranges = keptRanges(op.ranges, s.point_count);
+        patches.push(patch(node, select(ranges)));
         sources.splice(
           0,
           sources.length,
           ...input.segments.flatMap((seg, i) =>
-            lineage(
-              input,
-              seg,
-              i,
-              i === at ? ranges : undefined,
-              i === at && reverse,
-            ),
+            lineage(input, seg, i, i === at ? ranges : undefined),
           ),
         );
         if (op.kind === "prune") {
@@ -548,10 +533,6 @@ export function editSegments(
             0,
           );
         }
-        if (reverse && s.time_status !== "absent")
-          changes.warnings.push(
-            "Timestamps reversed with their samples; no new timestamps were generated",
-          );
       }
     }
     return finish(render(doc, patches), ids, kinds, settings, sources, changes);
@@ -585,9 +566,7 @@ function appendFeature(
 function composeFragment(
   input: SegmentInput,
   s: SegmentManifest,
-  reverse: boolean,
   prefix: string,
-  warnings: string[],
 ) {
   return withDocument(input.raw, (doc) => {
     const namespace = ns(doc),
@@ -612,22 +591,8 @@ function composeFragment(
     ).reverse())
       if (!container.find(".//gx:Track | .//kml:LineString", namespace).length)
         container.remove();
-    if (reverse) {
-      patches.push(
-        patch(
-          selected,
-          sampleTemplate(selected, s.point_count)(
-            [{ start: 0, end: s.point_count }],
-            true,
-          ),
-        ),
-      );
-      if (s.time_status !== "absent")
-        warnings.push("Composed segment timestamps reversed with samples");
-    }
     // Resolve ID collisions between independent source documents, including StyleMap and SchemaData.
     // Duplicate external XML IDs are ambiguous; internal segment IDs alone cannot resolve style references.
-    // Patch fragments must undergo the same remapping, so finalize reversal before remapping IDs.
     const rewritten = render(doc, patches);
     return withDocument(rewritten, (copy) => {
       const mapping = new Map<string, string>();

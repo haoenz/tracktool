@@ -1,44 +1,8 @@
+/* Map workspace, renderer frame, and a single responsive panel layout. */
 @font-face {
   font-family: MapNoto;
   src: url("/static/vendor/NotoSansCJKsc-Regular.otf") format("opentype");
   font-display: block;
-}
-.map-app {
-  height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  background: #eef1f5;
-  color: #233142;
-}
-.map-header {
-  margin-bottom: 0;
-  padding: 10px 20px;
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  border-bottom: 1px solid #d7dfe8;
-  background: white;
-  flex-wrap: wrap;
-}
-.map-header h1 {
-  font-size: 20px;
-  margin: 0;
-}
-.map-header .grow {
-  flex: 1;
-}
-.map-content {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-.map-controls {
-  width: 310px;
-  flex-shrink: 0;
-  overflow: auto;
-  background: white;
-  padding: 16px;
-  box-sizing: border-box;
 }
 .map-controls h2 {
   font-size: 16px;
@@ -48,15 +12,11 @@
   display: block;
   margin: 10px 0 4px;
 }
-.map-controls .ant-select {
+.map-controls .ui-select {
   width: 100%;
 }
-.map-controls .ant-input-number {
+.map-controls .ui-number {
   width: 100%;
-}
-.map-track-list {
-  max-height: 220px;
-  overflow: auto;
 }
 .map-track-list label {
   margin: 6px 0;
@@ -76,11 +36,11 @@
 .project-presentation summary {
   cursor: pointer;
 }
-.project-presentation > .ant-select {
+.project-presentation > .ui-select {
   width: 100%;
   margin-bottom: 8px;
 }
-.project-presentation .ant-btn {
+.project-presentation [data-slot="button"] {
   max-width: 100%;
   height: auto;
   white-space: normal;
@@ -92,7 +52,7 @@
   gap: 6px;
   margin: 10px 0;
 }
-.project-segment .ant-select {
+.project-segment .ui-select {
   min-width: 120px;
 }
 .map-stage {
@@ -149,12 +109,6 @@
   opacity: 0;
   pointer-events: none;
 }
-.map-status {
-  padding: 8px 16px;
-  background: #fff;
-  border-top: 1px solid #d7dfe8;
-  min-height: 24px;
-}
 .map-error {
   color: #ad2626;
 }
@@ -166,7 +120,7 @@
   display: flex;
   gap: 6px;
 }
-.map-app .ant-alert {
+.map-app .ui-alert {
   margin: 8px 0;
 }
 .render-page {
@@ -177,52 +131,21 @@
 .render-page .map-frame {
   box-shadow: none;
 }
-@media (max-width: 700px) {
-  .map-content {
-    flex-direction: column;
-  }
-  .map-controls {
-    width: 100%;
-    max-height: 42dvh;
-    border-bottom: 1px solid #d7dfe8;
-  }
-  .map-controls.collapsed {
-    display: none;
-  }
-  .map-header {
-    padding: 8px 12px;
-    gap: 8px;
-  }
-  .map-header h1 {
-    font-size: 17px;
-  }
-  .map-stage {
-    min-height: 240px;
-  }
-}
-
-/* The map owns the viewport; tools float without resizing its camera. */
 .map-app {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: #e8efed;
+  color: #233142;
   position: relative;
   overflow: hidden;
-  background: #e8efed;
 }
 .map-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
   position: absolute;
   inset: 0;
-}
-.map-header {
-  position: absolute;
-  z-index: 6;
-  top: 16px;
-  left: 16px;
-  padding: 10px 12px;
-  border: 1px solid #dbe4df;
-  border-radius: 14px;
-  gap: 12px;
-  box-shadow: 0 5px 24px #19332a15;
-  max-width: calc(100% - 32px);
-  box-sizing: border-box;
 }
 .map-brand {
   display: flex;
@@ -236,14 +159,11 @@
 }
 .map-header h1 {
   font-size: 16px;
+  margin: 0;
 }
 .save-state {
   color: #73837a;
   font-size: 12px;
-}
-.map-header nav {
-  display: flex;
-  gap: 4px;
 }
 .workspace-tools {
   position: absolute;
@@ -253,45 +173,12 @@
   display: flex;
   gap: 6px;
 }
-.workspace-tools .ant-btn {
+.workspace-tools [data-slot="button"] {
   box-shadow: 0 3px 14px #19332a12;
-}
-.map-controls {
-  position: absolute;
-  z-index: 5;
-  top: 82px;
-  left: 16px;
-  bottom: 64px;
-  width: 340px;
-  max-width: calc(100% - 32px);
-  max-height: none;
-  border: 1px solid #dbe4df;
-  border-radius: 14px;
-  padding: 0 16px 20px;
-  box-shadow: 0 8px 30px #19332a18;
-}
-.map-controls.wide {
-  width: 480px;
 }
 .map-controls[hidden],
 .map-controls [hidden] {
   display: none !important;
-}
-.panel-heading {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: white;
-  padding: 14px 0;
-  border-bottom: 1px solid #edf1ee;
-  margin-bottom: 14px;
-}
-.panel-heading h2 {
-  margin: 0;
-  font-size: 17px;
 }
 .map-controls section > h2 {
   font-size: 13px;
@@ -308,25 +195,6 @@
   color: #6b7b71;
   font-size: 12px;
   margin: 0;
-}
-.map-track-list {
-  max-height: 32vh;
-}
-.map-status {
-  position: absolute;
-  z-index: 5;
-  bottom: 12px;
-  left: 16px;
-  max-width: min(620px, calc(100% - 32px));
-  box-sizing: border-box;
-  min-height: 0;
-  padding: 8px 12px;
-  font-size: 12px;
-  border: 1px solid #dbe4df;
-  border-radius: 8px;
-  box-shadow: 0 3px 14px #19332a12;
-  max-height: 28vh;
-  overflow: auto;
 }
 .inspection-banner {
   position: absolute;
@@ -353,7 +221,7 @@
   margin: 0;
   padding: 0;
 }
-.map-controls .work-main > .ant-typography:first-child,
+.map-controls .work-main > .ui-typography:first-child,
 .settings-panel > header {
   display: none;
 }
@@ -362,16 +230,16 @@
   flex-direction: column;
   gap: 0;
 }
-.map-controls .ant-card {
+.map-controls .ui-card {
   margin-bottom: 16px;
 }
-.map-controls .ant-card-body {
+.map-controls [data-slot="card-content"] {
   padding: 14px;
 }
-.map-controls .work-main .ant-typography {
+.map-controls .work-main .ui-typography {
   font-size: 13px;
 }
-.map-controls .settings-panel .ant-descriptions {
+.map-controls .settings-panel .ui-descriptions {
   font-size: 13px;
 }
 @media (max-width: 1080px) {
@@ -379,57 +247,6 @@
     top: 82px;
     flex-direction: column;
     align-items: flex-end;
-  }
-}
-@media (max-width: 700px) {
-  .map-content {
-    flex-direction: row;
-  }
-  .map-header {
-    top: 10px;
-    left: 10px;
-    max-width: calc(100% - 20px);
-    width: calc(100% - 20px);
-    padding: 8px 10px;
-    gap: 6px;
-  }
-  .map-brand {
-    flex: 1;
-  }
-  .map-header nav {
-    width: 100%;
-    justify-content: space-between;
-  }
-  .workspace-tools {
-    top: 112px;
-    right: 10px;
-  }
-  .workspace-tools .ant-btn {
-    font-size: 12px;
-    padding-inline: 9px;
-  }
-  .map-controls,
-  .map-controls.wide {
-    top: auto;
-    left: 10px;
-    bottom: 54px;
-    width: calc(100% - 20px);
-    max-width: none;
-    max-height: 49dvh;
-    padding-inline: 14px;
-  }
-  .map-track-list {
-    max-height: 24dvh;
-  }
-  .map-status {
-    left: 10px;
-    bottom: 8px;
-    max-width: calc(100% - 20px);
-    max-height: 36px;
-  }
-  .inspection-banner {
-    bottom: 56px;
-    gap: 8px;
   }
 }
 .map-stage.browsing .map-frame {
@@ -456,7 +273,6 @@
   color: inherit;
   text-decoration: none;
 }
-
 .overview-hint {
   color: #69796f;
   font-size: 12px;
@@ -469,15 +285,6 @@
   padding: 8px 4px;
   border-radius: 6px;
   align-items: center;
-}
-.overview-row .ant-checkbox-wrapper {
-  display: flex;
-  align-items: flex-start;
-  margin: 0;
-  font-size: 12px;
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
 }
 .overview-row.selected {
   background: #eaf3ff;
@@ -510,94 +317,33 @@
 .overview-status {
   line-height: 1.6;
 }
-@media (max-width: 700px) {
-  .overview-detail {
-    right: 10px;
-    bottom: 56px;
-    width: calc(100% - 20px);
-    max-height: 28dvh;
-  }
-  .map-status {
-    bottom: 30px;
-    max-height: 58px;
-  }
-  .map-controls,
-  .map-controls.wide {
-    bottom: 92px;
-  }
-  .overview-detail {
-    bottom: 92px;
-  }
-  .map-status:has([role="alert"]) {
-    max-height: 25dvh;
-  }
-}
-
-/* Project entry and return actions remain reachable on narrow screens. */
-@media (max-width: 700px) {
-  .map-header nav {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 2px;
-  }
-  .map-header nav .ant-btn {
-    font-size: 12px;
-    padding-inline: 6px;
-  }
-  .workspace-tools {
-    top: 164px;
-  }
-}
-
-/* Two map entry points; related actions stay inside the floating panel. */
-.track-tabs,
-.panel-subnav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 12px;
-}
-.track-tabs .ant-btn {
-  flex: 1;
-  padding-inline: 8px;
-}
-.panel-subnav {
-  margin-top: 10px;
-}
-.map-controls .save-state {
-  display: block;
-  margin-bottom: 8px;
-}
 .project-entry {
   margin-bottom: 16px;
 }
-.project-entry .ant-btn {
+.project-entry [data-slot="button"] {
   margin: 0 6px 8px 0;
 }
-.category-legend {
-  margin-top: 20px;
-}
-.category-legend > div {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-}
-.category-legend small {
-  color: #69796f;
-  margin-left: auto;
-}
-.legend-line {
-  width: 28px;
-  height: 4px;
-  border-radius: 2px;
-}
 .map-status {
+  padding: 8px 12px;
   background: #ffffffb8;
+  border-top: 1px solid #d7dfe8;
+  min-height: 0;
+  position: absolute;
+  z-index: 5;
+  bottom: 12px;
+  left: 16px;
+  max-width: min(620px, calc(100% - 32px));
+  box-sizing: border-box;
+  font-size: 12px;
+  border: 1px solid #dbe4df;
+  border-radius: 8px;
+  box-shadow: 0 3px 14px #19332a12;
+  max-height: 28vh;
+  overflow: auto;
   backdrop-filter: blur(5px);
   pointer-events: none;
 }
-.map-status .ant-spin {
+.map-status [role="status"] {
   margin-right: 6px;
 }
 .map-errors {
@@ -619,44 +365,25 @@
 .map-errors[hidden] {
   display: none;
 }
-@media (max-width: 700px) {
-  .map-header nav {
-    display: flex;
-    justify-content: flex-start;
-  }
-  .map-header nav .ant-btn {
-    flex: 1;
-  }
-  .map-controls,
-  .map-controls.wide {
-    bottom: 40px;
-    max-height: 58dvh;
-  }
-  .track-tabs .ant-btn {
-    font-size: 12px;
-  }
-}
-.map-controls {
-  scroll-padding-top: 130px;
-}
-.panel-heading {
-  display: block;
-}
-.panel-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.panel-heading .track-tabs {
-  margin: 12px 0 0;
-}
-
-/* Compact project menu keeps the map visible on every screen size. */
 .map-header {
-  width: auto;
+  margin-bottom: 0;
   padding: 5px;
+  display: flex;
   gap: 6px;
+  align-items: center;
+  border-bottom: 1px solid #d7dfe8;
+  background: white;
   flex-wrap: nowrap;
+  position: absolute;
+  z-index: 6;
+  top: 16px;
+  left: 16px;
+  border: 1px solid #dbe4df;
+  border-radius: 14px;
+  box-shadow: 0 5px 24px #19332a15;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
+  width: auto;
 }
 .map-header .project-icon {
   display: grid;
@@ -684,25 +411,13 @@
   outline-offset: 3px;
 }
 .map-header nav {
-  width: auto;
+  display: flex;
   gap: 4px;
+  width: auto;
 }
 .map-header nav[hidden] {
   display: none;
 }
-.panel-heading .track-tabs {
-  margin-top: 0;
-}
-.map-controls {
-  scroll-padding-top: 80px;
-}
-@media (max-width: 700px) {
-  .map-controls,
-  .map-controls.wide {
-    top: 72px;
-  }
-}
-
 .library-actions,
 .archive-maintenance {
   display: flex;
@@ -714,31 +429,22 @@
 .archive-maintenance p {
   flex-basis: 100%;
 }
-
 .track-properties {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid #edf1ee;
-}
-.property-form,
-.property-preview {
-  margin: 16px 0;
-  padding: 16px;
-  background: #f6f9f7;
-  border-radius: 10px;
 }
 .property-form label {
   display: grid;
   gap: 6px;
   margin: 12px 0;
 }
-.property-form .ant-select {
+.property-form .ui-select {
   width: 100%;
 }
-.track-properties .ant-alert {
+.track-properties .ui-alert {
   margin-block: 10px;
 }
-
 .map-resource-error,
 .overview-resource-error {
   position: absolute;
@@ -760,4 +466,375 @@
 .map-resource-error button {
   margin-left: 10px;
   cursor: pointer;
+}
+.map-controls {
+  width: 380px;
+  flex-shrink: 0;
+  overflow: auto;
+  background: white;
+  padding: 0 16px 20px;
+  box-sizing: border-box;
+  position: absolute;
+  z-index: 5;
+  top: 82px;
+  left: 16px;
+  bottom: 64px;
+  max-width: calc(100% - 32px);
+  max-height: none;
+  border: 1px solid #dbe4df;
+  border-radius: 14px;
+  box-shadow: 0 8px 30px #19332a18;
+  scroll-padding-top: 64px;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  padding-bottom: 150px;
+}
+.map-controls.wide {
+  width: 460px;
+}
+.map-controls:has(.track-editor:not([hidden])) {
+  overflow-x: hidden;
+}
+.map-track-list {
+  max-height: none;
+  overflow: visible;
+}
+.map-controls section {
+  min-width: 0;
+}
+.map-controls p,
+.map-controls strong {
+  overflow-wrap: anywhere;
+}
+.map-controls [data-slot="button"] {
+  min-height: 44px;
+  height: auto;
+  white-space: normal;
+}
+.map-controls .ui-select,
+.map-controls [data-slot="input"],
+.map-controls .ui-number {
+  min-height: 40px;
+}
+.map-controls .ui-checkbox {
+  min-height: 44px;
+  align-items: center;
+}
+.map-controls summary {
+  cursor: pointer;
+  min-height: 44px;
+  align-content: center;
+}
+.map-controls button:focus-visible,
+.map-controls summary:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+.track-row-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 8px;
+  cursor: pointer;
+  color: inherit;
+  min-height: 44px;
+}
+.track-row-name small {
+  display: block;
+  color: #65746d;
+  margin-top: 6px;
+}
+.overview-row .ui-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  flex: 0 0 44px;
+}
+.overview-row [data-slot="checkbox"] {
+  position: relative;
+}
+.overview-row [data-slot="checkbox"]::after {
+  content: "";
+  position: absolute;
+  inset: -14px;
+}
+.overview-row:hover {
+  background: #edf4f0;
+}
+.month-heading {
+  flex-basis: 100%;
+  margin: 8px 0;
+  color: #69796f;
+}
+.batch-actions {
+  position: sticky;
+  top: 0;
+  background: #eff6ff;
+  padding: 8px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-radius: 8px;
+}
+.batch-actions strong {
+  flex-basis: 100%;
+}
+.project-bar {
+  position: absolute;
+  z-index: 7;
+  top: 16px;
+  right: 16px;
+  max-width: calc(100% - 390px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 3px 14px #19332a22;
+}
+.project-bar strong {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-bar [data-slot="button"] {
+  min-height: 44px;
+}
+.project-tabs {
+  display: flex;
+  position: sticky;
+  top: 0;
+  padding: 8px 0;
+  background: white;
+  z-index: 3;
+  gap: 4px;
+}
+.project-export-actions {
+  position: fixed;
+  bottom: 78px;
+  left: 33px;
+  width: 346px;
+  background: white;
+  padding: 8px 0;
+  z-index: 5;
+  border-top: 1px solid #dbe4df;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.project-export-actions small {
+  font-size: 11px;
+  color: #65746d;
+}
+.sheet-controls {
+  display: none;
+}
+.upload-drop {
+  padding: 12px;
+  border: 1px dashed #689985;
+  border-radius: 8px;
+  margin: 12px 0;
+}
+.upload-drop input {
+  width: 100%;
+}
+.import-panel .ui-select {
+  width: 100%;
+}
+.property-form,
+.property-preview {
+  margin: 16px 0;
+  padding: 10px;
+  background: #f6f9f7;
+  border-radius: 10px;
+}
+@media (max-width: 900px) and (min-width: 701px) {
+  .project-bar {
+    top: 76px;
+    right: 16px;
+    max-width: calc(100% - 430px);
+  }
+}
+@media (max-width: 700px) {
+  .map-header {
+    top: 8px;
+    left: 8px;
+    max-width: calc(100% - 16px);
+    gap: 2px;
+  }
+  .map-header [data-slot="button"] {
+    min-height: 44px;
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+  .map-controls,
+  .map-controls.wide {
+    top: auto;
+    bottom: max(24px, env(safe-area-inset-bottom));
+    left: 8px;
+    width: calc(100% - 16px);
+    max-width: none;
+    height: 48dvh;
+    max-height: calc(100dvh - 90px);
+    padding: 0 12px 24px;
+    border-radius: 16px 16px 8px 8px;
+  }
+  .in-project .map-controls {
+    max-height: calc(100dvh - 190px);
+    padding-bottom: 145px;
+  }
+  .map-app[data-sheet="collapsed"] .map-controls {
+    height: 52px;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+  .map-app[data-sheet="collapsed"] .map-controls > .panel-header {
+    display: none;
+  }
+  .map-app[data-sheet="full"] .map-controls {
+    height: calc(100dvh - 90px);
+  }
+  .sheet-controls {
+    display: flex;
+    position: sticky;
+    top: 0;
+    padding: 4px 0;
+    justify-content: center;
+    background: white;
+    z-index: 8;
+    border-bottom: 1px solid #edf1ee;
+  }
+  .project-tabs,
+  .batch-actions {
+    top: 53px;
+  }
+  .project-bar {
+    top: 70px;
+    left: 8px;
+    right: 8px;
+    max-width: none;
+    padding: 4px 8px;
+  }
+  .project-bar strong {
+    max-width: 140px;
+    font-size: 13px;
+  }
+  .project-bar [data-slot="button"] {
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+  .project-export-actions {
+    bottom: max(25px, env(safe-area-inset-bottom));
+    left: 21px;
+    width: calc(100% - 42px);
+  }
+  .map-app[data-sheet="collapsed"] .project-export-actions {
+    display: none;
+  }
+  .map-status {
+    left: auto;
+    right: 8px;
+    top: 8px;
+    bottom: auto;
+    max-width: 42%;
+    max-height: 60px;
+  }
+  .map-errors {
+    bottom: 28px;
+    right: 8px;
+    max-width: calc(100% - 16px);
+  }
+  .map-stage {
+    min-height: 0;
+  }
+  .inspection-banner {
+    bottom: 30px;
+  }
+}
+
+/* Shared panel navigation: one title row with a leading back arrow. */
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 0;
+}
+.panel-header h2,
+.map-controls .panel-header h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.panel-header .panel-back {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.inspection-banner .panel-header {
+  flex-basis: 100%;
+  padding: 0;
+}
+
+.list-visibility-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0;
+}
+.list-visibility-toolbar > button {
+  position: relative;
+  width: 44px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.list-visibility-toolbar > input {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+}
+.list-sort-menu [role="radiogroup"] {
+  flex-direction: column;
+  align-items: flex-start;
+  margin-bottom: 0;
+}
+.filter-indicator {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.list-filter-fields {
+  display: grid;
+  gap: 8px;
+}
+.list-filter-fields label {
+  display: block;
+  font-weight: 500;
+}
+.list-filter-dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 8px 0;
+}
+.list-filter-dates input {
+  min-width: 0;
+  width: 100%;
+  margin-top: 8px;
 }

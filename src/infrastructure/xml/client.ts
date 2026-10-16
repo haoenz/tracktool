@@ -119,9 +119,21 @@ export class XmlWorkers implements XmlPort {
       );
       job.abort = () => finish(new AppError("CANCELLED", "操作已取消"));
       job.signal?.addEventListener("abort", job.abort, { once: true });
-      worker.once(
+      worker.on(
         "message",
-        (message: { result?: XmlResult; error?: ErrorInfo }) => {
+        (message: {
+          result?: XmlResult;
+          error?: ErrorInfo;
+          "watch:import"?: unknown;
+          "watch:require"?: unknown;
+        }) => {
+          // Node watch mode forwards dependency notifications through this port.
+          // Keep listening for the actual XML result after those notifications.
+          if (
+            Array.isArray(message?.["watch:import"]) ||
+            Array.isArray(message?.["watch:require"])
+          )
+            return;
           if (message.error)
             finish(new AppError(message.error.code, message.error.message));
           else if (message.result) finish(undefined, message.result);

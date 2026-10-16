@@ -4,6 +4,8 @@ import { setTimeout as delay } from "node:timers/promises";
 const backend = spawn(
   process.execPath,
   [
+    "--watch",
+    "--watch-preserve-output",
     "dist/node/server/main.js",
     "--host",
     "127.0.0.1",

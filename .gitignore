@@ -40,3 +40,9 @@ coverage/
 # Desktop metadata
 .DS_Store
 Thumbs.db
+
+# Local validation screenshots
+/docs/validation/**/*.png
+/docs/validation/**/*.jpg
+/docs/validation/**/*.jpeg
+/docs/validation/**/*.webp

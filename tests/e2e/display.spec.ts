@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { tool } from "./map-tools.js";
+import { tool, selectProjectTrack, saveProject } from "./map-tools.js";
 import type { Project } from "../../src/shared/project.js";
 import type { Selection } from "../../src/shared/map.js";
 import type { TrackDetail } from "../../src/shared/track-edit.js";
@@ -46,16 +46,8 @@ test("project display stays fixed, exports the same geometry, and updates only e
   const projectName = `P4-${fixture.id}`;
   try {
     await page.reload();
-    await expect(
-      page.getByRole("checkbox", { name: fixture.path, exact: true }),
-    ).toBeVisible({ timeout: 30000 });
-    await page
-      .getByRole("checkbox", { name: fixture.path, exact: true })
-      .click();
-    await expect(
-      page.getByRole("checkbox", { name: fixture.path, exact: true }),
-    ).toBeChecked();
     await tool(page, "新建出图工程");
+    await selectProjectTrack(page, fixture.path);
     await expect.poll(async () => (await state(page)).tracks.length).toBe(1);
     await page.locator(".project-presentation summary").click();
     const defaults = await call<TrackDetail>(page, `/api/tracks/${fixture.id}`);
@@ -76,9 +68,7 @@ test("project display stays fixed, exports the same geometry, and updates only e
     expect(
       (await call<TrackDetail>(page, `/api/tracks/${fixture.id}`)).settings,
     ).toEqual(defaults.settings);
-    await page.getByLabel("项目名称", { exact: true }).fill(projectName);
-    await page.getByRole("button", { name: "保存项目", exact: true }).click();
-    await expect(page.locator(".save-state")).toHaveText("出图工程");
+    await saveProject(page, projectName);
     const download = page.waitForEvent("download");
     await page
       .getByRole("button", { name: "导出展示 KML", exact: true })
@@ -110,14 +100,15 @@ test("project display stays fixed, exports the same geometry, and updates only e
     await call(page, "/api/test/edit-presentation", { id: fixture.id });
     await tool(page, "轨迹库");
     await page
-      .getByRole("checkbox", { name: "Train/same.kml", exact: true })
+      .getByRole("button", { name: /^(隐藏|显示) 索引未命中$/, exact: true })
       .click();
     expect(
       (await state(page)).tracks.find((t) => t.entry_id === fixture.id),
     ).toEqual(fixed.tracks[0]);
     await page
-      .getByRole("checkbox", { name: "Train/same.kml", exact: true })
+      .getByRole("button", { name: /^(隐藏|显示) 索引未命中$/, exact: true })
       .click();
+    await tool(page, "出图");
     await expect.poll(() => geometry(page)).toEqual(fixedGeometry);
     const reopened = await call<{ state: Project } & Selection>(
       page,
@@ -128,7 +119,10 @@ test("project display stays fixed, exports the same geometry, and updates only e
     expect(
       reopened.tracks.flatMap((t) => t.geojson.features.map((f) => f.geometry)),
     ).toEqual(fixedGeometry);
-    await tool(page, "项目");
+    await page
+      .getByRole("group", { name: "出图设置" })
+      .getByRole("button", { name: "内容", exact: true })
+      .click();
     await page.setViewportSize({ width: 390, height: 844 });
     await page
       .getByRole("button", {

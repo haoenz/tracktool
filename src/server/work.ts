@@ -17,6 +17,7 @@ import { publicConfig } from "../domain/config.js";
 import type { ConfigStore } from "../services/ports.js";
 import { WorkRequestSchema } from "../shared/work.js";
 import { SqliteTasks } from "../infrastructure/task-store.js";
+import { UploadCleanup } from "../infrastructure/upload-cleanup.js";
 import { WorkFiles } from "../infrastructure/work-files.js";
 import { BusinessRunner } from "../infrastructure/work-runner.js";
 import { TaskQueue } from "../infrastructure/task-queue.js";
@@ -34,6 +35,7 @@ export function workRoutes(
   envKey?: string,
   options?: WorkOptions,
 ) {
+  let cleanupTimer: ReturnType<typeof setInterval> | undefined;
   let engine:
     | Promise<{
         queue: TaskQueue;
@@ -90,6 +92,14 @@ export function workRoutes(
           ]),
       );
       queue.start();
+      const cleanup = new UploadCleanup(store, files);
+      const sweep = () => {
+        try { cleanup.sweep(); }
+        catch (error) { app.log.warn({ err: error }, "Upload cleanup will retry"); }
+      };
+      sweep();
+      cleanupTimer = setInterval(sweep, 1000);
+      cleanupTimer.unref();
       return { queue, files, edits, runner };
     })());
   if (options)
@@ -97,8 +107,10 @@ export function workRoutes(
       await get();
     });
   app.addHook("onClose", async () => {
+    clearInterval(cleanupTimer);
     if (engine) {
       const value = await engine;
+      clearInterval(cleanupTimer);
       await value.queue.close();
       value.edits.close();
     }

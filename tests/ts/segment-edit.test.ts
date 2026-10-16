@@ -1,3 +1,4 @@
+import { SegmentEditSchema } from "../../dist/node/shared/track-edit.js";
 import { afterEach, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -189,7 +190,7 @@ it("splits a direct Placemark LineString, keeps precise tokens and wraps its geo
   ).toHaveLength(2);
   expect(view(next(result)).connections).toEqual([]);
 });
-it("prunes non-overlapping ranges and reverses every aligned series without inventing time or altitude", () => {
+it("prunes non-overlapping ranges preserving aligned series without inventing time or altitude", () => {
   const input = source(),
     id = input.segments[1]!.segment_id;
   const result = editSegments(
@@ -217,17 +218,6 @@ it("prunes non-overlapping ranges and reverses every aligned series without inve
     [1, 2],
     [3, 4],
   ]);
-  const reversed = editSegments(
-    next(result),
-    { kind: "reverse", segment_id: id },
-    "reverse",
-  );
-  expect(values(reversed.raw, "//gx:coord")).toEqual([coords[3], coords[1]]);
-  expect(values(reversed.raw, "//kml:when")).toEqual([times[3], times[1]]);
-  expect(values(reversed.raw, "//gx:value")).toEqual(["4", ""]);
-  expect(
-    reversed.sources.find((s) => s.source_segment_id === id)?.evidence,
-  ).toMatchObject({ reversed: true });
 });
 it.each([
   {
@@ -376,7 +366,6 @@ it("composes mixed source segments in explicit order with styles and schemas, wi
         {
           version_id: "v2",
           segment_id: other.segments[0]!.segment_id,
-          reverse: true,
         },
         { version_id: "v1", segment_id: input.segments[1]!.segment_id },
       ],
@@ -389,7 +378,7 @@ it("composes mixed source segments in explicit order with styles and schemas, wi
     ["LineString", "hand_drawn"],
     ["gx:Track", "unknown"],
   ]);
-  expect(values(result.raw, "//kml:coordinates")).toEqual(["122,31 121,30"]);
+  expect(values(result.raw, "//kml:coordinates")).toEqual(["121,30 122,31"]);
   expect(values(result.raw, "//kml:when")).toEqual(times);
   const ids = values(result.raw, "//*[@id]/@id");
   expect(new Set(ids).size).toBe(ids.length);
@@ -411,7 +400,11 @@ it("uses locators instead of duplicate XML geometry IDs, validates source manife
   expect(() =>
     editSegments(
       bad,
-      { kind: "reverse", segment_id: bad.segments[0]!.segment_id },
+      {
+        kind: "prune",
+        segment_id: bad.segments[0]!.segment_id,
+        ranges: [{ start: 0, end: 1 }],
+      },
       "bad",
     ),
   ).toThrow("manifest");
@@ -888,4 +881,19 @@ it("prepares a composition from fixed historical/source-only versions and publis
     "unknown",
     "hand_drawn",
   ]);
+});
+
+it("rejects retired reversal operations and composition flags", () => {
+  expect(
+    SegmentEditSchema.safeParse({ kind: "reverse", segment_id: "segment" })
+      .success,
+  ).toBe(false);
+  for (const reverse of [true, false])
+    expect(
+      SegmentEditSchema.safeParse({
+        kind: "compose",
+        segments: [{ version_id: "version", segment_id: "segment", reverse }],
+        default_connect: false,
+      }).success,
+    ).toBe(false);
 });

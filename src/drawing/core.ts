@@ -139,7 +139,12 @@ export class MapCanvas {
       );
       const overviewBlocked = Object.keys(
         this.map.getStyle()?.sources ?? {},
-      ).some((id) => id.startsWith("overview-") && this.resources.blocked(id));
+      ).some(
+        (id) =>
+          id.startsWith("overview-") &&
+          this.resources.errors(id).length > 0 &&
+          !this.resources.pending(id),
+      );
       onOverviewError?.(overviewBlocked ? "轨迹概览加载失败，请重试" : "");
     };
     this.resources = new ResourceHealth(
@@ -387,7 +392,10 @@ export class MapCanvas {
     this.updateCredit();
     this.draw();
   }
-  fit(tracks?: SelectedTrack[]) {
+  fit(
+    tracks?: SelectedTrack[],
+    padding?: { left: number; right: number; top: number; bottom: number },
+  ) {
     const coordinates: Position[] = [];
     const geometry = tracks
       ? displayGeometry(
@@ -441,7 +449,7 @@ export class MapCanvas {
         [east, north],
       ],
       {
-        padding: {
+        padding: padding ?? {
           top: this.surround.y + (this.state.title ? 90 : 55),
           bottom: this.surround.y + 55,
           left: this.surround.x + 55,

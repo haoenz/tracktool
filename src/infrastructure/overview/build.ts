@@ -1,3 +1,4 @@
+import { distance } from "../../domain/kml-edit.js";
 import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
@@ -142,6 +143,17 @@ export async function buildOverview(
           );
           value = {
             name: data.name,
+            tags: data.track_tags,
+            date: (() => {
+              let first: bigint | undefined;
+              for (const t of data.tracks)
+                for (const s of t.segments)
+                  for (const time of s.time_us ?? [])
+                    if (first === undefined || time < first) first = time;
+              return first === undefined
+                ? ""
+                : new Date(Number(first / 1000n)).toISOString().slice(0, 10);
+            })(),
             points: pointCount(data),
             segments: data.tracks.flatMap((t) =>
               t.segments.map((s) =>
@@ -158,6 +170,17 @@ export async function buildOverview(
           account(bytes.length);
           await atomic(objectPath(root, row.sha256), bytes);
         }
+        entry.tags = value.tags;
+        entry.date = value.date || entry.date;
+        entry.distance_m = value.segments.reduce(
+          (total, segment) =>
+            total +
+            segment.reduce(
+              (sum, p, i) => sum + (i ? distance(segment[i - 1]!, p) : 0),
+              0,
+            ),
+          0,
+        );
         if (presentation) {
           try {
             value = await readObject(root, presentation.key);
@@ -193,6 +216,8 @@ export async function buildOverview(
             ).data;
             value = {
               name: value.name,
+              tags: value.tags,
+              date: value.date,
               points: pointCount(data),
               segments: data.tracks.flatMap((t) =>
                 t.segments.map((s) =>

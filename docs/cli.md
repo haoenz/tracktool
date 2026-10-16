@@ -15,7 +15,7 @@ tracktool exif geotag ./photos --overwrite --failed-folder TrackPosFailed
 # 一键修复缺失 GPSPosition/GPSAltitude 的媒体
 tracktool exif repair ./VID
 
-# 归档新轨迹（一次可给多条：SQLite 批量事务入库；默认把源文件收进归档的 Backup/，--keep 保留原件）
+# 归档新轨迹（一次可给多条：SQLite 批量事务入库；默认保留原件、不创建 Backup；任一文件校验失败则整批不入库）
 tracktool kml push ./2024-05-01\ 徒步.kml ./2024-05-02\ 徒步.kml
 
 # 通配符由工具自己展开（只作用于最后一段路径，按路径序入库），PowerShell 里也能直接用
@@ -42,11 +42,10 @@ tracktool kml type ./2024-05-01\ 徒步.kml --raw
 # 通配符在进程内展开（按名排序）；一个文件只给裸值，多个文件每行「值<TAB>路径」，值留在第一列
 tracktool kml type "./tracks/2024-05-*.kml"
 
-# 默认把源文件收进归档的 Backup/（同路径同字节的归档成员幂等复用，也一并搬走）；
-# Backup/ 里已有同内容的副本时，新那份副本清掉而不是留第二份，内容不同则两处都留并报警告；
-# 想保留工作区原件就加 --keep
+# 默认保留源文件，整批校验后一次提交；无需 Backup 目录
 tracktool kml push ./2024-05-03\ 徒步.kml
-tracktool kml push ./2024-05-03\ 徒步.kml --keep
+# --keep 仍可使用；只有 --move 显式启用旧的 Backup 搬移流程
+tracktool kml push ./2024-05-03\ 徒步.kml --move
 
 # 日常操作后按需导出当前展示；原件、隐藏段和历史请另做 full-backup
 tracktool kml download "2026-10-01 徒步" --output /downloads
@@ -104,7 +103,7 @@ tracktool track operation OPERATION_ID
 }
 ```
 
-operation 还支持 prune（segment_id 和半开 ranges）、reverse（segment_id）、draw（after_segment_id、WGS84 coordinates，可明确吸附）、compose（按序 version_id/segment_id/reverse 和 default_connect）、presentation（完整 settings）、split_journey（每个输出 path/category/segment_ids）、restore_version（version_id/presentation_id）。完整契约见 [API](api.md) 和 `src/shared/track-edit.ts`。未知字段、重复/遗漏段、非法范围和倒向连接均拒绝。
+operation 还支持 prune（segment_id 和半开 ranges）、draw（after_segment_id、WGS84 coordinates，可明确吸附）、compose（按序 version_id/segment_id 和 default_connect）、presentation（完整 settings）、split_journey（每个输出 path/category/segment_ids）、restore_version（version_id/presentation_id）。完整契约见 [API](api.md) 和 `src/shared/track-edit.ts`。未知字段、重复/遗漏段、非法范围和倒向连接均拒绝。
 
 整组撤销请求为 `{schema:1,archive_id,operation:{kind:"restore_group",operation_id,expected:[…]}}`，expected 从 `track operation` 各 effect.after 取出上述五个目标引用字段。全部成员仍与原操作结果一致才能撤销；生成的新行程保留为历史来源，原行程恢复活动状态。恢复历史版本同样先预览，不删除后续版本。
 

@@ -321,9 +321,9 @@ class SetTag extends BusinessCommand {
   }
 }
 class Push extends BusinessCommand {
-  static description = "归档轨迹；默认把源文件移入 Backup";
+  static description = "整批校验并入库，默认保留源文件且不创建 Backup";
   static args = { paths };
-  static flags = { type: category(), zip, keep: Flags.boolean() };
+  static flags = { type: category(), zip, keep: Flags.boolean(), move: Flags.boolean({ description: "显式将源文件移入 Backup（旧搬移流程）", exclusive: ["keep"] }) };
   async run() {
     const { args, flags } = await this.parse(Push);
     await this.using(flags, async (ctx, s) => {
@@ -333,7 +333,7 @@ class Push extends BusinessCommand {
         expandPaths(args.paths),
         w.database,
         w.backup,
-        !flags.keep,
+        !!flags.move,
         flags.type as Category | undefined,
       );
       process.exitCode = result.exitCode;
@@ -474,6 +474,7 @@ class Merge extends BusinessCommand {
     output: Flags.string({ char: "o", required: true }),
     connected: Flags.boolean(),
     keep: Flags.boolean(),
+    move: Flags.boolean({ description: "显式将源文件移入 Backup", exclusive: ["keep"] }),
   };
   async run() {
     const { args, flags } = await this.parse(Merge);
@@ -487,7 +488,7 @@ class Merge extends BusinessCommand {
         output,
         w.database,
         w.backup,
-        flags.keep,
+        !flags.move,
         flags.connected,
         [
           w.database,

@@ -1,19 +1,22 @@
-import { useEffect, useState } from "react";
+import { DisplaySettings } from "./display-settings.js";
+import { editTracks } from "./track-editor-map.js";
+import { TrackHistory } from "./track-history.js";
+import "./work.css";
+import { ArrowLeft } from "lucide-react";
+import { useEditSnapshot } from "./edit-snapshot.js";
+import { nearestPoint, previewAnnotations } from "../shared/edit-map.js";
+import { useEffect, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
 import {
   Alert,
   Button,
-  Card,
-  Checkbox,
   Input,
-  InputNumber,
   Select,
   Space,
   Spin,
-  Typography,
-} from "antd";
-import { api, request } from "./api.js";
+  Modal,
+} from "./components/controls.js";
+import { api, waitForWorkTask } from "./api.js";
 import { useWorkspace } from "./workspace.js";
 import { TrackEditorMap } from "./track-editor-map.js";
 import type {
@@ -22,23 +25,28 @@ import type {
   EditGeometry,
   TrackDetail,
   Presentation,
-  VersionSummary,
   VersionRef,
   EntrySnapshot,
 } from "../shared/track-edit.js";
+import type { PublicConfig } from "../shared/contracts.js";
 import type { WorkTask } from "../shared/work.js";
 
-type Catalog = {
-  archive_id: string;
-  entries: { id: string; path: string }[];
-  next_cursor: number | null;
+const editActions: Record<string, string> = {
+  split_segment: "断开轨迹",
+  prune: "删除轨迹点",
+  draw: "补绘轨迹",
+  fill_altitude: "补高程",
+  set_tag: "修改标签",
+  split_journey: "拆分行程",
 };
-type Selection = {
-  version_id: string;
-  segment_id: string;
-  reverse: boolean;
-  name: string;
-};
+const groupColors = [
+  "#2563eb",
+  "#dc2626",
+  "#16a34a",
+  "#9333ea",
+  "#d97706",
+  "#0891b2",
+];
 const reference = (e: VersionRef): VersionRef => ({
   entry_id: e.entry_id,
   version_id: e.version_id,
@@ -60,18 +68,25 @@ async function detail(id: string) {
   }
   return { ...value, segments };
 }
-export default function TrackEditor() {
+function TrackEditor({
+  initialEntry,
+  view = "edit",
+  active: visible = true,
+  onEntryChange,
+}: {
+  initialEntry: string;
+  view?: "edit" | "display" | "history";
+  active?: boolean;
+  onEntryChange?: (id: string) => void;
+}) {
   const workspace = useWorkspace(),
-    cache = useQueryClient(),
-    [params, setParams] = useSearchParams();
-  const [search, setSearch] = useState(""),
-    [cursor, setCursor] = useState(0),
-    [entryId, setEntry] = useState(""),
+    cache = useQueryClient();
+  const [entryId, setEntry] = useState(initialEntry),
     [segmentId, setSegment] = useState(""),
-    [mode, setMode] = useState("split_segment"),
+    [mode, setMode] = useState(""),
     [indices, setIndices] = useState(""),
     [start, setStart] = useState(0),
-    [end, setEnd] = useState(1),
+    [end, setEnd] = useState(0),
     [drawing, setDrawing] = useState<[number, number][]>([]),
     [after, setAfter] = useState<string | null>(null),
     [snapStart, setSnapStart] = useState<string>(),
@@ -81,47 +96,53 @@ export default function TrackEditor() {
     [error, setError] = useState(""),
     [note, setNote] = useState(""),
     [busy, setBusy] = useState(false),
+    [directSave, setDirectSave] = useState(false),
     [preview, setPreview] = useState<EditPreview>(),
     [outputIndex, setOutputIndex] = useState(0),
-    [showBefore, setShowBefore] = useState(false),
-    [historyCursor, setHistoryCursor] = useState(0),
-    [segmentPage, setSegmentPage] = useState(0),
-    [coordinateText, setCoordinateText] = useState("");
-  const [sources, setSources] = useState<
-      Extract<EditRequest, { target: VersionRef }>["sources"]
-    >([]),
-    [selections, setSelections] = useState<Selection[]>([]),
-    [sourceId, setSourceId] = useState<string>(),
-    [assign, setAssign] = useState<Record<string, number>>({}),
+    [showBefore, setShowBefore] = useState(false);
+  const [assign, setAssign] = useState<Record<string, number>>({}),
     [journeys, setJourneys] = useState<
-      { path: string; category: "Default" | "Train" | "Flight" | null }[]
-    >([]),
-    [edgeTo, setEdgeTo] = useState<string>();
-  const taskId = params.get("panel") === "tracks" ? params.get("task") : null;
-  const catalog = useQuery({
-    queryKey: ["track-catalog", search, cursor],
+      {
+        path: string;
+        category: "Default" | "Train" | "Flight" | null;
+        tag?: string;
+      }[]
+    >([]);
+  const [taskId, taskLink] = useState<string | null>(null);
+  const [editTouched, setEditTouched] = useState(false);
+  const rangeAnchor = useRef<number | undefined>(undefined);
+  const [candidates, setCandidates] = useState<
+    { start: number; end: number }[]
+  >([]);
+  const [tag, setTag] = useState<string>();
+  const config = useQuery({
+    queryKey: ["work-bootstrap"],
+    queryFn: () => api<{ config: PublicConfig }>("/api/work/bootstrap"),
+    enabled: view === "edit",
+  });
+  const target = useEditSnapshot(entryId, detail);
+  const tagData = useQuery({
+    queryKey: ["track-tag", entryId, target.data?.entry.version_id],
     queryFn: () =>
-      api<Catalog>(
-        `/api/tracks?search=${encodeURIComponent(search)}&cursor=${cursor}`,
+      api<{ tag: string }>(
+        `/api/tracks/${entryId}/tag?version_id=${target.data!.entry.version_id}`,
       ),
+    enabled: mode === "set_tag" && !!target.data,
   });
-  const target = useQuery({
-    queryKey: ["track-detail", entryId],
-    queryFn: () => detail(entryId),
-    enabled: !!entryId,
-  });
-  const history = useQuery({
-    queryKey: ["track-history", entryId, historyCursor],
-    queryFn: () =>
-      api<{ versions: VersionSummary[]; next_cursor: number | null }>(
-        `/api/tracks/${entryId}/versions?cursor=${historyCursor}`,
-      ),
-    enabled: !!entryId,
-  });
+  const geometryRef =
+    preview?.before.find((e) => e.entry_id === entryId) ?? target.data?.entry;
   const geometry = useQuery({
-    queryKey: ["track-geometry", entryId, target.data?.entry.generation],
-    queryFn: () => api<EditGeometry>(`/api/tracks/${entryId}/geometry`),
-    enabled: !!target.data,
+    queryKey: [
+      "track-geometry",
+      entryId,
+      geometryRef?.version_id,
+      geometryRef?.presentation_id,
+    ],
+    queryFn: () =>
+      api<EditGeometry>(
+        `/api/tracks/${entryId}/geometry?${new URLSearchParams({ raw: "true", version_id: geometryRef!.version_id, presentation_id: geometryRef!.presentation_id })}`,
+      ),
+    enabled: !!geometryRef && (view !== "history" || !!preview),
   });
   const task = useQuery({
     queryKey: ["task", taskId],
@@ -141,29 +162,12 @@ export default function TrackEditor() {
     enabled: !!preview,
   });
   useEffect(() => {
-    if (!entryId && catalog.data) {
-      const selected = catalog.data.entries.find(
-        (e) => e.path === workspace.selected[0]?.entry,
-      );
-      if (selected) setEntry(selected.id);
-    }
-  }, [entryId, catalog.data, workspace.selected]);
-  useEffect(() => {
     const d = target.data;
     if (!d) return;
     setSettings(structuredClone(d.settings));
     setSettingsRef(`${d.entry.entry_id}:${d.entry.generation}`);
     setSegment(d.settings.order[0] ?? "");
     setAfter(d.settings.order[0] ?? null);
-    setSelections(
-      d.settings.order.map((id) => ({
-        version_id: d.entry.version_id,
-        segment_id: id,
-        reverse: false,
-        name: `当前 · 段 ${d.segments.find((s) => s.segment_id === id)!.ordinal + 1}`,
-      })),
-    );
-    setSources([]);
     setAssign(
       Object.fromEntries(
         d.settings.order.map((id, i) => [id, i === 0 ? 0 : 1]),
@@ -185,7 +189,11 @@ export default function TrackEditor() {
       "target" in t.request.options.trackPreview.request
     )
       setEntry(t.request.options.trackPreview.request.target.entry_id);
-    if (t.status === "succeeded" && t.request.operation === "track:preview") {
+    if (
+      t.status === "succeeded" &&
+      t.request.operation === "track:preview" &&
+      !directSave
+    ) {
       setPreview(t.output!.data as EditPreview);
       setOutputIndex(0);
       setShowBefore(false);
@@ -200,32 +208,181 @@ export default function TrackEditor() {
         )
       ) {
         const e = result?.entries?.find((e) => e.state === "active");
-        if (e) setEntry(e.entry_id);
+        if (e) {
+          setEntry(e.entry_id);
+          onEntryChange?.(e.entry_id);
+        }
       }
       setPreview(undefined);
+      setIndices("");
+      setDrawing([]);
+      setCandidates([]);
+      setStart(0);
+      setEnd(0);
+      setTag(undefined);
+      setDirectSave(false);
+      setEditTouched(false);
       setNote("编辑已保存，旧版本保留在历史中。");
       void cache.invalidateQueries({ queryKey: ["track-detail"] });
       void cache.invalidateQueries({ queryKey: ["track-history"] });
       void cache.invalidateQueries({ queryKey: ["track-catalog"] });
+      void target.refetch();
       void workspace.refresh(workspace.archive);
     }
   }, [task.data?.id, task.data?.status]);
   const d = target.data,
-    selected = d?.segments.find((s) => s.segment_id === segmentId),
     active = task.data && ["queued", "running"].includes(task.data.status);
   const settings =
     settingsRef === `${d?.entry.entry_id}:${d?.entry.generation}`
       ? draftSettings
       : d?.settings;
-  function changeEntry(id: string) {
-    setEntry(id);
+  const draftDirty =
+    !!tag ||
+    (mode === "split_journey" && editTouched) ||
+    !!preview ||
+    !!drawing.length ||
+    !!indices.trim() ||
+    end > start ||
+    !!candidates.length ||
+    (!!settings &&
+      !!d &&
+      JSON.stringify(settings) !== JSON.stringify(d.settings));
+  const draftKey = `editor:${entryId}`;
+  useEffect(() => {
+    workspace.draft?.(draftKey, draftDirty);
+    return () => workspace.draft?.(draftKey, false);
+  }, [workspace.draft, draftKey, draftDirty]);
+  const tagOptions = [
+    ...new Set(
+      ["Default", "Train", "Flight"].flatMap(
+        (category) =>
+          (config.data?.config[
+            ("track_tag." + category) as keyof PublicConfig
+          ] as string[] | undefined) ?? [],
+      ),
+    ),
+  ].map((value) => ({ value, label: value }));
+  const currentTag = tagData.data?.tag;
+  const breaks = indices
+    .split(/[,，\s]+/)
+    .filter(Boolean)
+    .map(Number);
+  const splitError = journeys.some(
+    (j) =>
+      !j.path
+        .split("/")
+        .at(-1)
+        ?.replace(/\.kml$/i, "")
+        .trim(),
+  )
+    ? "请为每条行程填写名称。"
+    : new Set(journeys.map((j) => j.path)).size !== journeys.length
+      ? "行程名称不能重复。"
+      : journeys.some((_, i) => !Object.values(assign).includes(i))
+        ? "请给每条行程分配至少一个片段。"
+        : journeys.some((j) => !j.tag)
+          ? "请为每条行程选择活动标签。"
+          : settings?.order.some(
+                (id) =>
+                  assign[id] === undefined || assign[id]! >= journeys.length,
+              )
+            ? "还有片段未分配。"
+            : "";
+  const canSave =
+    !!d &&
+    d.entry.state === "active" &&
+    d.manifest_status === "ready" &&
+    (mode === "split_segment"
+      ? breaks.length > 0
+      : mode === "prune"
+        ? candidates.length > 0 ||
+          (end > start && rangeAnchor.current === undefined)
+        : mode === "draw"
+          ? drawing.length >= 2
+          : mode === "set_tag"
+            ? !!tagData.data && !!tag && tag !== currentTag
+            : mode === "split_journey"
+              ? !splitError
+              : mode === "fill_altitude");
+  function tagCategory(value: string): "Default" | "Train" | "Flight" {
+    return (
+      (["Default", "Train", "Flight"] as const).find((category) =>
+        (
+          config.data?.config[
+            ("track_tag." + category) as keyof PublicConfig
+          ] as string[] | undefined
+        )?.includes(value),
+      ) ?? "Default"
+    );
+  }
+  function journeyPath(
+    name: string,
+    category: "Default" | "Train" | "Flight" | null,
+  ) {
+    const folders = d?.entry.path.split("/").slice(1, -1) ?? [];
+    return `${[category ?? "Default", ...folders].join("/")}/${name.replace(/[\\/]/g, "-").replace(/\.kml$/i, "")}.kml`;
+  }
+  function clearSelection() {
+    setIndices("");
+    setStart(0);
+    setEnd(0);
+    setCandidates([]);
+    rangeAnchor.current = undefined;
+    setNote("");
+  }
+  function resetDraft() {
+    setEditTouched(false);
+    clearSelection();
+    setDrawing([]);
+    setSnapStart(undefined);
+    setSnapEnd(undefined);
+    setTag(undefined);
     setPreview(undefined);
+    taskLink(null);
     setError("");
     setNote("");
-    setHistoryCursor(0);
-    setSegmentPage(0);
-    setParams({ panel: "tracks" });
-    setDrawing([]);
+    if (d) {
+      setSettings(structuredClone(d.settings));
+      setAssign(
+        Object.fromEntries(
+          d.settings.order.map((id, i) => [id, i === 0 ? 0 : 1]),
+        ),
+      );
+      setJourneys(
+        [1, 2].map((n) => ({
+          path: journeyPath(
+            `${d.entry.path
+              .split("/")
+              .at(-1)!
+              .replace(/\.kml$/i, "")}-行程${n}`,
+            d.entry.category,
+          ),
+          category: d.entry.category,
+        })),
+      );
+    }
+  }
+  function locateSegment(id: string) {
+    const segment = geometry.data?.segments.find((s) => s.segment_id === id);
+    if (segment)
+      workspace.fit?.(editTracks({ segments: [segment], connections: [] }));
+  }
+  function chooseSegment(id: string) {
+    setSegment(id);
+    clearSelection();
+    locateSegment(id);
+  }
+  function locateRange(start: number, end: number) {
+    const coordinates = geometry.data?.segments
+      .find((s) => s.segment_id === segmentId)
+      ?.coordinates.slice(start, end);
+    if (coordinates?.length)
+      workspace.fit?.(
+        editTracks({
+          segments: [{ segment_id: segmentId, coordinates }],
+          connections: [],
+        }),
+      );
   }
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -233,6 +390,7 @@ export default function TrackEditor() {
     try {
       await action();
     } catch (e) {
+      setDirectSave(false);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -249,58 +407,41 @@ export default function TrackEditor() {
             schema: 1,
             archive_id: d.archive_id,
             target: reference(d.entry),
-            sources: operation.kind === "compose" ? sources : [],
+            sources: [],
             operation,
           };
+    setNote("");
+    const saveNow = [
+      "split_segment",
+      "prune",
+      "draw",
+      "set_tag",
+      "presentation",
+    ].includes(operation.kind);
+    setDirectSave(saveNow);
     const created = await api<{ task_id: string }>(
       "/api/tracks/edit-previews",
       body,
     );
     setPreview(undefined);
-    setParams({ panel: "tracks", task: created.task_id });
+    taskLink(created.task_id);
+    if (saveNow) {
+      const ready = await waitForWorkTask(created.task_id);
+      await applyPreview(ready.output!.data as EditPreview);
+    }
   }
-  function setIgnored(id: string, on: boolean) {
-    setSettings((s) =>
-      s
-        ? {
-            ...s,
-            ignored: on
-              ? [...s.ignored.filter((x) => x !== id), id]
-              : s.ignored.filter((x) => x !== id),
-          }
-        : s,
+  async function applyPreview(value: EditPreview) {
+    const next = await api<{ task_id: string }>(
+      `/api/tracks/edit-previews/${value.preview_id}/apply`,
+      {
+        schema: 1,
+        archive_id: value.archive_id,
+        preview_id: value.preview_id,
+        preview_sha256: value.preview_sha256,
+        request_key: `apply:${value.preview_id}`,
+      },
     );
-  }
-  function connection(from: string, to: string, value: string) {
-    setSettings((s) =>
-      s
-        ? {
-            ...s,
-            connections: [
-              ...s.connections.filter((e) => e.from !== from || e.to !== to),
-              ...(value === "default"
-                ? []
-                : [{ from, to, connect: value === "yes" }]),
-            ],
-          }
-        : s,
-    );
-  }
-  function move(id: string, delta: number) {
-    if (!settings) return;
-    const order = [...settings.order],
-      i = order.indexOf(id),
-      j = i + delta;
-    if (j < 0 || j >= order.length) return;
-    [order[i], order[j]] = [order[j]!, order[i]!];
-    const connections = settings.connections.filter(
-      (e) => order.indexOf(e.from) < order.indexOf(e.to),
-    );
-    setSettings({ ...settings, order, connections });
-    if (connections.length !== settings.connections.length)
-      setNote(
-        `调整顺序移除了 ${settings.connections.length - connections.length} 条倒向连接，请在预览核对。`,
-      );
+    taskLink(next.task_id);
   }
   async function prepare() {
     if (!d || !settings) return;
@@ -319,7 +460,7 @@ export default function TrackEditor() {
       return make({
         kind: "prune",
         segment_id: segmentId,
-        ranges: [{ start, end }],
+        ranges: candidates.length ? candidates : [{ start, end }],
       });
     if (mode === "draw")
       return make({
@@ -333,27 +474,54 @@ export default function TrackEditor() {
           ? { snap_end: { segment_id: snapEnd, endpoint: "start" as const } }
           : {}),
       });
-    if (mode === "compose")
-      return make({
-        kind: "compose",
-        segments: selections.map(({ name, ...s }) => {
-          void name;
-          return s;
-        }),
-        default_connect: settings.default_connect,
-      });
-    if (mode === "split_journey")
+    if (mode === "fill_altitude") return make({ kind: "fill_altitude" });
+    if (mode === "set_tag") {
+      if (!tag) throw new Error("请选择活动标签");
+      return make({ kind: "set_tag", tag });
+    }
+    if (mode === "split_journey" && editTouched)
       return make({
         kind: "split_journey",
         outputs: journeys.map((j, i) => ({
           ...j,
+          path: journeyPath(
+            `${j.path
+              .split("/")
+              .at(-1)!
+              .replace(/\.kml$/i, "")} ${j.tag ?? ""}`.trim(),
+            j.category,
+          ),
           segment_ids: settings.order.filter((id) => assign[id] === i),
         })),
       });
   }
   function pick(p: [number, number]) {
-    if (preview && !showBefore) return;
+    if (view !== "edit" || busy || active || !mode || (preview && !showBefore))
+      return;
     if (mode === "draw") {
+      const endpoint = geometry.data?.segments
+        .map((s) => ({
+          id: s.segment_id,
+          point: drawing.length ? s.coordinates[0] : s.coordinates.at(-1),
+        }))
+        .filter((s) => s.point)
+        .map((s) => ({
+          ...s,
+          distance:
+            Math.hypot(
+              (s.point![0] - p[0]) * Math.cos((p[1] * Math.PI) / 180),
+              s.point![1] - p[1],
+            ) * 111320,
+        }))
+        .sort((a, b) => a.distance - b.distance)[0];
+      if (!drawing.length)
+        setSnapStart(
+          endpoint && endpoint.distance <= 30 ? endpoint.id : undefined,
+        );
+      else
+        setSnapEnd(
+          endpoint && endpoint.distance <= 30 ? endpoint.id : undefined,
+        );
       setDrawing((v) => [...v, p]);
       return;
     }
@@ -361,30 +529,35 @@ export default function TrackEditor() {
       (s) => s.segment_id === segmentId,
     )?.coordinates;
     if (!coords?.length) return;
-    let best = 0,
-      distance = Infinity;
-    coords.forEach(([x, y], i) => {
-      const dx = ((((x - p[0] + 180) % 360) + 360) % 360) - 180,
-        ds = (dx * Math.cos((p[1] * Math.PI) / 180)) ** 2 + (y - p[1]) ** 2;
-      if (ds < distance) {
-        best = i;
-        distance = ds;
-      }
-    });
-    if (mode === "split_segment")
+    const best = nearestPoint(coords, p);
+    if (mode === "split_segment" && best < coords.length - 1)
       setIndices((s) =>
         [
-          ...new Set([...s.split(/[,，\s]+/).filter(Boolean), String(best)]),
+          ...(s
+            .split(/[,，\s]+/)
+            .filter(Boolean)
+            .includes(String(best))
+            ? s.split(/[,，\s]+/).filter((x) => x && x !== String(best))
+            : [...s.split(/[,，\s]+/).filter(Boolean), String(best)]),
         ].join(","),
       );
     else if (mode === "prune") {
-      setStart(best);
-      setEnd(Math.min(best + 1, coords.length));
+      if (rangeAnchor.current === undefined) {
+        rangeAnchor.current = best;
+        setStart(best);
+        setEnd(best);
+      } else {
+        setStart(Math.min(rangeAnchor.current, best));
+        setEnd(Math.max(rangeAnchor.current, best) + 1);
+        rangeAnchor.current = undefined;
+      }
+      setCandidates([]);
     }
-    setNote(`已选择段内第 ${best} 个点（从 0 开始）。`);
+    setNote("");
   }
   async function detect() {
     if (!d) return;
+    clearSelection();
     const result = await api<{
       after_point_indices?: number[];
       ranges?: { start: number; end: number }[];
@@ -398,86 +571,123 @@ export default function TrackEditor() {
     if (result.after_point_indices) {
       setIndices(result.after_point_indices.join(","));
       setNote(
-        `检测到 ${result.after_point_indices.length} 个候选断点，请查看预览。`,
+        `检测到 ${result.after_point_indices.length} 个候选断点，请检查后保存修改。`,
       );
     } else if (result.ranges?.length) {
-      await make({
-        kind: "prune",
-        segment_id: segmentId,
-        ranges: result.ranges,
-      });
+      setCandidates(result.ranges);
+      setStart(0);
+      setEnd(0);
+      setNote(
+        `检测到 ${result.ranges.length} 个候选范围；可逐项排除，检查后保存修改。`,
+      );
     } else setNote("未检测到候选漂移点。");
   }
-  async function addSource() {
-    if (!sourceId || !d) return;
-    const value = await detail(sourceId);
-    if (
-      value.entry.version_id === d.entry.version_id ||
-      sources.some((s) => s.version_id === value.entry.version_id)
-    )
-      throw new Error("这个来源已加入");
-    const { generation, ...ref } = reference(value.entry);
-    void generation;
-    setSources((s) => [...s, ref]);
-    setSelections((s) => [
-      ...s,
-      ...value.settings.order.map((id) => ({
-        version_id: value.entry.version_id,
-        segment_id: id,
-        reverse: false,
-        name: `${value.entry.path} · 段 ${value.segments.find((s) => s.segment_id === id)!.ordinal + 1}`,
-      })),
-    ]);
-  }
-  async function undo(operationId: string) {
-    const op = await api<{
-      effects: { after: EntrySnapshot }[];
-      deleted: boolean;
-    }>(`/api/tracks/operations/${operationId}`);
-    if (op.deleted) throw new Error("组内条目已删除，无法撤销");
-    await make({
-      kind: "restore_group",
-      operation_id: operationId,
-      expected: op.effects.map((e) => reference(e.after)),
-    });
-  }
-  async function download(version: string, entry = entryId) {
-    const response = await request(
-        `/api/tracks/${entry}/versions/${version}/raw`,
-      ),
-      url = URL.createObjectURL(await response.blob()),
-      a = document.createElement("a");
-    a.href = url;
-    a.download = d?.entry.path.split("/").at(-1) ?? "track.kml";
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
+
   const segmentOptions =
     d?.segments.map((s) => ({
       value: s.segment_id,
       label: `段 ${s.ordinal + 1} · ${s.point_count} 点`,
     })) ?? [];
-  const mapData = preview ? resultGeometry.data : geometry.data;
-  const displayed =
+  let mapData = preview ? resultGeometry.data : geometry.data;
+  if (!preview && view === "display" && geometry.data && settings) {
+    const byId = new Map(
+      geometry.data.segments.map((segment) => [segment.segment_id, segment]),
+    );
+    const ignored = new Set(settings.ignored);
+    const edges = new Map<
+      string,
+      { from: string; to: string; connect: boolean }
+    >();
+    const put = (edge: { from: string; to: string; connect: boolean }) =>
+      edges.set(JSON.stringify([edge.from, edge.to]), edge);
+    for (let i = 1; i < settings.order.length; i++)
+      put({
+        from: settings.order[i - 1]!,
+        to: settings.order[i]!,
+        connect: settings.default_connect,
+      });
+    settings.connections.forEach(put);
+    mapData = {
+      segments: settings.order
+        .filter((id) => !ignored.has(id))
+        .flatMap((id) => (byId.get(id) ? [byId.get(id)!] : [])),
+      connections: [...edges.values()].flatMap(({ from, to, connect }) => {
+        const a = byId.get(from)?.coordinates.at(-1),
+          b = byId.get(to)?.coordinates[0];
+        return connect && !ignored.has(from) && !ignored.has(to) && a && b
+          ? [[a, b]]
+          : [];
+      }),
+    };
+  }
+  const visualDrawing = [...drawing];
+  const snapA = geometry.data?.segments
+      .find((s) => s.segment_id === snapStart)
+      ?.coordinates.at(-1),
+    snapB = geometry.data?.segments.find((s) => s.segment_id === snapEnd)
+      ?.coordinates[0];
+  if (visualDrawing.length && snapA) visualDrawing[0] = snapA;
+  if (visualDrawing.length > 1 && snapB)
+    visualDrawing[visualDrawing.length - 1] = snapB;
+  const drawn =
     mapData && mode === "draw" && drawing.length && !preview
       ? {
           ...mapData,
           segments: [
             ...mapData.segments,
-            { segment_id: "new-drawing", coordinates: drawing },
+            { segment_id: "new-drawing", coordinates: visualDrawing },
           ],
         }
       : mapData;
+  const coords =
+    geometry.data?.segments.find((s) => s.segment_id === segmentId)
+      ?.coordinates ?? [];
+  const marked =
+    !preview && mode === "prune"
+      ? (candidates.length ? candidates : [{ start, end }])
+          .map((r) => ({
+            segment_id: "ux-delete",
+            coordinates: coords.slice(r.start, r.end),
+          }))
+          .filter((s) => s.coordinates.length)
+      : !preview && mode === "split_segment"
+        ? indices
+            .split(/[,，\s]+/)
+            .filter(Boolean)
+            .map(Number)
+            .filter((i) => coords[i])
+            .map((i) => ({ segment_id: "ux-break", coordinates: [coords[i]!] }))
+        : [];
+  const displayed = drawn && {
+    ...drawn,
+    segments: [
+      ...drawn.segments,
+      ...marked,
+      ...(!preview && ["split_segment", "prune"].includes(mode)
+        ? (() => {
+            const line = mapData?.segments.find(
+              (s) => s.segment_id === segmentId,
+            )?.coordinates;
+            return line?.length
+              ? [
+                  { segment_id: "ux-add", coordinates: [line[0]!] },
+                  { segment_id: "ux-break", coordinates: [line.at(-1)!] },
+                ]
+              : [];
+          })()
+        : []),
+      ...(preview && !showBefore
+        ? previewAnnotations(geometry.data, preview, mapData)
+        : []),
+    ],
+  };
   return (
     <div className="work-main track-editor">
-      <Typography.Title level={2}>行程编辑</Typography.Title>
-      <p>
-        断开轨迹、修复或补绘仍保存为一条行程；只有「拆成独立行程」会产生多个
-        KML。
-      </p>
       {[
         error,
-        catalog.error?.message,
+        task.data?.error?.message,
+        config.error?.message,
+        tagData.error?.message,
         target.error?.message,
         geometry.error?.message,
         resultGeometry.error?.message,
@@ -489,57 +699,25 @@ export default function TrackEditor() {
       {note && (
         <Alert type="info" title={note} closable onClose={() => setNote("")} />
       )}
-      <label>
-        查找行程
-        <Input
-          aria-label="查找行程"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setCursor(0);
-          }}
-        />
-      </label>
-      <Select
-        aria-label="编辑行程"
-        virtual={false}
-        placeholder="选择轨迹库中的行程"
-        value={entryId || undefined}
-        onChange={changeEntry}
-        options={catalog.data?.entries.map((e) => ({
-          value: e.id,
-          label: e.path,
-        }))}
-        style={{ width: "100%" }}
-      />
-      <Space>
+      {(error || task.data?.error) && (
         <Button
-          disabled={!cursor}
-          onClick={() => setCursor(Math.max(0, cursor - 200))}
-        >
-          上一页行程
-        </Button>
-        <Button
-          disabled={catalog.data?.next_cursor == null}
-          onClick={() => setCursor(catalog.data!.next_cursor!)}
-        >
-          下一页行程
-        </Button>
-        <Button
+          disabled={busy || !!active}
           onClick={() => {
-            if (entryId) void target.refetch();
-            void catalog.refetch();
+            if (
+              draftDirty &&
+              !window.confirm("重新载入会放弃当前修改，是否继续？")
+            )
+              return;
+            resetDraft();
+            void target.refetch();
           }}
         >
-          刷新
+          重新载入轨迹
         </Button>
-      </Space>
+      )}
       {target.isFetching && <Spin />}
       {d && settings && (
         <>
-          <p>
-            {d.entry.path} · 第 {d.entry.generation} 次变更
-          </p>
           {d.entry.state !== "active" && (
             <Alert
               type="info"
@@ -553,534 +731,490 @@ export default function TrackEditor() {
               description={d.manifest_error}
             />
           )}
-          <Card title="段列表与连接">
-            <Checkbox
-              checked={settings.default_connect}
-              onChange={(e) =>
-                setSettings({ ...settings, default_connect: e.target.checked })
-              }
-            >
-              默认连接相邻段
-            </Checkbox>
-            {settings.order
-              .slice(segmentPage, segmentPage + 100)
-              .map((id, offset) => {
-                const i = segmentPage + offset;
-                const s = d.segments.find((s) => s.segment_id === id)!;
-                const to = settings.order[i + 1],
-                  override = settings.connections.find(
-                    (e) => e.from === id && e.to === to,
-                  );
-                return (
-                  <div className="edit-segment" key={id}>
-                    <Space wrap>
-                      <Button
-                        type={segmentId === id ? "primary" : "default"}
-                        onClick={() => setSegment(id)}
-                      >
-                        段 {s.ordinal + 1}
-                      </Button>
-                      <span>
-                        {s.geometry_kind} · {s.point_count} 点 ·{" "}
-                        {s.time_status === "present"
-                          ? "有时间"
-                          : s.time_status === "absent"
-                            ? "无时间"
-                            : "时间不完整"}{" "}
-                        ·{" "}
-                        {s.source_kind === "hand_drawn"
-                          ? "手绘"
-                          : s.source_kind === "measured"
-                            ? "实测"
-                            : "来源未确认"}
-                      </span>
-                      <Checkbox
-                        checked={settings.ignored.includes(id)}
-                        onChange={(e) => setIgnored(id, e.target.checked)}
-                      >
-                        忽略段 {s.ordinal + 1}
-                      </Checkbox>
-                      <Button
-                        aria-label={`上移段 ${s.ordinal + 1}`}
-                        disabled={!i}
-                        onClick={() => move(id, -1)}
-                      >
-                        上移
-                      </Button>
-                      <Button
-                        aria-label={`下移段 ${s.ordinal + 1}`}
-                        disabled={i === settings.order.length - 1}
-                        onClick={() => move(id, 1)}
-                      >
-                        下移
-                      </Button>
-                      <Button
-                        disabled={busy || !!active}
-                        onClick={() =>
-                          void run(() =>
-                            make({ kind: "reverse", segment_id: id }),
-                          )
-                        }
-                      >
-                        反向预览
-                      </Button>
-                    </Space>
-                    {to && (
-                      <label>
-                        与下一段连接{" "}
-                        <Select
-                          aria-label={`段 ${s.ordinal + 1} 的连接`}
-                          value={
-                            override
-                              ? override.connect
-                                ? "yes"
-                                : "no"
-                              : "default"
-                          }
-                          onChange={(v) => connection(id, to, v)}
-                          options={[
-                            { value: "default", label: "跟随默认" },
-                            { value: "yes", label: "连接" },
-                            { value: "no", label: "断开" },
-                          ]}
-                        />
-                      </label>
-                    )}
-                  </div>
+          {view === "display" && (
+            <DisplaySettings
+              settings={settings}
+              segments={d.segments}
+              geometry={geometry.data}
+              selected={segmentId}
+              busy={busy || !!active}
+              dirty={draftDirty}
+              onChange={setSettings}
+              onSelect={(id) => {
+                setSegment(id);
+                const segment = geometry.data?.segments.find(
+                  (s) => s.segment_id === id,
                 );
-              })}
-            <Space>
-              <Button
-                disabled={!segmentPage}
-                onClick={() => setSegmentPage(Math.max(0, segmentPage - 100))}
-              >
-                上一页段
-              </Button>
-              <Button
-                disabled={segmentPage + 100 >= settings.order.length}
-                onClick={() => setSegmentPage(segmentPage + 100)}
-              >
-                下一页段
-              </Button>
-            </Space>
-            <details>
-              <summary>跨段连接覆盖</summary>
-              <Space wrap>
-                <span>从当前选择段到</span>
-                <Select
-                  aria-label="连接目标段"
-                  value={edgeTo}
-                  onChange={setEdgeTo}
-                  options={segmentOptions.filter(
-                    (s) =>
-                      settings.order.indexOf(s.value) >
-                      settings.order.indexOf(segmentId),
-                  )}
-                />
-                <Button
-                  disabled={!edgeTo}
-                  onClick={() => edgeTo && connection(segmentId, edgeTo, "yes")}
-                >
-                  增加连接
-                </Button>
-              </Space>
-              {settings.connections.map((e) => (
-                <p key={`${e.from}/${e.to}`}>
-                  {segmentOptions.find((s) => s.value === e.from)?.label} →{" "}
-                  {segmentOptions.find((s) => s.value === e.to)?.label}：
-                  {e.connect ? "连接" : "断开"}
-                  <Button onClick={() => connection(e.from, e.to, "default")}>
-                    移除覆盖
-                  </Button>
-                </p>
-              ))}
-            </details>
-            <Button
-              disabled={busy || !!active}
-              onClick={() =>
+                if (segment && !settings.ignored.includes(id))
+                  workspace.fit?.(
+                    editTracks({ segments: [segment], connections: [] }),
+                  );
+              }}
+              onDiscard={() => {
+                setSettings(structuredClone(d.settings));
+                setError("");
+                setNote("");
+              }}
+              onSave={() =>
                 void run(() => make({ kind: "presentation", settings }))
               }
-            >
-              预览展示设置
-            </Button>
-            <p>忽略中段不会自动连接两侧；需要跨接时可明确增加连接。</p>
-          </Card>
-          <Card title="编辑操作">
-            <Select
-              aria-label="段编辑操作"
-              virtual={false}
-              value={mode}
-              onChange={(v) => {
-                setMode(v);
-                setPreview(undefined);
-              }}
-              options={[
-                { value: "split_segment", label: "内部断开（一个 KML）" },
-                { value: "prune", label: "删除漂移点" },
-                { value: "draw", label: "插入手绘" },
-                { value: "compose", label: "组合库内片段" },
-                { value: "split_journey", label: "拆成独立行程" },
-                { value: "presentation", label: "仅保存展示设置" },
-              ]}
-              style={{ width: "100%" }}
             />
-            {["split_segment", "prune"].includes(mode) && (
-              <>
-                <p>
-                  当前：段 {selected ? selected.ordinal + 1 : "—"}
-                  。可在地图点击附近采样点，也可填写点索引。
-                </p>
+          )}
+          {view === "edit" && !mode && (
+            <div className="grid grid-cols-2 gap-2" aria-label="选择编辑操作">
+              {Object.entries(editActions).map(([key, label]) => (
                 <Button
-                  disabled={busy || !!active}
-                  onClick={() => void run(detect)}
+                  key={key}
+                  className="h-auto min-h-12 whitespace-normal"
+                  onClick={() => {
+                    resetDraft();
+                    setMode(key);
+                  }}
                 >
-                  自动检测候选
+                  {label}
                 </Button>
-              </>
-            )}
-            {mode === "split_segment" && (
-              <label>
-                在这些点之后断开（从 0 开始，逗号分隔）
-                <Input
-                  aria-label="断点索引"
-                  value={indices}
-                  onChange={(e) => setIndices(e.target.value)}
-                />
-              </label>
-            )}
-            {mode === "prune" && (
-              <Space wrap>
-                <label>
-                  删除起点（含）
-                  <InputNumber
-                    aria-label="删除起点"
-                    min={0}
-                    value={start}
-                    onChange={(v) => setStart(v ?? 0)}
-                  />
-                </label>
-                <label>
-                  删除终点（不含）
-                  <InputNumber
-                    aria-label="删除终点"
-                    min={1}
-                    value={end}
-                    onChange={(v) => setEnd(v ?? 1)}
-                  />
-                </label>
-              </Space>
-            )}
-            {mode === "draw" && (
-              <>
-                <p>
-                  点击地图依次补绘，至少两个点；不会添加时间。已画{" "}
-                  {drawing.length} 点。
-                </p>
-                <Space wrap>
-                  <Button onClick={() => setDrawing((v) => v.slice(0, -1))}>
-                    撤回末点
-                  </Button>
-                  <Button onClick={() => setDrawing([])}>清空补绘</Button>
-                </Space>
-                <label>
-                  插入位置
-                  <Select
-                    aria-label="补绘插入位置"
-                    value={after ?? "first"}
-                    onChange={(v) => setAfter(v === "first" ? null : v)}
-                    options={[
-                      { value: "first", label: "最前" },
-                      ...segmentOptions.map((s) => ({
-                        ...s,
-                        label: `${s.label} 之后`,
-                      })),
-                    ]}
-                  />
-                </label>
-                <label>
-                  起点吸附到段尾
-                  <Select
-                    aria-label="起点吸附"
-                    allowClear
-                    value={snapStart}
-                    onChange={setSnapStart}
-                    options={segmentOptions}
-                  />
-                </label>
-                <label>
-                  终点吸附到段首
-                  <Select
-                    aria-label="终点吸附"
-                    allowClear
-                    value={snapEnd}
-                    onChange={setSnapEnd}
-                    options={segmentOptions}
-                  />
-                </label>
-                <details>
-                  <summary>填写 WGS84 坐标</summary>
-                  <Input.TextArea
-                    aria-label="手绘坐标"
-                    value={coordinateText}
-                    onChange={(e) => setCoordinateText(e.target.value)}
-                    placeholder="每行 经度,纬度"
-                  />
-                  <Button
-                    onClick={() => {
-                      const values = coordinateText
-                        .split("\n")
-                        .filter(Boolean)
-                        .map((l) => l.split(/[,，\s]+/).map(Number));
-                      if (
-                        values.length < 2 ||
-                        values.some(
-                          (v) => v.length !== 2 || !v.every(Number.isFinite),
-                        )
-                      )
-                        setError("请输入至少两行经度,纬度");
-                      else setDrawing(values as [number, number][]);
-                    }}
-                  >
-                    使用填写坐标
-                  </Button>
-                </details>
-              </>
-            )}
-            {mode === "compose" && (
-              <>
-                <p>
-                  按下方顺序组合成当前行程的新版本。来源行程仍保留；可先搜索行程，再加入片段。
-                </p>
-                <Space wrap>
-                  <Select
-                    aria-label="组合来源行程"
-                    value={sourceId}
-                    onChange={setSourceId}
-                    options={catalog.data?.entries.map((e) => ({
-                      value: e.id,
-                      label: e.path,
-                    }))}
-                    style={{ minWidth: 180, maxWidth: "100%" }}
-                  />
-                  <Button
-                    disabled={!sourceId}
-                    onClick={() => void run(addSource)}
-                  >
-                    加入来源片段
-                  </Button>
-                </Space>
-                {selections.map((s, i) => (
-                  <div
-                    className="edit-segment"
-                    key={`${s.version_id}/${s.segment_id}`}
-                  >
-                    <span>
-                      {i + 1}. {s.name}
-                    </span>
-                    <Space wrap>
-                      <Checkbox
-                        checked={s.reverse}
-                        onChange={(e) =>
-                          setSelections((v) =>
-                            v.map((x, j) =>
-                              j === i ? { ...x, reverse: e.target.checked } : x,
-                            ),
-                          )
-                        }
-                      >
-                        反向
-                      </Checkbox>
+              ))}
+            </div>
+          )}
+          {view === "edit" && mode && (
+            <section aria-label={editActions[mode]} className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="返回编辑操作"
+                  disabled={busy || !!active}
+                  onClick={() => {
+                    if (
+                      draftDirty &&
+                      !window.confirm("有未保存的修改，是否放弃并返回？")
+                    )
+                      return;
+                    resetDraft();
+                    setMode("");
+                  }}
+                >
+                  <ArrowLeft size={18} />
+                </Button>
+                <strong>{editActions[mode]}</strong>
+              </div>
+              <fieldset
+                disabled={busy || !!active || !!preview}
+                className="min-w-0 space-y-3"
+              >
+                {["split_segment", "prune"].includes(mode) && (
+                  <div className="space-y-2" aria-label="选择编辑片段">
+                    <p>
+                      选择片段，地图会高亮并定位；绿色点为起点，橙色点为终点。
+                    </p>
+                    {segmentOptions.map((option) => (
                       <Button
-                        disabled={!i}
-                        onClick={() =>
-                          setSelections((v) => {
-                            const n = [...v];
-                            [n[i - 1], n[i]] = [n[i]!, n[i - 1]!];
-                            return n;
-                          })
+                        key={option.value}
+                        className="h-auto w-full justify-start whitespace-normal"
+                        aria-pressed={segmentId === option.value}
+                        variant={
+                          segmentId === option.value ? "default" : "outline"
                         }
+                        onClick={() => chooseSegment(option.value)}
                       >
-                        提前
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+                {mode === "split_segment" && (
+                  <>
+                    <p>
+                      点击地图上的断开位置，再点同一位置可取消。断开后仍是一条行程。
+                    </p>
+                    <p>
+                      已选 {breaks.length} 处断点，将形成 {breaks.length + 1}{" "}
+                      个片段。
+                    </p>
+                    <Space wrap>
+                      <Button onClick={() => void run(detect)}>
+                        查找可能的断点
                       </Button>
                       <Button
-                        onClick={() =>
-                          setSelections((v) => v.filter((_, j) => j !== i))
-                        }
+                        disabled={!breaks.length}
+                        onClick={() => setIndices("")}
                       >
-                        移除片段
+                        清除选择
                       </Button>
                     </Space>
-                  </div>
-                ))}
-              </>
-            )}
-            {mode === "split_journey" && (
-              <>
-                <p>
-                  每个段分配一次。需要在段内分开时，先使用内部断开；全部新行程成功保存后，原行程转为历史来源。
-                </p>
-                {journeys.map((j, i) => (
-                  <div className="edit-segment" key={i}>
+                    {breaks.map((point, i) => (
+                      <div key={point} className="flex items-center gap-2">
+                        <Button onClick={() => locateRange(point, point + 1)}>
+                          查看断点 {i + 1}
+                        </Button>
+                        <Button
+                          onClick={() =>
+                            setIndices(
+                              breaks.filter((p) => p !== point).join(","),
+                            )
+                          }
+                        >
+                          取消断点 {i + 1}
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {mode === "prune" && (
+                  <>
+                    <p>
+                      {rangeAnchor.current !== undefined
+                        ? "请选择删除范围的终点。"
+                        : end > start || candidates.length
+                          ? "红色部分将被删除，保存前请检查。"
+                          : "请在地图选择删除范围的起点，然后选择终点。"}
+                    </p>
+                    <p>
+                      将删除{" "}
+                      {candidates.length
+                        ? candidates.reduce((n, r) => n + r.end - r.start, 0)
+                        : Math.max(0, end - start)}{" "}
+                      个轨迹点。
+                    </p>
+                    <Space wrap>
+                      <Button onClick={() => void run(detect)}>
+                        查找漂移点
+                      </Button>
+                      <Button onClick={clearSelection}>重新选择</Button>
+                      <Button onClick={clearSelection}>清除选择</Button>
+                    </Space>
+                    {candidates.map((r, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <Button onClick={() => locateRange(r.start, r.end)}>
+                          查看范围 {i + 1}（{r.end - r.start} 点）
+                        </Button>
+                        <Button
+                          onClick={() =>
+                            setCandidates(candidates.filter((_, j) => j !== i))
+                          }
+                        >
+                          保留此范围
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {mode === "draw" && (
+                  <>
                     <label>
-                      行程 {i + 1} 路径
-                      <Input
-                        aria-label={`行程 ${i + 1} 路径`}
-                        value={j.path}
-                        onChange={(e) =>
-                          setJourneys((v) =>
-                            v.map((x, k) =>
-                              k === i ? { ...x, path: e.target.value } : x,
-                            ),
-                          )
-                        }
+                      在哪里补绘
+                      <Select
+                        aria-label="补绘位置"
+                        value={after ?? "first"}
+                        onChange={(v) => {
+                          setAfter(v === "first" ? null : v);
+                          setDrawing([]);
+                          setSnapStart(undefined);
+                          setSnapEnd(undefined);
+                        }}
+                        options={[
+                          { value: "first", label: "轨迹最前面" },
+                          ...segmentOptions.map((o) => ({
+                            value: o.value,
+                            label: `${o.label}之后`,
+                          })),
+                        ]}
                       />
                     </label>
-                    <Select
-                      aria-label={`行程 ${i + 1} 分类`}
-                      value={j.category ?? "unknown"}
-                      options={["Default", "Train", "Flight", "unknown"].map(
-                        (x) => ({
-                          value: x,
-                          label: x === "unknown" ? "未分类" : x,
-                        }),
-                      )}
-                      onChange={(v) =>
-                        setJourneys((old) =>
-                          old.map((x, k) =>
-                            k === i
-                              ? {
-                                  ...x,
-                                  category:
-                                    v === "unknown"
-                                      ? null
-                                      : (v as "Default" | "Train" | "Flight"),
-                                }
-                              : x,
-                          ),
-                        )
-                      }
-                    />
-                  </div>
-                ))}
-                <Button
-                  onClick={() =>
-                    setJourneys((v) => [
-                      ...v,
-                      {
-                        path: d.entry.path.replace(
-                          /\.kml$/i,
-                          `-行程${v.length + 1}.kml`,
-                        ),
-                        category: d.entry.category,
-                      },
-                    ])
-                  }
-                >
-                  增加行程
-                </Button>
-                {segmentOptions.map((s) => (
-                  <label className="edit-segment" key={s.value}>
-                    {s.label}
-                    <Select
-                      aria-label={`${s.label} 归属`}
-                      value={assign[s.value]}
-                      options={journeys.map((_, i) => ({
-                        value: i,
-                        label: `行程 ${i + 1}`,
-                      }))}
-                      onChange={(v) =>
-                        setAssign((a) => ({ ...a, [s.value]: v }))
-                      }
-                    />
-                  </label>
-                ))}
-              </>
-            )}
-            <Button
-              type="primary"
-              aria-label="生成编辑预览"
-              loading={busy}
-              disabled={
-                !!active ||
-                d.entry.state !== "active" ||
-                d.manifest_status !== "ready"
-              }
-              onClick={() => void run(prepare)}
-            >
-              生成编辑预览
-            </Button>
-          </Card>
-          {preview && (
-            <Card title="待确认的编辑预览">
-              <p>
-                生成 {preview.outputs.length}{" "}
-                份结果；应用后保留输入版本。有效期至{" "}
-                {new Date(preview.expires_at).toLocaleString()}。
-              </p>
-              {preview.outputs.map((o, i) => (
-                <p key={i}>
-                  {o.path} · {o.segments.length} 段 ·{" "}
-                  {o.segments.reduce((n, s) => n + s.point_count, 0)} 点 ·{" "}
-                  {o.state}
-                </p>
-              ))}
-              {preview.changes.map((c, i) => (
-                <div key={i}>
+                    <p>
+                      点击地图依次画线，至少两个点。靠近已有端点时会自动吸附；手绘部分没有时间信息。
+                    </p>
+                    <p>已画 {drawing.length} 点。</p>
+                    <Space wrap>
+                      <Button
+                        disabled={!drawing.length}
+                        onClick={() => {
+                          setDrawing(drawing.slice(0, -1));
+                          setSnapEnd(undefined);
+                          if (drawing.length <= 1) setSnapStart(undefined);
+                        }}
+                      >
+                        撤回一点
+                      </Button>
+                      <Button
+                        disabled={!drawing.length}
+                        onClick={() => {
+                          setDrawing([]);
+                          setSnapStart(undefined);
+                          setSnapEnd(undefined);
+                        }}
+                      >
+                        重新绘制
+                      </Button>
+                    </Space>
+                    {snapStart && (
+                      <p>
+                        起点已吸附到片段末尾{" "}
+                        <Button onClick={() => setSnapStart(undefined)}>
+                          取消起点吸附
+                        </Button>
+                      </p>
+                    )}
+                    {snapEnd && (
+                      <p>
+                        终点已吸附到片段开头{" "}
+                        <Button onClick={() => setSnapEnd(undefined)}>
+                          取消终点吸附
+                        </Button>
+                      </p>
+                    )}
+                  </>
+                )}
+                {mode === "fill_altitude" && (
                   <p>
-                    结果 {i + 1}：增加 {c.added_points} 点，移除{" "}
-                    {c.removed_points} 点；连接 {c.before_edges.length} →{" "}
-                    {c.after_edges.length}；移除 {c.removed_connections.length}{" "}
-                    条旧覆盖。
+                    为整段缺失高程的轨迹片段查询海拔，已有高程的片段保持不变。计算完成后查看结果，再决定是否保存。
                   </p>
-                  {c.warnings.map((w, j) => (
-                    <Alert key={j} type="warning" title={w} />
-                  ))}
-                </div>
-              ))}
-              <Space wrap>
-                <Checkbox
-                  checked={showBefore}
-                  onChange={(e) => setShowBefore(e.target.checked)}
-                >
-                  查看编辑前
-                </Checkbox>
-                <Select
-                  aria-label="预览结果"
-                  value={outputIndex}
-                  onChange={setOutputIndex}
-                  options={preview.outputs.map((o, i) => ({
-                    value: i,
-                    label: o.path,
-                  }))}
-                />
+                )}
+                {mode === "set_tag" && (
+                  <>
+                    <p>当前标签：{currentTag ?? "未设置"}</p>
+                    <Select
+                      aria-label="活动标签"
+                      placeholder="选择新标签"
+                      value={tag ?? currentTag}
+                      onChange={setTag}
+                      options={tagOptions}
+                    />
+                  </>
+                )}
+                {mode === "split_journey" && (
+                  <div onClickCapture={() => setEditTouched(true)}>
+                    <p>
+                      把片段分到不同的行程中。需要从片段中间拆开时，请先使用“断开轨迹”。
+                    </p>
+                    {journeys.map((journey, i) => (
+                      <div key={i} className="rounded-md border p-3 space-y-2">
+                        <strong
+                          style={{ color: groupColors[i % groupColors.length] }}
+                        >
+                          行程 {i + 1}
+                        </strong>
+                        <label>
+                          名称
+                          <Input
+                            aria-label={`行程 ${i + 1} 名称`}
+                            value={journey.path
+                              .split("/")
+                              .at(-1)!
+                              .replace(/\.kml$/i, "")}
+                            onChange={(e) =>
+                              setJourneys(
+                                journeys.map((j, k) =>
+                                  k === i
+                                    ? {
+                                        ...j,
+                                        path: journeyPath(
+                                          e.target.value,
+                                          j.category,
+                                        ),
+                                      }
+                                    : j,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <Select
+                          aria-label={`行程 ${i + 1} 活动标签`}
+                          placeholder="选择活动标签"
+                          value={journey.tag}
+                          onChange={(value) => {
+                            const category = tagCategory(value);
+                            setJourneys(
+                              journeys.map((j, k) =>
+                                k === i
+                                  ? {
+                                      ...j,
+                                      tag: value,
+                                      category,
+                                      path: journeyPath(
+                                        j.path
+                                          .split("/")
+                                          .at(-1)!
+                                          .replace(/\.kml$/i, ""),
+                                        category,
+                                      ),
+                                    }
+                                  : j,
+                              ),
+                            );
+                          }}
+                          options={tagOptions}
+                        />
+                        {segmentOptions
+                          .filter((o) => assign[o.value] === i)
+                          .map((o) => (
+                            <label key={o.value} className="block">
+                              <Button
+                                variant="ghost"
+                                onClick={() => locateSegment(o.value)}
+                              >
+                                {o.label}
+                              </Button>
+                              <Select
+                                aria-label={`${o.label} 分配到`}
+                                value={assign[o.value]}
+                                onChange={(value) =>
+                                  setAssign({ ...assign, [o.value]: value })
+                                }
+                                options={journeys.map((_, j) => ({
+                                  value: j,
+                                  label: `行程 ${j + 1}`,
+                                }))}
+                              />
+                            </label>
+                          ))}
+                        {!Object.values(assign).includes(i) && (
+                          <>
+                            <p>尚未分配片段</p>
+                            <Button
+                              disabled={journeys.length <= 2}
+                              onClick={() => {
+                                setJourneys(journeys.filter((_, j) => j !== i));
+                                setAssign(
+                                  Object.fromEntries(
+                                    Object.entries(assign).map(([id, n]) => [
+                                      id,
+                                      n > i ? n - 1 : n,
+                                    ]),
+                                  ),
+                                );
+                              }}
+                            >
+                              删除空行程
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                    <Button
+                      onClick={() =>
+                        setJourneys([
+                          ...journeys,
+                          {
+                            path: journeyPath(
+                              `新行程 ${journeys.length + 1}`,
+                              d.entry.category,
+                            ),
+                            category: d.entry.category,
+                          },
+                        ])
+                      }
+                    >
+                      增加行程
+                    </Button>
+                    {splitError && <p role="status">{splitError}</p>}
+                  </div>
+                )}
+              </fieldset>
+              <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t bg-background py-3">
+                <span className="mr-auto text-sm">
+                  {busy || active
+                    ? "正在处理…"
+                    : draftDirty
+                      ? "未保存修改"
+                      : "尚未修改"}
+                </span>
                 <Button
-                  type="primary"
-                  disabled={!!active || busy}
-                  onClick={() =>
-                    void run(async () => {
-                      const next = await api<{ task_id: string }>(
-                        `/api/tracks/edit-previews/${preview.preview_id}/apply`,
-                        {
-                          schema: 1,
-                          archive_id: preview.archive_id,
-                          preview_id: preview.preview_id,
-                          preview_sha256: preview.preview_sha256,
-                          request_key: `apply:${preview.preview_id}`,
-                        },
-                      );
-                      setParams({ panel: "tracks", task: next.task_id });
-                    })
-                  }
+                  disabled={busy || !!active || !draftDirty}
+                  onClick={resetDraft}
                 >
-                  确认应用编辑
+                  放弃修改
                 </Button>
-              </Space>
-            </Card>
+                <Button
+                  variant="default"
+                  loading={busy || !!active}
+                  disabled={!canSave || busy || !!active || !!preview}
+                  onClick={() => void run(prepare)}
+                >
+                  {mode === "fill_altitude"
+                    ? "计算高程"
+                    : mode === "split_journey"
+                      ? "确认拆分…"
+                      : "保存"}
+                </Button>
+              </div>
+            </section>
           )}
-          {displayed && (
+          {preview && !directSave && (
+            <Modal
+              title={mode === "fill_altitude" ? "补高程结果" : "确认拆分行程"}
+              open
+              closable={!busy && !active}
+              onCancel={() => {
+                setPreview(undefined);
+                taskLink(null);
+              }}
+              footer={
+                <>
+                  <Button
+                    disabled={busy || !!active}
+                    onClick={() => {
+                      setPreview(undefined);
+                      taskLink(null);
+                    }}
+                  >
+                    返回修改
+                  </Button>
+                  <Button
+                    variant="default"
+                    loading={busy || !!active}
+                    onClick={() => void run(() => applyPreview(preview))}
+                  >
+                    {mode === "fill_altitude" ? "保存高程" : "确认拆分"}
+                  </Button>
+                </>
+              }
+            >
+              {mode === "fill_altitude" ? (
+                <p>
+                  {preview.altitude
+                    ? `已补齐 ${preview.altitude.filled} 个点，仍有 ${preview.altitude.remaining} 个点未补齐。`
+                    : "高程计算完成。"}
+                </p>
+              ) : (
+                <>
+                  <p>
+                    将生成以下 {preview.outputs.length}{" "}
+                    条行程，原行程保留在历史中。
+                  </p>
+                  <ul>
+                    {preview.outputs.map((o, i) => (
+                      <li key={i}>
+                        {o.path.split("/").at(-1)} · {o.segments.length} 个片段
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {preview.changes
+                .flatMap((c) => c.warnings)
+                .map((warning, i) => (
+                  <Alert key={i} type="warning" title={warning} />
+                ))}
+            </Modal>
+          )}
+          {displayed && (view === "display" || !!mode) && (
             <TrackEditorMap
               key={entryId}
               geometry={displayed}
+              active={visible && (view !== "history" || !!preview)}
+              readOnly
+              segmentColors={
+                mode === "split_journey"
+                  ? Object.fromEntries(
+                      Object.entries(assign).map(([id, group]) => [
+                        id,
+                        groupColors[group % groupColors.length]!,
+                      ]),
+                    )
+                  : undefined
+              }
               onPick={pick}
               selectedSegment={
                 mode === "draw" && drawing.length && !preview
@@ -1089,217 +1223,20 @@ export default function TrackEditor() {
               }
             />
           )}
-          <Card title="版本历史">
-            {history.error && (
-              <Alert type="error" title={history.error.message} />
-            )}
-            <p>下载保留完整原始字节；恢复先生成预览，后续版本仍保留。</p>
-            {history.data?.versions.map((v) => (
-              <HistoryRow
-                key={v.id}
-                version={v}
-                onDownload={() => void run(() => download(v.id))}
-                onRestore={(p) =>
-                  void run(() =>
-                    make({
-                      kind: "restore_version",
-                      version_id: v.id,
-                      presentation_id: p,
-                    }),
-                  )
-                }
-                onUndo={() => void run(() => undo(v.operation_id))}
-              />
-            ))}
-            <Space>
-              <Button
-                disabled={!historyCursor}
-                onClick={() =>
-                  setHistoryCursor(Math.max(0, historyCursor - 50))
-                }
-              >
-                较新版本
-              </Button>
-              <Button
-                disabled={history.data?.next_cursor == null}
-                onClick={() => setHistoryCursor(history.data!.next_cursor!)}
-              >
-                较早版本
-              </Button>
-            </Space>
-            <Sources
-              entryId={entryId}
-              download={(entry, version) =>
-                void run(() => download(version, entry))
-              }
-            />
-          </Card>
         </>
       )}
-      {task.data && (
-        <Card title="编辑任务">
-          <p>
-            {task.data.status === "succeeded"
-              ? "已完成"
-              : task.data.status === "running"
-                ? "处理中"
-                : task.data.status === "queued"
-                  ? "排队中"
-                  : task.data.status}
-          </p>
-          {task.data.error && (
-            <Alert type="error" title={task.data.error.message} />
-          )}
-          <Space wrap>
-            <Button onClick={() => workspace.open("tasks", task.data!.id)}>
-              查看完整处理记录
-            </Button>
-            {active ? (
-              <Button
-                onClick={() =>
-                  void run(async () => {
-                    await api(`/api/work/tasks/${taskId}/cancel`, {
-                      revision: task.data!.revision,
-                    });
-                    await task.refetch();
-                  })
-                }
-              >
-                取消任务
-              </Button>
-            ) : (
-              task.data.request.operation === "track:apply" &&
-              task.data.status !== "succeeded" && (
-                <Button
-                  onClick={() =>
-                    void run(async () => {
-                      const t = await api<WorkTask>(
-                        `/api/work/tasks/${taskId}/retry`,
-                        {},
-                      );
-                      setParams({ panel: "tracks", task: t.id });
-                    })
-                  }
-                >
-                  用原请求重试应用
-                </Button>
-              )
-            )}
-          </Space>
-        </Card>
-      )}
     </div>
   );
 }
-function HistoryRow({
-  version: v,
-  onDownload,
-  onRestore,
-  onUndo,
-}: {
-  version: VersionSummary;
-  onDownload: () => void;
-  onRestore: (p: string) => void;
-  onUndo: () => void;
+export default function TrackEditorView(props: {
+  initialEntry: string;
+  view?: "edit" | "display" | "history";
+  active?: boolean;
+  onEntryChange?: (id: string) => void;
 }) {
-  const [p, setP] = useState(v.presentations[0]?.id);
-  return (
-    <div className="edit-segment">
-      <p>
-        版本 {v.version_no} ·{" "}
-        {v.origin === "migration_baseline"
-          ? "迁移基线"
-          : v.origin === "imported"
-            ? "导入内容"
-            : "编辑结果"}{" "}
-        · {new Date(v.created_at).toLocaleString()}
-      </p>
-      <Space wrap>
-        <Button onClick={onDownload}>下载版本 {v.version_no}</Button>
-        <Select
-          aria-label={`版本 ${v.version_no} 展示快照`}
-          value={p}
-          onChange={setP}
-          options={v.presentations.map((s, i) => ({
-            value: s.id,
-            label: `展示 ${v.presentations.length - i} · ${new Date(s.created_at).toLocaleString()}`,
-          }))}
-        />
-        <Button disabled={!p} onClick={() => p && onRestore(p)}>
-          预览恢复版本 {v.version_no}
-        </Button>
-        <Button onClick={onUndo}>预览撤销该操作组</Button>
-      </Space>
-    </div>
-  );
-}
-function Sources({
-  entryId,
-  download,
-}: {
-  entryId: string;
-  download: (entry: string, version: string) => void;
-}) {
-  const [open, setOpen] = useState(false),
-    [cursor, setCursor] = useState(0);
-  const query = useQuery({
-    queryKey: ["track-sources", entryId, cursor],
-    enabled: open,
-    queryFn: () =>
-      api<{
-        locations: {
-          display_name: string;
-          source_role: string;
-          version_id: string;
-        }[];
-        lineage: {
-          source_entry_id: string;
-          source_version_id: string;
-          source_start: number | null;
-          source_end_exclusive: number | null;
-          evidence_kind: string;
-        }[];
-        next_cursor: number | null;
-      }>(`/api/tracks/${entryId}/sources?cursor=${cursor}`),
-  });
-  return (
-    <details onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary>输入来源与原件</summary>
-      <p>迁移基线或较早候选不等于已核实原件。</p>
-      {query.error && <Alert type="error" title={query.error.message} />}{" "}
-      {query.data?.locations.map((s, i) => (
-        <p key={i}>
-          {s.display_name} · {s.source_role}
-          <Button onClick={() => download(entryId, s.version_id)}>
-            下载来源
-          </Button>
-        </p>
-      ))}
-      {query.data?.lineage.map((s, i) => (
-        <p key={i}>
-          来源点范围 [{s.source_start ?? "?"}, {s.source_end_exclusive ?? "?"})
-          · {s.evidence_kind}
-          <Button
-            onClick={() => download(s.source_entry_id, s.source_version_id)}
-          >
-            下载输入版本
-          </Button>
-        </p>
-      ))}
-      <Space>
-        <Button
-          disabled={!cursor}
-          onClick={() => setCursor(Math.max(0, cursor - 100))}
-        >
-          上一页来源
-        </Button>
-        <Button
-          disabled={query.data?.next_cursor == null}
-          onClick={() => setCursor(query.data!.next_cursor!)}
-        >
-          下一页来源
-        </Button>
-      </Space>
-    </details>
+  return props.view === "history" ? (
+    <TrackHistory entryId={props.initialEntry} active={props.active ?? true} />
+  ) : (
+    <TrackEditor {...props} />
   );
 }

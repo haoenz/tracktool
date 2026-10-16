@@ -11,7 +11,10 @@
     "jsx": "react-jsx",
     "types": ["node"],
     "noEmit": true,
-    "lib": ["ES2024", "DOM"]
+    "lib": ["ES2024", "DOM"],
+    "paths": {
+      "@/*": ["./src/web/*"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["src/web", "src/drawing"]

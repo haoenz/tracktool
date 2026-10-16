@@ -2,6 +2,9 @@ import path from "node:path";
 import { lstat, readdir } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
+import { entryName, filenameDate } from "../domain/archive.js";
+import { activeEntries } from "./archive/database.js";
+import type { ImportItem } from "../shared/work.js";
 import { AppError, checkCancelled } from "../domain/errors.js";
 import { TAGS as T } from "../domain/tags.js";
 import { coordinate, gpsTags } from "../domain/media.js";
@@ -93,6 +96,16 @@ export class BusinessRunner implements WorkRunner {
     value.inputs = await Promise.all(
       [...new Set(value.inputs)].map((p) => this.files.resolve(p)),
     );
+    if (value.options.importFiles) {
+      if (value.operation !== "archive:push") throw new AppError("USER_INPUT", "逐文件设置仅适用于轨迹入库");
+      const seen = new Set<string>();
+      for (const item of value.options.importFiles) {
+        item.path = await this.files.resolve(item.path);
+        if (!value.inputs.includes(item.path) || seen.has(item.path))
+          throw new AppError("USER_INPUT", "逐文件设置必须对应本次上传的文件，且不能重复");
+        seen.add(item.path);
+      }
+    }
     if (archiveNeeded(value.operation)) {
       const archive =
         value.archive ||
@@ -170,7 +183,8 @@ export class BusinessRunner implements WorkRunner {
       value.options.delta === undefined
     )
       throw new AppError("USER_INPUT", "请输入海拔偏移量");
-    if (["archive:push", "kml:merge"].includes(value.operation)) {
+    if (value.operation === "archive:push") value.options.keep = true;
+    if (value.operation === "kml:merge" && value.options.keep === false) {
       const backupName = String(
         (await this.config.load()).kml_backup_dir_name || "Backup",
       );
@@ -425,16 +439,89 @@ export class BusinessRunner implements WorkRunner {
       });
       if (request.operation.startsWith("archive:")) {
         const kind = request.operation.slice(8);
-        if (kind === "push")
-          result = await kml.push(
-            ctx,
-            await kmlInputs(),
-            database,
-            backup,
-            !o.keep,
-            o.category,
+        if (kind === "push") {
+          const files = await kmlInputs();
+          const db = new Database(databasePath(database), {
+            readonly: true,
+            fileMustExist: true,
+          });
+          const existing = new Map(
+            (
+              db
+                .prepare(`SELECT path,sha256 FROM ${activeEntries(db)}`)
+                .all() as { path: string; sha256: string }[]
+            ).map((e) => [e.path, e.sha256]),
           );
-        else if (kind === "init" || kind === "import-zip") {
+          db.close();
+          const items: ImportItem[] = [];
+          for (const file of files) {
+            checkCancelled(signal);
+            try {
+              const { source, category } = await kml.importContent(ctx, file);
+              const adjustment = o.importFiles?.find((item) => item.path === file);
+              const chosen = adjustment?.category ?? o.category ?? category;
+              if (!chosen)
+                throw new AppError(
+                  "USER_INPUT",
+                  "无法识别活动标签，请选择入库分类",
+                );
+              const name = adjustment?.name ?? source.name;
+              if (!/\d{4}-\d{2}-\d{2}/.test(name)) throw new AppError("USER_INPUT", "名称需包含行程日期，例如 2026-10-01 徒步.kml");
+              filenameDate(name);
+              const member = entryName(name, chosen),
+                sha = existing.get(member);
+              const status = !sha
+                ? "new"
+                : sha === source.sha256
+                  ? "duplicate"
+                  : "conflict";
+              items.push({
+                path: file,
+                member,
+                category: chosen,
+                status,
+                reason:
+                  status === "new"
+                    ? "新增轨迹"
+                    : status === "duplicate"
+                      ? "与已有轨迹或本批次文件重复，将跳过"
+                      : "已有同名轨迹，但内容不同；请修改名称或移除此文件",
+              });
+              if (!sha) existing.set(member, source.sha256);
+            } catch (e) {
+              if (e instanceof AppError && e.code === "CANCELLED") throw e;
+              items.push({
+                path: file,
+                status: "invalid",
+                reason: e instanceof Error ? e.message : String(e),
+              });
+            }
+          }
+          output.data = { import_items: items };
+          if (mode === "apply" && items.some((i) => i.status === "invalid" || i.status === "conflict"))
+            throw new AppError("USER_INPUT", "入库校验失败，本批次未写入任何轨迹；请修正后重新上传");
+          // Show all conflicts in the preview; application rejects the entire batch above.
+          if (!items.some((i) => i.status === "conflict"))
+            result = await kml.push(
+              ctx,
+              files,
+              database,
+              backup,
+              false,
+              o.category,
+              o.importFiles,
+            );
+          if (mode === "apply") {
+            output.committed = true;
+            const imported = new Database(databasePath(database), { readonly: true, fileMustExist: true });
+            try {
+              for (const item of items) {
+                const entry = imported.prepare(`SELECT id FROM ${activeEntries(imported)} WHERE path=?`).get(item.member) as { id: string } | undefined;
+                item.entryId = entry?.id;
+              }
+            } finally { imported.close(); }
+          }
+        } else if (kind === "init" || kind === "import-zip") {
           if (mode === "plan") {
             try {
               await lstat(path.join(directory, "archive.sqlite3"));
@@ -507,7 +594,7 @@ export class BusinessRunner implements WorkRunner {
             request.output!,
             database,
             backup,
-            !!o.keep,
+            o.keep !== false,
             !!o.connected,
             [
               database,
@@ -526,7 +613,7 @@ export class BusinessRunner implements WorkRunner {
           result = await kml.batch(ctx, files, async (file) => {
             const stem = path.basename(file, path.extname(file));
             if (request.operation === "kml:type") {
-              const value = await kml.content(ctx, file);
+              const value = await kml.importContent(ctx, file);
               rows.push({
                 file,
                 category: value.category,

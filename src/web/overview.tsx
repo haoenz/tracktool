@@ -57,6 +57,11 @@ export function useOverview(
   search: string,
   kind: string,
   active = true,
+  dates: { from: string; to: string; sort: string } = {
+    from: "",
+    to: "",
+    sort: "date-desc",
+  },
 ) {
   const [version, setVersion] = useState<string>();
   const [id, setId] = useState("");
@@ -82,14 +87,17 @@ export function useOverview(
     }, 200);
     return () => clearTimeout(timer);
   }, [search]);
-  useEffect(() => setOffset(0), [kind, version]);
+  useEffect(
+    () => setOffset(0),
+    [kind, version, dates.from, dates.to, dates.sort],
+  );
   const listVersion = version ?? query.data?.version;
   const list = useQuery({
-    queryKey: ["overview-entries", listVersion, queryText, kind, offset],
+    queryKey: ["overview-entries", listVersion, queryText, kind, offset, dates],
     enabled: active && !!listVersion,
     queryFn: ({ signal }) =>
       api<OverviewEntries>(
-        `/api/overview/entries?${new URLSearchParams({ version: listVersion!, q: queryText, kind, offset: String(offset), limit: "50" })}`,
+        `/api/overview/entries?${new URLSearchParams({ version: listVersion!, q: queryText, kind, ...dates, offset: String(offset), limit: "50" })}`,
         undefined,
         signal,
       ),

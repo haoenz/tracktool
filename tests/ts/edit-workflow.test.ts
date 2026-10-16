@@ -1,5 +1,12 @@
+import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
 import { afterEach, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -18,6 +25,7 @@ import { EditPreviews } from "../../dist/node/infrastructure/archive/edit-previe
 import {
   trackDetail,
   trackHistory,
+  trackTimeline,
   operationDetail,
 } from "../../dist/node/infrastructure/archive/track-reader.js";
 import { downloadBytes } from "../../dist/node/infrastructure/archive/download.js";
@@ -195,6 +203,21 @@ it("ignores unrelated revisions but rejects stale presentation generations even 
   );
   f.previews.apply(f.file, apply(presentation));
   expect(trackHistory(f.file, f.id).versions).toHaveLength(1);
+  const timeline = trackTimeline(f.file, f.id);
+  expect(timeline.events).toHaveLength(2);
+  expect(timeline.events[0]).toMatchObject({
+    kind: "presentation",
+    title: "调整显示",
+    current: true,
+  });
+  expect(timeline.events[1]!.current).toBe(false);
+  expect(timeline.events[0]!.after.version_id).toBe(
+    timeline.events[1]!.after.version_id,
+  );
+  expect(timeline.events[0]!.after.presentation_id).not.toBe(
+    timeline.events[1]!.after.presentation_id,
+  );
+
   expect(() => f.previews.apply(f.file, apply(p))).toThrow(/changed/);
   const d = trackDetail(f.file, f.id),
     next = EditRequestSchema.parse({ ...f.split(), target: ref(d.entry) });
@@ -223,6 +246,14 @@ it("splits independent journeys atomically, restores their whole group and preve
     "active",
   ]);
   expect(new ArchiveWriter().status(f.file).entries).toBe(2);
+  for (const entry of result.entries) {
+    expect(trackTimeline(f.file, entry.entry_id).events[0]).toMatchObject({
+      id: result.operation_id,
+      kind: "split_journey",
+      current: true,
+    });
+  }
+
   await expect(
     f.previews.create(
       f.file,
@@ -779,6 +810,8 @@ it.each(["set_tag", "fill_altitude"] as const)(
       async () => transformed,
     );
     expect(snap(f.file)).toEqual(before);
+    if (kind === "fill_altitude")
+      expect(p.altitude).toEqual({ filled: 1, remaining: 5 });
     expect(p.outputs[0]!.settings).toEqual(f.detail.settings);
     expect(p.outputs[0]!.segments.map((s) => s.segment_id)).toEqual(
       f.detail.segments.map((s) => s.segment_id),
@@ -815,4 +848,87 @@ it("property transforms reject unexpected geometry changes without modifying the
     ),
   ).rejects.toThrow("分段或点数");
   expect(snap(f.file)).toEqual(before);
+});
+
+it("direct HTTP download pins displayed content and creates neither tasks nor temporary files", async () => {
+  const f = await fixture();
+  const oldSha = f.detail.entry.sha256;
+  const preview = await f.previews.create(f.file, randomUUID(), f.split());
+  f.previews.apply(f.file, apply(preview));
+  const currentSha = trackDetail(f.file, f.id).entry.sha256;
+  expect(currentSha).not.toBe(oldSha);
+  const app = await createApp({
+    configStore: { load: async () => ({ ...DEFAULTS, archive_path: f.dir }) },
+    token: "test",
+    work: { archive: f.dir, stateDir: path.join(f.dir, "web"), roots: [f.dir] },
+  });
+  cleanup.push(() => app.close());
+  const base = await app.listen({ host: "127.0.0.1", port: 0 });
+  const get = (url: string) =>
+    fetch(base + url, { headers: { "x-tracktool-token": "test" } });
+  const before = snap(f.file);
+  const uploads = path.join(f.dir, "web", "uploads");
+  const files = readdirSync(uploads, { recursive: true });
+  const tasks = await (await get("/api/work/tasks")).json();
+  const old = await get(`/api/tracks/${f.id}/download?sha256=${oldSha}`);
+  expect(old.status).toBe(200);
+  expect(Buffer.from(await old.arrayBuffer())).toEqual(raw);
+  expect(old.headers.get("content-type")).toContain(
+    "application/vnd.google-earth.kml+xml",
+  );
+  expect(old.headers.get("content-disposition")).toContain("attachment;");
+  const current = await get(
+    `/api/tracks/${f.id}/download?sha256=${currentSha}`,
+  );
+  expect(current.status).toBe(200);
+  expect(Buffer.from(await current.arrayBuffer())).toEqual(
+    Buffer.from(downloadBytes(f.file, { entry_id: f.id }).bytes),
+  );
+  expect(
+    (await get(`/api/tracks/${f.id}/download?sha256=${"f".repeat(64)}`)).status,
+  ).toBe(400);
+  expect((await get(`/api/tracks/${f.id}/download`)).status).toBe(400);
+  expect(readdirSync(uploads, { recursive: true })).toEqual(files);
+  expect(await (await get("/api/work/tasks")).json()).toEqual(tasks);
+  expect(snap(f.file)).toEqual(before);
+});
+
+it("split journeys store their selected activity tags atomically", async () => {
+  const f = await fixture(),
+    xml = new XmlWorkers(1, 0);
+  cleanup.push(() => xml.close());
+  const outputs = f.detail.segments.map((segment, i) => ({
+    path: `Default/result-${i}.kml`,
+    category: "Default" as const,
+    tag: i ? "驾车" : "徒步",
+    segment_ids: [segment.segment_id],
+  }));
+  const before = snap(f.file);
+  const preview = await f.previews.create(
+    f.file,
+    randomUUID(),
+    f.request({ kind: "split_journey", outputs }),
+    undefined,
+    async (bytes, op) => {
+      if (op.kind !== "set_tag") throw Error("unexpected operation");
+      const result = await xml.run(bytes, {
+        kind: "edit",
+        operation: { kind: "set-tag", tag: op.tag, create: true },
+      });
+      return Buffer.from(result.edit!.outputs[0]!.xml);
+    },
+  );
+  expect(snap(f.file)).toEqual(before);
+  const result = f.previews.apply(f.file, apply(preview));
+  for (const output of outputs) {
+    const entry = result.entries.find((e) => e.path === output.path)!;
+    expect(
+      (
+        await xml.run(
+          downloadBytes(f.file, { entry_id: entry.entry_id }).bytes,
+          { kind: "content" },
+        )
+      ).content!.tag,
+    ).toBe(output.tag);
+  }
 });

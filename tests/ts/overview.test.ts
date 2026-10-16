@@ -203,6 +203,13 @@ it("builds a complete decodable overview, reports bad entries, and never writes 
   });
   const manifest = await s.manifest(status.version!);
   expect(manifest.entries.find((e) => e.id === "broken")?.error).toBeTruthy();
+  expect(
+    manifest.entries.find((e) => e.id === "normal")?.distance_m,
+  ).toBeGreaterThan(0);
+  expect(manifest.entries.find((e) => e.id === "normal")?.date).toBe(
+    "2026-10-14",
+  );
+  expect(manifest.entries.find((e) => e.id === "single")?.distance_m).toBe(0);
   const tile = decoded(await s.tile(status.version!, 0, 0, 0));
   expect(
     tile.every(
@@ -537,6 +544,19 @@ it("authenticates overview routes and binds data to backend configuration", asyn
   ).json()) as { total: number; entries: unknown[] };
   expect(list.total).toBe(5);
   expect(list.entries).toHaveLength(2);
+  const dateFiltered = await fetch(
+    base +
+      `/api/overview/entries?version=${status.version}&from=2026-10-15&sort=name`,
+    { headers },
+  );
+  expect(dateFiltered.status).toBe(200);
+  expect(((await dateFiltered.json()) as { total: number }).total).toBe(0);
+  const dated = await fetch(
+    base +
+      `/api/overview/entries?version=${status.version}&from=2026-10-14&to=2026-10-14&sort=date-asc`,
+    { headers },
+  );
+  expect(((await dated.json()) as { total: number }).total).toBe(5);
   const filtered = (await (
     await fetch(
       base +
@@ -572,4 +592,23 @@ it("authenticates overview routes and binds data to backend configuration", asyn
       })
     ).status,
   ).toBe(400);
+});
+
+it("overview dates use measured time before filename metadata and never invent missing time", async () => {
+  const { source, cache } = await fixture();
+  const db = new Database(source);
+  db.prepare(
+    "UPDATE archive_entries SET filename_date=NULL WHERE id='normal'",
+  ).run();
+  insert(
+    db,
+    "timed",
+    '<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><Placemark><gx:Track><when>2020-04-05T10:00:00Z</when><when>2020-04-05T10:01:00Z</when><gx:coord>116 39 0</gx:coord><gx:coord>116.1 39 0</gx:coord></gx:Track></Placemark></Document></kml>',
+  );
+  db.close();
+  const s = service(source, cache);
+  const status = await ready(s);
+  const m = await s.manifest(status.version!);
+  expect(m.entries.find((e) => e.id === "normal")?.date).toBe("");
+  expect(m.entries.find((e) => e.id === "timed")?.date).toBe("2020-04-05");
 });

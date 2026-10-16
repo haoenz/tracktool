@@ -70,6 +70,8 @@ Python 调用方只需用自己的 `subprocess.run([...], check=True, capture_ou
 | `POST /api/work/tasks/:id/retry` | 普通任务建立新预览；版本编辑 apply 任务以原请求键重试，先回放已提交结果 |
 | `GET /api/work/tasks/:id/download?index=0` | 下载该任务登记的结果文件 |
 
+`archive:push` 支持 `options.importFiles: [{path, name?, category?}]`：每个 `path` 必须唯一且属于本次 `inputs`，名称必须为不含路径分隔符的 KML 文件名，分类为 `Default`、`Train` 或 `Flight`。逐文件设置优先于全局分类，校验和实际导入使用同一设置，不改动原文件内容。导入结果的 `import_items` 包含 `entryId`，可直接打开轨迹详情。同一个入库预览重复调用 `apply` 会返回原提交任务，便于网络中断后查询结果。
+
 HTTP 契约面向本地单用户应用，不是公网身份认证方案。上传暂存、预览、重试及取消方式见[网页使用说明](web-usage.md)。
 
 ## 版本化轨迹编辑
@@ -80,6 +82,8 @@ HTTP 契约面向本地单用户应用，不是公网身份认证方案。上传
 | --- | --- |
 | `GET /api/tracks?search=…&cursor=0` | 活动行程目录，每页 200 条 |
 | `GET /api/tracks/:entryId?cursor=0` | 当前引用、展示设置及段清单，每页 500 段 |
+| `GET /api/tracks/:entryId/tag?version_id=…` | 指定版本原始 KML 中的活动标签 |
+| `GET /api/tracks/:entryId/history?cursor=0` | 操作时间线，每页 50 条，包含操作名称、当时完整状态和当前状态标记 |
 | `GET /api/tracks/:entryId/versions?cursor=0` | 历史版本，每页 50 个，包含展示快照 |
 | `GET /api/tracks/:entryId/versions/:versionId?presentation_id=…` | 固定历史版本的段与展示 |
 | `GET /api/tracks/:entryId/versions/:versionId/raw` | 所属历史版本原字节下载 |
@@ -93,7 +97,7 @@ HTTP 契约面向本地单用户应用，不是公网身份认证方案。上传
 | `GET /api/tracks/edit-previews/:previewId/raw?index=0` | 指定输出完整 KML |
 | `POST /api/tracks/edit-previews/:previewId/apply` | 提交 EditApply，返回 202 `{task_id}`；结果与冲突通过任务状态读取 |
 
-EditRequest 为 `{schema:1,archive_id,target,sources:[],operation}`；target 含 entry_id/version_id/presentation_id/generation/sha256，额外来源固定历史引用省略 generation。operation 使用 kind 判别，支持 split_segment、prune、reverse、draw、compose、presentation、split_journey、restore_version；restore_group 使用 `{schema:1,archive_id,operation:{kind:"restore_group",operation_id,expected:[完整引用]}}`。未知字段拒绝。
+EditRequest 为 `{schema:1,archive_id,target,sources:[],operation}`；target 含 entry_id/version_id/presentation_id/generation/sha256，额外来源固定历史引用省略 generation。operation 使用 kind 判别，支持 split_segment、prune、draw、compose、presentation、split_journey、restore_version；restore_group 使用 `{schema:1,archive_id,operation:{kind:"restore_group",operation_id,expected:[完整引用]}}`。未知字段拒绝。
 
 EditApply 只含 `{schema:1,archive_id,preview_id,preview_sha256,request_key}`，路由 ID 必须一致，不接受客户端输出 KML。预览 24 小时有效；提交后的幂等结果不随预览过期。任务错误可带 SOURCE_CHANGED、PREVIEW_EXPIRED、PREVIEW_CHANGED、IDEMPOTENCY_CONFLICT、RESTORE_DEPENDENCY_CHANGED。同步预览读取的过期为 410、冲突为 409，异步应用失败则在任务 error 中报告。复用旧任务下载不表示允许执行已退役操作。
 

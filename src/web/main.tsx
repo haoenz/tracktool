@@ -8,8 +8,8 @@ import {
   useLocation,
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ConfigProvider, Spin } from "antd";
-import zhCN from "antd/locale/zh_CN";
+import { Spin } from "./components/controls.js";
+import { Toaster } from "./components/ui/sonner.js";
 import "./style.css";
 const MapPage = lazy(() => import("./map-page.js"));
 const client = new QueryClient({
@@ -23,7 +23,12 @@ function LegacyPanel({ panel }: { panel: string }) {
 }
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ConfigProvider locale={zhCN} button={{ autoInsertSpace: false }}>
+    <>
+      <Toaster
+        position="top-center"
+        visibleToasts={1}
+        containerAriaLabel="通知"
+      />
       <QueryClientProvider client={client}>
         <BrowserRouter>
           <Routes>
@@ -35,7 +40,7 @@ createRoot(document.getElementById("root")!).render(
                 </Suspense>
               }
             />
-            {["archive", "tracks", "tasks", "settings"].map((panel) => (
+            {["archive", "settings"].map((panel) => (
               <Route
                 key={panel}
                 path={"/" + panel}
@@ -46,6 +51,6 @@ createRoot(document.getElementById("root")!).render(
           </Routes>
         </BrowserRouter>
       </QueryClientProvider>
-    </ConfigProvider>
+    </>
   </StrictMode>,
 );

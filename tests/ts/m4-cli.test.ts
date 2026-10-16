@@ -98,7 +98,7 @@ it("CLI init/type/tag/push/status/rebuild/backup/download/delete retains stdout 
   expect(tag.status, tag.stderr).toBe(0);
   expect(tag.stderr).toContain("DEBUG");
   expect(readFileSync(file)).toEqual(raw);
-  const push = run(dir, "kml", "push", file);
+  const push = run(dir, "kml", "push", file, "--move");
   expect(push.status, push.stderr).toBe(0);
   expect(existsSync(file)).toBe(false);
   expect(
@@ -305,3 +305,45 @@ it("CLI full backup and restore preserve the library and refuse to overwrite des
   expect(run(dir, "archive", "full-backup", "--output", backup).status).toBe(1);
   expect(run(dir, "archive", "restore-backup", backup, archive).status).toBe(1);
 });
+
+
+it("default CLI import retains originals, rejects mixed invalid batches and needs no Backup", async () => {
+  const { dir, archive, file } = await setup();
+  const bad = path.join(dir, "2026-10-02 bad.kml");
+  writeFileSync(bad, "<kml>");
+  const rejected = run(dir, "kml", "push", file, bad);
+  expect(rejected.status).not.toBe(0);
+  const writer = new ArchiveWriter();
+  const database = path.join(archive, "archive.sqlite3");
+  expect(writer.status(database)).toMatchObject({ entries: 0, pending: 0 });
+  expect(existsSync(path.join(archive, "Backup"))).toBe(false);
+  const accepted = run(dir, "kml", "push", file);
+  expect(accepted.status, accepted.stderr).toBe(0);
+  expect(readFileSync(file)).toEqual(raw);
+  expect(existsSync(path.join(archive, "Backup"))).toBe(false);
+  expect(writer.status(database)).toMatchObject({ entries: 1, pending: 0 });
+  expect(run(dir, "kml", "push", file).status).toBe(0);
+  expect(writer.status(database)).toMatchObject({ entries: 1, pending: 0 });
+}, 30000);
+
+it.each(["push-entry-written", "push-before-commit"])("process death at %s rolls back direct import and reupload succeeds", async (point) => {
+  const { dir, archive, file } = await setup();
+  const database = path.join(archive, "archive.sqlite3");
+  const request = {
+    kind: "push", database, move: false, backup: path.join(archive, "Backup"),
+    entries: [0, 1].map((n) => ({ source: file, sha256: digest(raw), category: "Train", member: `Train/${n}.kml` })),
+  };
+  const crash = child(
+    `import {ArchiveWriter} from ${JSON.stringify(writerUrl)};await new ArchiveWriter(undefined,p=>{if(p===${JSON.stringify(point)})process.kill(process.pid,'SIGKILL');}).execute(${JSON.stringify(request)});`,
+  );
+  const result = await crash.done;
+  if (process.platform === "win32") expect(result.code).not.toBe(0);
+  else expect(result.signal, result.output).toBe("SIGKILL");
+  const writer = new ArchiveWriter();
+  expect(writer.status(database)).toMatchObject({ entries: 0, pending: 0, revision: 0 });
+  expect(existsSync(path.join(archive, "Backup"))).toBe(false);
+  expect(readFileSync(file)).toEqual(raw);
+  const retry = run(dir, "kml", "push", file);
+  expect(retry.status, retry.stderr).toBe(0);
+  expect(writer.status(database)).toMatchObject({ entries: 1, pending: 0 });
+}, 30000);

@@ -6,7 +6,7 @@ import {
   OverviewSummary,
   OverviewVersion,
 } from "../../shared/overview.js";
-export const FORMAT = 3;
+export const FORMAT = 4;
 export const LIMITS = {
   diskBytes: 512 * 1024 ** 2,
   buildBytes: 128 * 1024 ** 2,

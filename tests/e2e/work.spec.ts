@@ -1,24 +1,17 @@
+import { filterTracks } from "./map-tools.js";
 import { tool } from "./map-tools.js";
-import os from "node:os";
-import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
-async function choose(page: Page, name: string) {
-  await page.getByLabel("操作", { exact: true }).click();
-  await page.getByRole("option", { name, exact: true }).click();
-}
 async function upload(page: Page, name: string, buffer: Buffer) {
-  await page.getByText("从当前设备上传", { exact: true }).click();
+  const source = page.getByText("从当前设备上传", { exact: true });
+  if (await source.isVisible()) await source.click();
   await page
     .getByLabel("上传输入文件")
     .setInputFiles({ name, mimeType: "application/octet-stream", buffer });
-  await expect(page.getByLabel("已选输入（每行一个完整路径）")).toHaveValue(
-    new RegExp(name.replaceAll(".", "\\.")),
-  );
+  await expect(page.getByRole("article", { name, exact: true })).toBeVisible();
 }
 async function confirm(page: Page) {
-  await page.getByRole("button", { name: "确认执行此预览" }).click();
   await expect(
     page
       .locator(".task-detail")
@@ -46,26 +39,28 @@ test("archive upload, backup, read-only download and real deletion use separate 
   await expect(page.getByRole("button", { name: "管理轨迹库" })).toHaveCount(0);
   await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
   await expect(page.getByLabel("操作", { exact: true })).toHaveCount(0);
-  await page.locator("#option-category").click();
-  await page.getByRole("option", { name: "Default", exact: true }).click();
-  await page.getByText("保留入库的源文件", { exact: true }).click();
   await upload(
     page,
     "2026-10-01 网页归档.kml",
     await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml"),
   );
-  await page.getByRole("button", { name: "生成操作预览" }).click();
-  await page.getByRole("button", { name: "确认执行此预览" }).click();
-  await expect(page.getByText("已完成", { exact: true })).toBeVisible({
+  await expect(page.getByRole("button", { name: "导入 1 条轨迹", exact: true })).toBeEnabled();
+  await page.getByText("修改名称或分类", { exact: true }).click();
+  await page.getByLabel("2026-10-01 网页归档.kml 分类", { exact: true }).click();
+  await page.getByRole("option", { name: "普通轨迹", exact: true }).click();
+  await page.getByRole("button", { name: "重新校验", exact: true }).click();
+  await page.getByRole("button", { name: "导入 1 条轨迹", exact: true }).click();
+  await expect(page.getByText("已导入 1 条轨迹。", { exact: true })).toBeVisible({
     timeout: 20000,
   });
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "关闭", exact: true })
-    .click();
-  await tool(page, "轨迹导出");
-  await page.getByRole("button", { name: "导出 ZIP", exact: true }).click();
-  await page.getByRole("button", { name: "生成操作预览" }).click();
+  await page.getByRole("button", { name: "返回轨迹库", exact: true }).click();
+  await page.getByRole("button", { name: "导出轨迹", exact: true }).click();
+  await expect(page.getByRole("button", { name: "导出", exact: true })).toHaveCount(0);
+  await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
+  await page.getByRole("option", { name: "ZIP", exact: true }).click();
+  const automaticDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出", exact: true }).click();
+  expect((await automaticDownload).suggestedFilename()).toBe("Archive.zip");
   await confirm(page);
   const event = page.waitForEvent("download");
   await page
@@ -74,40 +69,37 @@ test("archive upload, backup, read-only download and real deletion use separate 
     .first()
     .click();
   expect((await event).suggestedFilename()).toBe("Archive.zip");
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "关闭", exact: true })
-    .click();
+  await page.getByRole("button", { name: "返回轨迹库", exact: true }).click();
   await tool(page, "轨迹库");
-  await page.getByLabel("筛选轨迹", { exact: true }).fill("网页归档");
+  await filterTracks(page, "网页归档");
   await page
     .getByRole("button", {
       name: "查看 Default/2026-10/2026-10-01 网页归档.kml",
       exact: true,
     })
     .click();
-  await page.getByRole("button", { name: "下载轨迹", exact: true }).click();
-  await expect(page.getByLabel("输出路径（可选）")).toHaveCount(0);
-  await page.getByRole("button", { name: "生成操作预览" }).click();
-  await confirm(page);
   const downloading = page.waitForEvent("download");
-  await page
-    .locator(".task-detail")
-    .getByRole("button", { name: "下载", exact: true })
-    .click();
+  const taskRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/api/work/")) taskRequests.push(request.url());
+  });
+  await page.getByRole("button", { name: "下载轨迹", exact: true }).click();
+  await expect(page.getByLabel("历史版本 ID（留空下载当前版本）")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "轨迹详情" }).locator(".task-detail")).toHaveCount(0);
   const downloaded = await downloading;
+  expect(taskRequests).toEqual([]);
   expect(downloaded.suggestedFilename()).toBe("2026-10-01 网页归档.kml");
   expect(await readFile((await downloaded.path())!)).toEqual(
     await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml"),
   );
   await page.getByRole("button", { name: "删除轨迹", exact: true }).click();
-  await page.getByRole("button", { name: "生成操作预览" }).click();
+
   await expect(
     page.getByText(/将删除 .*网页归档.kml 及 1 个版本/),
   ).toBeVisible();
-  await page.getByRole("button", { name: "确认执行此预览" }).click();
+  await page.getByRole("button", { name: "确认删除", exact: true }).click();
   await expect(page.getByText("已完成", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await page.getByRole("button", { name: "返回列表", exact: true }).click();
   await expect(
     page.getByRole("button", {
       name: "查看 Default/2026-10/2026-10-01 网页归档.kml",
@@ -115,112 +107,16 @@ test("archive upload, backup, read-only download and real deletion use separate 
     }),
   ).toHaveCount(0);
 });
-test("track editing reports malformed input as partial and allows a fresh retry", async ({
-  page,
-}) => {
-  await page.goto("/tracks");
-  await page.getByRole("tab", { name: "独立文件工具" }).click();
-  await choose(page, "检查分类");
-  await upload(page, "bad.kml", Buffer.from("<kml>"));
-  await page.getByRole("button", { name: "开始检查" }).click();
-  await expect(page.getByText("部分失败", { exact: true })).toBeVisible({
-    timeout: 15000,
-  });
-  await expect(
-    page.getByRole("button", { name: "确认执行此预览" }),
-  ).toHaveCount(0);
-  await page.getByRole("button", { name: "重新预览 / 重试" }).click();
-  await expect(page.getByText("部分失败", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "查看处理记录" }).click();
-  await expect(
-    page.getByRole("heading", { name: "处理记录", exact: true }),
-  ).toBeVisible();
-  await page.reload();
-  await expect(
-    page.getByRole("button", { name: "重新预览 / 重试" }),
-  ).toBeVisible();
-});
-
-test("edited KML can be inspected on a map and its upload batch remains manageable after refresh", async ({
-  page,
-}) => {
-  await page.goto("/tracks");
-  await page.getByRole("tab", { name: "独立文件工具" }).click();
-  await choose(page, "设置活动标签");
-  await page.getByLabel("活动标签", { exact: true }).click();
-  await page.getByRole("option", { name: "徒步", exact: true }).click();
-  await page.getByText("缺少活动标签时创建", { exact: true }).click();
-  await upload(
-    page,
-    "2026-10-01 地图检查.kml",
-    await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml"),
-  );
-  await page.getByRole("button", { name: "生成操作预览" }).click();
-  await confirm(page);
-  await page.getByRole("button", { name: "地图检查处理结果" }).click();
-  await expect(
-    page.getByRole("region", { name: "轨迹结果地图" }),
-  ).toBeVisible();
-  await expect(page.locator(".map-stage")).toHaveAttribute(
-    "data-status",
-    "ready",
-    { timeout: 20000 },
-  );
-  await page.screenshot({
-    path: path.join(os.tmpdir(), "tracktool-m6-tracks.png"),
-    fullPage: true,
-  });
-  await page.getByRole("button", { name: "返回原地图" }).click();
-  await page.reload();
-  await expect(page.getByText("暂存文件", { exact: true })).toBeVisible();
-  await expect(page.getByText(/2026-10-01 地图检查.kml ·/)).toBeVisible();
-});
-test("selected library tracks can be processed as copies and inspected without losing the original map", async ({
-  page,
-}) => {
-  await page.goto("/map");
-  await page
-    .getByRole("checkbox", { name: "Train/same.kml", exact: true })
-    .click();
-  await expect(
-    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
-  ).toBeChecked();
-  await page.getByRole("button", { name: "适合轨迹", exact: true }).click();
-  const camera = await page.evaluate(() => window.renderer!.state.camera);
-  await page
-    .getByRole("button", { name: "处理已选轨迹 · 1", exact: true })
-    .click();
-  await page.getByRole("tab", { name: "独立文件工具" }).click();
-  await page
-    .getByRole("button", { name: "使用地图已选轨迹", exact: true })
-    .click();
-  await expect(
-    page.getByText("正在处理轨迹副本", { exact: true }),
-  ).toBeVisible();
-  await choose(page, "设置活动标签");
-  await page.getByLabel("活动标签", { exact: true }).click();
-  await page.getByRole("option", { name: "徒步", exact: true }).click();
-  await page.getByText("缺少活动标签时创建", { exact: true }).click();
-  await page.getByRole("button", { name: "生成操作预览", exact: true }).click();
-  await confirm(page);
-  await page
-    .getByRole("button", { name: "地图检查处理结果", exact: true })
-    .click();
-  await expect(
-    page.getByRole("region", { name: "轨迹结果地图" }),
-  ).toBeVisible();
-  await expect(page.locator(".map-stage")).toHaveCount(1);
-  await page.getByRole("button", { name: "返回原地图", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "处理记录", exact: true }),
-  ).toBeVisible();
-  expect(await page.evaluate(() => window.renderer!.state.camera)).toEqual(
-    camera,
-  );
-  await tool(page, "轨迹库");
-  await expect(
-    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
-  ).toBeChecked();
+test("library offers no standalone editor or independent file tools", async ({ page }) => {
+  await page.goto("/map?panel=library");
+  await expect(page.getByRole("button", { name: "筛选", exact: true })).not.toBeVisible();
+  await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
+  await expect(page.getByRole("button", { name: "筛选", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "库内行程编辑", exact: true })).toHaveCount(0);
+  await expect(page.getByText("当前行程与刷新", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "独立文件工具" })).toHaveCount(0);
+  await expect(page.getByLabel("上传输入文件")).toHaveCount(0);
+  await expect(page.getByLabel("操作", { exact: true })).toHaveCount(0);
 });
 
 test("library entry points and favicon work on mobile", async ({
@@ -234,31 +130,165 @@ test("library entry points and favicon work on mobile", async ({
   expect(response.ok()).toBe(true);
   expect(await response.text()).toContain("<svg");
   await tool(page, "轨迹库");
-  await page.getByRole("button", { name: "归档状态", exact: true }).click();
-  await page.getByRole("button", { name: "开始检查", exact: true }).click();
-  await expect(page.getByText("已完成", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "恢复中断操作", exact: true }).click();
-  await expect(page.getByRole("dialog")).toContainText("不是恢复已删除的轨迹");
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "关闭", exact: true })
-    .click();
+  await expect(page.getByRole("button", { name: "归档状态", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "升级数据库", exact: true })).toHaveCount(0);
   await page
     .getByRole("button", { name: "查看 Train/same.kml", exact: true })
     .click();
   await page.getByRole("button", { name: "下载轨迹", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "生成操作预览" }),
+    page.getByRole("button", { name: "下载轨迹", exact: true }).last(),
   ).toBeVisible();
   expect(
     await page
-      .getByRole("dialog")
+      .getByRole("region", { name: "轨迹详情" })
       .evaluate((el) => el.scrollWidth <= el.clientWidth),
   ).toBe(true);
   await page.screenshot({ path: info.outputPath("track-detail-mobile.png") });
-  await page.getByRole("button", { name: "关闭详情", exact: true }).click();
-  await tool(page, "轨迹导出");
-  await page.getByRole("button", { name: "聚合导出", exact: true }).click();
-  await expect(page.getByRole("dialog")).toContainText("聚合导出");
+  await page.getByRole("button", { name: "返回列表", exact: true }).click();
+  await page.getByRole("button", { name: "返回轨迹库", exact: true }).click();
+  await page.getByRole("button", { name: "导出轨迹", exact: true }).click();
+  await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
+  await page.getByRole("option", { name: "聚合KML", exact: true }).click();
+  await expect(page.getByRole("region", { name: "轨迹导出类型" })).toContainText("聚合导出");
+  const kmlDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出", exact: true }).click();
+  expect((await kmlDownload).suggestedFilename()).toMatch(/\.kml$/i);
+  await expect(page.getByRole("button", { name: "导出", exact: true })).toBeEnabled();
+  await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
+  await page.getByRole("option", { name: "PNG图像", exact: true }).click();
+  await expect(page.getByRole("button", { name: "新建出图工程", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "导出", exact: true })).toHaveCount(0);
   await expect(page.getByLabel("操作", { exact: true })).toHaveCount(0);
+});
+
+for (const width of [1280, 390]) {
+  test(`upload keeps one list, blocks invalid files and skips duplicates at ${width}px`, async ({ page }) => {
+    test.setTimeout(60000);
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/map?panel=library");
+    await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
+    const name = `2026-10-01 上传交互-${width}-${Date.now()}.kml`;
+    const buffer = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
+    await page.getByLabel("上传输入文件").setInputFiles([
+      { name, mimeType: "application/octet-stream", buffer },
+      { name: "2026-10-02 损坏.kml", mimeType: "application/octet-stream", buffer: Buffer.from("<kml>") },
+    ]);
+    const list = page.getByRole("region", { name: "上传文件列表" });
+    await expect(list.getByRole("article")).toHaveCount(2);
+    await expect(list).toContainText("需要处理");
+    await expect(page.getByRole("button", { name: "导入 1 条轨迹", exact: true })).toBeDisabled();
+    await expect(page.locator(".task-detail")).toHaveCount(0);
+    await page.getByRole("button", { name: "移除 2026-10-02 损坏.kml", exact: true }).click();
+    await expect(page.getByRole("button", { name: "导入 1 条轨迹", exact: true })).toBeEnabled();
+    await expect(list.getByRole("article")).toHaveCount(1);
+    await page.getByRole("button", { name: "导入 1 条轨迹", exact: true }).click();
+    await expect(page.getByText("已导入 1 条轨迹。", { exact: true })).toBeVisible();
+    await expect(list.getByRole("button", { name: "查看轨迹", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "继续上传", exact: true }).click();
+    await upload(page, name, buffer);
+    await expect(page.getByText("已导入 0 条轨迹，跳过 1 条重复轨迹。", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^导入 \d+ 条轨迹$/ })).toHaveCount(0);
+    expect(await page.locator(".import-panel").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.getByRole("button", { name: "继续上传", exact: true }).click();
+    const changed = Buffer.from(buffer.toString().replace("</kml>", "<!-- changed --> </kml>"));
+    await upload(page, name, changed);
+    await expect(list).toContainText("名称冲突");
+    await page.getByText("修改名称或分类", { exact: true }).click();
+    await page.getByLabel(`${name} 导入名称`, { exact: true }).fill(name.replace(".kml", "-修正.kml"));
+    await page.getByRole("button", { name: "重新校验", exact: true }).click();
+    await page.getByRole("button", { name: "导入 1 条轨迹", exact: true }).click();
+    await expect(page.getByText("已导入 1 条轨迹。", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "查看轨迹", exact: true }).click();
+    await expect(page.getByRole("button", { name: "编辑轨迹", exact: true })).toBeVisible();
+  });
+}
+
+test("a failed upload never silently submits the successful subset", async ({ page }) => {
+  await page.goto("/map?panel=library");
+  await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
+  let previews = 0;
+  page.on("request", (request) => { if (request.url().endsWith("/api/work/preview")) previews++; });
+  await page.route("**/api/work/uploads?**", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("name")?.includes("失败")) await route.abort();
+    else await route.continue();
+  });
+  const buffer = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
+  await page.getByLabel("上传输入文件").setInputFiles([
+    { name: "2026-10-01 上传成功.kml", mimeType: "application/octet-stream", buffer },
+    { name: "2026-10-01 上传失败.kml", mimeType: "application/octet-stream", buffer },
+  ]);
+  await expect(page.getByText("有文件上传失败，本批次尚未导入。请重试或移除失败文件。", { exact: true })).toBeVisible();
+  expect(previews).toBe(0);
+  await expect(page.getByRole("region", { name: "上传文件列表" }).getByRole("article")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: /^导入 \d+ 条轨迹$/ })).toBeDisabled();
+  await page.unroute("**/api/work/uploads?**");
+  await page.getByRole("button", { name: "重新校验", exact: true }).click();
+  await expect(page.getByRole("button", { name: "导入 2 条轨迹", exact: true })).toBeEnabled();
+});
+
+for (const width of [1280, 390]) {
+  test(`panel back arrows stay beside titles and return through detail at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/map?panel=library");
+    await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
+    await page.getByRole("button", { name: "查看 Train/same.kml", exact: true }).click();
+    const header = page.getByRole("complementary", { name: "地图控制面板" }).locator(":scope > .panel-header");
+    const back = header.getByRole("button", { name: "返回列表", exact: true });
+    await expect(back).toBeVisible();
+    await expect(back).toHaveText("");
+    await expect(back.locator("svg")).toHaveCount(1);
+    const buttonBox = (await back.boundingBox())!;
+    const titleBox = (await header.getByRole("heading").boundingBox())!;
+    expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(titleBox.x);
+    expect(Math.abs(buttonBox.y + buttonBox.height / 2 - titleBox.y - titleBox.height / 2)).toBeLessThan(2);
+    await page.getByRole("button", { name: "编辑轨迹", exact: true }).click();
+    await header.getByRole("button", { name: "返回详情", exact: true }).click();
+    await expect(header.getByRole("button", { name: "返回列表", exact: true })).toBeVisible();
+    await header.getByRole("button", { name: "返回列表", exact: true }).click();
+    await expect(page.getByRole("button", { name: "筛选", exact: true })).toBeVisible();
+    await header.getByRole("button", { name: "返回轨迹库", exact: true }).click();
+    await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
+    await header.getByRole("button", { name: "返回轨迹库", exact: true }).click();
+    await expect(page.getByRole("button", { name: "轨迹列表", exact: true })).toBeVisible();
+  });
+}
+
+test("lost import response can recover the same committed result", async ({ page }) => {
+  await page.goto("/map?panel=library");
+  await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
+  await upload(page, `2026-10-01 断网响应-${Date.now()}.kml`, await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml"));
+  let committedTask = "";
+  let recoveredTask = "";
+  await page.route("**/api/work/tasks/*/apply", async (route) => {
+    const response = await route.fetch();
+    const task = await response.json() as { id: string };
+    if (!committedTask) { committedTask = task.id; await route.abort(); }
+    else { recoveredTask = task.id; await route.fulfill({ response }); }
+  });
+  await page.getByRole("button", { name: "导入 1 条轨迹", exact: true }).click();
+  await expect(page.getByRole("button", { name: "查询导入结果", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "查询导入结果", exact: true }).click();
+  await expect(page.getByText("已导入 1 条轨迹。", { exact: true })).toBeVisible();
+  expect(recoveredTask).toBe(committedTask);
+});
+
+test("upload works without secure-context randomUUID and explains name conflicts", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, "randomUUID", { value: undefined, configurable: true });
+  });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/map?panel=library");
+  await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
+  const name = `2026-10-01 HTTP上传-${Date.now()}.kml`;
+  const buffer = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
+  await upload(page, name, buffer);
+  await page.getByRole("button", { name: "导入 1 条轨迹", exact: true }).click();
+  await expect(page.getByText("已导入 1 条轨迹。", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "继续上传", exact: true }).click();
+  await upload(page, name, Buffer.from(buffer.toString().replace("</kml>", "<!-- changed --> </kml>")));
+  await expect(page.getByRole("region", { name: "上传文件列表" })).toContainText("名称冲突");
+  await expect(page.getByRole("button", { name: /^导入 \d+ 条轨迹$/ })).toBeDisabled();
+  expect(errors).toEqual([]);
 });

@@ -1,37 +1,24 @@
-import { tool } from "./map-tools.js";
+import { filterTracks, expectTrackFilter } from "./map-tools.js";
+import { tool, selectProjectTrack, saveProject } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 import { test, expect, type Page } from "@playwright/test";
 import type { Project } from "../../src/shared/project.js";
-
 const track = "Train/same.kml";
-
+const state = (page: Page) => page.evaluate(() => window.renderer!.state);
 async function browse(page: Page) {
-  await page.goto("/map");
+  await page.goto("/map?panel=library");
+  await tool(page, "轨迹库");
   await expect(
-    page.getByRole("checkbox", { name: track, exact: true }),
-  ).toBeVisible({ timeout: 30000 });
+    page.getByRole("button", { name: `查看 ${track}`, exact: true }),
+  ).toBeVisible();
   await page.waitForFunction(() => window.renderer?.map.loaded());
-}
-async function state(page: Page) {
-  return page.evaluate(() => window.renderer!.state);
 }
 async function title(page: Page, value: string) {
   await tool(page, "工程样式");
   await page.getByLabel("标题", { exact: true }).fill(value);
 }
-async function overviewVisible(page: Page) {
-  return page.evaluate(() =>
-    window
-      .renderer!.map.getStyle()
-      .layers.some(
-        (l) =>
-          l.id.startsWith("overview-") &&
-          l.type === "line" &&
-          window.renderer!.map.getPaintProperty(l.id, "line-opacity") !== 0,
-      ),
-  );
-}
-test("explicit project entry preserves browse camera, selection and filter; only real edits prompt", async ({
+
+test("project candidate browsing preserves composition, filters, visibility and list position; exit protects changes", async ({
   page,
 }, info) => {
   test.setTimeout(90000);
@@ -40,188 +27,168 @@ test("explicit project entry preserves browse camera, selection and filter; only
   await expect(
     page.getByRole("button", { name: "导出 PNG", exact: true }),
   ).not.toBeVisible();
-  await page.getByRole("checkbox", { name: track, exact: true }).click();
-  await expect(
-    page.getByRole("checkbox", { name: track, exact: true }),
-  ).toBeChecked();
   await page
-    .getByRole("button", { name: `查看 ${track}`, exact: true })
+    .getByRole("button", { name: "隐藏 索引未命中", exact: true })
     .click();
-  await page.getByLabel("筛选轨迹", { exact: true }).fill("Train");
+  await filterTracks(page, "Train");
   await page.evaluate(() =>
     window.renderer!.map.jumpTo({ center: [111, 32], zoom: 6.2 }),
   );
   const before = await state(page);
-  await expect(page.locator(".save-state")).toHaveText("浏览地图", {
-    timeout: 20000,
-  });
   await tool(page, "新建出图工程");
   await expect(page.locator(".map-stage")).toHaveClass(/export-preview/);
   expect((await state(page)).camera).toEqual(before.camera);
-  expect((await state(page)).tracks).toEqual(before.tracks);
-  await expect(page.locator(".save-state")).toHaveText("出图工程");
-  await tool(page, "返回浏览");
-  await expect(page.locator(".save-state")).toHaveText("浏览地图", {
-    timeout: 20000,
-  });
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await tool(page, "新建出图工程");
-  await title(page, "测试修改");
+  expect((await state(page)).tracks).toEqual([]);
   await expect(page.locator(".save-state")).toHaveText("未保存");
-  await page.getByLabel("标题", { exact: true }).fill("");
-  await expect(page.locator(".save-state")).toHaveText("出图工程");
-  await page.getByLabel("标题", { exact: true }).fill("保留的工程修改");
+  await selectProjectTrack(page, track);
+  await title(page, "保留的工程修改");
   await tool(page, "设置");
-  await page.getByLabel("底图", { exact: true }).click();
+  await page.getByRole("combobox", { name: "底图", exact: true }).click();
   await page
-    .locator(".ant-select-item-option-content")
-    .getByText("深色矢量", { exact: true })
-    .click();
-  await expect
-    .poll(async () => (await state(page)).style.basemap, { timeout: 20000 })
-    .toBe("dark");
+    .getByRole("combobox", { name: "搜索底图", exact: true })
+    .fill("深色矢量");
+  await page.getByText("深色矢量", { exact: true }).click();
+  await expect.poll(async () => (await state(page)).style.basemap).toBe("dark");
   await page.evaluate(() =>
     window.renderer!.map.jumpTo({ center: [120, 40], zoom: 9 }),
   );
-  await tool(page, "轨迹库");
-  await page.getByLabel("筛选轨迹", { exact: true }).fill("Train");
-  await page.getByLabel("筛选轨迹", { exact: true }).fill("same");
-  await page.getByRole("button", { name: "清空选择", exact: true }).click();
-  await expect(
-    page.getByRole("checkbox", { name: track, exact: true }),
-  ).not.toBeChecked();
+  const composition = await state(page);
   await tool(page, "出图");
-  await page.getByRole("switch", { name: "出图预览", exact: true }).click();
-  await expect.poll(() => overviewVisible(page)).toBe(false);
+  await page.getByRole("button", { name: "从轨迹库添加", exact: true }).click();
+  await filterTracks(page, "same");
+  await page
+    .getByRole("button", { name: `查看 ${track}`, exact: true })
+    .click();
+  await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
+  await page.evaluate(() =>
+    window.renderer!.map.jumpTo({ center: [101, 27], zoom: 7 }),
+  );
+  await page.getByRole("button", { name: "返回列表", exact: true }).click();
+  await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
+  await page.getByRole("button", { name: "回到工程", exact: true }).click();
+  await expect.poll(() => state(page)).toEqual(composition);
   await tool(page, "返回浏览");
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "取消", exact: true })
     .click();
-  await expect(page.locator(".save-state")).toHaveText("未保存");
   expect((await state(page)).title).toBe("保留的工程修改");
   await tool(page, "返回浏览");
   await page
     .getByRole("button", { name: "放弃修改并返回", exact: true })
     .click();
-  await expect(page.locator(".save-state")).toHaveText("浏览地图", {
-    timeout: 20000,
-  });
+  await expect(page.locator(".save-state")).toHaveText("浏览地图");
   expect((await state(page)).camera).toEqual(before.camera);
-  expect((await state(page)).tracks).toEqual(before.tracks);
   expect((await state(page)).style).toEqual(before.style);
-  await expect(page.getByLabel("筛选轨迹", { exact: true })).toHaveValue(
-    "Train",
-  );
+  expect((await state(page)).tracks).toEqual(before.tracks);
+  await expectTrackFilter(page, "Train");
   await expect(
-    page.getByRole("checkbox", { name: track, exact: true }),
-  ).toBeChecked();
-  await expect(
-    page.getByRole("button", { name: `查看 ${track}`, exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(() => overviewVisible(page)).toBe(true);
-  await expect(page.locator(".ant-modal-mask")).not.toBeVisible();
-  await page.screenshot({
-    path: info.outputPath("browse-restored.png"),
-    animations: "disabled",
-  });
+    page.getByRole("button", { name: "显示 索引未命中", exact: true }),
+  ).toHaveAttribute("aria-pressed", "false");
+  await page.screenshot({ path: info.outputPath("browse-restored.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await tool(page, "新建出图工程");
+  await page.getByRole("button", { name: "收起项目菜单", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "当前出图工程" }),
+  ).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await expect(
-    page.getByRole("button", { name: "返回浏览", exact: true }),
-  ).toBeEnabled();
-  await page.getByRole("button", { name: "收起项目菜单", exact: true }).click();
-  await expect(
-    page.getByRole("complementary", { name: "地图控制面板" }),
-  ).toHaveCount(0);
-  await page.screenshot({
-    path: info.outputPath("project-mobile.png"),
-    animations: "disabled",
-  });
+  await page.screenshot({ path: info.outputPath("project-mobile.png") });
 });
 
-test("failed save and cancelled overwrite retain edits; save and return restores browse; reopen is clean", async ({
+test("ordinary save, save-as, pending open and failed save never write the wrong target", async ({
   page,
 }) => {
   test.setTimeout(90000);
   await browse(page);
   const before = (await state(page)).camera;
+  const names = [`工程A-${Date.now()}`, `工程B-${Date.now()}`];
   await tool(page, "新建出图工程");
   await title(page, "保存后返回");
+  await saveProject(page, names[0]!);
+  await page
+    .getByRole("region", { name: "当前出图工程" })
+    .getByRole("button", { name: "另存为", exact: true })
+    .click();
+  const saveAs = page.getByRole("dialog", { name: "另存工程" });
+  await saveAs.getByLabel("另存为名称").fill(names[1]!);
+  await saveAs.getByRole("button", { name: "确定", exact: true }).click();
+  await expect(page.locator(".save-state")).toHaveText("已保存");
+  await tool(page, "项目");
+  await page.getByLabel("已保存项目", { exact: true }).click();
+  await page.getByRole("option", { name: names[0]!, exact: true }).click();
+  await title(page, "B 的新修改");
+  const saved: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/projects/save"))
+      saved.push((r.postDataJSON() as { name: string }).name);
+  });
+  let dialogs = 0;
+  page.on("dialog", async (d) => {
+    dialogs++;
+    await d.dismiss();
+  });
+  await page
+    .getByRole("region", { name: "当前出图工程" })
+    .getByRole("button", { name: "保存", exact: true })
+    .click();
+  await expect(page.locator(".save-state")).toHaveText("已保存");
+  expect(saved).toEqual([names[1]]);
+  expect(dialogs).toBe(0);
+  await page
+    .getByRole("region", { name: "当前出图工程" })
+    .getByRole("button", { name: "另存为", exact: true })
+    .click();
+  await saveAs.getByLabel("另存为名称").fill(names[0]!);
+  await saveAs.getByRole("button", { name: "确定", exact: true }).click();
+  expect(dialogs).toBe(1);
+  expect(saved).toEqual([names[1]]);
+  await saveAs.getByRole("button", { name: "取消", exact: true }).click();
+  await title(page, "失败后保留");
   await tool(page, "返回浏览");
-  const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("项目名称", { exact: true }).fill("P4保存往返");
-  await page.route("**/api/projects/save", (route) =>
-    route.fulfill({
+  const exit = page.getByRole("dialog");
+  await page.route("**/api/projects/save", (r) =>
+    r.fulfill({
       status: 500,
       json: {
         error: { code: "INTERNAL", message: "模拟保存失败", exitCode: 1 },
       },
     }),
   );
-  await dialog.getByRole("button", { name: "保存并返回", exact: true }).click();
-  await expect(dialog.getByRole("alert")).toContainText("模拟保存失败");
-  await expect(page.locator(".save-state")).toHaveText("未保存");
-  expect((await state(page)).title).toBe("保存后返回");
+  await exit.getByRole("button", { name: "保存并返回", exact: true }).click();
+  await expect(exit.getByRole("alert")).toContainText("模拟保存失败");
+  expect((await state(page)).title).toBe("失败后保留");
   await page.unroute("**/api/projects/save");
-  await dialog.getByRole("button", { name: "保存并返回", exact: true }).click();
-  await expect(page.locator(".save-state")).toHaveText("浏览地图", {
-    timeout: 20000,
-  });
+  await exit.getByRole("button", { name: "保存并返回", exact: true }).click();
+  await expect(page.locator(".save-state")).toHaveText("浏览地图");
   expect((await state(page)).camera).toEqual(before);
   await tool(page, "打开已有工程");
   await page.getByLabel("已保存项目", { exact: true }).click();
-  await page
-    .locator(".ant-select-item-option-content")
-    .getByText("P4保存往返", { exact: true })
-    .click();
+  await page.getByRole("option", { name: names[0]!, exact: true }).click();
   await page.getByRole("button", { name: "载入项目", exact: true }).click();
-  await expect(page.locator(".ant-message")).toContainText("项目已载入", {
-    timeout: 20000,
-  });
-  await expect(page.locator(".save-state")).toHaveText("出图工程");
+  await expect(page.locator(".save-state")).toHaveText("已保存");
   expect((await state(page)).title).toBe("保存后返回");
-  await title(page, "覆盖取消后仍保留");
-  await tool(page, "返回浏览");
-  page.once("dialog", (d) => d.dismiss());
-  await dialog.getByRole("button", { name: "保存并返回", exact: true }).click();
-  await expect(dialog).toBeVisible();
-  await expect(page.locator(".save-state")).toHaveText("未保存");
-  expect((await state(page)).title).toBe("覆盖取消后仍保留");
-  await dialog
-    .getByRole("button", { name: "放弃修改并返回", exact: true })
-    .click();
-  await expect(page.locator(".save-state")).toHaveText("浏览地图", {
-    timeout: 20000,
-  });
 });
 
-test("highlight initializes full precision project; old JSON binds current library and missing sources block export", async ({
+test("explicit project selection uses full precision; legacy JSON binds the fixed library and missing sources block export", async ({
   page,
 }) => {
   test.setTimeout(90000);
   await browse(page);
-  await page
-    .getByRole("button", { name: `查看 ${track}`, exact: true })
-    .click();
-  await expect(page.getByRole("region", { name: "轨迹详情" })).toContainText(
-    track,
-  );
   await tool(page, "新建出图工程");
-  await tool(page, "轨迹库");
-  await expect(
-    page.getByRole("checkbox", { name: track, exact: true }),
-  ).toBeChecked();
+  await selectProjectTrack(page, track);
   const project = await state(page);
   expect(project.tracks).toHaveLength(1);
   expect(project.tracks[0]!.entry).toBe(track);
-  const exact = await page.evaluate(() => window.renderer!.data);
-  expect(exact!.features.map((f) => f.geometry)).toEqual([
+  expect(
+    await page.evaluate(() =>
+      window.renderer!.data!.features.map((f) => f.geometry),
+    ),
+  ).toEqual([
     {
       type: "MultiLineString",
       coordinates: [
@@ -239,9 +206,9 @@ test("highlight initializes full precision project; old JSON binds current libra
     { type: "MultiPoint", coordinates: [[105, 31]] },
   ]);
   await tool(page, "返回浏览");
-  await expect(page.locator(".save-state")).toHaveText("浏览地图", {
-    timeout: 20000,
-  });
+  await page
+    .getByRole("button", { name: "放弃修改并返回", exact: true })
+    .click();
   await tool(page, "打开已有工程");
   await page.locator("input[type=file]").setInputFiles({
     name: "invalid.json",
@@ -249,9 +216,6 @@ test("highlight initializes full precision project; old JSON binds current libra
     buffer: Buffer.from("{"),
   });
   await expect(page.locator(".map-errors [role=alert]")).toBeVisible();
-  await expect(page.locator(".save-state")).toHaveText("浏览地图", {
-    timeout: 20000,
-  });
   const legacy: Record<string, unknown> = structuredClone(project);
   legacy.schema = 1;
   legacy.archive = "/foreign/archive.sqlite3";
@@ -265,19 +229,20 @@ test("highlight initializes full precision project; old JSON binds current libra
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(legacy)),
   });
-  await expect(page.locator(".ant-message")).toContainText("项目已载入", {
-    timeout: 20000,
-  });
+  await expect(page.locator("[data-sonner-toaster]")).toContainText(
+    "项目已载入",
+  );
   const upgraded = await state(page);
   expect(upgraded.schema).toBe(3);
   expect(upgraded.archive).toBe(project.archive);
   expect(upgraded.tracks).toEqual(project.tracks);
-  await expect(page.locator(".save-state")).toHaveText("出图工程");
+  await tool(page, "项目");
   const missing: Project = {
     ...upgraded,
     schema: 2,
     tracks: [{ entry: "Default/missing.kml", sha256: "0".repeat(64) }],
   };
+  page.once("dialog", (d) => d.accept());
   await page.locator("input[type=file]").setInputFiles({
     name: "missing.json",
     mimeType: "application/json",
@@ -290,9 +255,9 @@ test("highlight initializes full precision project; old JSON binds current libra
   await expect(
     page.getByRole("button", { name: "导出 PNG", exact: true }),
   ).toBeDisabled();
-  await tool(page, "项目");
-  await page.getByLabel("项目名称", { exact: true }).fill("缺失源不可保存");
   await expect(
-    page.getByRole("button", { name: "保存项目", exact: true }),
+    page
+      .getByRole("region", { name: "当前出图工程" })
+      .getByRole("button", { name: "保存", exact: true }),
   ).toBeDisabled();
 });

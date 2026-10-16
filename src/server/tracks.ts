@@ -24,11 +24,14 @@ import {
   trackCatalog,
   trackDetail,
   trackHistory,
+  trackTimeline,
   operationDetail,
   versionInput,
   inputGeometry,
   requireVersioned,
 } from "../infrastructure/archive/track-reader.js";
+import { downloadBytes } from "../infrastructure/archive/download.js";
+import { exportSelectedOriginals } from "../infrastructure/archive/selected-export.js";
 import { XmlWorkers } from "../infrastructure/xml/client.js";
 
 const id = z.string().min(1).max(200),
@@ -39,6 +42,19 @@ export function trackRoutes(
   app: FastifyInstance,
   get: () => Promise<{ queue: TaskQueue; edits: EditPreviews; file: string }>,
 ) {
+  app.post("/api/tracks/download", async (req, reply) => {
+    const { ids } = z
+      .object({ ids: z.array(id).min(1).max(200) })
+      .strict()
+      .parse(req.body);
+    return reply
+      .type("application/zip")
+      .header(
+        "Content-Disposition",
+        'attachment; filename="tracktool-originals.zip"',
+      )
+      .send(await exportSelectedOriginals((await get()).file, ids));
+  });
   app.get("/api/tracks", async (req) => {
     const q = page
       .extend({ search: z.string().max(200).default("") })
@@ -54,6 +70,33 @@ export function trackRoutes(
       undefined,
       undefined,
       q.cursor,
+    );
+  });
+  app.get("/api/tracks/:entryId/download", async (req, reply) => {
+    const { entryId } = z.object({ entryId: id }).parse(req.params);
+    const { sha256 } = z
+      .object({ sha256: z.string().regex(/^[a-f0-9]{64}$/) })
+      .strict()
+      .parse(req.query);
+    const result = downloadBytes((await get()).file, {
+      entry_id: entryId,
+      expected_sha256: sha256,
+    });
+    return reply
+      .type("application/vnd.google-earth.kml+xml")
+      .header("Cache-Control", "no-store")
+      .header(
+        "Content-Disposition",
+        `attachment; filename="track.kml"; filename*=UTF-8''${encodeURIComponent(result.name)}`,
+      )
+      .send(Buffer.from(result.bytes));
+  });
+  app.get("/api/tracks/:entryId/history", async (req) => {
+    const { entryId } = z.object({ entryId: id }).parse(req.params);
+    return trackTimeline(
+      (await get()).file,
+      entryId,
+      page.parse(req.query).cursor,
     );
   });
   app.get("/api/tracks/:entryId/versions", async (req) => {
@@ -127,10 +170,32 @@ export function trackRoutes(
       z.object({ operationId: id }).parse(req.params).operationId,
     ),
   );
+  app.get("/api/tracks/:entryId/tag", async (req) => {
+    const { entryId } = z.object({ entryId: id }).parse(req.params);
+    const { version_id } = z.object({ version_id: id }).parse(req.query);
+    const input = readTransaction((await get()).file, (db) => {
+      const entry = currentEntry(db, entryId);
+      const version = db
+        .prepare("SELECT sha256 FROM track_versions WHERE id=? AND entry_id=?")
+        .get(version_id, entry.entry_id) as { sha256: string } | undefined;
+      if (!version) throw new AppError("USER_INPUT", "轨迹版本不存在");
+      return rawObject(db, version.sha256);
+    });
+    const xml = new XmlWorkers(1, 0);
+    try {
+      return { tag: (await xml.run(input, { kind: "content" })).content!.tag };
+    } finally {
+      await xml.close();
+    }
+  });
   app.get("/api/tracks/:entryId/geometry", async (req) => {
     const p = z.object({ entryId: id }).parse(req.params),
       q = z
-        .object({ version_id: id.optional(), presentation_id: id.optional() })
+        .object({
+          version_id: id.optional(),
+          presentation_id: id.optional(),
+          raw: z.enum(["true", "false"]).default("false"),
+        })
         .parse(req.query);
     const input = readTransaction((await get()).file, (db) => {
       requireVersioned(db);
@@ -142,7 +207,7 @@ export function trackRoutes(
         q.presentation_id ?? e.presentation_id,
       );
     });
-    return inputGeometry(input);
+    return inputGeometry(input, undefined, q.raw === "true");
   });
   app.post("/api/tracks/detect", async (req) => {
     const q = z

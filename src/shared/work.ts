@@ -53,6 +53,11 @@ export const WorkRequestSchema = z
     options: z
       .object({
         category: z.enum(["Default", "Train", "Flight"]).optional(),
+        importFiles: z.array(z.object({
+          path: text.min(1),
+          category: z.enum(["Default", "Train", "Flight"]).optional(),
+          name: z.string().min(1).max(240).regex(/^[^/\\:\x00-\x1f]+\.kml$/i).optional(),
+        }).strict()).max(500).optional(),
         tag: text.optional(),
         create: z.boolean().optional(),
         keep: z.boolean().optional(),
@@ -106,12 +111,21 @@ export const WorkRequestSchema = z
   })
   .strict();
 export type WorkRequest = z.infer<typeof WorkRequestSchema>;
+export interface ImportItem {
+  path: string;
+  member?: string;
+  entryId?: string;
+  category?: string;
+  status: "new" | "duplicate" | "conflict" | "invalid";
+  reason: string;
+}
 export interface WorkOutput {
   paths: string[];
   data?: unknown;
   committed?: boolean;
 }
 export interface WorkTask extends Task {
+  uploadsCleaned?: boolean;
   request: Omit<WorkRequest, "operation"> & { operation: string };
   previewId?: string;
   expiresAt?: string;

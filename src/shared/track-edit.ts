@@ -100,7 +100,6 @@ export const SegmentEditSchema = z.discriminatedUnion("kind", [
       ranges: z.array(PointRangeSchema).min(1).max(10000),
     })
     .strict(),
-  z.object({ kind: z.literal("reverse"), segment_id: id }).strict(),
   z
     .object({
       kind: z.literal("draw"),
@@ -119,7 +118,6 @@ export const SegmentEditSchema = z.discriminatedUnion("kind", [
             .object({
               version_id: id,
               segment_id: id,
-              reverse: z.boolean().default(false),
             })
             .strict(),
         )
@@ -150,6 +148,7 @@ const targetOperation = z.discriminatedUnion("kind", [
               path: z.string().min(1).max(4096),
               category: z.enum(["Default", "Train", "Flight"]).nullable(),
               segment_ids: z.array(id).min(1).max(10000),
+              tag: z.string().min(1).max(200).optional(),
             })
             .strict(),
         )
@@ -238,6 +237,7 @@ export type VersionSummary = {
   presentations: { id: string; created_at: string }[];
 };
 export type EditPreview = {
+  altitude?: { filled: number; remaining: number };
   preview_id: string;
   preview_sha256: string;
   archive_id: string;
@@ -265,4 +265,13 @@ export type EditPreview = {
 export type EditGeometry = {
   segments: { segment_id: string; coordinates: [number, number][] }[];
   connections: [number, number][][];
+};
+
+export type HistoryEvent = {
+  id: string;
+  kind: string;
+  title: string;
+  created_at: string;
+  after: EntrySnapshot;
+  current: boolean;
 };

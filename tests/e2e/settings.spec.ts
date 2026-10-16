@@ -64,11 +64,9 @@ test("settings contain map controls only and server configuration writes require
   await expect(nav.getByRole("button")).toHaveText(["轨迹", "设置"]);
   await expect(page.locator(".workspace-tools")).toHaveCount(0);
   await tool(page, "轨迹库");
-  await expect(page.getByRole("tab")).toHaveText([
-    "轨迹库",
-    "轨迹处理",
-    "轨迹导出",
-  ]);
+  await expect(page.getByRole("tab")).toHaveCount(0);
+  for (const name of ["上传轨迹", "制作地图", "批量操作"])
+    await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

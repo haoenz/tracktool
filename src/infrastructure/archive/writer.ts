@@ -53,6 +53,7 @@ import {
   temporary,
 } from "../durable-files.js";
 import { readZip, writeZip } from "./zip.js";
+import { readManifest } from "../xml/manifest.js";
 import { XmlWorkers } from "../xml/client.js";
 import type { XmlPort } from "../../services/ports.js";
 import { rebuild } from "./collections.js";
@@ -61,6 +62,8 @@ export type FaultPoint =
   | Parameters<DeleteFault>[0]
   | Parameters<MigrationFault>[0]
   | Parameters<BackupFault>[0]
+  | "push-entry-written"
+  | "push-before-commit"
   | "intent-committed"
   | "target-durable"
   | "source-removed"
@@ -374,9 +377,10 @@ export class ArchiveWriter {
   async push(
     request: Extract<ArchiveRequest, { kind: "push" }>,
   ): Promise<ArchiveResult> {
-    await this.recover(request.database);
+    if (request.move) await this.recover(request.database);
     const warnings: string[] = [];
-    transaction(request.database, true, (db) => {
+    const db = connect(request.database, true);
+    try {
       for (const input of request.entries) {
         if (lstatSync(input.source).isSymbolicLink())
           throw new AppError(
@@ -386,6 +390,11 @@ export class ArchiveWriter {
         const bytes = readFileSync(input.source);
         if (digest(bytes) !== input.sha256)
           throw new AppError("USER_INPUT", `Source changed: ${input.source}`);
+        if (!request.move) {
+          const manifest = readManifest(bytes, (ordinal) => String(ordinal));
+          if (manifest.status !== "ready" || !manifest.segments.some((segment) => segment.point_count > 0))
+            throw new AppError("USER_INPUT", `Invalid track: ${input.source}: ${manifest.error ?? "no track points"}`);
+        }
         const entry = addEntry(db, input.member, bytes, input.category, {
           container: resolvePath(input.source),
           member: null,
@@ -393,6 +402,7 @@ export class ArchiveWriter {
           source_role: "imported_file",
           evidence: {},
         });
+        await this.fault("push-entry-written");
         if (!request.move) continue;
         const target = path.join(
           resolvePath(request.backup),
@@ -416,9 +426,16 @@ export class ArchiveWriter {
             : []),
         );
       }
-    });
-    await this.fault("intent-committed");
-    await this.recover(request.database);
+      await this.fault("push-before-commit");
+      db.exec("COMMIT");
+    } finally {
+      if (db.inTransaction) db.exec("ROLLBACK");
+      db.close();
+    }
+    if (request.move) {
+      await this.fault("intent-committed");
+      await this.recover(request.database);
+    }
     return {
       message:
         "Tracks archived; run archive rebuild / backup to refresh derived files",

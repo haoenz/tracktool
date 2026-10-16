@@ -66,7 +66,7 @@ export function selectEntry(
 }
 export function downloadBytes(
   file: string,
-  selector: EntrySelector & { version_id?: string },
+  selector: EntrySelector & { version_id?: string; expected_sha256?: string },
 ): { name: string; bytes: Uint8Array; sha256: string } {
   return readTransaction(file, (db) => {
     const entry = selectEntry(db, selector);
@@ -91,6 +91,15 @@ export function downloadBytes(
         );
       sha256 = row.sha256;
       name = row.path;
+    }
+    if (selector.expected_sha256 && sha256 !== selector.expected_sha256) {
+      const historical = schemaVersion(db) >= 3 && !selector.version_id
+        ? db.prepare("SELECT sha256,path FROM track_versions WHERE entry_id=? AND sha256=? ORDER BY version_no DESC LIMIT 1")
+            .get(entry.id, selector.expected_sha256) as { sha256: string; path: string } | undefined
+        : undefined;
+      if (!historical) throw new AppError("USER_INPUT", "当前展示的轨迹版本已不可用，请刷新详情后重试");
+      sha256 = historical.sha256;
+      name = historical.path;
     }
     return { name: path.basename(name), sha256, bytes: rawObject(db, sha256) };
   });

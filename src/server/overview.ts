@@ -86,6 +86,15 @@ export function overviewRoutes(
         version: OverviewVersion,
         offset: z.coerce.number().int().min(0).default(0),
         limit: z.coerce.number().int().min(1).max(500).default(100),
+        from: z
+          .string()
+          .regex(/^$|^\d{4}-\d{2}-\d{2}$/)
+          .default(""),
+        to: z
+          .string()
+          .regex(/^$|^\d{4}-\d{2}-\d{2}$/)
+          .default(""),
+        sort: z.enum(["date-desc", "date-asc", "name"]).default("date-desc"),
         q: z.string().max(200).default(""),
         kind: z.string().max(200).default("all"),
         ids: z
@@ -103,13 +112,28 @@ export function overviewRoutes(
     const text = query.q.toLocaleLowerCase(),
       rows = m.entries.filter(
         (e) =>
+          (!query.from || (!!e.date && e.date >= query.from)) &&
+          (!query.to || (!!e.date && e.date <= query.to)) &&
           (query.kind === "all" || e.kind === query.kind) &&
           (!query.ids || query.ids.split(",").includes(e.id)) &&
           (!text ||
-            `${e.name} ${e.entry} ${e.kind} ${e.date}`
+            `${e.name} ${e.entry} ${e.kind} ${e.date} ${e.tags ?? ""}`
               .toLocaleLowerCase()
               .includes(text)),
       );
+    rows.sort((a, b) =>
+      query.sort === "name"
+        ? a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
+        : !a.date
+          ? !b.date
+            ? a.id.localeCompare(b.id)
+            : 1
+          : !b.date
+            ? -1
+            : (query.sort === "date-desc"
+                ? b.date.localeCompare(a.date)
+                : a.date.localeCompare(b.date)) || a.id.localeCompare(b.id),
+    );
     return {
       version: m.version,
       total: rows.length,

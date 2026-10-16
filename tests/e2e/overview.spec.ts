@@ -1,16 +1,20 @@
+import { filterTracks } from "./map-tools.js";
 import { tool } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 import { test, expect, type Page } from "@playwright/test";
 
 async function loaded(page: Page) {
-  await page.goto("/map");
+  await page.goto("/map?panel=library");
+  await expect(page.getByRole("complementary", { name: "地图控制面板" })).toBeVisible();
+  if (await page.getByRole("button", { name: "轨迹列表", exact: true }).isVisible())
+    await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
   await page.waitForFunction(() => {
     const m = window.renderer?.map;
     return (
       m?.isStyleLoaded() &&
       m
         .getStyle()
-        .layers.some(
+        ?.layers.some(
           (l) =>
             l.id.startsWith("overview-") &&
             l.type === "line" &&
@@ -26,7 +30,7 @@ async function overviewSource(page: Page) {
       (
         window
           .renderer!.map.getStyle()
-          .layers.find(
+          ?.layers.find(
             (l) =>
               l.id.startsWith("overview-") &&
               l.type === "line" &&
@@ -57,8 +61,8 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
   expect(await page.evaluate(() => window.renderer!.state.tracks)).toEqual([]);
   await expect(page.locator(".save-state")).toHaveText("浏览地图");
   await expect(
-    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
-  ).toBeChecked();
+    page.getByRole("button", { name: "隐藏 索引未命中", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   const view = page.getByRole("button", {
     name: "查看 Default/2026-10-01 中文.kml",
     exact: true,
@@ -67,8 +71,8 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
   await expect(page.getByRole("region", { name: "轨迹详情" })).toContainText(
     "个点",
   );
-  await expect(page.getByRole("button", { name: "定位此轨迹" })).toBeEnabled();
-  await page.getByRole("button", { name: "定位此轨迹" }).click();
+  await expect(page.getByRole("button", { name: "定位轨迹" })).toBeEnabled();
+  await page.getByRole("button", { name: "定位轨迹" }).click();
   await expect(page.locator(".save-state")).toHaveText("浏览地图");
   expect(await page.evaluate(() => window.renderer!.state.tracks)).toEqual([]);
   const source = await overviewSource(page);
@@ -84,7 +88,8 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
     source,
   );
   expect(JSON.stringify(width)).toContain("trackId");
-  await page.getByLabel("筛选轨迹", { exact: true }).fill("no-such-track");
+  await page.getByRole("button", { name: "返回列表", exact: true }).click();
+  await filterTracks(page, "no-such-track");
   await expect(
     page.getByText("没有匹配的轨迹。", { exact: true }),
   ).toBeVisible();
@@ -138,10 +143,12 @@ test("new versions keep visible old tiles until the replacement is ready and ret
   await page.evaluate(() =>
     window.renderer!.map.jumpTo({ center: [120, 30], zoom: 13 }),
   );
-  await expect(page.getByText(/概览加载失败/)).toBeVisible();
+  await expect(page.locator(".overview-resource-error")).toBeVisible({
+    timeout: 15000,
+  });
   await page.unroute("**/api/overview/tiles/**");
   await page.getByRole("button", { name: "重试概览", exact: true }).click();
-  await expect(page.getByText(/概览加载失败/)).toHaveCount(0);
+  await expect(page.locator(".overview-resource-error")).toHaveCount(0);
   await page.waitForFunction(() => window.renderer!.map.areTilesLoaded());
 });
 test("style reload restores the overview; export preview excludes it; mobile panels keep the map", async ({
@@ -150,10 +157,7 @@ test("style reload restores the overview; export preview excludes it; mobile pan
   await loaded(page);
   await tool(page, "地图样式");
   await page.getByRole("combobox", { name: "底图", exact: true }).click();
-  await page
-    .locator(".ant-select-item-option-content")
-    .getByText("深色矢量", { exact: true })
-    .click();
+  await page.getByRole("option").getByText("深色矢量", { exact: true }).click();
   await expect.poll(() => overviewSource(page)).toBeTruthy();
   await expect
     .poll(() => page.evaluate(() => window.renderer!.state.style.basemap), {
@@ -163,7 +167,7 @@ test("style reload restores the overview; export preview excludes it; mobile pan
   await page.waitForFunction(() =>
     window
       .renderer!.map.getStyle()
-      .layers.some(
+      ?.layers.some(
         (l) =>
           l.id.startsWith("overview-") &&
           l.type === "line" &&
@@ -176,6 +180,9 @@ test("style reload restores the overview; export preview excludes it; mobile pan
   await tool(page, "新建出图工程");
   await expect.poll(() => overviewSource(page)).toBeUndefined();
   await tool(page, "返回浏览");
+  await page
+    .getByRole("button", { name: "放弃修改并返回", exact: true })
+    .click();
   await expect.poll(() => overviewSource(page)).toBeTruthy();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "收起项目菜单" }).click();
@@ -222,7 +229,10 @@ test("cold build, empty library and failures offer usable status and import/retr
               },
     }),
   );
-  await page.goto("/map");
+  await page.goto("/map?panel=library");
+  await expect(page.getByRole("complementary", { name: "地图控制面板" })).toBeVisible();
+  if (await page.getByRole("button", { name: "轨迹列表", exact: true }).isVisible())
+    await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("3/10");
   state = "error";
   await expect(
@@ -232,7 +242,7 @@ test("cold build, empty library and failures offer usable status and import/retr
   await expect(page.getByText(/轨迹库为空/)).toBeVisible();
   await page.getByRole("button", { name: "导入 KML", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "轨迹库管理", exact: true }),
+    page.getByText("1 · 选择或拖入 KML", { exact: true }),
   ).toBeVisible();
 });
 
@@ -255,28 +265,28 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
     };
   });
   await page.mouse.click(point.x, point.y);
-  await expect(page.getByRole("dialog")).toContainText("Train/same.kml");
-  await expect(page.getByRole("dialog")).toContainText(
-    "Default/2026-10-01 中文.kml",
-  );
+  await expect(
+    page.getByRole("region", { name: "重叠轨迹候选", exact: true }),
+  ).toContainText("索引未命中");
+  await expect(
+    page.getByRole("region", { name: "重叠轨迹候选", exact: true }),
+  ).toContainText("原始中文");
   await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Train/same.kml", exact: true })
+    .getByRole("region", { name: "重叠轨迹候选", exact: true })
+    .getByRole("button", { name: "索引未命中", exact: true })
     .click();
   await expect(page.getByRole("region", { name: "轨迹详情" })).toContainText(
     "Train/same.kml",
   );
-  await tool(page, "轨迹库");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".overview-row.selected")).toHaveCount(1);
+  await page.getByRole("button", { name: "返回列表", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "隐藏 索引未命中", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByRole("button", { name: "查看 Train/same.kml", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
-  await expect(
-    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
-  ).toBeChecked();
-  await page.getByRole("button", { name: "关闭详情", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "查看 Train/same.kml", exact: true }),
-  ).toHaveAttribute("aria-pressed", "false");
 });
 test("GCJ02 basemap uses its own overview version and a style reload restores selection", async ({
   page,
@@ -294,11 +304,11 @@ test("GCJ02 basemap uses its own overview version and a style reload restores se
     return `${b.group} · ${b.name}`;
   });
   const select = page.getByRole("combobox", { name: "底图", exact: true });
-  await select.fill(label);
+  await select.click();
   await page
-    .locator(".ant-select-item-option-content")
-    .getByText(label, { exact: true })
-    .click();
+    .getByRole("combobox", { name: "搜索底图", exact: true })
+    .fill(label);
+  await page.getByRole("option").getByText(label, { exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => window.renderer!.crs), { timeout: 15000 })
     .toBe("gcj02");
@@ -362,7 +372,7 @@ test("category colors and alpha match original KML while selection preserves cat
       source,
     ),
   ).toEqual(paint.color);
-  await page.getByRole("button", { name: "定位此轨迹", exact: true }).click();
+  await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
   await page.getByRole("button", { name: "收起项目菜单", exact: true }).click();
   await page.waitForFunction(() => window.renderer!.map.areTilesLoaded());
   await expect(page.locator(".map-status")).toHaveCount(0, { timeout: 10000 });
@@ -382,7 +392,10 @@ test("only pending work shows a translucent loading status and success notificat
     await route.continue();
   });
   try {
-    await page.goto("/map");
+    await page.goto("/map?panel=library");
+  await expect(page.getByRole("complementary", { name: "地图控制面板" })).toBeVisible();
+  if (await page.getByRole("button", { name: "轨迹列表", exact: true }).isVisible())
+    await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
     await expect(page.locator(".map-status")).toContainText(/正在/, {
       timeout: 15000,
     });
@@ -398,31 +411,33 @@ test("only pending work shows a translucent loading status and success notificat
   await expect(
     page.getByText("选择轨迹查看，拖动地图探索。", { exact: true }),
   ).toHaveCount(0);
-  await page.getByRole("button", { name: "清空选择", exact: true }).click();
+  await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
   await expect(
-    page.getByRole("checkbox", { name: "Train/same.kml", exact: true }),
+    page.getByRole("button", { name: /^(显示|隐藏) 索引未命中$/, exact: true }),
   ).toBeEnabled();
   await page
-    .getByRole("checkbox", { name: "Train/same.kml", exact: true })
+    .getByRole("button", { name: "显示 索引未命中", exact: true })
     .click();
-  await expect(page.locator(".ant-message")).toContainText("已选择 1 条轨迹");
-  await expect(page.locator(".ant-message-notice")).toHaveCount(0, {
+  await expect(page.locator("[data-sonner-toaster]")).toContainText(
+    "已更新地图显示",
+  );
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0, {
     timeout: 10000,
   });
   await expect(page.locator(".map-status")).toHaveCount(0);
 });
 
-test("browse checkboxes filter map lines and points, survive searches and style reload, and select all again", async ({
+test("browse eye buttons filter map lines and points, survive searches and style reload, and select all again", async ({
   page,
 }) => {
   await loaded(page);
   const source = await overviewSource(page);
-  await page.getByRole("button", { name: "清空选择", exact: true }).click();
-  const checkbox = page.getByRole("checkbox", {
-    name: "Train/same.kml",
+  await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
+  const checkbox = page.getByRole("button", {
+    name: /^(隐藏|显示) 索引未命中$/,
     exact: true,
   });
-  await expect(checkbox).not.toBeChecked();
+  await expect(checkbox).toHaveAttribute("aria-pressed", "false");
   await expect
     .poll(() =>
       page.evaluate((s) => window.renderer!.map.getFilter(s + "-line"), source),
@@ -433,8 +448,10 @@ test("browse checkboxes filter map lines and points, survive searches and style 
       ["in", ["get", "trackId"], ["literal", []]],
     ]);
   await expect(checkbox).toBeEnabled();
-  await checkbox.check();
-  await expect(page.locator(".ant-message")).toContainText("已选择 1 条轨迹");
+  await checkbox.click();
+  await expect(page.locator("[data-sonner-toaster]")).toContainText(
+    "已更新地图显示",
+  );
   const filters = await page.evaluate(
     (s) =>
       ["line", "point"].map((role) =>
@@ -444,7 +461,7 @@ test("browse checkboxes filter map lines and points, survive searches and style 
   );
   for (const filter of filters)
     expect(JSON.stringify(filter)).toMatch(/"literal",\["[^"]+"\]/);
-  await page.getByLabel("筛选轨迹", { exact: true }).fill("no-such-track");
+  await filterTracks(page, "no-such-track");
   await expect(
     page.getByText("没有匹配的轨迹。", { exact: true }),
   ).toBeVisible();
@@ -464,37 +481,37 @@ test("browse checkboxes filter map lines and points, survive searches and style 
         const m = window.renderer!.map;
         const l = m
           .getStyle()
-          .layers.find(
+          ?.layers.find(
             (l) => l.id.startsWith("overview-") && l.type === "line",
           );
         return l && m.getFilter(l.id);
       }),
     )
     .toEqual(filters[0]);
-  await page.getByLabel("筛选轨迹", { exact: true }).fill("");
-  await expect(checkbox).toBeChecked();
+  await filterTracks(page, "");
+  await expect(checkbox).toHaveAttribute("aria-pressed", "true");
   await expect(
-    page.getByRole("checkbox", {
-      name: "Default/2026-10-01 中文.kml",
+    page.getByRole("button", {
+      name: /^(显示|隐藏) 原始中文$/,
       exact: true,
     }),
-  ).not.toBeChecked();
-  await page.getByRole("button", { name: "全选轨迹", exact: true }).click();
+  ).toHaveAttribute("aria-pressed", "false");
+  await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
   await expect(
-    page.getByRole("checkbox", {
-      name: "Default/2026-10-01 中文.kml",
+    page.getByRole("button", {
+      name: /^(显示|隐藏) 原始中文$/,
       exact: true,
     }),
-  ).toBeChecked();
+  ).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => overviewSource(page)).toBeTruthy();
-  await checkbox.uncheck();
+  await checkbox.click();
   await expect
     .poll(() =>
       page.evaluate(() => {
         const m = window.renderer!.map;
         const l = m
           .getStyle()
-          .layers.find(
+          ?.layers.find(
             (l) => l.id.startsWith("overview-") && l.type === "line",
           );
         return l && JSON.stringify(m.getFilter(l.id));
