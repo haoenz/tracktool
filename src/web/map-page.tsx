@@ -59,7 +59,7 @@ import {
 import { api, request } from "./api.js";
 import { MapViewport, type Viewport } from "./map-viewport.js";
 import { ProjectPresentation } from "./project-presentation.js";
-import type { Presentation } from "../shared/track-edit.js";
+import type { HistoryEvent, Presentation } from "../shared/track-edit.js";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map.css";
 import projectIcon from "./project-icon.svg";
@@ -382,6 +382,25 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     projectDates,
   );
   const overview = inProject ? projectOverview : browseOverview;
+  const detailHistory = useQuery({
+    queryKey: ["track-history", overview.id, "timeline", 0],
+    queryFn: () =>
+      api<{ events: HistoryEvent[]; next_cursor: number | null }>(
+        `/api/tracks/${overview.id}/history?cursor=0`,
+      ),
+    enabled: !!overview.id && panel === "library" && detailOpen && !editing && !archiveAction,
+  });
+  const detailLinks = (["display", "history"] as const).filter((view) =>
+    view === "display"
+      ? overview.selected?.segments !== 1
+      : !!detailHistory.data && (
+          detailHistory.data.next_cursor !== null ||
+          detailHistory.data.events.length > 1 ||
+          detailHistory.data.events.some((event) =>
+            !["import", "push", "migration_baseline", "baseline"].includes(event.kind),
+          )
+        ),
+  );
   const filtersApplied = !!(kind.length > 0 || dates.from || dates.to || overview.candidates.length);
   const listVisible = panel === "library" && !(overview.id && detailOpen) && !archiveAction;
   const scrollKey = `${inProject}:${panel}:${panel === "library" && detailOpen && overview.id ? overview.id : "list"}:${panel === "library" ? (archiveAction ?? (libraryList ? "list" : "home")) : ""}:${exportPanel ? projectTab : ""}:${panel === "library" && editing}`;
@@ -2121,37 +2140,39 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                             </PopoverContent>
                           </Popover>
                         </div>
-                        <div className="track-detail-links">
-                          {(["display", "history"] as const).map((view) => (
-                            <Button
-                              key={view}
-                              variant="ghost"
-                              className="track-detail-link"
-                              aria-label={editorTitles[view]}
-                              onClick={() => {
-                                if (
-                                  view !== editorView &&
-                                  hasDraft &&
-                                  !window.confirm("切换编辑功能将放弃当前草稿，是否继续？")
-                                )
-                                  return;
-                                setEditorView(view);
-                                setEditing(true);
-                                setDetailAction(undefined);
-                              }}
-                            >
-                              {view === "display" ? (
-                                <SlidersHorizontal aria-hidden="true" />
-                              ) : (
-                                <History aria-hidden="true" />
-                              )}
-                              <span>
-                                <strong>{editorTitles[view]}</strong>
-                              </span>
-                              <ChevronRight aria-hidden="true" />
-                            </Button>
-                          ))}
-                        </div>
+                        {detailLinks.length > 0 && (
+                          <div className="track-detail-links">
+                            {detailLinks.map((view) => (
+                              <Button
+                                key={view}
+                                variant="ghost"
+                                className="track-detail-link"
+                                aria-label={editorTitles[view]}
+                                onClick={() => {
+                                  if (
+                                    view !== editorView &&
+                                    hasDraft &&
+                                    !window.confirm("切换编辑功能将放弃当前草稿，是否继续？")
+                                  )
+                                    return;
+                                  setEditorView(view);
+                                  setEditing(true);
+                                  setDetailAction(undefined);
+                                }}
+                              >
+                                {view === "display" ? (
+                                  <SlidersHorizontal aria-hidden="true" />
+                                ) : (
+                                  <History aria-hidden="true" />
+                                )}
+                                <span>
+                                  <strong>{editorTitles[view]}</strong>
+                                </span>
+                                <ChevronRight aria-hidden="true" />
+                              </Button>
+                            ))}
+                          </div>
+                        )}
                       </TrackInsights>
                     )}
                   </div>

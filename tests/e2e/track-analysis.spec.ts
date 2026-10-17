@@ -83,7 +83,7 @@ for (const width of [1280, 390])
       ).toBeVisible();
       await expect(
         panel.getByRole("button", { name: "历史记录", exact: true }),
-      ).toBeVisible();
+      ).toBeHidden();
       await expect(panel.locator(".track-detail-link small")).toHaveCount(0);
       await expect(panel.locator(".track-file-info")).toHaveCount(0);
       await expect(panel.getByRole("region", { name: "更多统计" })).toHaveCount(

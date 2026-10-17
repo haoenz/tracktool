@@ -72,10 +72,12 @@ test("single-track panel previews and saves tag, split and cleanup with history"
     .getByRole("button", { name: "查看 Train/same.kml", exact: true })
     .click();
   const dialog = page.getByRole("region", { name: "轨迹详情", exact: true });
-  for (const name of ["编辑轨迹", "分段管理", "历史记录"])
-    await expect(
-      dialog.getByRole("button", { name, exact: true }),
-    ).toBeEnabled();
+  await expect(
+    dialog.getByRole("button", { name: "编辑轨迹", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    dialog.getByRole("button", { name: "历史记录", exact: true }),
+  ).toBeHidden();
   await dialog.getByRole("button", { name: "编辑轨迹", exact: true }).click();
   const choose = async (name: string) => {
     const back = page.getByRole("button", {
