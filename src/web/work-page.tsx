@@ -1,3 +1,4 @@
+import { PanelLoading } from "./components/panel-loading.js";
 import { ImportPanel } from "./import-panel.js";
 import { Textarea } from "./components/controls.js";
 import { useEffect, useRef, useState } from "react";
@@ -81,7 +82,8 @@ export function TaskDetail({
   const task = query.data;
   useEffect(() => {
     if (
-      task && (task.mode === "apply" || task.uploadsCleaned) &&
+      task &&
+      (task.mode === "apply" || task.uploadsCleaned) &&
       !["queued", "running"].includes(task.status)
     ) {
       void cache.invalidateQueries({ queryKey: ["work-catalog"] });
@@ -162,7 +164,9 @@ export function TaskDetail({
       !automatic &&
       !task.uploadsCleaned &&
       !deletion?.dependencies.length &&
-      !importItems?.some((i) => i.status === "conflict" || i.status === "invalid") &&
+      !importItems?.some(
+        (i) => i.status === "conflict" || i.status === "invalid",
+      ) &&
       task.mode === "plan" &&
       task.status === "succeeded" &&
       !READ_OPERATIONS.includes(task.request.operation);
@@ -184,7 +188,9 @@ export function TaskDetail({
           {task.mode === "plan" &&
           task.status === "succeeded" &&
           !READ_OPERATIONS.includes(task.request.operation)
-            ? automatic ? "正在准备" : "校验完成"
+            ? automatic
+              ? "正在准备"
+              : "校验完成"
             : task.request.operation === "archive:push" &&
                 task.mode === "apply" &&
                 task.status === "succeeded"
@@ -259,7 +265,11 @@ export function TaskDetail({
       {task.status === "partial" && (
         <Alert
           type="warning"
-          title={task.request.operation === "archive:push" ? "入库校验失败，本批次未入库；请修正异常文件后重新预览。" : "部分文件失败；已完成结果保留。请检查逐文件原因，重新预览后重试。"}
+          title={
+            task.request.operation === "archive:push"
+              ? "入库校验失败，本批次未入库；请修正异常文件后重新预览。"
+              : "部分文件失败；已完成结果保留。请检查逐文件原因，重新预览后重试。"
+          }
         />
       )}
       {!executable && (
@@ -295,7 +305,12 @@ export function TaskDetail({
       )}
       {task.error && <Alert type="error" title={task.error.message} />}
       <ErrorBox error={error} />
-      {task.uploadsCleaned && <Alert type="info" title="上传暂存副本已自动清理；需要再次处理时请重新上传。" />}
+      {task.uploadsCleaned && (
+        <Alert
+          type="info"
+          title="上传暂存副本已自动清理；需要再次处理时请重新上传。"
+        />
+      )}
       <Space wrap className="work-actions">
         {canApply && (
           <Button
@@ -305,7 +320,9 @@ export function TaskDetail({
           >
             {task.request.operation === "archive:push"
               ? "确认入库"
-              : task.request.operation === "archive:delete" ? "确认删除" : "确认执行"}
+              : task.request.operation === "archive:delete"
+                ? "确认删除"
+                : "确认执行"}
           </Button>
         )}
         {active ? (
@@ -316,7 +333,10 @@ export function TaskDetail({
           >
             取消任务
           </Button>
-        ) : executable && !automatic && !task.uploadsCleaned && task.status !== "succeeded" ? (
+        ) : executable &&
+          !automatic &&
+          !task.uploadsCleaned &&
+          task.status !== "succeeded" ? (
           <Button loading={busy} onClick={() => void act("retry")}>
             {task.request.operation === "track:apply"
               ? "用原请求重试应用"
@@ -566,17 +586,19 @@ function FilePicker({
   }
   return (
     <Card title={importing ? "1 · 选择或拖入 KML" : "输入来源"}>
-      {!importing && <RadioGroup
-        value={source}
-        onValueChange={(e) => {
-          setSource(e);
-          onChange("");
-        }}
-        options={[
-          { label: "服务端目录", value: "server" },
-          { label: "从当前设备上传", value: "upload" },
-        ]}
-      />}
+      {!importing && (
+        <RadioGroup
+          value={source}
+          onValueChange={(e) => {
+            setSource(e);
+            onChange("");
+          }}
+          options={[
+            { label: "服务端目录", value: "server" },
+            { label: "从当前设备上传", value: "upload" },
+          ]}
+        />
+      )}
       {!importing && source === "server" ? (
         <>
           <p className="ui-typography text-muted-foreground ">
@@ -744,18 +766,20 @@ function FilePicker({
             ))}
         </ul>
       )}
-      {!importing && <details open>
-        <summary>高级：完整服务端路径</summary>
-        <label className="work-label" htmlFor="work-inputs">
-          已选输入（每行一个完整路径）
-        </label>
-        <Textarea
-          id="work-inputs"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          rows={3}
-        />
-      </details>}
+      {!importing && (
+        <details open>
+          <summary>高级：完整服务端路径</summary>
+          <label className="work-label" htmlFor="work-inputs">
+            已选输入（每行一个完整路径）
+          </label>
+          <Textarea
+            id="work-inputs"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            rows={3}
+          />
+        </details>
+      )}
     </Card>
   );
 }
@@ -879,7 +903,13 @@ export function ArchiveWorkPage({
   entries?: string[];
 }) {
   if (fixedOperation === "archive:push") return <ImportPanel />;
-  return <FileOperation fixedOperation={fixedOperation} entry={entry} entries={entries} />;
+  return (
+    <FileOperation
+      fixedOperation={fixedOperation}
+      entry={entry}
+      entries={entries}
+    />
+  );
 }
 function FileOperation({
   fixedOperation,
@@ -930,7 +960,13 @@ function FileOperation({
   const names = Object.entries(OPERATIONS).filter(
     ([key]) =>
       key.startsWith("archive:") &&
-      !["archive:init", "archive:import-zip", "archive:recover", "archive:status", "archive:migrate"].includes(key),
+      ![
+        "archive:init",
+        "archive:import-zip",
+        "archive:recover",
+        "archive:status",
+        "archive:migrate",
+      ].includes(key),
   );
   const choose = (next: Operation) => {
     setOperation(next);
@@ -962,9 +998,16 @@ function FileOperation({
       });
       const task = await api<WorkTask>("/api/work/preview", body);
       setTask(task.id);
-      if (["archive:backup", "archive:rebuild", "archive:download"].includes(operation)) {
+      if (
+        ["archive:backup", "archive:rebuild", "archive:download"].includes(
+          operation,
+        )
+      ) {
         await waitForWorkTask(task.id);
-        const applied = await api<WorkTask>(`/api/work/tasks/${task.id}/apply`, {});
+        const applied = await api<WorkTask>(
+          `/api/work/tasks/${task.id}/apply`,
+          {},
+        );
         setTask(applied.id);
         await downloadWorkFiles(await waitForWorkTask(applied.id));
       }
@@ -976,22 +1019,30 @@ function FileOperation({
   }
   const deletionStarted = useRef("");
   useEffect(() => {
-    if (operation !== "archive:delete" || !archivePath || !entry || deletionStarted.current === entry) return;
+    if (
+      operation !== "archive:delete" ||
+      !archivePath ||
+      !entry ||
+      deletionStarted.current === entry
+    )
+      return;
     deletionStarted.current = entry;
     void preview();
   }, [operation, archivePath, entry]);
   return (
     <>
       <div className="work-main">
-        {!fixedOperation && (
-          <h1 className="ui-typography ">轨迹库管理</h1>
-        )}
+        {!fixedOperation && <h1 className="ui-typography ">轨迹库管理</h1>}
         <p className="ui-typography text-muted-foreground ">
-          {operation === "archive:delete" ? "确认影响范围后删除轨迹及其历史版本。" : "选择导出选项，完成后自动下载；也可在结果中再次下载。"}
+          {operation === "archive:delete"
+            ? "确认影响范围后删除轨迹及其历史版本。"
+            : "选择导出选项，完成后自动下载；也可在结果中再次下载。"}
         </p>
         <ErrorBox error={bootstrap.error} />
         {!bootstrap.data ? (
-          <Spin />
+          bootstrap.isError ? null : (
+            <PanelLoading>正在读取轨迹库信息…</PanelLoading>
+          )
         ) : (
           <>
             <div className="work-grid">
@@ -1084,15 +1135,21 @@ function FileOperation({
                       )}
                   </div>
                   <ErrorBox error={error} />
-                  {operation === "archive:delete" && !!error && <Button loading={busy} onClick={() => void preview()}>重新检查删除范围</Button>}
-                  {operation !== "archive:delete" && <Button
-                    variant="default"
-                    className="work-actions"
-                    loading={busy}
-                    onClick={() => void preview()}
-                  >
-                    {operation === "archive:download" ? "下载轨迹" : "导出"}
-                  </Button>}
+                  {operation === "archive:delete" && !!error && (
+                    <Button loading={busy} onClick={() => void preview()}>
+                      重新检查删除范围
+                    </Button>
+                  )}
+                  {operation !== "archive:delete" && (
+                    <Button
+                      variant="default"
+                      className="work-actions"
+                      loading={busy}
+                      onClick={() => void preview()}
+                    >
+                      {operation === "archive:download" ? "下载轨迹" : "导出"}
+                    </Button>
+                  )}
                 </Card>
                 {["archive:push", "archive:import-zip"].includes(operation) && (
                   <FilePicker
@@ -1106,7 +1163,11 @@ function FileOperation({
               </section>
               <section>
                 {id ? (
-                  <TaskDetail id={id} onSelect={setTask} automatic={operation !== "archive:delete"} />
+                  <TaskDetail
+                    id={id}
+                    onSelect={setTask}
+                    automatic={operation !== "archive:delete"}
+                  />
                 ) : (
                   <Card title="操作结果">
                     <p className="ui-typography text-muted-foreground ">

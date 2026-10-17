@@ -932,6 +932,11 @@
 
 /* Keep the desktop list footer at the panel edge while rows scroll. */
 @media (min-width: 701px) {
+  .map-controls:has(> section:not([hidden]) .import-panel[data-empty="true"]) {
+    bottom: auto;
+    max-height: calc(100dvh - 146px);
+    padding-bottom: 0;
+  }
   .map-controls.track-detail-panel {
     padding-bottom: 20px;
   }
@@ -1003,7 +1008,8 @@
   color: #68756d;
   font-size: 13px;
 }
-.track-list-status {
+.track-list-status,
+.panel-loading {
   display: grid;
   place-items: center;
   height: 100%;

@@ -6,12 +6,7 @@ import {
 } from "react";
 import type { SelectedTrack } from "../shared/map.js";
 export type Panel =
-  | "library"
-  | "style"
-  | "export"
-  | "project"
-  | "archive"
-  | "settings";
+  "library" | "style" | "export" | "project" | "archive" | "settings";
 export interface EditMap {
   tracks: SelectedTrack[];
   pick?: (p: [number, number]) => void;
@@ -25,8 +20,9 @@ export interface Workspace {
   draft?: (key: string, dirty: boolean) => void;
   open: (panel: Panel, task?: string) => void;
   showTrack?: (id: string) => void;
+  showTracks?: (ids: string[]) => void;
   inspect: (id: string) => Promise<void>;
-  refresh: (archive: string) => Promise<void>;
+  refresh: (archive: string, options?: { quiet?: boolean }) => Promise<void>;
 }
 export const WorkspaceContext = createContext<Workspace | null>(null);
 export function useWorkspace() {

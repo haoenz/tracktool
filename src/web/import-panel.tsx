@@ -1,19 +1,49 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  Check,
+  CircleAlert,
+  Ellipsis,
+  FileUp,
+  LoaderCircle,
+  Upload,
+  X,
+} from "lucide-react";
+import { Popover as PopoverPrimitive } from "radix-ui";
 import { Alert, Button, Input, Select } from "./components/controls.js";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "./components/ui/popover.js";
 import { api } from "./api.js";
 import { useWorkspace } from "./workspace.js";
 import type { ImportItem, UploadResult, WorkTask } from "../shared/work.js";
 
 type Category = "Default" | "Train" | "Flight";
+type Stage =
+  | "queued"
+  | "uploading"
+  | "reading"
+  | "saving"
+  | "done"
+  | "duplicate"
+  | "error"
+  | "cancelled"
+  | "uncertain";
 type Row = {
   id: string;
   file: File;
   name: string;
   category?: Category;
+  stage: Stage;
+  progress: number;
   path?: string;
+  upload?: string;
+  planId?: string;
+  applyId?: string;
+  applying?: boolean;
   result?: ImportItem;
-  status: string;
   error?: string;
 };
 const categories = [
@@ -27,57 +57,65 @@ const labels: Record<string, string> = {
   Train: "火车",
   Flight: "飞机",
 };
+const stages: Record<Stage, string> = {
+  queued: "等待上传",
+  uploading: "正在上传",
+  reading: "正在读取轨迹",
+  saving: "正在保存",
+  done: "已导入",
+  duplicate: "重复轨迹已跳过",
+  error: "需要处理",
+  cancelled: "已取消",
+  uncertain: "待确认结果",
+};
+const completed = (row: Row) =>
+  row.stage === "done" || row.stage === "duplicate";
+const working = (row: Row) =>
+  ["uploading", "reading", "saving"].includes(row.stage);
+const active = (task: WorkTask) => ["queued", "running"].includes(task.status);
+const message = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+const size = (bytes: number) =>
+  bytes < 1024 * 1024
+    ? `${Math.max(1, Math.ceil(bytes / 1024))} KB`
+    : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 // getRandomValues also works on LAN HTTP pages, where randomUUID is unavailable.
 function uploadId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const hex = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
-const active = (task: WorkTask) => ["queued", "running"].includes(task.status);
-const message = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
-const pause = () => new Promise((resolve) => setTimeout(resolve, 300));
 
 export function ImportPanel() {
   const workspace = useWorkspace();
-  const queryClient = useQueryClient();
+  const cache = useQueryClient();
   const [rows, setRows] = useState<Row[]>([]);
-  const [phase, setPhase] = useState<
-    "idle" | "checking" | "applying" | "done" | "uncertain"
-  >("idle");
+  const current = useRef<Row[]>([]);
+  const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
-  const [preview, setPreview] = useState<WorkTask>();
-  const [dirty, setDirty] = useState(false);
-  const [cancelled, setCancelled] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
   const busy = useRef(false);
   const stop = useRef(false);
   const mounted = useRef(true);
+  const dragDepth = useRef(0);
+  const input = useRef<HTMLInputElement>(null);
   const xhr = useRef<XMLHttpRequest | undefined>(undefined);
-  const uploads = useRef(new Set<string>());
-  const pendingPreview = useRef<string | undefined>(undefined);
-  const pendingApply = useRef<string | undefined>(undefined);
-  const busyUI =
-    phase === "checking" || phase === "applying" || phase === "uncertain";
-  const fresh = rows.filter((row) => row.result?.status === "new").length;
-  const duplicates = rows.filter(
-    (row) => row.result?.status === "duplicate",
-  ).length;
-  const problems = rows.filter(
-    (row) =>
-      row.error || ["invalid", "conflict"].includes(row.result?.status ?? ""),
-  ).length;
-
-  async function cleanup() {
-    for (const id of [...uploads.current]) {
-      try {
-        await api(`/api/work/uploads/${id}/cleanup`, {});
-        uploads.current.delete(id);
-      } catch {
-        /* Active operations retain their files; terminal tasks also clean server-side. */
-      }
+  function publish() {
+    if (mounted.current) setRows(current.current.map((row) => ({ ...row })));
+  }
+  async function cleanup(row: Row) {
+    if (!row.upload) return;
+    try {
+      await api(`/api/work/uploads/${row.upload}/cleanup`, {});
+      row.upload = undefined;
+      row.path = undefined;
+    } catch {
+      /* Active tasks and server expiration own any remaining temporary files. */
     }
   }
   useEffect(() => {
@@ -86,45 +124,53 @@ export function ImportPanel() {
       mounted.current = false;
       stop.current = true;
       xhr.current?.abort();
-      if (!busy.current) void cleanup();
+      if (!busy.current)
+        for (const row of current.current) {
+          if (!row.applying && !row.applyId) void cleanup(row);
+        }
     };
   }, []);
+  const unresolved = rows.some((row) => !completed(row));
   useEffect(() => {
-    if (!rows.length || phase === "done") return;
+    if (!unresolved) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [rows.length, phase]);
+  }, [unresolved]);
 
   async function settle(task: WorkTask, cancellable: boolean) {
-    let current = task;
-    while (active(current)) {
-      if (cancellable && stop.current && !current.cancelRequested) {
+    let next = task;
+    while (active(next)) {
+      if (cancellable && stop.current && !next.cancelRequested) {
         try {
-          await api(`/api/work/tasks/${current.id}/cancel`, {
-            revision: current.revision,
+          await api(`/api/work/tasks/${next.id}/cancel`, {
+            revision: next.revision,
           });
         } catch {
-          /* A concurrent progress update may change the revision; retry with the next read. */
+          /* Retry cancellation with the latest revision. */
         }
       }
-      await pause();
-      current = await api<WorkTask>(`/api/work/tasks/${current.id}`);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      next = await api<WorkTask>(`/api/work/tasks/${next.id}`);
     }
-    return current;
+    return next;
   }
-  function send(row: Row, update: (status: string) => void) {
-    const id = uploadId();
-    uploads.current.add(id);
+  async function send(row: Row) {
+    await cleanup(row);
+    if (stop.current) throw new Error("已取消");
+    row.upload = uploadId();
+    row.stage = "uploading";
+    row.progress = 0;
+    publish();
     return new Promise<UploadResult>((resolve, reject) => {
       const request = new XMLHttpRequest();
       xhr.current = request;
       request.open(
         "POST",
-        `/api/work/uploads?name=${encodeURIComponent(row.file.name)}&id=${id}`,
+        `/api/work/uploads?name=${encodeURIComponent(row.file.name)}&id=${row.upload}`,
       );
       request.setRequestHeader(
         "X-Tracktool-Token",
@@ -133,18 +179,20 @@ export function ImportPanel() {
       );
       request.setRequestHeader("Content-Type", "application/octet-stream");
       request.upload.onprogress = (event) => {
-        if (event.lengthComputable)
-          update(`上传中 ${Math.round((event.loaded / event.total) * 100)}%`);
+        if (event.lengthComputable) {
+          row.progress = Math.round((event.loaded / event.total) * 100);
+          publish();
+        }
       };
-      request.onerror = () => reject(new Error("上传连接中断，请重试"));
+      request.onerror = () => reject(new Error("上传连接中断，请重试。"));
       request.onabort = () => reject(new Error("已取消"));
       request.onload = () => {
         try {
-          const data = JSON.parse(request.responseText) as UploadResult & {
+          const result = JSON.parse(request.responseText) as UploadResult & {
             error?: { message: string };
           };
-          if (request.status >= 200 && request.status < 300) resolve(data);
-          else reject(new Error(data.error?.message ?? "上传失败，请重试"));
+          if (request.status >= 200 && request.status < 300) resolve(result);
+          else reject(new Error(result.error?.message ?? "上传失败，请重试。"));
         } catch (error) {
           reject(error);
         }
@@ -152,431 +200,473 @@ export function ImportPanel() {
       request.send(row.file);
     });
   }
-  async function check(next: Row[]) {
+  async function process(row: Row) {
+    row.error = undefined;
+    // A lost apply response must resume the same idempotent operation.
+    if (!row.applying && !row.applyId) {
+      if (!/\.kml$/i.test(row.file.name)) throw new Error("请选择 KML 文件。");
+      if (!/^[^/\\:\x00-\x1f]+\.kml$/i.test(row.name) || row.name.length > 240)
+        throw new Error(
+          "名称应以 .kml 结尾，不能包含路径分隔符，且不超过 240 个字符。",
+        );
+      if (row.file.size > 8 * 1024 ** 3)
+        throw new Error("文件超过 8 GiB，请拆分后上传。");
+      if (!row.path) row.path = (await send(row)).files[0];
+      if (stop.current) return;
+      row.stage = "reading";
+      publish();
+      const queued = row.planId
+        ? await api<WorkTask>(`/api/work/tasks/${row.planId}`)
+        : await api<WorkTask>("/api/work/preview", {
+            operation: "archive:push",
+            archive: workspace.archive,
+            inputs: [row.path],
+            options: {
+              importFiles: [
+                { path: row.path, name: row.name, category: row.category },
+              ],
+            },
+          });
+      row.planId = queued.id;
+      const plan = await settle(queued, true);
+      if (stop.current) return;
+      const result = (
+        plan.output?.data as { import_items?: ImportItem[] } | undefined
+      )?.import_items?.[0];
+      row.result = result;
+      if (
+        plan.status !== "succeeded" ||
+        !result ||
+        ["invalid", "conflict"].includes(result.status) ||
+        plan.uploadsCleaned
+      ) {
+        const reason = (
+          result?.reason ??
+          plan.error?.message ??
+          "未能读取轨迹，请重试。"
+        )
+          .split(row.path ?? "\u0000")
+          .join(row.file.name);
+        row.planId = undefined;
+        await cleanup(row);
+        throw new Error(reason);
+      }
+      if (result.status === "duplicate") {
+        row.stage = "duplicate";
+        row.planId = undefined;
+        await cleanup(row);
+        return;
+      }
+    }
+    row.stage = "saving";
+    publish();
+    row.applying = true;
+    let applied: WorkTask;
+    try {
+      applied = row.applyId
+        ? await api<WorkTask>(`/api/work/tasks/${row.applyId}`)
+        : await api<WorkTask>(`/api/work/tasks/${row.planId}/apply`, {});
+    } catch (error) {
+      // HTTP rejection is definitive; network and decoding failures may follow a commit.
+      if (
+        !row.applyId &&
+        !(error instanceof TypeError || error instanceof SyntaxError)
+      ) {
+        row.applying = false;
+        row.planId = undefined;
+        await cleanup(row);
+      }
+      throw error;
+    }
+    row.applyId = applied.id;
+    const done = await settle(applied, false);
+    row.applying = false;
+    row.applyId = undefined;
+    row.planId = undefined;
+    const result = (
+      done.output?.data as { import_items?: ImportItem[] } | undefined
+    )?.import_items?.[0];
+    row.result = result ?? row.result;
+    await cleanup(row);
+    if (done.status !== "succeeded")
+      throw new Error(done.error?.message ?? "保存失败，请重试。");
+    row.stage = result?.status === "duplicate" ? "duplicate" : "done";
+  }
+  async function run(ids: string[]) {
     if (busy.current) return;
     busy.current = true;
     stop.current = false;
-    setCancelled(false);
-    setPhase("checking");
+    setRunning(true);
+    setStopping(false);
     setError("");
-    setPreview(undefined);
-    setDirty(false);
-    let current = next.map(
-      (row) =>
-        ({
-          ...row,
-          path: undefined,
-          result: undefined,
-          error: undefined,
-          status: "等待上传",
-        }) as Row,
+    const batch = current.current.filter(
+      (row) => ids.includes(row.id) && !completed(row),
     );
-    const publish = () => {
-      if (mounted.current) setRows([...current]);
-    };
+    batch.forEach((row) => {
+      row.stage = "queued";
+      row.error = undefined;
+    });
     publish();
-    let keep = false;
-    let skipped = false;
     try {
-      await cleanup();
-      for (let index = 0; index < current.length; index++) {
+      for (const row of batch) {
         if (stop.current) break;
-        const row = current[index]!;
         try {
-          if (!/\.kml$/i.test(row.file.name))
-            throw new Error("请选择 KML 文件");
-          if (
-            !/^[^/\\:\x00-\x1f]+\.kml$/i.test(row.name) ||
-            row.name.length > 240
-          )
-            throw new Error(
-              "导入名称应以 .kml 结尾，不能包含路径分隔符，且不超过 240 个字符",
-            );
-          if (row.file.size > 8 * 1024 ** 3)
-            throw new Error("文件超过 8 GiB，请拆分后上传");
-          const result = await send(row, (status) => {
-            row.status = status;
-            publish();
-          });
-          row.path = result.files[0];
-          row.status = "待校验";
+          await process(row);
         } catch (error) {
-          row.error = message(error);
-          row.status = "上传失败";
+          row.stage =
+            row.applying || row.applyId
+              ? "uncertain"
+              : stop.current
+                ? "cancelled"
+                : "error";
+          row.error =
+            row.stage === "uncertain"
+              ? "暂时无法确认导入结果，请查询结果后继续。"
+              : row.stage === "cancelled"
+                ? undefined
+                : message(error)
+                    .split(row.path ?? "\u0000")
+                    .join(row.file.name);
+        }
+        if (stop.current && !completed(row) && row.stage !== "uncertain") {
+          row.stage = "cancelled";
+          row.planId = undefined;
+          await cleanup(row);
         }
         publish();
-      }
-      if (stop.current) return;
-      // Never submit a partial selection when even one upload failed.
-      if (current.some((row) => row.error)) {
-        setError("有文件上传失败，本批次尚未导入。请重试或移除失败文件。");
-        setDirty(true);
-        return;
-      }
-      if (!current.length) return;
-      current.forEach((row) => {
-        row.status = "校验中";
-      });
-      publish();
-      const queued = await api<WorkTask>("/api/work/preview", {
-        operation: "archive:push",
-        archive: workspace.archive,
-        inputs: current.map((row) => row.path!),
-        options: {
-          importFiles: current.map((row) => ({
-            path: row.path!,
-            name: row.name,
-            category: row.category,
-          })),
-        },
-      });
-      const task = await settle(queued, true);
-      if (stop.current) return;
-      const items = (
-        task.output?.data as { import_items?: ImportItem[] } | undefined
-      )?.import_items;
-      current = current.map((row) => {
-        const result = items?.find((item) => item.path === row.path);
-        return {
-          ...row,
-          result,
-          status: result
-            ? {
-                new: "待导入",
-                duplicate: "将跳过",
-                conflict: "名称冲突",
-                invalid: "需要处理",
-              }[result.status]
-            : "校验失败",
-          error: result
-            ? undefined
-            : (task.error?.message ?? "校验未完成，请重试"),
-        };
-      });
-      publish();
-      keep =
-        task.status === "succeeded" &&
-        !task.uploadsCleaned &&
-        current.every(
-          (row) =>
-            row.result && ["new", "duplicate"].includes(row.result.status),
-        );
-      if (keep && current.every((row) => row.result?.status === "duplicate")) {
-        skipped = true;
-        keep = false;
-        current.forEach((row) => {
-          row.status = "已跳过";
-        });
-        publish();
-      } else if (keep) setPreview(task);
-      else if (!items?.length)
-        setError(task.error?.message ?? "校验未完成，请重试");
-    } catch (error) {
-      if (!stop.current) {
-        setError(message(error));
-        setDirty(true);
       }
     } finally {
+      for (const row of batch)
+        if (row.stage === "queued") row.stage = "cancelled";
       xhr.current = undefined;
-      if (!keep || stop.current) await cleanup();
       busy.current = false;
+      publish();
       if (mounted.current) {
-        if (stop.current) {
-          setRows(
-            current.map((row) => ({
-              ...row,
-              status: "已取消",
-              result: undefined,
-              error: undefined,
-            })),
-          );
-          setDirty(true);
+        setRunning(false);
+        setStopping(false);
+      }
+      if (!mounted.current)
+        for (const row of current.current) {
+          if (!row.applying && !row.applyId) void cleanup(row);
         }
-        setPhase(skipped ? "done" : "idle");
+      if (batch.some(completed)) {
+        void cache.invalidateQueries({ queryKey: ["overview"] });
+        void cache.invalidateQueries({ queryKey: ["overview-entries"] });
+        void workspace.refresh(workspace.archive, { quiet: true }).catch(() => {
+          /* Import is committed; a refresh can retry independently. */
+        });
       }
     }
   }
   function choose(files: FileList | null) {
-    if (!files?.length || busy.current || busyUI) return;
+    if (!files?.length || busy.current) return;
     try {
       const added = Array.from(files).map((file): Row => ({
         id: uploadId(),
         file,
         name: file.name,
-        status: "等待上传",
+        stage: "queued",
+        progress: 0,
       }));
-      void check([...rows, ...added]);
+      current.current = [...current.current, ...added];
+      publish();
+      void run(added.map((row) => row.id));
     } catch (error) {
       setError(`无法准备上传：${message(error)}`);
     } finally {
       if (input.current) input.current.value = "";
     }
   }
-
   function change(id: string, patch: Partial<Row>) {
-    setRows((old) =>
-      old.map((row) =>
-        row.id === id ? { ...row, ...patch, status: "待重新校验" } : row,
-      ),
-    );
-    setDirty(true);
-    setPreview(undefined);
+    const row = current.current.find((row) => row.id === id);
+    if (!row || busy.current || row.stage === "uncertain") return;
+    Object.assign(row, patch, { planId: undefined, result: undefined });
+    publish();
   }
-  async function finish(task: WorkTask) {
-    const done = await settle(task, false);
-    if (done.status !== "succeeded") {
-      pendingApply.current = undefined;
-      throw new Error(done.error?.message ?? "导入未完成，请重新校验后重试");
-    }
-    pendingApply.current = undefined;
-    const items =
-      (done.output?.data as { import_items?: ImportItem[] } | undefined)
-        ?.import_items ?? [];
-    setRows((old) =>
-      old.map((row) => {
-        const result =
-          items.find((item) => item.path === row.path) ?? row.result;
-        return {
-          ...row,
-          result,
-          status: result?.status === "duplicate" ? "已跳过" : "已导入",
-        };
-      }),
-    );
-    setPhase("done");
-    setPreview(undefined);
-    await cleanup();
-    void queryClient.invalidateQueries({ queryKey: ["overview"] });
-    void queryClient.invalidateQueries({ queryKey: ["overview-entries"] });
-    void workspace.refresh(workspace.archive).catch(() => {
-      /* Import already committed; list refresh can retry independently. */
-    });
+  function remove(id: string) {
+    if (busy.current) return;
+    const row = current.current.find((row) => row.id === id);
+    if (!row || row.stage === "uncertain") return;
+    void cleanup(row);
+    current.current = current.current.filter((row) => row.id !== id);
+    publish();
   }
-  async function apply() {
-    if (
-      busy.current ||
-      (!preview && !pendingApply.current && !pendingPreview.current)
-    )
-      return;
-    busy.current = true;
-    setError("");
-    setPhase("applying");
-    try {
-      let task: WorkTask;
-      if (pendingApply.current)
-        task = await api<WorkTask>(`/api/work/tasks/${pendingApply.current}`);
-      else {
-        pendingPreview.current ??= preview!.id;
-        task = await api<WorkTask>(
-          `/api/work/tasks/${pendingPreview.current}/apply`,
-          {},
-        );
-        pendingApply.current = task.id;
-        pendingPreview.current = undefined;
-      }
-      await finish(task);
-    } catch (error) {
-      if (!(error instanceof TypeError || error instanceof SyntaxError))
-        pendingPreview.current = undefined;
-      const uncertain = !!(pendingApply.current || pendingPreview.current);
-      setError(
-        uncertain ? "暂时无法确认导入结果，请查询结果后继续。" : message(error),
-      );
-      setPhase(uncertain ? "uncertain" : "idle");
-      if (!uncertain) {
-        setDirty(true);
-        setPreview(undefined);
-        await cleanup();
-      }
-    } finally {
-      busy.current = false;
-    }
-  }
+  const imported = rows.filter((row) => row.stage === "done");
+  const skipped = rows.filter((row) => row.stage === "duplicate").length;
+  const retryable = rows.filter((row) =>
+    ["error", "cancelled"].includes(row.stage),
+  );
+  const processed = rows.filter(
+    (row) => !working(row) && row.stage !== "queued",
+  ).length;
   return (
-    <div className="import-panel">
-      <p>选择 KML 文件，检查后导入。设备上的原文件始终保留。</p>
+    <div className="import-panel" data-empty={rows.length === 0}>
       {error && <Alert type="error" title={error} />}
-      {phase !== "done" && (
-        <div
-          className="import-dropzone"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            choose(event.dataTransfer.files);
-          }}
+      <input
+        ref={input}
+        className="sr-only"
+        tabIndex={-1}
+        type="file"
+        accept=".kml"
+        multiple
+        aria-label="上传输入文件"
+        disabled={running}
+        onChange={(event) => choose(event.target.files)}
+      />
+      <div
+        className={`import-dropzone${rows.length ? " compact" : ""}${dragging ? " dragging" : ""}`}
+        aria-disabled={running}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          if (!running && event.dataTransfer.types.includes("Files")) {
+            dragDepth.current++;
+            setDragging(true);
+          }
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = running ? "none" : "copy";
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          if (--dragDepth.current <= 0) {
+            dragDepth.current = 0;
+            setDragging(false);
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          dragDepth.current = 0;
+          setDragging(false);
+          choose(event.dataTransfer.files);
+        }}
+      >
+        <Upload className="import-upload-icon" aria-hidden="true" />
+        <div>
+          {rows.length > 0 && <strong>添加更多轨迹</strong>}
+          <span>支持格式：.kml</span>
+        </div>
+        <Button
+          variant={rows.length ? "outline" : "default"}
+          disabled={running}
+          onClick={() => input.current?.click()}
         >
-          <input
-            ref={input}
-            type="file"
-            accept=".kml"
-            multiple
-            aria-label="上传输入文件"
-            disabled={busyUI}
-            onChange={(event) => choose(event.target.files)}
-          />
-          <span>选择或拖入 KML，可多选</span>
-        </div>
-      )}
+          {rows.length ? "添加文件" : "选择文件"}
+        </Button>
+      </div>
       {rows.length > 0 && (
-        <section aria-label="上传文件列表" className="import-files">
-          {rows.map((row) => (
-            <article
-              key={row.id}
-              className="import-file"
-              aria-label={row.file.name}
-            >
-              <div className="import-file-heading">
-                <strong>{row.file.name}</strong>
-                <span role="status">{row.status}</span>
-              </div>
-              {phase !== "done" && (
-                <>
-                  <details>
-                    <summary>修改名称或分类</summary>
-                    <div className="import-file-options">
-                      <label>
-                        导入名称
-                        <Input
-                          aria-label={`${row.file.name} 导入名称`}
-                          value={row.name}
-                          disabled={busyUI}
-                          onChange={(event) =>
-                            change(row.id, { name: event.target.value })
-                          }
-                        />
-                      </label>
-                      <label>
-                        分类
-                        <Select
-                          aria-label={`${row.file.name} 分类`}
-                          value={row.category ?? "auto"}
-                          disabled={busyUI}
-                          options={categories}
-                          onChange={(value) =>
-                            change(row.id, {
-                              category:
-                                value === "auto"
-                                  ? undefined
-                                  : (value as Category),
-                            })
-                          }
-                        />
-                      </label>
-                    </div>
-                  </details>
-                  <Button
-                    variant="ghost"
-                    disabled={busyUI}
-                    aria-label={`移除 ${row.file.name}`}
-                    onClick={() =>
-                      void check(rows.filter((item) => item.id !== row.id))
-                    }
-                  >
-                    移除
-                  </Button>
-                </>
-              )}
-              {!dirty && row.result?.category && !row.category && (
-                <small>
-                  识别为{labels[row.result.category] ?? row.result.category}
-                </small>
-              )}
-              {row.error && <p className="error-text">{row.error}</p>}
-              {!dirty && row.result && row.result.status !== "new" && (
-                <p>
-                  {row.result.status === "duplicate"
-                    ? phase === "done"
-                      ? "重复轨迹已跳过"
-                      : "重复轨迹，将跳过"
-                    : row.result.reason
-                        .split(row.path ?? "\u0000")
-                        .join(row.file.name)}
-                </p>
-              )}
-              {!dirty && row.result?.status === "conflict" && (
-                <small>
-                  同名轨迹：{row.result.member?.split("/").at(-1)}（
-                  {labels[row.result.category ?? ""]}）
-                </small>
-              )}
-              {phase === "done" &&
-                row.result?.entryId &&
-                workspace.showTrack && (
-                  <Button
-                    variant="outline"
-                    onClick={() => workspace.showTrack?.(row.result!.entryId!)}
-                  >
-                    查看轨迹
-                  </Button>
-                )}
-            </article>
-          ))}
-        </section>
-      )}
-      {phase === "done" ? (
-        <div className="import-actions" role="status">
-          <p>
-            已导入 {fresh} 条轨迹
-            {duplicates ? `，跳过 ${duplicates} 条重复轨迹` : ""}。
-          </p>
-          <Button
-            onClick={() => {
-              setRows([]);
-              setPhase("idle");
-              setError("");
-              setDirty(false);
-            }}
-          >
-            继续上传
-          </Button>
-        </div>
-      ) : (
-        rows.length > 0 && (
-          <div className="import-actions">
-            {phase === "checking" ? (
-              <>
-                <p role="status">正在上传并校验文件…</p>
-                <Button
-                  disabled={cancelled}
-                  onClick={() => {
-                    stop.current = true;
-                    xhr.current?.abort();
-                    setCancelled(true);
-                  }}
-                >
-                  {cancelled ? "正在取消…" : "取消上传"}
-                </Button>
-              </>
-            ) : phase === "applying" ? (
-              <p role="status">正在导入，请稍候…</p>
-            ) : phase === "uncertain" ? (
-              <Button onClick={() => void apply()}>查询导入结果</Button>
-            ) : (
-              <>
-                {dirty ? (
-                  <p>文件列表或设置已变更，请重新校验后导入。</p>
-                ) : problems > 0 ? (
-                  <p>有 {problems} 个文件需要处理；修正或移除后才能导入。</p>
-                ) : (
-                  <p>
-                    待导入 {fresh} 条
-                    {duplicates ? `，将跳过 ${duplicates} 条重复轨迹` : ""}。
-                  </p>
-                )}
-                {(dirty || !preview) && (
-                  <Button onClick={() => void check(rows)}>重新校验</Button>
-                )}
-                <Button
-                  variant="default"
-                  disabled={!preview || dirty || problems > 0 || fresh === 0}
-                  onClick={() => void apply()}
-                >
-                  导入 {fresh} 条轨迹
-                </Button>
-              </>
+        <>
+          <div className="import-summary" role="status">
+            <span>
+              {running
+                ? `已处理 ${processed} / ${rows.length} 个文件`
+                : `共 ${rows.length} 个文件`}
+            </span>
+            {running && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={stopping}
+                onClick={() => {
+                  stop.current = true;
+                  xhr.current?.abort();
+                  setStopping(true);
+                }}
+              >
+                {stopping ? "正在停止…" : "停止剩余上传"}
+              </Button>
             )}
           </div>
-        )
+          {stopping && (
+            <p className="overview-hint">
+              正在保存的轨迹完成后停止，已导入的轨迹会保留。
+            </p>
+          )}
+          <section aria-label="上传文件列表" className="import-files">
+            {rows.map((row) => (
+              <article
+                key={row.id}
+                className="import-file"
+                aria-label={row.file.name}
+                data-stage={row.stage}
+              >
+                <div className="import-file-main">
+                  <span className="import-state-icon" aria-hidden="true">
+                    {working(row) ? (
+                      <LoaderCircle className="animate-spin" />
+                    ) : completed(row) ? (
+                      <Check />
+                    ) : ["error", "uncertain"].includes(row.stage) ? (
+                      <CircleAlert />
+                    ) : (
+                      <FileUp />
+                    )}
+                  </span>
+                  <div className="import-file-info">
+                    <strong title={row.name}>{row.name}</strong>
+                    <div className="import-file-meta">
+                      <span>{size(row.file.size)}</span>
+                      {(row.category ?? row.result?.category) && (
+                        <span className="import-category">
+                          {labels[row.category ?? row.result!.category!]}
+                        </span>
+                      )}
+                      <span>
+                        {row.stage === "uploading"
+                          ? `上传中 ${row.progress}%`
+                          : row.result?.status === "conflict" &&
+                              row.stage === "error"
+                            ? "名称冲突"
+                            : stages[row.stage]}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="import-row-actions">
+                    {row.stage === "uncertain" ? (
+                      <Button
+                        size="sm"
+                        disabled={running}
+                        onClick={() => void run([row.id])}
+                      >
+                        查询导入结果
+                      </Button>
+                    ) : completed(row) ? (
+                      row.result?.entryId &&
+                      workspace.showTrack && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={running}
+                          onClick={() =>
+                            workspace.showTrack?.(row.result!.entryId!)
+                          }
+                        >
+                          查看轨迹
+                        </Button>
+                      )
+                    ) : (
+                      <>
+                        {["error", "cancelled"].includes(row.stage) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={running}
+                            onClick={() => void run([row.id])}
+                          >
+                            重试
+                          </Button>
+                        )}
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={running}
+                              aria-label={`${row.file.name} 更多操作`}
+                            >
+                              <Ellipsis aria-hidden="true" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            align="end"
+                            className="import-options-popover"
+                          >
+                            <p className="font-medium">修改名称或分类</p>
+                            <div className="import-file-options">
+                              <label>
+                                导入名称
+                                <Input
+                                  aria-label={`${row.file.name} 导入名称`}
+                                  value={row.name}
+                                  onChange={(event) =>
+                                    change(row.id, { name: event.target.value })
+                                  }
+                                />
+                              </label>
+                              <label>
+                                分类
+                                <Select
+                                  aria-label={`${row.file.name} 分类`}
+                                  value={row.category ?? "auto"}
+                                  options={categories}
+                                  onChange={(value) =>
+                                    change(row.id, {
+                                      category:
+                                        value === "auto"
+                                          ? undefined
+                                          : (value as Category),
+                                    })
+                                  }
+                                />
+                              </label>
+                            </div>
+                            <PopoverPrimitive.Close asChild>
+                              <Button
+                                variant="default"
+                                onClick={() => void run([row.id])}
+                              >
+                                保存并重试
+                              </Button>
+                            </PopoverPrimitive.Close>
+                            <PopoverPrimitive.Close asChild>
+                              <Button
+                                variant="ghost"
+                                onClick={() => remove(row.id)}
+                                aria-label={`移除 ${row.file.name}`}
+                              >
+                                <X aria-hidden="true" />
+                                移除文件
+                              </Button>
+                            </PopoverPrimitive.Close>
+                          </PopoverContent>
+                        </Popover>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {row.stage === "uploading" && (
+                  <progress
+                    className="import-progress"
+                    value={row.progress}
+                    max={100}
+                    aria-label={`${row.file.name} 上传进度`}
+                  />
+                )}
+                {row.error && <p className="import-file-error">{row.error}</p>}
+              </article>
+            ))}
+          </section>
+          {!running && (
+            <div className="import-actions">
+              <p role="status">
+                已导入 {imported.length} 条轨迹
+                {skipped ? `，跳过 ${skipped} 条重复轨迹` : ""}。
+                {retryable.length > 0 && ` ${retryable.length} 个文件待处理。`}
+              </p>
+              {imported.length > 0 && (
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    const ids = imported.flatMap((row) =>
+                      row.result?.entryId ? [row.result.entryId] : [],
+                    );
+                    if (workspace.showTracks) workspace.showTracks(ids);
+                    else workspace.open("library", "imported");
+                  }}
+                >
+                  查看已导入轨迹
+                </Button>
+              )}
+              {retryable.length > 0 && (
+                <Button
+                  onClick={() => void run(retryable.map((row) => row.id))}
+                >
+                  重试失败文件
+                </Button>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
