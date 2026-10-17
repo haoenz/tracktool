@@ -35,6 +35,8 @@ export class OverviewLayer {
   private visibility?: OverviewVisibility;
   private serial = 0;
   private scale = 1;
+  private hoverTimer?: number;
+  private hoverEvent?: MapMouseEvent;
   constructor(
     private map: LibreMap,
     private crs: string,
@@ -278,9 +280,18 @@ export class OverviewLayer {
   }
   private click = (event: MapMouseEvent) => this.onPick(this.hits(event));
   private hover = (event: MapMouseEvent) => {
-    this.map.getCanvas().style.cursor = this.hits(event).length
-      ? "pointer"
-      : "";
+    this.hoverEvent = event;
+    if (this.hoverTimer !== undefined) return;
+    // queryRenderedFeatures is comparatively expensive; cap it at 20 Hz
+    // instead of running for every mousemove event.
+    this.hoverTimer = window.setTimeout(() => {
+      this.hoverTimer = undefined;
+      const pending = this.hoverEvent;
+      if (!pending) return;
+      const canvas = this.map.getCanvas();
+      const cursor = this.hits(pending).length ? "pointer" : "";
+      if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+    }, 50);
   };
   private remove(id?: string) {
     if (!id) return;
@@ -290,6 +301,7 @@ export class OverviewLayer {
     if (this.map.getSource(id)) this.map.removeSource(id);
   }
   destroy() {
+    if (this.hoverTimer !== undefined) window.clearTimeout(this.hoverTimer);
     this.map.off("style.load", this.restore);
     this.map.off("idle", this.idle);
     this.map.off("sourcedata", this.loaded);

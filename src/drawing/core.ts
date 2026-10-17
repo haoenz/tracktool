@@ -62,7 +62,8 @@ export class MapCanvas {
   credit: HTMLDivElement;
   map: maplibregl.Map;
   fontReady: Promise<void>;
-  private fontFailed = false;
+  private fontLoading = false;
+  private textWidths = new Map<string, number>();
 
   constructor(
     frame: HTMLElement,
@@ -183,7 +184,7 @@ export class MapCanvas {
       if (this.surroundSize) this.setSurround(...this.surroundSize);
       this.draw();
     });
-    this.fontReady = this.loadFont();
+    this.fontReady = Promise.resolve();
     this.updateCredit();
   }
   private loadFont() {
@@ -192,19 +193,53 @@ export class MapCanvas {
       .then((fonts) => {
         if (!fonts.length) throw new Error("中文字体加载失败，请重试");
         this.loadedFont = true;
-        this.fontFailed = false;
+        this.textWidths.clear();
         if (!this.destroyed) this.draw();
       });
     void pending.catch((error: unknown) => {
-      this.fontFailed = true;
       console.warn("[地图字体]", error);
     });
     return pending;
   }
+  /** The bundled CJK font is only required for export fidelity. Browsing
+   * labels use the platform font so the 16 MB asset never blocks first paint. */
+  private ensureFont() {
+    if (this.loadedFont) return Promise.resolve();
+    if (!this.fontLoading) {
+      this.fontLoading = true;
+      this.fontReady = this.loadFont();
+      void this.fontReady
+        .finally(() => {
+          this.fontLoading = false;
+        })
+        .catch(() => {});
+    }
+    return this.fontReady;
+  }
+  private fontFamily() {
+    return this.loadedFont
+      ? "MapNoto"
+      : 'system-ui, -apple-system, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif';
+  }
+  private measureText(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    size: number,
+  ) {
+    const family = this.fontFamily();
+    ctx.font = `${size}px ${family}`;
+    const key = `${family}|${size.toFixed(3)}|${text}`;
+    const cached = this.textWidths.get(key);
+    if (cached !== undefined) return cached;
+    const width = ctx.measureText(text).width;
+    this.textWidths.set(key, width);
+    return width;
+  }
   retryResources() {
     this.resources.clear();
     this.onError?.("");
-    if (!this.loadedFont) this.fontReady = this.loadFont();
+    if (this.exportPreview && !this.loadedFont)
+      void this.ensureFont().catch(() => {});
     this.map.setStyle(mapStyle(this.state, this.config, this.displayData), {
       diff: false,
     });
@@ -246,6 +281,7 @@ export class MapCanvas {
   }
   setExportPreview(show: boolean) {
     this.exportPreview = show;
+    if (show) void this.ensureFont().catch(() => {});
     this.draw();
   }
   setCamera(camera: Project["camera"]) {
@@ -461,7 +497,7 @@ export class MapCanvas {
     );
   }
   draw() {
-    if (!this.loadedFont) return;
+    if (this.exportPreview && !this.loadedFont) return;
     const browsing = !this.exportPreview && this.surroundSize;
     const w = browsing ? this.surroundSize![0] : this.state.frame.width;
     const h = browsing ? this.surroundSize![1] : this.state.frame.height;
@@ -498,10 +534,10 @@ export class MapCanvas {
     this.labels = [];
     if (this.exportPreview && this.state.title) {
       let size = 30;
-      ctx.font = `${size}px MapNoto`;
-      while (ctx.measureText(this.state.title).width > w - 64 && size > 10) {
+      let width = this.measureText(ctx, this.state.title, size);
+      while (width > w - 64 && size > 10) {
         size--;
-        ctx.font = `${size}px MapNoto`;
+        width = this.measureText(ctx, this.state.title, size);
       }
       ctx.strokeText(this.state.title, w / 2, 38);
       ctx.fillText(this.state.title, w / 2, 38);
@@ -526,8 +562,7 @@ export class MapCanvas {
       const y =
         Math.round((projected.y - this.surround.y + offsetY) * 1e6) / 1e6;
       const size = [22, 20, 17, 14][city.level]! * unit;
-      ctx.font = `${size}px MapNoto`;
-      const tw = ctx.measureText(city.name).width;
+      const tw = this.measureText(ctx, city.name, size);
       const box: [number, number, number, number] = [
         x - tw / 2 - 5 * unit,
         y - size / 2 - 5 * unit,
@@ -575,10 +610,7 @@ export class MapCanvas {
     deadline = performance.now() + 65000,
     strict = true,
   ): Promise<RenderReport | undefined> {
-    if (strict) {
-      if (this.fontFailed) this.fontReady = this.loadFont();
-      await this.fontReady;
-    }
+    if (strict && this.exportPreview) await this.ensureFont();
     if (this.destroyed) return;
     if (performance.now() >= deadline)
       throw new Error("地图资源等待超时；请检查网络并重试");

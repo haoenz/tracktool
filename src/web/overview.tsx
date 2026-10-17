@@ -1,5 +1,5 @@
 import { compareOverviewEntries } from "../shared/overview.js";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   OverviewCrs,
@@ -76,7 +76,14 @@ export function useOverview(
     enabled: active,
     queryFn: ({ signal }) =>
       api<OverviewStatus>(`/api/overview?crs=${crs}`, undefined, signal),
-    refetchInterval: active ? 2000 : false,
+    // Poll fast only while the cache is being built; a ready library only
+    // needs a low-frequency check for changes made outside this tab.
+    refetchInterval: active
+      ? (query) =>
+          query.state.data?.state === "building" || query.state.data?.updating
+            ? 1000
+            : 10_000
+      : false,
     retry: (count, error) => count < 2 && !error.message.includes("版本已过期"),
     retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 2000),
   });
@@ -104,14 +111,22 @@ export function useOverview(
       );
     if (!candidates.length) return fetch(params);
     const entries: OverviewEntry[] = [];
-    for (let i = 0; i < candidates.length; i += 100) {
-      const result = await fetch({
-        ...params,
-        ids: candidates.slice(i, i + 100).join(","),
-        offset: "0",
-        limit: "100",
-      });
-      entries.push(...result.entries);
+    const chunks: string[][] = [];
+    for (let i = 0; i < candidates.length; i += 100)
+      chunks.push(candidates.slice(i, i + 100));
+    // Keep large selections fast without flooding the local server.
+    for (let i = 0; i < chunks.length; i += 4) {
+      const results = await Promise.all(
+        chunks.slice(i, i + 4).map((ids) =>
+          fetch({
+            ...params,
+            ids: ids.join(","),
+            offset: "0",
+            limit: "100",
+          }),
+        ),
+      );
+      for (const result of results) entries.push(...result.entries);
     }
     entries.sort((a, b) =>
       compareOverviewEntries(a, b, params.sort ?? "date-desc"),
@@ -233,15 +248,15 @@ export function useOverview(
     setTileError,
     loading,
     setLoading,
-    published: (next: string) => {
+    published: useCallback((next: string) => {
       setVersion(next);
       setTileError("");
-    },
-    pick: (ids: string[]) => {
+    }, []),
+    pick: useCallback((ids: string[]) => {
       setOffset(0);
       setCandidates(ids.length > 1 ? ids : []);
       setId(ids.length === 1 ? ids[0]! : "");
-    },
+    }, []),
     retry: async () => {
       setTileError("");
       await api(`/api/overview/retry?crs=${crs}`, {});

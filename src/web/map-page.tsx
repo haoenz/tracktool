@@ -70,7 +70,7 @@ import type {
   SelectedTrack,
 } from "../shared/map.js";
 import { useOverview, rememberedCamera, rememberCamera } from "./overview.js";
-import type { OverviewVisibility } from "./overview-layer.js";
+import type { OverviewHit, OverviewVisibility } from "./overview-layer.js";
 import type { OverviewEntry, OverviewStatus } from "../shared/overview.js";
 import type { Project } from "../shared/project.js";
 import { frames } from "../drawing/core.js";
@@ -102,6 +102,7 @@ const panels: Record<Panel, string> = {
   archive: "轨迹库管理",
   settings: "设置",
 };
+const emptyTracks: SelectedTrack[] = [];
 type Bootstrap = {
   config: MapConfig;
   state: Project;
@@ -291,8 +292,11 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     setFilterDraft(undefined);
   }
   const tracks = projectTracks;
-  const dirty =
-    inProject && (!currentName || JSON.stringify(projectState) !== baseline);
+  const dirty = useMemo(
+    () =>
+      inProject && (!currentName || JSON.stringify(projectState) !== baseline),
+    [inProject, currentName, projectState, baseline],
+  );
   const setState = (update: Project | ((prev: Project) => Project)) => {
     if (inProject)
       setProjectState((prev) =>
@@ -335,6 +339,11 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
   const [menuExpanded, setMenuExpanded] = useState(
     !!panel && panel !== "settings",
   );
+  useEffect(() => {
+    document.title = panel
+      ? `Tracktool · ${panels[panel]}`
+      : "Tracktool · 地图";
+  }, [panel]);
   const [exportEntries, setExportEntries] = useState<string[]>();
   const [exportKind, setExportKind] = useState<"zip" | "kml" | "png">();
   const exportPage = panel === "export" || panel === "project";
@@ -1162,6 +1171,82 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
   ).length;
   const pageSelected = visible.length > 0 && selectedOnPage === visible.length;
   const invalid = sourceErrors.length > 0 || versionChanged;
+  // Map events fire after this render. Keep stable wrappers so MapViewport can
+  // bail out of panel-driven re-renders while still seeing the latest state.
+  const viewportHandlers = useRef<{
+    pick: (hits: OverviewHit[]) => void;
+    camera: (camera: Project["camera"]) => void;
+    error: (error: string) => void;
+  }>({
+    pick: () => {},
+    camera: () => {},
+    error: () => {},
+  });
+  viewportHandlers.current.pick = (hits) => {
+    if (!hits.length || editMap || !browsing) return;
+    if (
+      hasDraft &&
+      (hits.length !== 1 || hits[0]?.id !== overview.id) &&
+      !window.confirm("当前轨迹有编辑草稿，切换轨迹将放弃草稿。是否继续？")
+    )
+      return;
+    setFilter("");
+    setKind([]);
+    setDates({ ...dates, from: "", to: "" });
+    setFilterDraft(undefined);
+    overview.pick(hits.map((h) => h.id));
+    setDetailOpen(hits.length === 1);
+    setMenuExpanded(true);
+    setLibraryList(true);
+    setArchiveAction(undefined);
+    setSheet("half");
+    openPanel("library");
+    setEditing(false);
+  };
+  viewportHandlers.current.camera = (camera) => {
+    if (inspection) {
+      setInspection((old) => (old ? { ...old, camera } : old));
+      return;
+    }
+    if (inProject && browsing) {
+      setCandidateCamera(camera);
+      return;
+    }
+    if (JSON.stringify(stateRef.current.camera) !== JSON.stringify(camera)) {
+      fitted.current = true;
+      if (browsing) rememberCamera(initial.initialArchive, camera);
+      if (inProject)
+        change((s) => {
+          s.camera = camera;
+        });
+      else setState((prev) => ({ ...prev, camera }));
+    }
+  };
+  viewportHandlers.current.error = (error) => {
+    overview.setTileError(error);
+    if (error) void overview.query.refetch();
+  };
+  const handleOverviewPick = useCallback(
+    (hits: OverviewHit[]) => viewportHandlers.current.pick(hits),
+    [],
+  );
+  const handleCamera = useCallback(
+    (camera: Project["camera"]) => viewportHandlers.current.camera(camera),
+    [],
+  );
+  const handleOverviewError = useCallback(
+    (error: string) => viewportHandlers.current.error(error),
+    [],
+  );
+  const viewportState = useMemo(
+    () =>
+      inspection
+        ? { ...state, camera: inspection.camera, title: "" }
+        : inProject && browsing
+          ? { ...state, camera: candidateCamera ?? state.camera }
+          : state,
+    [inspection, state, inProject, browsing, candidateCamera],
+  );
   return (
     <WorkspaceContext.Provider
       value={{
@@ -1887,143 +1972,148 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 )}
               </div>
             </section>
-            <section hidden={panel !== "settings"}>
-              <Settings inProject={inProject}>
-                <h3>地图样式</h3>
-                <label>底图</label>
-                <Select
-                  searchable
+            {panel === "settings" && (
+              <section>
+                <Settings inProject={inProject}>
+                  <h3>地图样式</h3>
+                  <label>底图</label>
+                  <Select
+                    searchable
 
-                  aria-label="底图"
-                  value={switching || state.style.basemap}
-                  loading={!!switching}
-                  onChange={(id) => void switchBase(id)}
-                  options={[
-                    { value: "light", label: "浅色矢量" },
-                    { value: "dark", label: "深色矢量" },
-                    ...(config.satellite
-                      ? [{ value: "satellite", label: "自定义卫星" }]
-                      : []),
-                    ...config.basemaps.map((b) => ({
-                      value: b.id,
-                      label: `${b.group} · ${b.name}`,
-                    })),
-                  ]}
-                />
-                <label>城市标注</label>
-                <Select
-                  aria-label="城市标注"
-                  value={state.style.cities}
-                  disabled={!!cityReason(state, config)}
-                  options={[
-                    { value: "county", label: "县级及以上" },
-                    { value: "none", label: "关闭" },
-                  ]}
-                  onChange={(value) =>
-                    change((s) => {
-                      s.style.cities = value;
-                    })
-                  }
-                />
-                <details>
-                  <summary>地图要素与叠加层</summary>
-                  {Object.entries(featureControls).map(
-                    ([key, [label, options]]) => (
-                      <div key={key} title={featureReason(state, config, key)}>
-                        <label>{label}</label>
-                        <Select
-                          aria-label={label}
-                          disabled={!!featureReason(state, config, key)}
-                          value={state.style.features[key]}
-                          options={Object.entries(options).map(
-                            ([value, label]) => ({
-                              value,
-                              label,
-                            }),
+                    aria-label="底图"
+                    value={switching || state.style.basemap}
+                    loading={!!switching}
+                    onChange={(id) => void switchBase(id)}
+                    options={[
+                      { value: "light", label: "浅色矢量" },
+                      { value: "dark", label: "深色矢量" },
+                      ...(config.satellite
+                        ? [{ value: "satellite", label: "自定义卫星" }]
+                        : []),
+                      ...config.basemaps.map((b) => ({
+                        value: b.id,
+                        label: `${b.group} · ${b.name}`,
+                      })),
+                    ]}
+                  />
+                  <label>城市标注</label>
+                  <Select
+                    aria-label="城市标注"
+                    value={state.style.cities}
+                    disabled={!!cityReason(state, config)}
+                    options={[
+                      { value: "county", label: "县级及以上" },
+                      { value: "none", label: "关闭" },
+                    ]}
+                    onChange={(value) =>
+                      change((s) => {
+                        s.style.cities = value;
+                      })
+                    }
+                  />
+                  <details>
+                    <summary>地图要素与叠加层</summary>
+                    {Object.entries(featureControls).map(
+                      ([key, [label, options]]) => (
+                        <div
+                          key={key}
+                          title={featureReason(state, config, key)}
+                        >
+                          <label>{label}</label>
+                          <Select
+                            aria-label={label}
+                            disabled={!!featureReason(state, config, key)}
+                            value={state.style.features[key]}
+                            options={Object.entries(options).map(
+                              ([value, label]) => ({
+                                value,
+                                label,
+                              }),
+                            )}
+                            onChange={(value) =>
+                              change((s) => {
+                                s.style.features[key] = value;
+                              })
+                            }
+                          />
+                        </div>
+                      ),
+                    )}
+                    {config.overlays.map((o) => (
+                      <div key={o.id} title={overlayReason(state, config, o)}>
+                        <Checkbox
+                          disabled={!!overlayReason(state, config, o)}
+                          checked={state.style.overlays.some(
+                            (s) => s.id === o.id && s.enabled,
                           )}
+                          onCheckedChange={(v) =>
+                            change((s) => {
+                              s.style.overlays = s.style.overlays
+                                .filter((i) => i.id !== o.id)
+                                .concat({
+                                  id: o.id,
+                                  enabled: v,
+                                  opacity: 1,
+                                });
+                            })
+                          }
+                        >
+                          {o.name}
+                        </Checkbox>
+                        <InputNumber
+                          aria-label={`${o.name}透明度`}
+                          min={0.1}
+                          max={1}
+                          step={0.1}
+                          value={
+                            state.style.overlays.find((s) => s.id === o.id)
+                              ?.opacity ?? 1
+                          }
                           onChange={(value) =>
                             change((s) => {
-                              s.style.features[key] = value;
+                              const item = s.style.overlays.find(
+                                (i) => i.id === o.id,
+                              );
+                              if (item) item.opacity = value ?? 1;
                             })
                           }
                         />
                       </div>
-                    ),
-                  )}
-                  {config.overlays.map((o) => (
-                    <div key={o.id} title={overlayReason(state, config, o)}>
-                      <Checkbox
-                        disabled={!!overlayReason(state, config, o)}
-                        checked={state.style.overlays.some(
-                          (s) => s.id === o.id && s.enabled,
-                        )}
-                        onCheckedChange={(v) =>
-                          change((s) => {
-                            s.style.overlays = s.style.overlays
-                              .filter((i) => i.id !== o.id)
-                              .concat({
-                                id: o.id,
-                                enabled: v,
-                                opacity: 1,
-                              });
-                          })
-                        }
-                      >
-                        {o.name}
-                      </Checkbox>
-                      <InputNumber
-                        aria-label={`${o.name}透明度`}
-                        min={0.1}
-                        max={1}
-                        step={0.1}
-                        value={
-                          state.style.overlays.find((s) => s.id === o.id)
-                            ?.opacity ?? 1
-                        }
-                        onChange={(value) =>
-                          change((s) => {
-                            const item = s.style.overlays.find(
-                              (i) => i.id === o.id,
-                            );
-                            if (item) item.opacity = value ?? 1;
-                          })
-                        }
-                      />
-                    </div>
-                  ))}
-                  <label>电力最低电压（kV）</label>
-                  <Select
-                    aria-label="电力最低电压"
-                    value={state.style.power.min_voltage}
-                    options={[0, 110, 220, 500].map((value) => ({
-                      value,
-                      label: String(value),
-                    }))}
-                    onChange={(value) =>
-                      change((s) => {
-                        s.style.power.min_voltage = value;
-                      })
-                    }
-                  />
-                  <label>电力设施</label>
-                  <Select
-                    aria-label="电力设施"
-                    value={state.style.power.facilities}
-                    options={[
-                      ["none", "关闭"],
-                      ["substations", "变电站"],
-                      ["generation", "发电设施"],
-                      ["all", "全部"],
-                    ].map(([value, label]) => ({ value, label }))}
-                    onChange={(value) =>
-                      change((s) => {
-                        s.style.power.facilities = value;
-                      })
-                    }
-                  />
-                </details>
-              </Settings>
-            </section>
+                    ))}
+                    <label>电力最低电压（kV）</label>
+                    <Select
+                      aria-label="电力最低电压"
+                      value={state.style.power.min_voltage}
+                      options={[0, 110, 220, 500].map((value) => ({
+                        value,
+                        label: String(value),
+                      }))}
+                      onChange={(value) =>
+                        change((s) => {
+                          s.style.power.min_voltage = value;
+                        })
+                      }
+                    />
+                    <label>电力设施</label>
+                    <Select
+                      aria-label="电力设施"
+                      value={state.style.power.facilities}
+                      options={[
+                        ["none", "关闭"],
+                        ["substations", "变电站"],
+                        ["generation", "发电设施"],
+                        ["all", "全部"],
+                      ].map(([value, label]) => ({ value, label }))}
+                      onChange={(value) =>
+                        change((s) => {
+                          s.style.power.facilities = value;
+                        })
+                      }
+                    />
+                  </details>
+                </Settings>
+              </section>
+            )}
             {exportPanel && inProject && (
               <div className="project-tabs" role="group" aria-label="出图设置">
                 <Button onClick={() => setProjectTab("content")}>内容</Button>
@@ -2599,19 +2689,13 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
           </aside>
           <MapViewport
             ref={viewport}
-            state={
-              inspection
-                ? { ...state, camera: inspection.camera, title: "" }
-                : inProject && browsing
-                  ? { ...state, camera: candidateCamera ?? state.camera }
-                  : state
-            }
+            state={viewportState}
             config={config}
             cities={cities.labels}
             tracks={
               editMap?.tracks ??
               inspection?.tracks ??
-              (inProject && !browsing ? tracks : [])
+              (inProject && !browsing ? tracks : emptyTracks)
             }
             preview={
               inProject && preview && !inspection && !browsing && !editMap
@@ -2637,57 +2721,11 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             }
             highlightSegment={editMap?.segment}
             onPointPick={editMap?.pick}
-            onOverviewPick={(hits) => {
-              if (!hits.length || editMap || !browsing) return;
-              if (
-                hasDraft &&
-                (hits.length !== 1 || hits[0]?.id !== overview.id) &&
-                !window.confirm(
-                  "当前轨迹有编辑草稿，切换轨迹将放弃草稿。是否继续？",
-                )
-              )
-                return;
-              setFilter("");
-              setKind([]);
-              setDates({ ...dates, from: "", to: "" });
-              setFilterDraft(undefined);
-              overview.pick(hits.map((h) => h.id));
-              setDetailOpen(hits.length === 1);
-              setMenuExpanded(true);
-              setLibraryList(true);
-              setArchiveAction(undefined);
-              setSheet("half");
-              openPanel("library");
-              setEditing(false);
-            }}
+            onOverviewPick={handleOverviewPick}
             onOverviewLoading={overview.setLoading}
             onOverviewVersion={overview.published}
-            onOverviewError={(error) => {
-              overview.setTileError(error);
-              if (error) void overview.query.refetch();
-            }}
-            onCamera={(camera) => {
-              if (inspection) {
-                setInspection((old) => (old ? { ...old, camera } : old));
-                return;
-              }
-              if (inProject && browsing) {
-                setCandidateCamera(camera);
-                return;
-              }
-              if (
-                JSON.stringify(stateRef.current.camera) !==
-                JSON.stringify(camera)
-              ) {
-                fitted.current = true;
-                if (browsing) rememberCamera(initial.initialArchive, camera);
-                if (inProject)
-                  change((s) => {
-                    s.camera = camera;
-                  });
-                else setState((prev) => ({ ...prev, camera }));
-              }
-            }}
+            onOverviewError={handleOverviewError}
+            onCamera={handleCamera}
             onError={setError}
           />
         </div>

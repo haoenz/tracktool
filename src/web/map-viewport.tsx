@@ -2,6 +2,7 @@ import { AnalysisLayer } from "./analysis-layer.js";
 import type { AnalysisOverlay } from "./track-insights.js";
 import {
   forwardRef,
+  memo,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -55,8 +56,8 @@ type Props = {
   highlightSegment?: string;
   analysisOverlay?: AnalysisOverlay;
 };
-export const MapViewport = forwardRef<Viewport, Props>(
-  function MapViewport(props, ref) {
+export const MapViewport = memo(
+  forwardRef<Viewport, Props>(function MapViewport(props, ref) {
     const stage = useRef<HTMLDivElement>(null),
       holder = useRef<HTMLDivElement>(null),
       credit = useRef<HTMLDivElement>(null),
@@ -317,7 +318,8 @@ export const MapViewport = forwardRef<Viewport, Props>(
         const bounds = stage.current?.getBoundingClientRect();
         const canvas = map.mapElement.getBoundingClientRect();
         const scale = canvas.width / map.mapElement.clientWidth;
-        if (!bounds || !scale || bounds.width <= 0 || bounds.height <= 0) return;
+        if (!bounds || !scale || bounds.width <= 0 || bounds.height <= 0)
+          return;
         // Locate within the viewport regardless of floating panels or toolbars.
         const margin = Math.min(16, bounds.width / 4, bounds.height / 4);
         const left = bounds.left + margin;
@@ -395,5 +397,6 @@ export const MapViewport = forwardRef<Viewport, Props>(
         )}
       </div>
     );
-  },
+  }),
 );
+MapViewport.displayName = "MapViewport";

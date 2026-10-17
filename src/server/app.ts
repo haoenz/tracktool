@@ -3,9 +3,11 @@ import { ZodError } from "zod";
 import { mapRoutes, type MapOptions } from "./maps.js";
 import { overviewRoutes } from "./overview.js";
 import Fastify, { type FastifyInstance } from "fastify";
+import compress from "@fastify/compress";
 import staticFiles from "@fastify/static";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ConfigStore } from "../services/ports.js";
 import { createContext } from "../services/context.js";
@@ -26,6 +28,7 @@ export async function createApp(options: {
     bodyLimit: 2 * 1024 * 1024,
     trustProxy: false,
   });
+  await app.register(compress, { global: true, threshold: 1024 });
   const token = options.token ?? randomBytes(32).toString("hex");
   const webRoot =
     options.webRoot ?? fileURLToPath(new URL("../../web/", import.meta.url));
@@ -103,6 +106,13 @@ export async function createApp(options: {
     prefix: "/",
     wildcard: false,
     index: false,
+    setHeaders(reply, filePath) {
+      if (filePath.includes(`${sep}assets${sep}`))
+        reply.header("Cache-Control", "public, max-age=31536000, immutable");
+      else if (filePath.endsWith(`${sep}NotoSansCJKsc-Regular.otf`))
+        reply.header("Cache-Control", "public, max-age=604800");
+      else reply.header("Cache-Control", "public, max-age=0");
+    },
   });
   const page = async () =>
     (await readFile(`${webRoot}/index.html`, "utf8")).replace(

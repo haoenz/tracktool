@@ -49,6 +49,7 @@
     ]
   },
   "dependencies": {
+    "@fastify/compress": "9.2.2",
     "@fastify/static": "10.1.6",
     "@foxglove/wasm-bz2": "0.3.0",
     "@napi-rs/lzma": "1.5.1",

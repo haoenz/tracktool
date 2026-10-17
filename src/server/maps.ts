@@ -70,7 +70,20 @@ export function mapRoutes(
       directory: process.cwd(),
     };
   });
-  app.get("/api/cities", async () => (await getResources()).cities);
+  app.get("/api/cities", async () => {
+    const cities = (await getResources()).cities;
+    // The web renderer only reads these four fields; omit gazetteer metadata
+    // that would otherwise dominate the payload (670 KB -> 230 KB).
+    return {
+      coverage: cities.coverage,
+      labels: cities.labels.map(({ id, name, level, position }) => ({
+        id,
+        name,
+        level,
+        position,
+      })),
+    };
+  });
   app.get("/api/browse", async (request) => {
     const query = z
         .object({ path: z.string().max(4096).optional() })
