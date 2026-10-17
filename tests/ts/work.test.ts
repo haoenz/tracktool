@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
   mkdtemp,
   writeFile,
@@ -15,6 +15,7 @@ import path from "node:path";
 import os from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import sharp from "sharp";
+import Database from "better-sqlite3";
 import { createApp } from "../../dist/node/server/app.js";
 import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js";
 import { SqliteTasks } from "../../dist/node/infrastructure/task-store.js";
@@ -27,6 +28,7 @@ import type { WorkTask, WorkRequest } from "../../dist/node/shared/work.js";
 import type { WorkRunner } from "../../dist/node/services/work-ports.js";
 const cleanup: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
+  vi.unstubAllGlobals();
   for (const fn of cleanup.splice(0).reverse()) await fn();
 });
 async function tmp() {
@@ -229,6 +231,7 @@ async function server(host = "127.0.0.1") {
     config,
     JSON.stringify({
       archive_path: archive,
+      auto_fill_locations: false,
       google_api_key: "fixture-private-key",
     }),
   );
@@ -878,32 +881,127 @@ it("HTTP uploaded imports clean copies after both success and invalid preview, a
 });
 
 
-it("per-file import names and categories match preview and atomic publication", async () => {
+it("per-file import names and activity tags match preview and atomic publication", async () => {
   const { dir, archive, call, settled } = await server();
   const bytes = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
   const files = [path.join(dir, "2026-10-01 原始一.kml"), path.join(dir, "2026-10-01 原始二.kml")];
   for (const file of files) await writeFile(file, bytes);
   const importFiles = [
-    { path: files[0], name: "2026-10-02 修改一.kml", category: "Default" },
-    { path: files[1], name: "2026-10-03 修改二.kml", category: "Flight" },
+    { path: files[0], name: "2026-10-02 修改一.kml", tag: "徒步" },
+    { path: files[1], name: "2026-10-03 修改二.kml", tag: "飞机" },
   ];
   const plan = await call<WorkTask>("/api/work/preview", { operation: "archive:push", archive, inputs: files, options: { importFiles } });
   expect((await settled(plan.id)).output?.data).toMatchObject({ import_items: [
-    { member: "Default/2026-10/2026-10-02 修改一.kml", status: "new" },
-    { member: "Flight/2026-10/2026-10-03 修改二.kml", status: "new" },
+    { member: "Default/2026-10/2026-10-02 修改一.kml", tag: "徒步", sourceTag: "火车", status: "new" },
+    { member: "Flight/2026-10/2026-10-03 修改二.kml", tag: "飞机", sourceTag: "火车", status: "new" },
   ] });
   const applied = await call<WorkTask>(`/api/work/tasks/${plan.id}/apply`, {});
   const done = await settled(applied.id);
   expect(done.status).toBe("succeeded");
   expect(done.output?.data).toMatchObject({ import_items: [
-    { member: "Default/2026-10/2026-10-02 修改一.kml", entryId: expect.any(String) },
-    { member: "Flight/2026-10/2026-10-03 修改二.kml", entryId: expect.any(String) },
+    { member: "Default/2026-10/2026-10-02 修改一.kml", tag: "徒步", sourceTag: "火车", entryId: expect.any(String) },
+    { member: "Flight/2026-10/2026-10-03 修改二.kml", tag: "飞机", sourceTag: "火车", entryId: expect.any(String) },
   ] });
   expect((await call<WorkTask>(`/api/work/tasks/${plan.id}/apply`, {})).id).toBe(applied.id);
-  for (const file of files) expect(await readFile(file)).toEqual(bytes);
+  expect(await readFile(files[0]!, "utf8")).toContain("<value>徒步</value>");
+  expect(await readFile(files[1]!, "utf8")).toContain("<value>飞机</value>");
+  const repeated = await call<WorkTask>("/api/work/preview", {
+    operation: "archive:push",
+    archive,
+    inputs: files,
+    options: {
+      importFiles: [
+        { path: files[0], name: "2026-10-02 修改一.kml" },
+        { path: files[1], name: "2026-10-03 修改二.kml" },
+      ],
+    },
+  });
+  expect((await settled(repeated.id)).output?.data).toMatchObject({ import_items: [{ status: "duplicate" }, { status: "duplicate" }] });
   for (const overrides of [
     [{ path: files[0], name: "../2026-10-01.kml" }],
     [{ path: files[0] }, { path: files[0] }],
     [{ path: files[1] }],
+    [{ path: files[0], tag: "不存在" }],
   ]) await expect(call("/api/work/preview", { operation: "archive:push", archive, inputs: [files[0]], options: { importFiles: overrides } })).rejects.toThrow();
+});
+
+it("import automatically fills endpoint administrative locations when enabled", async () => {
+  const { dir, config, call, settled } = await server();
+  const archive = path.join(dir, "locations-archive");
+  const source = path.join(dir, "2026-10-01 自动位置.kml");
+  await copyFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml", source);
+  const settings = JSON.parse(await readFile(config, "utf8")) as Record<string, unknown>;
+  settings.archive_path = archive;
+  settings.auto_fill_locations = true;
+  await writeFile(config, JSON.stringify(settings));
+  async function run(request: unknown) {
+    const queued = await call<WorkTask>("/api/work/preview", request);
+    const preview = await settled(queued.id);
+    expect(preview.status, JSON.stringify(preview.error)).toBe("succeeded");
+    const applied = await call<WorkTask>(
+      `/api/work/tasks/${queued.id}/apply`,
+      {},
+    );
+    const task = await settled(applied.id);
+    expect(task.status, JSON.stringify(task.error)).toBe("succeeded");
+    return task;
+  }
+  await run({ operation: "archive:init", archive });
+  const realFetch = globalThis.fetch;
+  const requested: string[] = [];
+  vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    if (!url.startsWith("https://maps.googleapis.com/maps/api/geocode/json"))
+      return realFetch(input, init);
+    requested.push(url);
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          status: "OK",
+          results: [
+            {
+              address_components: [
+                { long_name: "中国", short_name: "CN", types: ["country", "political"] },
+                { long_name: "浙江省", short_name: "ZJ", types: ["administrative_area_level_1", "political"] },
+                { long_name: "杭州市", short_name: "HZ", types: ["locality", "political"] },
+                { long_name: "西湖区", short_name: "XH", types: ["administrative_area_level_3", "political"] },
+              ],
+              types: ["locality", "political"],
+              place_id: "test-place",
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+  });
+  const imported = await run({
+    operation: "archive:push",
+    archive,
+    inputs: [source],
+    options: { keep: true },
+  });
+  expect(imported.output?.data).toMatchObject({
+    import_items: [{ tag: "火车", status: "new" }],
+  });
+  expect(requested).toHaveLength(2);
+  const db = new Database(path.join(archive, "archive.sqlite3"), { readonly: true });
+  try {
+    const rows = db
+      .prepare(
+        "SELECT endpoint,status,json_extract(location_json,'$.province') province FROM track_endpoint_locations ORDER BY endpoint",
+      )
+      .all() as { endpoint: string; status: string; province: string }[];
+    expect(rows).toEqual([
+      { endpoint: "end", status: "complete", province: "浙江省" },
+      { endpoint: "start", status: "complete", province: "浙江省" },
+    ]);
+  } finally {
+    db.close();
+  }
 });

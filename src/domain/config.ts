@@ -11,6 +11,7 @@ export const DEFAULTS: ConfigData = {
   log_level: "INFO",
   archive_path: "",
   archive_history: true,
+  auto_fill_locations: true,
   kml_backup_dir_name: "Backup",
   output_filters: "",
   google_api_key: "",
@@ -119,10 +120,10 @@ export function normalizeScalar(key: string, value: string): unknown {
       throw new AppError("USER_INPUT", `Unknown log level: ${value}`);
     return parsed.data;
   }
-  if (key === "archive_history") {
+  if (key === "archive_history" || key === "auto_fill_locations") {
     const parsed = parseBool(value);
     if (parsed === undefined)
-      throw new AppError("USER_INPUT", "archive_history is true or false");
+      throw new AppError("USER_INPUT", `${key} is true or false`);
     return parsed;
   }
   if (key.startsWith("track_tag.")) parseTagSpec(value);

@@ -70,7 +70,7 @@ Python 调用方只需用自己的 `subprocess.run([...], check=True, capture_ou
 | `POST /api/work/tasks/:id/retry` | 普通任务建立新预览；版本编辑 apply 任务以原请求键重试，先回放已提交结果 |
 | `GET /api/work/tasks/:id/download?index=0` | 下载该任务登记的结果文件 |
 
-`archive:push` 支持 `options.importFiles: [{path, name?, category?}]`：每个 `path` 必须唯一且属于本次 `inputs`，名称必须为不含路径分隔符的 KML 文件名，分类为 `Default`、`Train` 或 `Flight`。逐文件设置优先于全局分类，校验和实际导入使用同一设置，不改动原文件内容。导入结果的 `import_items` 包含 `entryId`，可直接打开轨迹详情。同一个入库预览重复调用 `apply` 会返回原提交任务，便于网络中断后查询结果。
+`archive:push` 支持 `options.importFiles: [{path, tag?, name?}]`：每个 `path` 必须唯一且属于本次 `inputs`，名称必须为不含路径分隔符的 KML 文件名，`tag` 必须是配置中已有的活动标签。逐文件标签会写入该文件的 `TrackTags`（网页上传场景即其暂存副本），并据此推导 `Default`、`Train` 或 `Flight` 分类；未指定时沿用文件原有标签。校验和实际导入使用同一设置。提交成功后，若 `auto_fill_locations` 未关闭且已配置 Google API key，会自动补全本批新入库轨迹的起终点行政区；该步骤不阻塞提交结果，失败只记录任务日志。导入结果的 `import_items` 包含 `entryId`，可直接打开轨迹详情。同一个入库预览重复调用 `apply` 会返回原提交任务，便于网络中断后查询结果。
 
 HTTP 契约面向本地单用户应用，不是公网身份认证方案。上传暂存、预览、重试及取消方式见[网页使用说明](web-usage.md)。
 

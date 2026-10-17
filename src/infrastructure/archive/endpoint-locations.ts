@@ -83,6 +83,7 @@ export type EndpointEvidence = {
 };
 export type FillEndpointOptions = {
   entry?: string;
+  entries?: string[];
   limit?: number;
   language?: string;
   dryRun?: boolean;
@@ -114,25 +115,6 @@ export async function fillEndpointLocations(
     (!Number.isInteger(options.limit) || options.limit < 1)
   )
     throw new AppError("USER_INPUT", "limit 必须为正整数");
-  const entries = readTransaction(file, (db) => {
-    if (schemaVersion(db) < 6 && !options.dryRun)
-      throw new AppError(
-        "USER_INPUT",
-        "端点行政区需要 schema 6；请先执行 archive migrate",
-      );
-    if (schemaVersion(db) < 3)
-      throw new AppError("USER_INPUT", "请先执行 archive migrate");
-    return db
-      .prepare(
-        `SELECT id,path FROM archive_entries WHERE state='active' ${options.entry ? "AND id=?" : ""} ORDER BY path`,
-      )
-      .all(...(options.entry ? [options.entry] : [])) as {
-      id: string;
-      path: string;
-    }[];
-  });
-  if (options.entry && !entries.length)
-    throw new AppError("USER_INPUT", "活动轨迹不存在");
   const summary = {
     tracks: 0,
     skipped: 0,
@@ -147,6 +129,37 @@ export async function fillEndpointLocations(
     fallback: 0,
     conflicts: 0,
   };
+  const selected = options.entries ? [...new Set(options.entries)] : undefined;
+  if (selected && !selected.length) return summary;
+  const filters: string[] = [];
+  const params: string[] = [];
+  if (options.entry) {
+    filters.push("AND id=?");
+    params.push(options.entry);
+  }
+  if (selected) {
+    filters.push(`AND id IN (${selected.map(() => "?").join(",")})`);
+    params.push(...selected);
+  }
+  const entries = readTransaction(file, (db) => {
+    if (schemaVersion(db) < 6 && !options.dryRun)
+      throw new AppError(
+        "USER_INPUT",
+        "端点行政区需要 schema 6；请先执行 archive migrate",
+      );
+    if (schemaVersion(db) < 3)
+      throw new AppError("USER_INPUT", "请先执行 archive migrate");
+    return db
+      .prepare(
+        `SELECT id,path FROM archive_entries WHERE state='active' ${filters.join(" ")} ORDER BY path`,
+      )
+      .all(...params) as {
+      id: string;
+      path: string;
+    }[];
+  });
+  if (options.entry && !entries.length)
+    throw new AppError("USER_INPUT", "活动轨迹不存在");
   const reusable = (v: EndpointLocation) =>
     v.resolver_version === ADMINISTRATIVE_RESOLVER_VERSION &&
     !options.refresh &&

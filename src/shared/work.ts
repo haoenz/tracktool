@@ -53,11 +53,23 @@ export const WorkRequestSchema = z
     options: z
       .object({
         category: z.enum(["Default", "Train", "Flight"]).optional(),
-        importFiles: z.array(z.object({
-          path: text.min(1),
-          category: z.enum(["Default", "Train", "Flight"]).optional(),
-          name: z.string().min(1).max(240).regex(/^[^/\\:\x00-\x1f]+\.kml$/i).optional(),
-        }).strict()).max(500).optional(),
+        importFiles: z
+          .array(
+            z
+              .object({
+                path: text.min(1),
+                tag: text.min(1).optional(),
+                name: z
+                  .string()
+                  .min(1)
+                  .max(240)
+                  .regex(/^[^/\\:\x00-\x1f]+\.kml$/i)
+                  .optional(),
+              })
+              .strict(),
+          )
+          .max(500)
+          .optional(),
         tag: text.optional(),
         create: z.boolean().optional(),
         keep: z.boolean().optional(),
@@ -117,6 +129,8 @@ export interface ImportItem {
   member?: string;
   entryId?: string;
   category?: string;
+  tag?: string;
+  sourceTag?: string;
   status: "new" | "duplicate" | "conflict" | "invalid";
   reason: string;
 }

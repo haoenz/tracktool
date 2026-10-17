@@ -256,7 +256,15 @@ export function TaskDetail({
       </details>
       {task.request.operation === "archive:push" && (
         <p>
-          分类：{task.request.options.category || "自动识别（见逐文件明细）"}。
+          活动标签：
+          {[
+            ...new Set(
+              (task.request.options.importFiles ?? [])
+                .map((item) => item.tag)
+                .filter(Boolean),
+            ),
+          ].join("、") || "自动识别（见逐文件明细）"}
+          。
           {task.mode === "plan"
             ? "预览不会写入轨迹库；请核对下面的重复、冲突及异常结果。"
             : "本批次在同一事务中入库；提交前失败整批回滚，成功提交后重新上传会识别为重复。"}
@@ -377,7 +385,8 @@ export function TaskDetail({
             <article key={n}>
               <strong>{i.path.split(/[\\/]/).at(-1)}</strong>
               <p>
-                {i.category ?? "分类未知"} · {i.reason}
+                {i.tag ?? "标签未知"}
+                {i.category ? `（${i.category}）` : ""} · {i.reason}
               </p>
             </article>
           ))}

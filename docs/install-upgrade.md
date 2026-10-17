@@ -46,4 +46,4 @@ ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL
 
 轨迹详情统计在 schema 5 中按内容哈希、解析器版本、分析版本及参数哈希持久缓存。迁移仅增加空缓存表，不预计算历史数据；首次查看时回填。缓存不推进业务或存储修订号，不改变轨迹历史。旧库未迁移或无法写入时仍可按需计算。
 
-端点行政区使用 schema 6 的独立表，迁移保留原有统计缓存和轨迹原件。升级先自动保存完整 SQLite 备份；迁移本身不访问 Google。执行 `pnpm cli track fill-locations --dry-run` 查看计划，去掉 `--dry-run` 才查询并持久化。
+端点行政区使用 schema 6 的独立表，迁移保留原有统计缓存和轨迹原件。升级先自动保存完整 SQLite 备份；迁移本身不访问 Google。迁移后网页/HTTP 入库的新轨迹会默认自动查询起终点行政区（`auto_fill_locations=false` 可关闭）；历史轨迹仍用 `pnpm cli track fill-locations --dry-run` 查看计划，去掉 `--dry-run` 才查询并持久化。

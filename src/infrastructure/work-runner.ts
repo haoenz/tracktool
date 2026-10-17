@@ -9,12 +9,13 @@ import { AppError, checkCancelled } from "../domain/errors.js";
 import { TAGS as T } from "../domain/tags.js";
 import { coordinate, gpsTags } from "../domain/media.js";
 import { parseMediaTime, formatWall } from "../domain/media-time.js";
-import { resolveApiKey, tagMap } from "../domain/config.js";
+import { parseBool, resolveApiKey, tagMap } from "../domain/config.js";
 import type { ConfigStore } from "../services/ports.js";
 import type { WorkRunner } from "../services/work-ports.js";
 import type { WorkRequest, WorkOutput } from "../shared/work.js";
 import { WorkRequestSchema } from "../shared/work.js";
 import { previewDeletion } from "./archive/deletion.js";
+import { fillEndpointLocations } from "./archive/endpoint-locations.js";
 import type { TaskEvent, BatchResult } from "../shared/contracts.js";
 import { createContext } from "../services/context.js";
 import { KmlService } from "../services/kml-service.js";
@@ -97,12 +98,19 @@ export class BusinessRunner implements WorkRunner {
       [...new Set(value.inputs)].map((p) => this.files.resolve(p)),
     );
     if (value.options.importFiles) {
-      if (value.operation !== "archive:push") throw new AppError("USER_INPUT", "逐文件设置仅适用于轨迹入库");
+      if (value.operation !== "archive:push")
+        throw new AppError("USER_INPUT", "逐文件设置仅适用于轨迹入库");
+      const tags = tagMap(await this.config.load());
       const seen = new Set<string>();
       for (const item of value.options.importFiles) {
         item.path = await this.files.resolve(item.path);
         if (!value.inputs.includes(item.path) || seen.has(item.path))
-          throw new AppError("USER_INPUT", "逐文件设置必须对应本次上传的文件，且不能重复");
+          throw new AppError(
+            "USER_INPUT",
+            "逐文件设置必须对应本次上传的文件，且不能重复",
+          );
+        if (item.tag !== undefined && !tags.has(item.tag))
+          throw new AppError("USER_INPUT", `未知活动标签：${item.tag}`);
         seen.add(item.path);
       }
     }
@@ -276,6 +284,63 @@ export class BusinessRunner implements WorkRunner {
         ]),
       )
       .digest("hex");
+  }
+  private async fillImportedLocations(
+    database: string,
+    entries: string[],
+    xml: XmlWorkers,
+    key: string,
+    signal: AbortSignal,
+    report: (event: TaskEvent) => void,
+  ) {
+    if (!entries.length) return;
+    report({
+      type: "log",
+      level: "INFO",
+      message: `正在补全 ${entries.length} 条轨迹的起终点行政区`,
+    });
+    if (!key) {
+      report({
+        type: "log",
+        level: "WARNING",
+        message: "未配置 Google API key，已跳过起终点行政区补全",
+      });
+      return;
+    }
+    try {
+      const summary = await fillEndpointLocations(
+        database,
+        xml,
+        new GoogleGeocode(),
+        key,
+        signal,
+        {
+          entries,
+          onProgress: (value) => {
+            if (typeof value.error === "string")
+              report({
+                type: "log",
+                level: "WARNING",
+                message: `起终点行政区补全失败：${value.error}`,
+              });
+          },
+        },
+      );
+      report({
+        type: "log",
+        level: "INFO",
+        message: `起终点行政区补全完成：保存 ${summary.saved} 个端点，复用 ${summary.reused} 个，失败 ${summary.failed} 条轨迹`,
+      });
+    } catch (error) {
+      report({
+        type: "log",
+        level: "WARNING",
+        message:
+          error instanceof AppError && error.code === "CANCELLED"
+            ? "起终点行政区补全已取消"
+            : `起终点行政区补全失败，轨迹已正常入库：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
   }
   async run(
     request: WorkRequest,
@@ -454,19 +519,66 @@ export class BusinessRunner implements WorkRunner {
           );
           db.close();
           const items: ImportItem[] = [];
+          const adjustments = new Map(
+            (o.importFiles ?? []).map((item) => [item.path, item]),
+          );
+          const tags = tagMap(config);
           for (const file of files) {
             checkCancelled(signal);
+            let sourceTag: string | undefined;
             try {
-              const { source, category } = await kml.importContent(ctx, file);
-              const adjustment = o.importFiles?.find((item) => item.path === file);
-              const chosen = adjustment?.category ?? o.category ?? category;
+              const adjustment = adjustments.get(file);
+              const tag = adjustment?.tag;
+              let { source, content, category } = await kml.importContent(
+                ctx,
+                file,
+              );
+              sourceTag = content.tag || undefined;
+              if (tag !== undefined) {
+                category = (tags.get(tag) ?? null) as typeof category;
+                if (content.tag !== tag) {
+                  if (mode === "apply") {
+                    await kml.edit(ctx, file, {
+                      kind: "set-tag",
+                      tag,
+                      create: true,
+                    });
+                    ({ source, content, category } = await kml.importContent(
+                      ctx,
+                      file,
+                    ));
+                    category = (tags.get(tag) ?? null) as typeof category;
+                  } else {
+                    // Preview the exact bytes the apply phase will publish.
+                    const edited = await xml.run(
+                      source.bytes,
+                      {
+                        kind: "edit",
+                        operation: { kind: "set-tag", tag, create: true },
+                      },
+                      signal,
+                    );
+                    const bytes = Buffer.from(edited.edit!.outputs[0]!.xml);
+                    source = {
+                      ...source,
+                      bytes,
+                      sha256: createHash("sha256").update(bytes).digest("hex"),
+                    };
+                  }
+                }
+              }
+              const chosen = category ?? o.category;
               if (!chosen)
                 throw new AppError(
                   "USER_INPUT",
-                  "无法识别活动标签，请选择入库分类",
+                  "无法识别活动标签，请选择活动标签",
                 );
               const name = adjustment?.name ?? source.name;
-              if (!/\d{4}-\d{2}-\d{2}/.test(name)) throw new AppError("USER_INPUT", "名称需包含行程日期，例如 2026-10-01 徒步.kml");
+              if (!/\d{4}-\d{2}-\d{2}/.test(name))
+                throw new AppError(
+                  "USER_INPUT",
+                  "名称需包含行程日期，例如 2026-10-01 徒步.kml",
+                );
               filenameDate(name);
               const member = entryName(name, chosen),
                 sha = existing.get(member);
@@ -479,6 +591,8 @@ export class BusinessRunner implements WorkRunner {
                 path: file,
                 member,
                 category: chosen,
+                tag: tag ?? (content.tag || undefined),
+                sourceTag,
                 status,
                 reason:
                   status === "new"
@@ -492,14 +606,22 @@ export class BusinessRunner implements WorkRunner {
               if (e instanceof AppError && e.code === "CANCELLED") throw e;
               items.push({
                 path: file,
+                tag: sourceTag,
+                sourceTag,
                 status: "invalid",
                 reason: e instanceof Error ? e.message : String(e),
               });
             }
           }
           output.data = { import_items: items };
-          if (mode === "apply" && items.some((i) => i.status === "invalid" || i.status === "conflict"))
-            throw new AppError("USER_INPUT", "入库校验失败，本批次未写入任何轨迹；请修正后重新上传");
+          if (
+            mode === "apply" &&
+            items.some((i) => i.status === "invalid" || i.status === "conflict")
+          )
+            throw new AppError(
+              "USER_INPUT",
+              "入库校验失败，本批次未写入任何轨迹；请修正后重新上传",
+            );
           // Show all conflicts in the preview; application rejects the entire batch above.
           if (!items.some((i) => i.status === "conflict"))
             result = await kml.push(
@@ -513,13 +635,33 @@ export class BusinessRunner implements WorkRunner {
             );
           if (mode === "apply") {
             output.committed = true;
-            const imported = new Database(databasePath(database), { readonly: true, fileMustExist: true });
+            const imported = new Database(databasePath(database), {
+              readonly: true,
+              fileMustExist: true,
+            });
             try {
               for (const item of items) {
-                const entry = imported.prepare(`SELECT id FROM ${activeEntries(imported)} WHERE path=?`).get(item.member) as { id: string } | undefined;
+                const entry = imported
+                  .prepare(
+                    `SELECT id FROM ${activeEntries(imported)} WHERE path=?`,
+                  )
+                  .get(item.member) as { id: string } | undefined;
                 item.entryId = entry?.id;
               }
-            } finally { imported.close(); }
+            } finally {
+              imported.close();
+            }
+            if (parseBool(config.auto_fill_locations) ?? true)
+              await this.fillImportedLocations(
+                database,
+                items
+                  .filter((item) => item.status === "new" && item.entryId)
+                  .map((item) => item.entryId!),
+                xml,
+                key,
+                signal,
+                report,
+              );
           }
         } else if (kind === "init" || kind === "import-zip") {
           if (mode === "plan") {

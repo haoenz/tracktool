@@ -95,8 +95,16 @@ export class KmlService {
   }
   async importContent(ctx: Context, file: string) {
     const value = await this.content(ctx, file);
-    const parsed = await this.xml.run(value.source.bytes, { kind: "tracks", source: file }, ctx.signal);
-    if (!parsed.tracks?.tracks.some((track) => track.segments.some((segment) => segment.longitude.length > 0)))
+    const parsed = await this.xml.run(
+      value.source.bytes,
+      { kind: "tracks", source: file },
+      ctx.signal,
+    );
+    if (
+      !parsed.tracks?.tracks.some((track) =>
+        track.segments.some((segment) => segment.longitude.length > 0),
+      )
+    )
       throw new AppError("USER_INPUT", "KML 中没有有效轨迹点");
     return value;
   }
@@ -133,17 +141,22 @@ export class KmlService {
     backup: string,
     move: boolean,
     override?: Category,
-    overrides: { path: string; category?: Category; name?: string }[] = [],
+    overrides: { path: string; tag?: string; name?: string }[] = [],
   ): Promise<BatchResult> {
     const entries: ArchiveInput[] = [];
     const result = await this.batch(ctx, files, async (file) => {
       const { source, category } = await this.importContent(ctx, file);
       const adjustment = overrides.find((item) => item.path === file);
-      const kind = adjustment?.category ?? override ?? category;
+      const kind =
+        (adjustment?.tag
+          ? (tagMap(ctx.config).get(adjustment.tag) as Category | undefined)
+          : undefined) ??
+        override ??
+        category;
       if (!kind)
         throw new AppError(
           "USER_INPUT",
-          "Unknown TrackTags; use kml set-tag or --type",
+          "无法识别活动标签，请设置 TrackTags 或选择活动标签",
         );
       const name = adjustment?.name ?? source.name;
       filenameDate(name);

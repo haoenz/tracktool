@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   CircleAlert,
@@ -16,11 +16,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "./components/ui/popover.js";
-import { api } from "./api.js";
+import { api, readConfig } from "./api.js";
 import { useWorkspace } from "./workspace.js";
+import type { PublicConfig } from "../shared/contracts.js";
 import type { ImportItem, UploadResult, WorkTask } from "../shared/work.js";
 
-type Category = "Default" | "Train" | "Flight";
 type Stage =
   | "queued"
   | "uploading"
@@ -35,7 +35,8 @@ type Row = {
   id: string;
   file: File;
   name: string;
-  category?: Category;
+  tag?: string;
+  detectedTag?: string;
   stage: Stage;
   progress: number;
   path?: string;
@@ -46,17 +47,14 @@ type Row = {
   result?: ImportItem;
   error?: string;
 };
-const categories = [
-  { value: "auto", label: "自动识别" },
-  { value: "Default", label: "普通轨迹" },
-  { value: "Train", label: "火车" },
-  { value: "Flight", label: "飞机" },
-];
-const labels: Record<string, string> = {
-  Default: "普通轨迹",
-  Train: "火车",
-  Flight: "飞机",
-};
+const tagValues = (config?: PublicConfig) =>
+  new Set(
+    ["Default", "Train", "Flight"].flatMap(
+      (category) =>
+        (config?.[("track_tag." + category) as keyof PublicConfig] as
+          string[] | undefined) ?? [],
+    ),
+  );
 const stages: Record<Stage, string> = {
   queued: "等待上传",
   uploading: "正在上传",
@@ -93,6 +91,29 @@ function uploadId(): string {
 export function ImportPanel() {
   const workspace = useWorkspace();
   const cache = useQueryClient();
+  const config = useQuery({
+    queryKey: ["config"],
+    queryFn: () => readConfig(),
+  });
+  const registeredTags = [...tagValues(config.data)].map((value) => ({
+    value,
+    label: value,
+  }));
+  const currentTag = (row: Row) => row.detectedTag ?? row.result?.sourceTag;
+  const rowTagOptions = (row: Row) => {
+    const value = currentTag(row);
+    return [
+      {
+        value: "auto",
+        label: value
+          ? tagValues(config.data).has(value)
+            ? value
+            : `${value}（未登记）`
+          : "当前标签未知",
+      },
+      ...registeredTags.filter((option) => option.value !== value),
+    ];
+  };
   const [rows, setRows] = useState<Row[]>([]);
   const current = useRef<Row[]>([]);
   const [running, setRunning] = useState(false);
@@ -222,9 +243,7 @@ export function ImportPanel() {
             archive: workspace.archive,
             inputs: [row.path],
             options: {
-              importFiles: [
-                { path: row.path, name: row.name, category: row.category },
-              ],
+              importFiles: [{ path: row.path, name: row.name, tag: row.tag }],
             },
           });
       row.planId = queued.id;
@@ -234,6 +253,7 @@ export function ImportPanel() {
         plan.output?.data as { import_items?: ImportItem[] } | undefined
       )?.import_items?.[0];
       row.result = result;
+      if (result?.sourceTag) row.detectedTag = result.sourceTag;
       if (
         plan.status !== "succeeded" ||
         !result ||
@@ -287,6 +307,7 @@ export function ImportPanel() {
       done.output?.data as { import_items?: ImportItem[] } | undefined
     )?.import_items?.[0];
     row.result = result ?? row.result;
+    if (result?.sourceTag) row.detectedTag = result.sourceTag;
     await cleanup(row);
     if (done.status !== "succeeded")
       throw new Error(done.error?.message ?? "保存失败，请重试。");
@@ -506,9 +527,9 @@ export function ImportPanel() {
                     <strong title={row.name}>{row.name}</strong>
                     <div className="import-file-meta">
                       <span>{size(row.file.size)}</span>
-                      {(row.category ?? row.result?.category) && (
+                      {(row.tag ?? row.result?.tag) && (
                         <span className="import-category">
-                          {labels[row.category ?? row.result!.category!]}
+                          {row.tag ?? row.result!.tag}
                         </span>
                       )}
                       <span>
@@ -571,7 +592,7 @@ export function ImportPanel() {
                             align="end"
                             className="import-options-popover"
                           >
-                            <p className="font-medium">修改名称或分类</p>
+                            <p className="font-medium">修改名称或活动标签</p>
                             <div className="import-file-options">
                               <label>
                                 导入名称
@@ -584,17 +605,14 @@ export function ImportPanel() {
                                 />
                               </label>
                               <label>
-                                分类
+                                活动标签
                                 <Select
-                                  aria-label={`${row.file.name} 分类`}
-                                  value={row.category ?? "auto"}
-                                  options={categories}
+                                  aria-label={`${row.file.name} 活动标签`}
+                                  value={row.tag ?? "auto"}
+                                  options={rowTagOptions(row)}
                                   onChange={(value) =>
                                     change(row.id, {
-                                      category:
-                                        value === "auto"
-                                          ? undefined
-                                          : (value as Category),
+                                      tag: value === "auto" ? undefined : value,
                                     })
                                   }
                                 />
