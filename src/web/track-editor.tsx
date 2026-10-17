@@ -3,7 +3,6 @@ import { samePresentation } from "../shared/presentation-equality.js";
 import { editTracks } from "./track-editor-map.js";
 import { TrackHistory } from "./track-history.js";
 import "./work.css";
-import { ArrowLeft } from "lucide-react";
 import { useEditSnapshot } from "./edit-snapshot.js";
 import { nearestPoint, previewAnnotations } from "../shared/edit-map.js";
 import { useEffect, useState, useRef } from "react";
@@ -74,13 +73,15 @@ function TrackEditor({
   view = "edit",
   active: visible = true,
   onEntryChange,
-  onDrawHeaderChange,
+  onHeaderChange,
 }: {
   initialEntry: string;
   view?: "edit" | "display" | "history";
   active?: boolean;
   onEntryChange?: (id: string) => void;
-  onDrawHeaderChange?: (header: { onBack: () => void } | undefined) => void;
+  onHeaderChange?: (
+    header: { title: string; backLabel: string; onBack: () => void } | undefined,
+  ) => void;
 }) {
   const workspace = useWorkspace(),
     cache = useQueryClient();
@@ -251,16 +252,23 @@ function TrackEditor({
     (!!settings && !!d && !samePresentation(settings, d.settings));
   const draftKey = `editor:${entryId}`;
   useEffect(() => {
-    if (view !== "display" || mode !== "draw") return;
-    onDrawHeaderChange?.({
+    if (!mode || view === "history") return;
+    onHeaderChange?.({
+      title: editActions[mode]!,
+      backLabel: view === "display" ? "返回分段管理" : "返回编辑操作",
       onBack: () => {
         if (busy || active) return;
+        if (
+          draftDirty &&
+          !window.confirm("有未保存的修改，是否放弃并返回？")
+        )
+          return;
         resetDraft();
         setMode("");
       },
     });
-    return () => onDrawHeaderChange?.(undefined);
-  }, [view, mode, busy, active, d, onDrawHeaderChange]);
+    return () => onHeaderChange?.(undefined);
+  }, [view, mode, busy, active, d, draftDirty, onHeaderChange]);
   useEffect(() => {
     workspace.draft?.(draftKey, draftDirty);
     return () => workspace.draft?.(draftKey, false);
@@ -807,28 +815,6 @@ function TrackEditor({
           )}
           {(view === "edit" || view === "display") && mode && (
             <section aria-label={editActions[mode]} className="space-y-3">
-              {view !== "display" && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label="返回编辑操作"
-                    disabled={busy || !!active}
-                    onClick={() => {
-                      if (
-                        draftDirty &&
-                        !window.confirm("有未保存的修改，是否放弃并返回？")
-                      )
-                        return;
-                      resetDraft();
-                      setMode("");
-                    }}
-                  >
-                    <ArrowLeft size={18} />
-                  </Button>
-                  <strong>{editActions[mode]}</strong>
-                </div>
-              )}
               <fieldset
                 disabled={busy || !!active || !!preview}
                 className="min-w-0 space-y-3"
@@ -1244,7 +1230,9 @@ export default function TrackEditorView(props: {
   view?: "edit" | "display" | "history";
   active?: boolean;
   onEntryChange?: (id: string) => void;
-  onDrawHeaderChange?: (header: { onBack: () => void } | undefined) => void;
+  onHeaderChange?: (
+    header: { title: string; backLabel: string; onBack: () => void } | undefined,
+  ) => void;
 }) {
   return props.view === "history" ? (
     <TrackHistory entryId={props.initialEntry} active={props.active ?? true} />

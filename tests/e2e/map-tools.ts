@@ -26,7 +26,9 @@ export async function tool(page: Page, name: string) {
     .getByRole("region", { name: "当前出图工程" })
     .isVisible();
   if (inProject && !["export", "project"].includes(currentPanel ?? "")) {
-    await page.getByRole("button", { name: "回到工程", exact: true }).click();
+    await page.getByRole("button", { name: "导出轨迹", exact: true }).click();
+    await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
+    await page.getByRole("option", { name: "PNG图像", exact: true }).click();
     await expect(page.getByRole("group", { name: "出图设置" })).toBeVisible();
   } else if (
     !inProject &&

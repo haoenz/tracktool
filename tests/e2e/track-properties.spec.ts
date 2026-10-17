@@ -86,6 +86,10 @@ test("single-track panel previews and saves tag, split and cleanup with history"
     });
     if (await back.isVisible()) await back.click();
     await page.getByRole("button", { name, exact: true }).click();
+    await expect(
+      page.locator("#map-panel > .panel-header").getByRole("heading", { name, exact: true }),
+    ).toBeVisible();
+    await expect(back).toHaveCount(1);
   };
   await choose("补高程");
   await expect(dialog).toContainText("缺失高程的轨迹片段查询海拔");
@@ -96,6 +100,7 @@ test("single-track panel previews and saves tag, split and cleanup with history"
   await expect(dialog).toContainText("编辑已保存，旧版本保留在历史中。", {
     timeout: 20000,
   });
+  await page.getByRole("button", { name: "返回编辑操作", exact: true }).click();
   await page.getByRole("button", { name: "返回详情", exact: true }).click();
   await page.getByRole("button", { name: "返回列表", exact: true }).click();
   // Use a longer independent fixture for split/prune.
@@ -119,6 +124,7 @@ test("single-track panel previews and saves tag, split and cleanup with history"
   await expect(dialog).toContainText("编辑已保存，旧版本保留在历史中。", {
     timeout: 20000,
   });
+  await page.getByRole("button", { name: "返回编辑操作", exact: true }).click();
   await page.getByRole("button", { name: "返回详情", exact: true }).click();
   await page.getByRole("button", { name: "返回列表", exact: true }).click();
   await page

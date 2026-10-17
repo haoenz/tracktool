@@ -180,7 +180,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     [candidateCamera, setCandidateCamera] = useState<Project["camera"]>(),
     [sheet, setSheet] = useState("half"),
     [editing, setEditing] = useState(false),
-    [drawHeader, setDrawHeader] = useState<{ onBack: () => void }>(),
+    [editorHeader, setEditorHeader] = useState<{ title: string; backLabel: string; onBack: () => void }>(),
     [detailOpen, setDetailOpen] = useState(true),
     [projectTab, setProjectTab] = useState("content"),
     [projectSearch, setProjectSearch] = useState(""),
@@ -1175,13 +1175,13 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             aria-label="地图控制面板"
           >
             <SheetHandle panel={controls} value={sheet} onChange={setSheet} />
-            {!listVisible && (
+            {!listVisible && !exportPage && panel !== "settings" && archiveAction !== "archive:push" && (
             <PanelHeader
               title={
                 panel === "library" && archiveAction
                   ? operationLabel(archiveAction)
                     : panel === "library" && overview.id && detailOpen
-                      ? editing ? drawHeader && editorView === "display" ? "补绘轨迹" : editorTitles[editorView] : overview.selected?.name ?? "正在读取轨迹…"
+                      ? editing ? editorHeader?.title ?? editorTitles[editorView] : overview.selected?.name ?? "正在读取轨迹…"
                       : panel === "library" && libraryList ? "轨迹列表" : exportPage ? "导出轨迹" : panel ? panels[panel] : ""
               }
               headingClassName={panel === "library" && overview.id && detailOpen ? "track-detail-heading" : undefined}
@@ -1189,17 +1189,17 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                 panel === "library" && archiveAction
                   ? "返回轨迹库"
                   : panel === "library" && overview.id && detailOpen
-                    ? editing ? drawHeader && editorView === "display" ? "返回分段管理" : "返回详情" : "返回列表"
+                    ? editing ? editorHeader?.backLabel ?? "返回详情" : "返回列表"
                     : inProject && !exportPage ? "回到工程" : "返回轨迹库"
               }
               onBack={
                 panel === "library" && archiveAction
-                  ? () => setArchiveAction(undefined)
+                    ? () => setArchiveAction(undefined)
                     : panel === "library" && overview.id && detailOpen
                       ? () => {
                           if (editing) {
-                            if (drawHeader && editorView === "display") {
-                              drawHeader.onBack(); return;
+                            if (editorHeader) {
+                              editorHeader.onBack(); return;
                             }
                             setEditing(false); return;
                           }
@@ -1209,10 +1209,8 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                         }
                       : panel === "library" && libraryList && !inProject
                         ? () => setLibraryList(false)
-                        : inProject && !exportPage
-                        ? () => openPanel("export")
-                        : exportPage || (!inProject && panel === "settings")
-                          ? () => openPanel("library")
+                        : inProject
+                          ? () => openPanel("export")
                           : undefined
               }
             />
@@ -2181,7 +2179,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       {(editorView === "edit" || (editing && detailOpen && panel === "library" && !archiveAction)) && <TrackEditor
                         key={`${overview.id}:${editorView}`}
                         view={editorView}
-                        onDrawHeaderChange={setDrawHeader}
+                        onHeaderChange={setEditorHeader}
                         initialEntry={overview.id}
                         onEntryChange={(id) => {
                           overview.setId(id);

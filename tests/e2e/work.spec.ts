@@ -53,7 +53,6 @@ test("archive upload, backup, read-only download and real deletion use separate 
   await expect(page.getByText("已导入 1 条轨迹。", { exact: true })).toBeVisible({
     timeout: 20000,
   });
-  await page.getByRole("button", { name: "返回轨迹库", exact: true }).click();
   await page.getByRole("button", { name: "导出轨迹", exact: true }).click();
   await expect(page.getByRole("button", { name: "导出", exact: true })).toHaveCount(0);
   await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
@@ -69,7 +68,7 @@ test("archive upload, backup, read-only download and real deletion use separate 
     .first()
     .click();
   expect((await event).suggestedFilename()).toBe("Archive.zip");
-  await page.getByRole("button", { name: "返回轨迹库", exact: true }).click();
+  await tool(page, "轨迹库");
   if (!(await page.getByLabel("筛选轨迹", { exact: true }).isVisible()))
     await tool(page, "轨迹库");
   await filterTracks(page, "网页归档");
@@ -148,7 +147,6 @@ test("library entry points and favicon work on mobile", async ({
   ).toBe(true);
   await page.screenshot({ path: info.outputPath("track-detail-mobile.png") });
   await page.getByRole("button", { name: "返回列表", exact: true }).click();
-  await page.getByRole("button", { name: "返回轨迹库", exact: true }).click();
   await page.getByRole("button", { name: "导出轨迹", exact: true }).click();
   await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
   await page.getByRole("option", { name: "聚合KML", exact: true }).click();
@@ -232,8 +230,8 @@ test("a failed upload never silently submits the successful subset", async ({ pa
 for (const width of [1280, 390]) {
   test(`panel back arrows stay beside titles and return through detail at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto("/map?panel=library");
-    await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
+    await page.goto("/map");
+    await tool(page, "轨迹库");
     await page.getByRole("button", { name: "查看 Train/same.kml", exact: true }).click();
     const header = page.getByRole("complementary", { name: "地图控制面板" }).locator(":scope > .panel-header");
     const back = header.getByRole("button", { name: "返回列表", exact: true });
@@ -249,10 +247,12 @@ for (const width of [1280, 390]) {
     await expect(header.getByRole("button", { name: "返回列表", exact: true })).toBeVisible();
     await header.getByRole("button", { name: "返回列表", exact: true }).click();
     await expect(page.getByRole("button", { name: "筛选", exact: true })).toBeVisible();
-    await header.getByRole("button", { name: "返回轨迹库", exact: true }).click();
-    await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
-    await header.getByRole("button", { name: "返回轨迹库", exact: true }).click();
-    await expect(page.getByRole("button", { name: "轨迹列表", exact: true })).toBeVisible();
+    for (const name of ["上传轨迹", "导出轨迹", "设置"]) {
+      await page.getByRole("button", { name, exact: true }).click();
+      await expect(header).toHaveCount(0);
+    }
+    await tool(page, "轨迹库");
+    await expect(page.getByRole("button", { name: "筛选", exact: true })).toBeVisible();
   });
 }
 
