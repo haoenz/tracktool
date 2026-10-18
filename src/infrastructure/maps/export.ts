@@ -91,7 +91,16 @@ export class Exports {
         },
       });
       page.on("pageerror", (error) => failures.push(error.message));
-      page.on("requestfailed", () => failures.push("资源请求失败"));
+      page.on("requestfailed", (request) => {
+        // MapLibre may discard interim raster tiles while choosing the final
+        // zoom. The renderer's readiness check still requires all visible tiles.
+        if (
+          request.failure()?.errorText === "net::ERR_ABORTED" &&
+          new URL(request.url()).pathname.startsWith("/tiles/")
+        )
+          return;
+        failures.push("资源请求失败");
+      });
       page.on("response", (r) => {
         if (r.status() >= 400) failures.push(`资源 HTTP ${r.status()}`);
       });
@@ -105,7 +114,6 @@ export class Exports {
       const report = (await page.evaluate("window.renderStatus")) as {
         error?: string;
         ready?: boolean;
-        labels?: unknown;
         camera?: unknown;
       };
       if (report.error || failures.length || !report.ready)
@@ -136,7 +144,6 @@ export class Exports {
         chromium: this.browser.version(),
         width: output.width,
         height: output.height,
-        labels: report.labels,
         camera: report.camera,
       };
     } catch (error) {

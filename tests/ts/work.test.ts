@@ -819,23 +819,41 @@ it("import preview distinguishes new, duplicate, conflict and invalid files with
 it("web import defaults to no Backup and rejects a mixed invalid batch without importing valid files", async () => {
   const { dir, archive, call, settled } = await server();
   const bytes = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
-  const good = path.join(dir, "2026-10-01 原子入库.kml"), bad = path.join(dir, "2026-10-02 异常.kml");
+  const good = path.join(dir, "2026-10-01 原子入库.kml"),
+    bad = path.join(dir, "2026-10-02 异常.kml");
   await writeFile(good, bytes);
   await writeFile(bad, "<kml>");
-  const catalog = () => call<{ catalog: { entries: unknown[] } }>("/api/work/catalog", { archive });
+  const catalog = () =>
+    call<{ catalog: { entries: unknown[] } }>("/api/work/catalog", { archive });
   const before = (await catalog()).catalog.entries.length;
-  const mixed = await call<WorkTask>("/api/work/preview", { operation: "archive:push", archive, inputs: [good, bad] });
+  const mixed = await call<WorkTask>("/api/work/preview", {
+    operation: "archive:push",
+    archive,
+    inputs: [good, bad],
+  });
   const rejected = await settled(mixed.id);
   expect(rejected.status).toBe("partial");
-  expect(rejected.output?.data).toMatchObject({ import_items: [{ status: "new" }, { status: "invalid" }] });
+  expect(rejected.output?.data).toMatchObject({
+    import_items: [{ status: "new" }, { status: "invalid" }],
+  });
   await expect(call(`/api/work/tasks/${mixed.id}/apply`, {})).rejects.toThrow();
   expect((await catalog()).catalog.entries).toHaveLength(before);
   for (let attempt = 0; attempt < 2; attempt++) {
-    const queued = await call<WorkTask>("/api/work/preview", { operation: "archive:push", archive, inputs: [good], options: { keep: false } });
+    const queued = await call<WorkTask>("/api/work/preview", {
+      operation: "archive:push",
+      archive,
+      inputs: [good],
+      options: { keep: false },
+    });
     const preview = await settled(queued.id);
     expect(preview.request.options.keep).toBe(true);
-    expect(preview.output?.data).toMatchObject({ import_items: [{ status: attempt ? "duplicate" : "new" }] });
-    const apply = await call<WorkTask>(`/api/work/tasks/${queued.id}/apply`, {});
+    expect(preview.output?.data).toMatchObject({
+      import_items: [{ status: attempt ? "duplicate" : "new" }],
+    });
+    const apply = await call<WorkTask>(
+      `/api/work/tasks/${queued.id}/apply`,
+      {},
+    );
     const done = await settled(apply.id);
     expect(done.status, JSON.stringify(done.error)).toBe("succeeded");
     expect(done.output?.committed).toBe(true);
@@ -848,18 +866,31 @@ it("web import defaults to no Backup and rejects a mixed invalid batch without i
 it("HTTP uploaded imports clean copies after both success and invalid preview, and require reupload", async () => {
   const { address, archive, call, settled } = await server();
   const upload = async (name: string, bytes: Uint8Array) => {
-    const response = await fetch(address + "/api/work/uploads?name=" + encodeURIComponent(name), {
-      method: "POST",
-      headers: { "X-Tracktool-Token": "work-test", "Content-Type": "application/octet-stream" },
-      body: Buffer.from(bytes),
-    });
+    const response = await fetch(
+      address + "/api/work/uploads?name=" + encodeURIComponent(name),
+      {
+        method: "POST",
+        headers: {
+          "X-Tracktool-Token": "work-test",
+          "Content-Type": "application/octet-stream",
+        },
+        body: Buffer.from(bytes),
+      },
+    );
     expect(response.ok).toBe(true);
     return response.json() as Promise<{ files: string[] }>;
   };
   const bytes = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
   for (const valid of [true, false]) {
-    const batch = await upload(valid ? "2026-10-01 清理.kml" : "2026-10-02 坏文件.kml", valid ? bytes : Buffer.from("<kml>"));
-    const plan = await call<WorkTask>("/api/work/preview", { operation: "archive:push", archive, inputs: batch.files });
+    const batch = await upload(
+      valid ? "2026-10-01 清理.kml" : "2026-10-02 坏文件.kml",
+      valid ? bytes : Buffer.from("<kml>"),
+    );
+    const plan = await call<WorkTask>("/api/work/preview", {
+      operation: "archive:push",
+      archive,
+      inputs: batch.files,
+    });
     await settled(plan.id);
     let id = plan.id;
     if (valid) {
@@ -867,42 +898,88 @@ it("HTTP uploaded imports clean copies after both success and invalid preview, a
       id = (await call<WorkTask>(`/api/work/tasks/${plan.id}/apply`, {})).id;
       expect((await settled(id)).status).toBe("succeeded");
     }
-    const cleaned = await until(() => call<WorkTask>("/api/work/tasks/" + id), (task) => task.uploadsCleaned === true);
+    const cleaned = await until(
+      () => call<WorkTask>("/api/work/tasks/" + id),
+      (task) => task.uploadsCleaned === true,
+    );
     expect(existsSync(batch.files[0]!)).toBe(false);
     expect(cleaned.request.inputs).toEqual(batch.files);
-    await expect(call(`/api/work/tasks/${id}/retry`, {})).rejects.toThrow("重新上传");
+    await expect(call(`/api/work/tasks/${id}/retry`, {})).rejects.toThrow(
+      "重新上传",
+    );
     if (valid) {
-      expect((await call<WorkTask>(`/api/work/tasks/${plan.id}/apply`, {})).id).toBe(id);
+      expect(
+        (await call<WorkTask>(`/api/work/tasks/${plan.id}/apply`, {})).id,
+      ).toBe(id);
       const again = await upload("2026-10-01 清理.kml", bytes);
-      const repeated = await call<WorkTask>("/api/work/preview", { operation: "archive:push", archive, inputs: again.files });
-      expect((await settled(repeated.id)).output?.data).toMatchObject({ import_items: [{ status: "duplicate" }] });
+      const repeated = await call<WorkTask>("/api/work/preview", {
+        operation: "archive:push",
+        archive,
+        inputs: again.files,
+      });
+      expect((await settled(repeated.id)).output?.data).toMatchObject({
+        import_items: [{ status: "duplicate" }],
+      });
     }
   }
 });
 
-
 it("per-file import names and activity tags match preview and atomic publication", async () => {
   const { dir, archive, call, settled } = await server();
   const bytes = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
-  const files = [path.join(dir, "2026-10-01 原始一.kml"), path.join(dir, "2026-10-01 原始二.kml")];
+  const files = [
+    path.join(dir, "2026-10-01 原始一.kml"),
+    path.join(dir, "2026-10-01 原始二.kml"),
+  ];
   for (const file of files) await writeFile(file, bytes);
   const importFiles = [
     { path: files[0], name: "2026-10-02 修改一.kml", tag: "徒步" },
     { path: files[1], name: "2026-10-03 修改二.kml", tag: "飞机" },
   ];
-  const plan = await call<WorkTask>("/api/work/preview", { operation: "archive:push", archive, inputs: files, options: { importFiles } });
-  expect((await settled(plan.id)).output?.data).toMatchObject({ import_items: [
-    { member: "Default/2026-10/2026-10-02 修改一.kml", tag: "徒步", sourceTag: "火车", status: "new" },
-    { member: "Flight/2026-10/2026-10-03 修改二.kml", tag: "飞机", sourceTag: "火车", status: "new" },
-  ] });
+  const plan = await call<WorkTask>("/api/work/preview", {
+    operation: "archive:push",
+    archive,
+    inputs: files,
+    options: { importFiles },
+  });
+  expect((await settled(plan.id)).output?.data).toMatchObject({
+    import_items: [
+      {
+        member: "Default/2026-10/2026-10-02 修改一.kml",
+        tag: "徒步",
+        sourceTag: "火车",
+        status: "new",
+      },
+      {
+        member: "Flight/2026-10/2026-10-03 修改二.kml",
+        tag: "飞机",
+        sourceTag: "火车",
+        status: "new",
+      },
+    ],
+  });
   const applied = await call<WorkTask>(`/api/work/tasks/${plan.id}/apply`, {});
   const done = await settled(applied.id);
   expect(done.status).toBe("succeeded");
-  expect(done.output?.data).toMatchObject({ import_items: [
-    { member: "Default/2026-10/2026-10-02 修改一.kml", tag: "徒步", sourceTag: "火车", entryId: expect.any(String) },
-    { member: "Flight/2026-10/2026-10-03 修改二.kml", tag: "飞机", sourceTag: "火车", entryId: expect.any(String) },
-  ] });
-  expect((await call<WorkTask>(`/api/work/tasks/${plan.id}/apply`, {})).id).toBe(applied.id);
+  expect(done.output?.data).toMatchObject({
+    import_items: [
+      {
+        member: "Default/2026-10/2026-10-02 修改一.kml",
+        tag: "徒步",
+        sourceTag: "火车",
+        entryId: expect.any(String),
+      },
+      {
+        member: "Flight/2026-10/2026-10-03 修改二.kml",
+        tag: "飞机",
+        sourceTag: "火车",
+        entryId: expect.any(String),
+      },
+    ],
+  });
+  expect(
+    (await call<WorkTask>(`/api/work/tasks/${plan.id}/apply`, {})).id,
+  ).toBe(applied.id);
   expect(await readFile(files[0]!, "utf8")).toContain("<value>徒步</value>");
   expect(await readFile(files[1]!, "utf8")).toContain("<value>飞机</value>");
   const repeated = await call<WorkTask>("/api/work/preview", {
@@ -916,13 +993,23 @@ it("per-file import names and activity tags match preview and atomic publication
       ],
     },
   });
-  expect((await settled(repeated.id)).output?.data).toMatchObject({ import_items: [{ status: "duplicate" }, { status: "duplicate" }] });
+  expect((await settled(repeated.id)).output?.data).toMatchObject({
+    import_items: [{ status: "duplicate" }, { status: "duplicate" }],
+  });
   for (const overrides of [
     [{ path: files[0], name: "../2026-10-01.kml" }],
     [{ path: files[0] }, { path: files[0] }],
     [{ path: files[1] }],
     [{ path: files[0], tag: "不存在" }],
-  ]) await expect(call("/api/work/preview", { operation: "archive:push", archive, inputs: [files[0]], options: { importFiles: overrides } })).rejects.toThrow();
+  ])
+    await expect(
+      call("/api/work/preview", {
+        operation: "archive:push",
+        archive,
+        inputs: [files[0]],
+        options: { importFiles: overrides },
+      }),
+    ).rejects.toThrow();
 });
 
 it("import automatically fills endpoint administrative locations when enabled", async () => {
@@ -930,7 +1017,10 @@ it("import automatically fills endpoint administrative locations when enabled", 
   const archive = path.join(dir, "locations-archive");
   const source = path.join(dir, "2026-10-01 自动位置.kml");
   await copyFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml", source);
-  const settings = JSON.parse(await readFile(config, "utf8")) as Record<string, unknown>;
+  const settings = JSON.parse(await readFile(config, "utf8")) as Record<
+    string,
+    unknown
+  >;
   settings.archive_path = archive;
   settings.auto_fill_locations = true;
   await writeFile(config, JSON.stringify(settings));
@@ -966,10 +1056,26 @@ it("import automatically fills endpoint administrative locations when enabled", 
           results: [
             {
               address_components: [
-                { long_name: "中国", short_name: "CN", types: ["country", "political"] },
-                { long_name: "浙江省", short_name: "ZJ", types: ["administrative_area_level_1", "political"] },
-                { long_name: "杭州市", short_name: "HZ", types: ["locality", "political"] },
-                { long_name: "西湖区", short_name: "XH", types: ["administrative_area_level_3", "political"] },
+                {
+                  long_name: "中国",
+                  short_name: "CN",
+                  types: ["country", "political"],
+                },
+                {
+                  long_name: "浙江省",
+                  short_name: "ZJ",
+                  types: ["administrative_area_level_1", "political"],
+                },
+                {
+                  long_name: "杭州市",
+                  short_name: "HZ",
+                  types: ["locality", "political"],
+                },
+                {
+                  long_name: "西湖区",
+                  short_name: "XH",
+                  types: ["administrative_area_level_3", "political"],
+                },
               ],
               types: ["locality", "political"],
               place_id: "test-place",
@@ -990,7 +1096,9 @@ it("import automatically fills endpoint administrative locations when enabled", 
     import_items: [{ tag: "火车", status: "new" }],
   });
   expect(requested).toHaveLength(2);
-  const db = new Database(path.join(archive, "archive.sqlite3"), { readonly: true });
+  const db = new Database(path.join(archive, "archive.sqlite3"), {
+    readonly: true,
+  });
   try {
     const rows = db
       .prepare(

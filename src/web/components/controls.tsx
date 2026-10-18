@@ -207,6 +207,7 @@ export function InputNumber({
 type Option = {
   value: string | number | undefined;
   label: ReactNode;
+  hint?: string;
   disabled?: boolean;
 };
 type ChoiceProps<T> = {
@@ -293,6 +294,11 @@ export function Select<T extends string | number | undefined | string[]>({
                     : placeholder
                   : (selected[0]?.label ?? placeholder)}
               </span>
+              {!multiple && selected[0]?.hint && (
+                <Badge variant="secondary" className="shrink-0">
+                  {selected[0].hint}
+                </Badge>
+              )}
               {loading ? (
                 <LoaderCircleIcon className="size-4 animate-spin" />
               ) : (
@@ -347,6 +353,11 @@ export function Select<T extends string | number | undefined | string[]>({
                       )}
                     />
                     <span className="break-all">{o.label}</span>
+                    {o.hint && (
+                      <Badge variant="secondary" className="ml-auto shrink-0">
+                        {o.hint}
+                      </Badge>
+                    )}
                   </CommandItem>
                 ))}
               </CommandList>

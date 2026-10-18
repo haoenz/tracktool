@@ -110,9 +110,8 @@ pnpm run dev
 pnpm check
 pnpm test:e2e
 pnpm test:terminal           # Linux PTY / zsh / Bash
-pnpm cities CN.zip new-cities.json
 ```
 
-正式构建、测试及城市数据维护无需 Python。
+正式构建与测试无需 Python。
 
 参考：[存储格式](docs/sqlite-storage.md)、[安装升级与发布检查](docs/install-upgrade.md)、[第三方资源](THIRD_PARTY_NOTICES.md)。

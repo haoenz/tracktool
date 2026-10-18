@@ -117,7 +117,6 @@ test("archive → selection → styling → save/reopen → JSON → independent
   await expect
     .poll(() => exportedReport)
     .toMatchObject({
-      labels: previewReport!.labels,
       camera: previewReport!.camera,
     });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -378,22 +377,26 @@ test("reselecting the applied basemap cancels a pending switch", async ({
 test("browse display style survives a reload", async ({ page }) => {
   await page.goto("/map");
   await tool(page, "地图样式");
-  const cities = page.getByRole("combobox", {
-    name: "城市标注",
+  const places = page.getByRole("combobox", {
+    name: "地名",
     exact: true,
   });
-  await cities.click();
-  await page.getByRole("option", { name: "关闭", exact: true }).click();
+  await places.click();
+  await page.getByRole("option", { name: "国家与城市", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => window.renderer?.state.style.cities))
-    .toBe("none");
+    .poll(() =>
+      page.evaluate(() => window.renderer?.state.style.features.places),
+    )
+    .toBe("major");
   await expect(page.getByText("地图样式已保存", { exact: true })).toBeVisible({
     timeout: 10_000,
   });
   await page.reload();
   await expect
-    .poll(() => page.evaluate(() => window.renderer?.state.style.cities))
-    .toBe("none");
+    .poll(() =>
+      page.evaluate(() => window.renderer?.state.style.features.places),
+    )
+    .toBe("major");
 });
 test("failed source retains the current map; a later source wins and camera/style changes avoid selection API", async ({
   page,
@@ -576,3 +579,116 @@ test("map icons directly toggle panels on desktop and mobile", async ({
     await expect(nav).toBeHidden();
   }
 });
+
+for (const [basemap, overlay] of [
+  ["amap-satellite", "openrailwaymap-standard"],
+  ["esri-satellite", "amap-labels"],
+] as const) {
+  test(`mixed coordinates ${basemap} + ${overlay} persist and export PNG`, async ({
+    page,
+  }, info) => {
+    test.setTimeout(120_000);
+    await page.goto("/map");
+    await tool(page, "地图样式");
+    const names = await page.evaluate(
+      ({ basemap, overlay }) => {
+        const config = window.renderer!.config;
+        const base = config.basemaps.find((b) => b.id === basemap)!;
+        return {
+          base: `${base.group} · ${base.name}`,
+          overlay: config.overlays.find((o) => o.id === overlay)!.name,
+        };
+      },
+      { basemap, overlay },
+    );
+    await page.getByRole("combobox", { name: "底图", exact: true }).click();
+    await page
+      .getByRole("combobox", { name: "搜索底图", exact: true })
+      .fill(names.base);
+    const baseHint = page
+      .getByRole("option")
+      .getByText("需重投影", { exact: true });
+    if (basemap === "amap-satellite") await expect(baseHint).toBeVisible();
+    else await expect(baseHint).toHaveCount(0);
+    await page
+      .getByRole("option")
+      .getByText(names.base, { exact: true })
+      .click();
+    await expect
+      .poll(() => page.evaluate(() => window.renderer!.state.style.basemap), {
+        timeout: 20000,
+      })
+      .toBe(basemap);
+    if (basemap === "amap-satellite")
+      await expect(
+        page.getByRole("combobox", { name: "道路", exact: true }),
+      ).toBeEnabled();
+    const overlaySelect = page.getByRole("combobox", {
+      name: overlay === "amap-labels" ? "路网与地名注记" : "铁路",
+      exact: true,
+    });
+    await overlaySelect.click();
+    const option = page.getByRole("option").filter({
+      has: page.getByText(names.overlay, { exact: true }),
+    });
+    const overlayHint = option.getByText("需重投影", { exact: true });
+    if (overlay === "amap-labels") await expect(overlayHint).toBeVisible();
+    else await expect(overlayHint).toHaveCount(0);
+    await expect(option).toBeEnabled();
+    await option.click();
+    await expect
+      .poll(() =>
+        page.evaluate((id) => !!window.renderer!.map.getSource(id), overlay),
+      )
+      .toBe(true);
+    await expect
+      .poll(
+        async () =>
+          (
+            await call<{ state: Project }>(page, "/api/bootstrap")
+          ).body.state.style.overlays.find((o) => o.id === overlay)?.enabled,
+      )
+      .toBe(true);
+    await page.reload();
+    await page.waitForFunction(
+      (id) => !!window.renderer?.map.getSource(id),
+      overlay,
+    );
+    const state = await page.evaluate(() =>
+      structuredClone(window.renderer!.state),
+    );
+    state.camera = { center: [116.404, 39.915], zoom: 12 };
+    state.output = { width: 960, height: 720 };
+    const submitted = await call<{ job: string }>(page, "/api/export", state);
+    expect(submitted.status).toBe(200);
+    let result: { status: string; error?: string } | undefined;
+    await expect
+      .poll(
+        async () => {
+          result = (
+            await call<{ status: string; error?: string }>(
+              page,
+              `/api/jobs/${submitted.body.job}`,
+            )
+          ).body;
+          return ["done", "failed"].includes(result.status);
+        },
+        { timeout: 90000 },
+      )
+      .toBe(true);
+    expect(result?.status, result?.error).toBe("done");
+    const token = await page
+      .locator('meta[name="tracktool-token"]')
+      .getAttribute("content");
+    const png = await page.request.get(`/api/jobs/${submitted.body.job}/png`, {
+      headers: { "X-Tracktool-Token": token! },
+    });
+    expect(png.ok()).toBe(true);
+    const data = await png.body();
+    expect(await sharp(data).metadata()).toMatchObject({
+      width: 960,
+      height: 720,
+    });
+    await sharp(data).toFile(info.outputPath("mixed-coordinates.png"));
+  });
+}

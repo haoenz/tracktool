@@ -32,6 +32,11 @@ import {
   PopoverTrigger,
 } from "./components/ui/popover.js";
 import { SheetHandle } from "./components/sheet-handle.js";
+import {
+  MapContentSettings,
+  ReprojectionHelp,
+} from "./map-content-settings.js";
+import { defaultProject } from "../shared/project.js";
 import { StartupScreen } from "./components/startup-screen.js";
 import { PanelHeader } from "./components/panel-header.js";
 import {
@@ -64,7 +69,6 @@ import { WorkspaceContext, type Panel, type EditMap } from "./workspace.js";
 import { operationLabel, type Operation } from "../shared/work.js";
 import type {
   Catalog,
-  Cities,
   MapConfig,
   Selection,
   SelectedTrack,
@@ -74,13 +78,7 @@ import type { OverviewHit, OverviewVisibility } from "./overview-layer.js";
 import type { OverviewEntry, OverviewStatus } from "../shared/overview.js";
 import type { Project } from "../shared/project.js";
 import { frames } from "../drawing/core.js";
-import {
-  featureControls,
-  featureReason,
-  overlayReason,
-  reconcileOverlays,
-  cityReason,
-} from "../drawing/layers.js";
+import { reconcileOverlays } from "../drawing/layers.js";
 import { api, request } from "./api.js";
 import { MapViewport, type Viewport } from "./map-viewport.js";
 import { ProjectPresentation } from "./project-presentation.js";
@@ -137,25 +135,17 @@ export default function MapPage() {
     queryFn: ({ signal }) =>
       api<Bootstrap>("/api/bootstrap", undefined, signal),
   });
-  const cities = useQuery({
-    queryKey: ["cities"],
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    queryFn: ({ signal }) => api<Cities>("/api/cities", undefined, signal),
-  });
-  if (bootstrap.isError || cities.isError)
+  if (bootstrap.isError)
     return (
       <div role="alert">
         <Alert
           type="error"
           title="地图资源加载失败"
-          description={(bootstrap.error ?? cities.error)?.message}
+          description={bootstrap.error?.message}
         />
         <Button
           onClick={() => {
             void bootstrap.refetch();
-            void cities.refetch();
           }}
         >
           重试
@@ -168,10 +158,10 @@ export default function MapPage() {
         )}
       </div>
     );
-  if (!bootstrap.data || !cities.data) return <StartupScreen />;
-  return <Editor initial={bootstrap.data} cities={cities.data} />;
+  if (!bootstrap.data) return <StartupScreen />;
+  return <Editor initial={bootstrap.data} />;
 }
-function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
+function Editor({ initial }: { initial: Bootstrap }) {
   const [libraryVisibility, setLibraryVisibility] =
     useSessionState<OverviewVisibility>(
       `tracktool:${initial.initialArchive}:visibility`,
@@ -230,7 +220,12 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     [displaySaveState, setDisplaySaveState] = useState<
       "" | "saving" | "saved" | "error"
     >(""),
-    [settingsDetailsOpen, setSettingsDetailsOpen] = useState(false),
+    [baseRetry, setBaseRetry] = useState<{
+      id: string;
+      style?: Project["style"];
+    }>(),
+    [baseUndo, setBaseUndo] = useState<Project["style"]>(),
+    [displayRetry, setDisplayRetry] = useState(0),
     [settingsBaseline, setSettingsBaseline] = useState<Project["style"]>(),
     [preview, setPreview] = useState(false),
     [sourceErrors, setSourceErrors] = useState<Selection["errors"]>([]),
@@ -461,21 +456,23 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
         });
     }, 400);
     return () => clearTimeout(timer);
-  }, [browseState.style, inProject]);
+  }, [browseState.style, inProject, displayRetry]);
   useEffect(() => {
-    if (panel === "settings" && !inProject && !settingsBaseline)
-      setSettingsBaseline(structuredClone(stateRef.current.style));
-  }, [panel, inProject, settingsBaseline]);
+    setSettingsBaseline(
+      panel === "settings"
+        ? structuredClone(stateRef.current.style)
+        : undefined,
+    );
+    setBaseUndo(undefined);
+    setBasemapNotes([]);
+    setBasemapError("");
+    setBaseRetry(undefined);
+    cancelPendingBase();
+  }, [panel, inProject, currentName]);
   const config = initial.config;
-  const crs =
-    config.basemaps.find((b) => b.id === state.style.basemap)?.crs === "gcj02"
-      ? "gcj02"
-      : "wgs84";
-  const browseCrs =
-    config.basemaps.find((b) => b.id === browseState.style.basemap)?.crs ===
-    "gcj02"
-      ? "gcj02"
-      : "wgs84";
+  // Raster sources are normalized by the tile service before rendering.
+  const crs = "wgs84";
+  const browseCrs = "wgs84";
   const browseOverview = useOverview(
     browseCrs,
     browseFilter,
@@ -764,6 +761,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     setSwitching(id);
     setError("");
     setBasemapError("");
+    setBaseRetry(undefined);
     setBasemapNotes([]);
     const next = structuredClone(stateRef.current);
     if (restore) next.style = structuredClone(restore);
@@ -773,10 +771,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       if (config.basemaps.some((b) => b.id === id))
         await api("/api/basemap-check", { id });
       if (sequence !== sourceSequence.current) return;
-      const targetCrs =
-        config.basemaps.find((b) => b.id === id)?.crs === "gcj02"
-          ? "gcj02"
-          : "wgs84";
+      const targetCrs = "wgs84";
       let prepared: OverviewStatus | undefined;
       if (browsing) {
         const deadline = Date.now() + 120000;
@@ -794,53 +789,60 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       if (sequence !== sourceSequence.current) return;
       const staged = await viewport.current?.stage(next, prepared);
       if (sequence !== sourceSequence.current) return;
+      if (!staged) throw new Error("底图未准备完成，请重试");
       if (staged) {
         if (restore) {
+          setBaseUndo(undefined);
           change((s) => {
             s.style = structuredClone(next.style);
           });
           setBasemapNotes(notes);
           setNotice(
             notes.length
-              ? `已恢复本次浏览的初始样式；${notes.join("；")}`
-              : "已恢复本次浏览的初始样式",
+              ? `已恢复地图设置；${notes.join("；")}`
+              : "已恢复地图设置",
           );
         } else {
           // Reconcile against the latest style so edits made while the
           // basemap was loading are not overwritten by the starting snapshot.
           const latest = structuredClone(stateRef.current);
+          const previousStyle = structuredClone(latest.style);
           latest.style.basemap = id;
           const appliedNotes = reconcileOverlays(latest, config);
           change((s) => {
             s.style.basemap = id;
             s.style.overlays = latest.style.overlays;
           });
+          setBaseUndo(previousStyle);
           setBasemapNotes(appliedNotes);
           if (appliedNotes.length) setNotice(appliedNotes.join("；"));
         }
       }
     } catch (e) {
-      if (sequence === sourceSequence.current)
+      if (sequence === sourceSequence.current) {
+        setBaseRetry({ id, style: restore });
         setBasemapError(
           restore
             ? `恢复设置失败：无法切换回「${basemapLabel(config, id)}」：${message(e)}`
             : `切换到「${basemapLabel(config, id)}」失败，仍显示「${basemapLabel(config, stateRef.current.style.basemap)}」：${message(e)}；可再次选择重试`,
         );
+      }
     } finally {
       if (sequence === sourceSequence.current) setSwitching("");
     }
   };
-  const resetSettings = () => {
-    if (!settingsBaseline) return;
-    if (switching) cancelPendingBase();
-    if (settingsBaseline.basemap === stateRef.current.style.basemap) {
+  const restoreSettings = (style: Project["style"]) => {
+    cancelPendingBase();
+    setBaseUndo(undefined);
+    setBaseRetry(undefined);
+    if (style.basemap === stateRef.current.style.basemap) {
       change((s) => {
-        s.style = structuredClone(settingsBaseline);
+        s.style = structuredClone(style);
       });
       setBasemapError("");
       setBasemapNotes([]);
-      setNotice("已恢复本次浏览的初始样式");
-    } else void switchBase(settingsBaseline.basemap, settingsBaseline);
+      setNotice("已恢复地图设置");
+    } else void switchBase(style.basemap, style);
   };
   const load = async (value?: unknown) => {
     setActivity("正在读取工程…");
@@ -1346,17 +1348,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
           : state,
     [inspection, state, inProject, browsing, candidateCamera],
   );
-  const cityUnavailable = cityReason(state, config);
-  let settingsAdjustments = 0;
-  for (const key of Object.keys(featureControls))
-    if (state.style.features[key] !== initial.state.style.features[key])
-      settingsAdjustments++;
-  settingsAdjustments += state.style.overlays.filter((o) => o.enabled).length;
-  if (
-    state.style.power.min_voltage !== initial.state.style.power.min_voltage ||
-    state.style.power.facilities !== initial.state.style.power.facilities
-  )
-    settingsAdjustments++;
   const settingsChanged =
     !!settingsBaseline &&
     JSON.stringify(state.style) !== JSON.stringify(settingsBaseline);
@@ -1369,6 +1360,7 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     ...config.basemaps.map((b) => ({
       value: b.id,
       label: basemapLabel(config, b.id),
+      hint: b.crs === "gcj02" && b.format !== "vector" ? "需重投影" : undefined,
     })),
   ];
   return (
@@ -2099,7 +2091,14 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             {panel === "settings" && (
               <section>
                 <Settings inProject={inProject}>
-                  <h3>地图样式</h3>
+                  <h3>底图</h3>
+                  {inProject && (
+                    <p className="settings-reason" role="status">
+                      {dirty
+                        ? "有未保存的修改，请保存工程以保留"
+                        : "工程无未保存的修改"}
+                    </p>
+                  )}
                   {!inProject && displaySaveState && (
                     <p
                       className={
@@ -2113,7 +2112,16 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                         ? "正在保存地图样式…"
                         : displaySaveState === "saved"
                           ? "地图样式已保存"
-                          : "地图样式保存失败，将在下次修改时重试"}
+                          : "地图样式保存失败"}
+                      {displaySaveState === "error" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setDisplayRetry((n) => n + 1)}
+                        >
+                          重试保存
+                        </Button>
+                      )}
                     </p>
                   )}
                   <label htmlFor="settings-basemap">底图</label>
@@ -2121,17 +2129,20 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                     id="settings-basemap"
                     searchable
                     aria-label="底图"
-                    aria-describedby={
+                    aria-describedby={[
                       switching
                         ? "settings-basemap-status"
                         : basemapError
                           ? "settings-basemap-error"
-                          : undefined
-                    }
-                    value={switching || state.style.basemap}
+                          : undefined,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    value={state.style.basemap}
                     onChange={(id) => void switchBase(id)}
                     options={basemapOptions}
                   />
+                  <ReprojectionHelp />
                   {switching && (
                     <p
                       className="settings-status"
@@ -2144,8 +2155,15 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                         aria-hidden="true"
                       />
                       <span>
-                        {`当前显示「${basemapLabel(config, state.style.basemap)}」，正在准备「${basemapLabel(config, switching)}」。可继续选择其他底图；重新选择当前底图即可返回。`}
+                        {`当前显示「${basemapLabel(config, state.style.basemap)}」，正在准备「${basemapLabel(config, switching)}」。`}
                       </span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={cancelPendingBase}
+                      >
+                        取消
+                      </Button>
                     </p>
                   )}
                   {basemapError && (
@@ -2155,7 +2173,33 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       role="alert"
                     >
                       {basemapError}
+                      {baseRetry && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            void switchBase(baseRetry.id, baseRetry.style)
+                          }
+                        >
+                          重试
+                        </Button>
+                      )}
                     </p>
+                  )}
+                  {baseUndo && !switching && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        restoreSettings({
+                          ...stateRef.current.style,
+                          basemap: baseUndo.basemap,
+                          overlays: structuredClone(baseUndo.overlays),
+                        })
+                      }
+                    >
+                      撤销底图切换
+                    </Button>
                   )}
                   {basemapNotes.length > 0 && (
                     <ul
@@ -2167,226 +2211,36 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       ))}
                     </ul>
                   )}
-                  <label htmlFor="settings-cities">城市标注</label>
-                  <Select
-                    id="settings-cities"
-                    aria-label="城市标注"
-                    aria-describedby={
-                      cityUnavailable ? "settings-cities-reason" : undefined
-                    }
-                    value={state.style.cities}
-                    disabled={!!cityUnavailable}
-                    options={[
-                      { value: "county", label: "县级及以上" },
-                      { value: "none", label: "关闭" },
-                    ]}
-                    onChange={(value) =>
-                      change((s) => {
-                        s.style.cities = value;
-                      })
-                    }
+                  <MapContentSettings
+                    state={state}
+                    config={config}
+                    change={(edit) => {
+                      setBaseUndo(undefined);
+                      setBasemapNotes([]);
+                      change(edit);
+                    }}
+                    notify={setNotice}
                   />
-                  {cityUnavailable && (
-                    <p className="settings-reason" id="settings-cities-reason">
-                      {cityUnavailable}
+                  <div className="settings-actions">
+                    <p className="settings-reason">
+                      撤销将恢复到本次打开面板时的设置；恢复默认将使用应用初始设置。
                     </p>
-                  )}
-                  <details
-                    open={settingsDetailsOpen}
-                    onToggle={(event) =>
-                      setSettingsDetailsOpen(event.currentTarget.open)
-                    }
-                  >
-                    <summary>
-                      地图要素与叠加层
-                      {settingsAdjustments
-                        ? `（${settingsAdjustments} 项已调整）`
-                        : ""}
-                    </summary>
-                    <fieldset className="settings-group">
-                      <legend>矢量要素</legend>
-                      {Object.entries(featureControls).map(
-                        ([key, [label, options]]) => {
-                          const reason = featureReason(state, config, key);
-                          return (
-                            <div key={key}>
-                              <label htmlFor={`settings-feature-${key}`}>
-                                {label}
-                              </label>
-                              <Select
-                                id={`settings-feature-${key}`}
-                                aria-label={label}
-                                aria-describedby={
-                                  reason
-                                    ? `settings-feature-${key}-reason`
-                                    : undefined
-                                }
-                                disabled={!!reason}
-                                value={state.style.features[key]}
-                                options={Object.entries(options).map(
-                                  ([value, label]) => ({
-                                    value,
-                                    label,
-                                  }),
-                                )}
-                                onChange={(value) =>
-                                  change((s) => {
-                                    s.style.features[key] = value;
-                                  })
-                                }
-                              />
-                              {reason && (
-                                <p
-                                  className="settings-reason"
-                                  id={`settings-feature-${key}-reason`}
-                                >
-                                  {reason}
-                                </p>
-                              )}
-                            </div>
-                          );
-                        },
-                      )}
-                    </fieldset>
-                    <fieldset className="settings-group">
-                      <legend>叠加层</legend>
-                      {config.overlays.map((o) => {
-                        const overlay = state.style.overlays.find(
-                          (s) => s.id === o.id,
-                        );
-                        const checked = overlay?.enabled === true;
-                        const reason = overlayReason(state, config, o);
-                        return (
-                          <div key={o.id} className="settings-overlay">
-                            <Checkbox
-                              aria-describedby={
-                                reason
-                                  ? `settings-overlay-${o.id}-reason`
-                                  : undefined
-                              }
-                              disabled={!!reason && !checked}
-                              checked={checked}
-                              onCheckedChange={(v) =>
-                                change((s) => {
-                                  const index = s.style.overlays.findIndex(
-                                    (i) => i.id === o.id,
-                                  );
-                                  const item = s.style.overlays[index];
-                                  if (item)
-                                    s.style.overlays[index] = {
-                                      ...item,
-                                      enabled: v,
-                                    };
-                                  else
-                                    s.style.overlays.push({
-                                      id: o.id,
-                                      enabled: v,
-                                      opacity: 1,
-                                    });
-                                })
-                              }
-                            >
-                              {o.name}
-                            </Checkbox>
-                            <InputNumber
-                              aria-label={`${o.name}透明度`}
-                              aria-describedby={
-                                reason
-                                  ? `settings-overlay-${o.id}-reason`
-                                  : undefined
-                              }
-                              min={0.1}
-                              max={1}
-                              step={0.1}
-                              disabled={!checked}
-                              value={overlay?.opacity ?? 1}
-                              onChange={(value) =>
-                                change((s) => {
-                                  const item = s.style.overlays.find(
-                                    (i) => i.id === o.id,
-                                  );
-                                  if (item) item.opacity = value ?? 1;
-                                })
-                              }
-                            />
-                            {reason && (
-                              <p
-                                className="settings-reason"
-                                id={`settings-overlay-${o.id}-reason`}
-                              >
-                                {reason}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </fieldset>
-                    <fieldset className="settings-group">
-                      <legend>电力设施</legend>
-                      <label htmlFor="settings-power-facilities">
-                        电力设施
-                      </label>
-                      <Select
-                        id="settings-power-facilities"
-                        aria-label="电力设施"
-                        value={state.style.power.facilities}
-                        options={[
-                          ["none", "关闭"],
-                          ["substations", "变电站"],
-                          ["generation", "发电设施"],
-                          ["all", "全部"],
-                        ].map(([value, label]) => ({ value, label }))}
-                        onChange={(value) =>
-                          change((s) => {
-                            s.style.power.facilities = value;
-                          })
-                        }
-                      />
-                      <label htmlFor="settings-power-voltage">
-                        电力最低电压（kV）
-                      </label>
-                      <Select
-                        id="settings-power-voltage"
-                        aria-label="电力最低电压"
-                        aria-describedby={
-                          state.style.power.facilities === "none"
-                            ? "settings-power-voltage-reason"
-                            : undefined
-                        }
-                        disabled={state.style.power.facilities === "none"}
-                        value={state.style.power.min_voltage}
-                        options={[0, 110, 220, 500].map((value) => ({
-                          value,
-                          label: String(value),
-                        }))}
-                        onChange={(value) =>
-                          change((s) => {
-                            s.style.power.min_voltage = value;
-                          })
-                        }
-                      />
-                      {state.style.power.facilities === "none" && (
-                        <p
-                          className="settings-reason"
-                          id="settings-power-voltage-reason"
-                        >
-                          关闭电力设施时无需设置最低电压。
-                        </p>
-                      )}
-                    </fieldset>
-                  </details>
-                  {!inProject && (
-                    <div className="settings-actions">
-                      <Button
-                        block
-                        variant="outline"
-                        disabled={!settingsChanged}
-                        onClick={resetSettings}
-                      >
-                        恢复本次浏览的初始样式
-                      </Button>
-                    </div>
-                  )}
+                    <Button
+                      variant="outline"
+                      disabled={!settingsChanged && !switching}
+                      onClick={() =>
+                        settingsBaseline && restoreSettings(settingsBaseline)
+                      }
+                    >
+                      撤销本次修改
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => restoreSettings(defaultProject().style)}
+                    >
+                      恢复默认设置
+                    </Button>
+                  </div>
                 </Settings>
               </section>
             )}
@@ -2967,7 +2821,6 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
             ref={viewport}
             state={viewportState}
             config={config}
-            cities={cities.labels}
             tracks={
               editMap?.tracks ??
               inspection?.tracks ??

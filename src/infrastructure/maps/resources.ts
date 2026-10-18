@@ -5,11 +5,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import opentype from "opentype.js";
-import { AppError } from "../../domain/errors.js";
-import type { MapConfig, MapPreset, Cities } from "../../shared/map.js";
+import { AppError, checkCancelled } from "../../domain/errors.js";
+import type { MapConfig, MapPreset } from "../../shared/map.js";
 import { TileCache } from "./tile-cache.js";
 import { Downloads } from "./downloads.js";
 import { Transport } from "./transport.js";
+import {
+  rasterReprojectionVersion,
+  reprojectGcjTile,
+} from "./raster-reprojection.js";
 type Preset = MapPreset & { url: string; invalid_tile_sha256?: string[] };
 type Vector = {
   tiles: string[];
@@ -66,10 +70,11 @@ export function tileUrl(
 export class MapResources {
   readonly root: string;
   readonly presets: Record<string, Preset>;
-  readonly cities: Cities;
   readonly assets: Assets;
   readonly tiles: TileCache;
   readonly downloads: Downloads;
+  // Separate queues avoid holding download slots while waiting for source tiles.
+  private readonly reprojections = new Downloads(2, { custom: 2 });
   private vector?: Vector;
   private preparing?: Promise<void>;
   private font?: opentype.Font;
@@ -97,9 +102,6 @@ export class MapResources {
     this.assets = JSON.parse(
       readFileSync(path.join(this.root, "data/assets.json"), "utf8"),
     ) as Assets;
-    this.cities = JSON.parse(
-      readFileSync(path.join(this.root, "data/cities-cn.json"), "utf8"),
-    ) as Cities;
     if (
       this.env.TRACKTOOL_MAP_TILEJSON &&
       !this.env.TRACKTOOL_MAP_VECTOR_ATTRIBUTION
@@ -229,7 +231,6 @@ export class MapResources {
       );
     await this.atomic(metadata, Buffer.from(JSON.stringify(value)));
     this.vector = value;
-    this.checkText(this.cities.labels.map((l) => l.name).join(""));
   }
   private async atomic(file: string, data: Buffer) {
     await mkdir(path.dirname(file), { recursive: true });
@@ -245,6 +246,7 @@ export class MapResources {
     const templates = this.vector?.tiles ?? [];
     return {
       renderer: "tracktool-map-ts-v1",
+      raster_reprojection: rasterReprojectionVersion,
       renderer_sha256: this.assets.renderer_sha256,
       playwright: "1.61.0",
       maplibre: this.assets.maplibre,
@@ -255,9 +257,6 @@ export class MapResources {
       font: this.assets.font,
       font_sha256:
         this.assets.files["static/vendor/NotoSansCJKsc-Regular.otf"]!.sha256,
-      cities_sha256: hash(
-        readFileSync(path.join(this.root, "data/cities-cn.json")),
-      ),
       basemap: {
         templates: templates.map((u) => {
           const p = new URL(u);
@@ -339,8 +338,6 @@ export class MapResources {
       attribution: credit,
       customVectorAttribution: this.env.TRACKTOOL_MAP_VECTOR_ATTRIBUTION ?? "",
       satelliteAttribution: this.env.TRACKTOOL_MAP_SATELLITE_ATTRIBUTION ?? "",
-      cityAttribution: "GeoNames · CC BY 4.0",
-      cityCoverage: this.cities.coverage,
       cacheTime: Math.floor(Date.now() / 1000),
     };
   }
@@ -372,7 +369,8 @@ export class MapResources {
       exporting,
     );
   }
-  async tile(
+  /** All display consumers, including PNG export, use the WGS84 tile grid. */
+  async displayTile(
     source: string,
     z: number,
     x: number,
@@ -380,6 +378,42 @@ export class MapResources {
     signal?: AbortSignal,
     exporting = false,
   ): Promise<{ data: Buffer; mime: string }> {
+    checkCancelled(signal);
+    this.checkTile(source, z, x, y);
+    const preset = this.presets[source];
+    if (preset?.crs !== "gcj02" || preset.format === "vector")
+      return this.tile(source, z, x, y, signal, exporting);
+    const key = hash(pythonJson([rasterReprojectionVersion, preset, z, x, y]));
+    const data = await this.reprojections.load(
+      key,
+      "custom",
+      async () => {
+        const hit = this.tiles.get(key);
+        if (hit !== undefined) {
+          try {
+            await this.validate(source, hit);
+            return hit;
+          } catch {
+            this.tiles.delete(key);
+          }
+        }
+        const result = await reprojectGcjTile(
+          z,
+          x,
+          y,
+          preset.tile_size,
+          async (tx, ty) =>
+            (await this.tile(source, z, tx, ty, undefined, exporting)).data,
+        );
+        this.tiles.put(key, result);
+        return result;
+      },
+      signal,
+      exporting,
+    );
+    return { data, mime: "image/png" };
+  }
+  private checkTile(source: string, z: number, x: number, y: number) {
     const preset = this.presets[source];
     if (
       (!["vector", "satellite"].includes(source) && !preset) ||
@@ -394,6 +428,18 @@ export class MapResources {
       throw new AppError("USER_INPUT", "无效瓦片坐标");
     if (preset && (z < preset.minzoom || z > preset.maxzoom))
       throw new AppError("USER_INPUT", "地图源不支持该瓦片级别");
+  }
+  async tile(
+    source: string,
+    z: number,
+    x: number,
+    y: number,
+    signal?: AbortSignal,
+    exporting = false,
+  ): Promise<{ data: Buffer; mime: string }> {
+    checkCancelled(signal);
+    this.checkTile(source, z, x, y);
+    const preset = this.presets[source];
     const template =
       source === "vector" ? this.vector?.tiles[0] : this.satellite;
     const url = preset
@@ -554,6 +600,7 @@ export class MapResources {
     }
   }
   async close() {
+    await this.reprojections.close();
     await this.downloads.close();
     this.tiles.close();
   }

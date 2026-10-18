@@ -1,6 +1,6 @@
 import type { Project } from "../shared/project.js";
 import type { MapConfig, MapPreset } from "../shared/map.js";
-// Composition policy shared by editor and export; no tile reprojection is implied.
+// Composition policy shared by editor and export; tiles arrive on a WGS84 grid.
 export const featureControls: Record<
   string,
   [string, Record<string, string>, string, string?]
@@ -80,8 +80,6 @@ export function overlayReason(
   peers = true,
 ) {
   const base = presetFor(state, config);
-  if (source.crs !== (base?.crs || "wgs84"))
-    return "坐标系不兼容，尚未实现瓦片重投影";
   if (source.content.some((c) => base?.content.includes(c)))
     return "底图已含同类内容，图片不能拆分";
   if (
@@ -96,17 +94,17 @@ export function overlayReason(
 }
 export function featureReason(state: Project, config: MapConfig, key: string) {
   const base = presetFor(state, config);
-  if ((base?.crs || "wgs84") !== "wgs84")
-    return "OSM 要素为 WGS84，不能叠到 GCJ-02 瓦片";
-  if (base?.content.includes(key)) return "底图已烧入同类内容，无法独立移除";
-  if (activeOverlays(state, config).some((o) => o.content.includes(key)))
-    return "已由透明注记层提供，按整体控制";
+  if (base?.content.includes(key)) return "由底图提供 · 无法单独关闭";
+  const provider = activeOverlays(state, config).find((o) =>
+    o.content.includes(key),
+  );
+  if (provider) return `由${provider.name}提供 · 随该图层控制`;
   const [, , layer, field] = featureControls[key]!;
   if (
     !config.vectorLayers?.[layer] ||
     (field && !(field in config.vectorLayers[layer]!))
   )
-    return "当前矢量源未提供所需图层 / 字段";
+    return "当前数据源不支持";
   return "";
 }
 export function effectiveFeatures(state: Project, config: MapConfig) {
@@ -118,16 +116,6 @@ export function effectiveFeatures(state: Project, config: MapConfig) {
         : state.style.features?.[key] || defaults[key]!,
     ]),
   );
-}
-export function cityReason(state: Project, config: MapConfig) {
-  if (
-    presetFor(state, config)?.content.includes("places") ||
-    activeOverlays(state, config).some((o) => o.content.includes("places"))
-  )
-    return "已有地名，暂停重复城市标注";
-  if (effectiveFeatures(state, config).places !== "none")
-    return "使用 OSM 地名，暂停 GeoNames 城市标注";
-  return "";
 }
 export function reconcileOverlays(state: Project, config: MapConfig) {
   const notes = [];

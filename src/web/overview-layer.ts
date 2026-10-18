@@ -109,6 +109,20 @@ export class OverviewLayer {
     this.install();
   };
   private install(force = false) {
+    // A style diff can remove runtime layers without firing style.load.
+    // Cached version IDs alone do not prove that the layers still exist.
+    const exists = (id: string) =>
+      !!this.map.getSource(id) &&
+      !!this.map.getLayer(`${id}-line`) &&
+      !!this.map.getLayer(`${id}-point`);
+    if (this.current && !exists(this.current)) {
+      this.remove(this.current);
+      this.current = undefined;
+    }
+    if (this.pending && !exists(this.pending)) {
+      this.remove(this.pending);
+      this.pending = undefined;
+    }
     const s = this.status;
     if (!s?.version || !s.tiles || this.hidden) return;
     const prefix = `overview-${s.version}`;

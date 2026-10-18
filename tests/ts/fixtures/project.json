@@ -10,7 +10,6 @@
     "basemap": "light",
     "color": "#e05240",
     "width": 3,
-    "cities": "county",
     "features": {
       "places": "none",
       "roads": "all",

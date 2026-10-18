@@ -50,10 +50,13 @@ export class TaskQueue {
     }
     // Retrying a lost HTTP response must return the same import, never enqueue it twice.
     if (preview?.request.operation === "archive:push") {
-      const applied = this.store.db.prepare("SELECT id FROM tasks WHERE preview_id=?").get(id) as { id: string } | undefined;
+      const applied = this.store.db
+        .prepare("SELECT id FROM tasks WHERE preview_id=?")
+        .get(id) as { id: string } | undefined;
       if (applied) return this.store.public(this.store.read(applied.id)!);
     }
-    if (preview?.uploadsCleaned) throw new AppError("USER_INPUT", "暂存副本已清理，请重新上传");
+    if (preview?.uploadsCleaned)
+      throw new AppError("USER_INPUT", "暂存副本已清理，请重新上传");
     if (!preview || READ_OPERATIONS.includes(preview.request.operation))
       throw new AppError("USER_INPUT", "此任务不能提交执行");
     if (
@@ -85,7 +88,8 @@ export class TaskQueue {
       task.request.options.trackApply
     )
       return this.applyEdit(task.request.options.trackApply);
-    if (task.uploadsCleaned) throw new AppError("USER_INPUT", "暂存副本已清理，请重新上传");
+    if (task.uploadsCleaned)
+      throw new AppError("USER_INPUT", "暂存副本已清理，请重新上传");
     const request = WorkRequestSchema.parse(task.request);
     if (request.options.trackPreview)
       request.options.trackPreview.id = randomUUID();

@@ -322,17 +322,53 @@
   font-size: 12px;
   font-weight: 600;
 }
-.settings-overlay {
-  display: flex;
-  flex-wrap: wrap;
+.settings-scope {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 10px 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-content-row {
+  min-width: 0;
+  margin-top: 12px;
+}
+.settings-content-row > label {
+  display: block;
+  margin-bottom: 4px;
+}
+.settings-provided {
+  margin: 4px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.settings-layer-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(90px, 1.4fr);
   align-items: center;
   gap: 8px;
-  margin-top: 2px;
+  margin-top: 8px;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--border);
 }
-.settings-overlay .ui-number {
-  width: 80px;
+.settings-layer-options .ui-number {
+  width: 100%;
 }
-.settings-overlay .settings-reason {
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.settings-actions .settings-reason {
   flex-basis: 100%;
 }
 .overview-row {

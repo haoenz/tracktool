@@ -10,9 +10,13 @@ import { UploadCleanup } from "../../dist/node/infrastructure/upload-cleanup.js"
 import { WorkRequestSchema } from "../../dist/node/shared/work.js";
 
 const teardown: (() => Promise<void> | void)[] = [];
-afterEach(async () => { for (const close of teardown.splice(0).reverse()) await close(); });
+afterEach(async () => {
+  for (const close of teardown.splice(0).reverse()) await close();
+});
 async function setup() {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "tracktool-upload-cleanup-"));
+  const dir = await mkdtemp(
+    path.join(os.tmpdir(), "tracktool-upload-cleanup-"),
+  );
   teardown.push(() => rm(dir, { recursive: true, force: true }));
   const files = new WorkFiles(path.join(dir, "state"), [dir]);
   const store = new SqliteTasks(path.join(dir, "tasks.sqlite3"));
@@ -20,25 +24,44 @@ async function setup() {
   const cleaner = new UploadCleanup(store, files);
   const upload = await files.upload("first.kml", Readable.from(["original"]));
   const input = upload.files[0]!;
-  const enqueue = (inputs = [input]) => store.enqueue(WorkRequestSchema.parse({ operation: "archive:push", inputs }));
+  const enqueue = (inputs = [input]) =>
+    store.enqueue(
+      WorkRequestSchema.parse({ operation: "archive:push", inputs }),
+    );
   return { dir, files, store, cleaner, upload, input, enqueue };
 }
 
-it.each(["succeeded", "failed", "partial", "cancelled", "interrupted"] as const)("cleans upload after apply %s while preserving server originals and unrelated batch files", async (status) => {
-  const { dir, files, store, cleaner, upload, input, enqueue } = await setup();
-  const other = await files.upload("other.kml", Readable.from(["other"]), upload.id);
-  const original = path.join(dir, "server-original.kml");
-  await writeFile(original, "original");
-  const task = enqueue([input, original]);
-  store.change(task.id, (value) => { value.mode = "apply"; });
-  store.claim("test");
-  store.finish(task.id, "test", status, {});
-  cleaner.sweep();
-  expect(existsSync(input)).toBe(false);
-  expect(existsSync(original)).toBe(true);
-  expect(existsSync(other.files[0]!)).toBe(true);
-  expect(store.read(task.id)?.uploadsCleaned).toBe(true);
-});
+it.each([
+  "succeeded",
+  "failed",
+  "partial",
+  "cancelled",
+  "interrupted",
+] as const)(
+  "cleans upload after apply %s while preserving server originals and unrelated batch files",
+  async (status) => {
+    const { dir, files, store, cleaner, upload, input, enqueue } =
+      await setup();
+    const other = await files.upload(
+      "other.kml",
+      Readable.from(["other"]),
+      upload.id,
+    );
+    const original = path.join(dir, "server-original.kml");
+    await writeFile(original, "original");
+    const task = enqueue([input, original]);
+    store.change(task.id, (value) => {
+      value.mode = "apply";
+    });
+    store.claim("test");
+    store.finish(task.id, "test", status, {});
+    cleaner.sweep();
+    expect(existsSync(input)).toBe(false);
+    expect(existsSync(original)).toBe(true);
+    expect(existsSync(other.files[0]!)).toBe(true);
+    expect(store.read(task.id)?.uploadsCleaned).toBe(true);
+  },
+);
 
 it("preserves successful previews until expiration; removes failed previews and empty batches", async () => {
   const { store, cleaner, upload, input, enqueue } = await setup();

@@ -87,9 +87,18 @@ export class AnalysisLayer {
     this.restore();
   };
   private restore = () => {
-    if (!this.dirty || !this.map.isStyleLoaded()) return;
+    if (!this.map.isStyleLoaded()) return;
+    // Incremental style replacement does not emit style.load.
+    const missing = ["analysis-profile", "analysis-cursor"].some(
+      (id) => !this.map.getSource(id) || !this.map.getLayer(id),
+    );
+    if (!this.dirty && !missing) return;
     this.dirty = false;
-    if (!this.map.getSource("analysis-profile")) {
+    if (missing) {
+      for (const id of ["analysis-cursor", "analysis-profile"]) {
+        if (this.map.getLayer(id)) this.map.removeLayer(id);
+        if (this.map.getSource(id)) this.map.removeSource(id);
+      }
       this.map.addSource("analysis-profile", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },

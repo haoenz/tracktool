@@ -115,20 +115,6 @@ export function mapRoutes(
     await options.display.save(state.style);
     return { style: state.style };
   });
-  app.get("/api/cities", async () => {
-    const cities = (await getResources()).cities;
-    // The web renderer only reads these four fields; omit gazetteer metadata
-    // that would otherwise dominate the payload (670 KB -> 230 KB).
-    return {
-      coverage: cities.coverage,
-      labels: cities.labels.map(({ id, name, level, position }) => ({
-        id,
-        name,
-        level,
-        position,
-      })),
-    };
-  });
   app.get("/api/browse", async (request) => {
     const query = z
         .object({ path: z.string().max(4096).optional() })
@@ -268,7 +254,7 @@ export function mapRoutes(
     const { id } = z.object({ id: z.string() }).parse(request.body),
       r = await getResources();
     if (!r.presets[id]) throw new AppError("USER_INPUT", "未知内置地图源");
-    await r.tile(id, 2, 3, 1);
+    await r.displayTile(id, 2, 3, 1);
     return { id, ok: true };
   });
   app.post("/api/export", async (request) => {
@@ -339,7 +325,7 @@ export function mapRoutes(
       const p = request.params,
         r = await (
           await getResources()
-        ).tile(
+        ).displayTile(
           p.source,
           Number(p.z),
           Number(p.x),

@@ -87,7 +87,9 @@ test("single-track panel previews and saves tag, split and cleanup with history"
     if (await back.isVisible()) await back.click();
     await page.getByRole("button", { name, exact: true }).click();
     await expect(
-      page.locator("#map-panel > .panel-header").getByRole("heading", { name, exact: true }),
+      page
+        .locator("#map-panel > .panel-header")
+        .getByRole("heading", { name, exact: true }),
     ).toBeVisible();
     await expect(back).toHaveCount(1);
   };
@@ -133,9 +135,7 @@ test("single-track panel previews and saves tag, split and cleanup with history"
       exact: true,
     })
     .click();
-  await dialog
-    .getByRole("button", { name: "历史记录", exact: true })
-    .click();
+  await dialog.getByRole("button", { name: "历史记录", exact: true }).click();
   await dialog
     .getByRole("list", { name: "操作时间线" })
     .getByRole("button")

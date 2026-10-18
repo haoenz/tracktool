@@ -69,19 +69,7 @@ export interface MapConfig {
   attribution: string;
   customVectorAttribution: string;
   satelliteAttribution: string;
-  cityAttribution: string;
-  cityCoverage: string;
   cacheTime: number;
-}
-export interface CityLabel {
-  id: string;
-  name: string;
-  level: number;
-  position: Position;
-}
-export interface Cities {
-  coverage: string;
-  labels: CityLabel[];
 }
 export const SelectionRequest = z
   .object({

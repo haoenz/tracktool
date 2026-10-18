@@ -22,7 +22,6 @@ test("display style round-trips and serializes queued writes", async () => {
   const first = defaultProject().style;
   const second = {
     ...first,
-    cities: "none" as const,
     features: { ...first.features, places: "all" },
   };
   await Promise.all([display.save(first), display.save(second)]);

@@ -4,13 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { ZipWriter, Uint8ArrayWriter, TextReader } from "@zip.js/zip.js";
 import {
   readTrackData,
   encodeTrackData,
   openArchive,
 } from "../../dist/node/api.js";
-import { buildGazetteer } from "../../dist/node/infrastructure/gazetteer.js";
 it("public API returns independent precise arrays and versioned JSON", async () => {
   const data = await readTrackData("tests/ts/fixtures/xml/complex.kml"),
     encoded = encodeTrackData(data);
@@ -74,60 +72,6 @@ it("data CLI emits JSON without terminal control codes and Chromium setup suppor
   expect(
     await readFile("resources/maps/static/vendor/Noto-LICENSE.txt", "utf8"),
   ).toContain("OFL");
-});
-it("city snapshot builder retains administrative names while using seat coordinates", async () => {
-  const row = (
-    id: string,
-    name: string,
-    code: string,
-    admin3 = "55",
-    lat = "26",
-    lon = "100",
-  ) =>
-    [
-      id,
-      name,
-      name,
-      name,
-      lat,
-      lon,
-      code.startsWith("ADM") ? "A" : "P",
-      code,
-      "CN",
-      "",
-      "29",
-      "1234",
-      admin3,
-      "",
-      "100",
-      "",
-      "",
-      "Asia/Shanghai",
-      "2026-01-01",
-    ].join("\t");
-  const writer = new ZipWriter(new Uint8ArrayWriter());
-  await writer.add(
-    "CN.txt",
-    new TextReader(
-      [
-        row("1", "示例县", "ADM3"),
-        row("2", "县城镇", "PPLA3", "55", "26.1", "100.1"),
-        row("3", "很大镇", "PPLA4"),
-        row("4", "误称城市", "PPL"),
-        row("5", "残缺县", "ADM3", ""),
-      ].join("\n"),
-    ),
-  );
-  const data = await buildGazetteer(await writer.close());
-  expect(data.labels).toHaveLength(1);
-  expect(data.labels[0]).toMatchObject({
-    name: "示例县",
-    level: 3,
-    code: "ADM3",
-    position: [100.1, 26.1],
-    position_kind: "seat",
-  });
-  expect(data.skipped.missing_admin_code).toBe(1);
 });
 it("public API works from node --input-type=module without leaking eval flags into workers", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "tracktool-api-eval-"));

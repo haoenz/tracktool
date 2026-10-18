@@ -216,16 +216,27 @@ test("details preserve list scroll; hover and focus do not repaint map highlight
   const handleBox = (await sheetHandle.boundingBox())!;
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 22);
   await page.mouse.down();
-  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 380, { steps: 12 });
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 380, {
+    steps: 12,
+  });
   await page.mouse.up();
-  await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "collapsed");
-  await expect.poll(async () => (await controls.boundingBox())!.height).toBeLessThan(60);
+  await expect(page.locator(".map-app")).toHaveAttribute(
+    "data-sheet",
+    "collapsed",
+  );
+  await expect
+    .poll(async () => (await controls.boundingBox())!.height)
+    .toBeLessThan(60);
   await sheetHandle.click();
   await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "half");
   await page.getByRole("button", { name: /调整面板高度/ }).press("End");
-  await expect.poll(async () => (await controls.boundingBox())!.height).toBeGreaterThan(600);
+  await expect
+    .poll(async () => (await controls.boundingBox())!.height)
+    .toBeGreaterThan(600);
   await page.getByRole("button", { name: /调整面板高度/ }).press("ArrowDown");
-  await expect.poll(async () => (await controls.boundingBox())!.height).toBeLessThan(500);
+  await expect
+    .poll(async () => (await controls.boundingBox())!.height)
+    .toBeLessThan(500);
   expect(await controls.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(
     true,
   );
@@ -244,7 +255,9 @@ test("details preserve list scroll; hover and focus do not repaint map highlight
   expect(halfCamera.zoom).toBeCloseTo(fullCamera.zoom, 8);
   expect(halfCamera.center[0]).toBeCloseTo(fullCamera.center[0], 8);
   expect(halfCamera.center[1]).toBeCloseTo(fullCamera.center[1], 8);
-  await expect(page.getByText("地图可见区域太小，请收起面板后再定位。")).toHaveCount(0);
+  await expect(
+    page.getByText("地图可见区域太小，请收起面板后再定位。"),
+  ).toHaveCount(0);
 });
 
 test("map picks real points, marks a range and preserves draft when switching panels", async ({
@@ -494,9 +507,7 @@ for (const width of [1280, 390]) {
     );
     await dialog.getByLabel("起始日期", { exact: true }).fill("2099-01-01");
     await dialog.getByRole("button", { name: "应用", exact: true }).click();
-    await expect(
-      page.getByText("无匹配", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText("无匹配", { exact: true })).toBeVisible();
     await expect(filter).toHaveAttribute("title", "筛选：已设置");
     await filter.click();
     await dialog.getByRole("button", { name: "重置", exact: true }).click();

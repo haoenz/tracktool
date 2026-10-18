@@ -47,7 +47,10 @@ export async function rebuild(
         const requested = new Set(selected);
         rows = rows.filter((row) => requested.has(row.path));
         if (!requested.size || rows.length !== requested.size)
-          throw new AppError("USER_INPUT", "部分所选轨迹已不存在，请返回列表重新选择");
+          throw new AppError(
+            "USER_INPUT",
+            "部分所选轨迹已不存在，请返回列表重新选择",
+          );
       }
       const items = new Map<
         Category,

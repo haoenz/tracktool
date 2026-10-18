@@ -80,7 +80,8 @@ function TrackEditor({
   active?: boolean;
   onEntryChange?: (id: string) => void;
   onHeaderChange?: (
-    header: { title: string; backLabel: string; onBack: () => void } | undefined,
+    header:
+      { title: string; backLabel: string; onBack: () => void } | undefined,
   ) => void;
 }) {
   const workspace = useWorkspace(),
@@ -258,10 +259,7 @@ function TrackEditor({
       backLabel: view === "display" ? "返回分段管理" : "返回编辑操作",
       onBack: () => {
         if (busy || active) return;
-        if (
-          draftDirty &&
-          !window.confirm("有未保存的修改，是否放弃并返回？")
-        )
+        if (draftDirty && !window.confirm("有未保存的修改，是否放弃并返回？"))
           return;
         resetDraft();
         setMode("");
@@ -1231,7 +1229,8 @@ export default function TrackEditorView(props: {
   active?: boolean;
   onEntryChange?: (id: string) => void;
   onHeaderChange?: (
-    header: { title: string; backLabel: string; onBack: () => void } | undefined,
+    header:
+      { title: string; backLabel: string; onBack: () => void } | undefined,
   ) => void;
 }) {
   return props.view === "history" ? (

@@ -32,7 +32,6 @@
     "start": "node dist/node/server/main.js",
     "dev": "pnpm build && node scripts/dev.ts",
     "cli": "node dist/node/cli/main.js",
-    "cities": "node scripts/build-map-cities.ts",
     "verify:package": "node scripts/release/verify-package.mjs",
     "test:terminal": "node scripts/release/terminal.mjs"
   },

@@ -16,7 +16,7 @@ import {
 import type { OverviewStatus } from "../shared/overview.js";
 import { MapCanvas } from "../drawing/core.js";
 import type { Project } from "../shared/project.js";
-import type { MapConfig, CityLabel, SelectedTrack } from "../shared/map.js";
+import type { MapConfig, SelectedTrack } from "../shared/map.js";
 import { displayCoordinate } from "../shared/coordinates.js";
 type Transition = {
   tracks: SelectedTrack[];
@@ -38,7 +38,6 @@ export interface Viewport {
 type Props = {
   state: Project;
   config: MapConfig;
-  cities: CityLabel[];
   tracks: SelectedTrack[];
   preview: boolean;
   overview?: OverviewStatus;
@@ -173,7 +172,6 @@ export const MapViewport = memo(
         frame,
         structuredClone(state),
         latest.current.config,
-        latest.current.cities,
         (camera) => {
           if (current.current === map) {
             if (!transition.current) candidate.current?.setCamera(camera);
@@ -266,7 +264,7 @@ export const MapViewport = memo(
         current.current = undefined;
         if (latest.current.exposeRenderer !== false) delete window.renderer;
       };
-    }, [props.config, props.cities]); // Stable bootstrap resources own the renderer lifetime.
+    }, [props.config]); // Stable bootstrap resources own the renderer lifetime.
     useEffect(() => {
       current.current?.apply(structuredClone(props.state));
       current.current?.setCamera(props.state.camera);

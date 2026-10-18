@@ -18,7 +18,9 @@ export async function tool(page: Page, name: string) {
     await tracks.click();
   await expect(tracks).toHaveAttribute("aria-expanded", "true");
   if (name === "轨迹库") {
-    await page.getByRole("button", { name: "打开轨迹列表", exact: true }).click();
+    await page
+      .getByRole("button", { name: "打开轨迹列表", exact: true })
+      .click();
     return;
   }
   const currentPanel = new URL(page.url()).searchParams.get("panel");

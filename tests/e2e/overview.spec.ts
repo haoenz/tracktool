@@ -6,8 +6,14 @@ import { resetDisplay } from "./display-reset.js";
 
 async function loaded(page: Page) {
   await page.goto("/map?panel=library");
-  await expect(page.getByRole("complementary", { name: "地图控制面板" })).toBeVisible();
-  if (await page.getByRole("button", { name: "轨迹列表", exact: true }).isVisible())
+  await expect(
+    page.getByRole("complementary", { name: "地图控制面板" }),
+  ).toBeVisible();
+  if (
+    await page
+      .getByRole("button", { name: "轨迹列表", exact: true })
+      .isVisible()
+  )
     await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
   await page.waitForFunction(() => {
     const m = window.renderer?.map;
@@ -95,9 +101,7 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
   expect(JSON.stringify(width)).toContain("trackId");
   await page.getByRole("button", { name: "返回列表", exact: true }).click();
   await filterTracks(page, "no-such-track");
-  await expect(
-    page.getByText("无匹配", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("无匹配", { exact: true })).toBeVisible();
   expect(await overviewSource(page)).toBe(source);
   await page.evaluate(() =>
     window.renderer!.map.jumpTo({ center: [117, 40], zoom: 8.2 }),
@@ -235,8 +239,14 @@ test("cold build, empty library and failures offer usable status and import/retr
     }),
   );
   await page.goto("/map?panel=library");
-  await expect(page.getByRole("complementary", { name: "地图控制面板" })).toBeVisible();
-  if (await page.getByRole("button", { name: "轨迹列表", exact: true }).isVisible())
+  await expect(
+    page.getByRole("complementary", { name: "地图控制面板" }),
+  ).toBeVisible();
+  if (
+    await page
+      .getByRole("button", { name: "轨迹列表", exact: true })
+      .isVisible()
+  )
     await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("3/10");
   state = "error";
@@ -285,7 +295,9 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
   await toggle.click();
   await expect(page.locator("#map-panel")).toBeHidden();
   await toggle.click();
-  await expect(page.getByRole("button", { name: "筛选", exact: true })).toHaveAttribute("title", "筛选：已设置");
+  await expect(
+    page.getByRole("button", { name: "筛选", exact: true }),
+  ).toHaveAttribute("title", "筛选：已设置");
   await expect(page.getByRole("button", { name: "清除位置筛选" })).toBeHidden();
   await expect(page.getByLabel("筛选轨迹", { exact: true })).toHaveValue("");
   await page.getByRole("button", { name: "筛选", exact: true }).click();
@@ -303,7 +315,11 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
     .locator(".track-list-section")
     .getByRole("button", { name: "查看 Train/same.kml", exact: true })
     .click();
-  await expect(page.getByRole("region", { name: "轨迹详情" }).locator(".track-route > strong")).toHaveText("未知");
+  await expect(
+    page
+      .getByRole("region", { name: "轨迹详情" })
+      .locator(".track-route > strong"),
+  ).toHaveText("未知");
   await toggle.click();
   await expect(page.locator("#map-panel")).toBeHidden();
   await toggle.click();
@@ -319,16 +335,24 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
   ).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "筛选", exact: true }).click();
   const filters = page.getByRole("dialog", { name: "筛选", exact: true });
-  await expect(filters.getByRole("group", { name: "位置筛选" })).toContainText("点选附近：");
+  await expect(filters.getByRole("group", { name: "位置筛选" })).toContainText(
+    "点选附近：",
+  );
   await filters.getByRole("button", { name: "清除位置筛选" }).click();
   await filters.getByRole("button", { name: "取消", exact: true }).click();
-  await expect(page.getByRole("button", { name: "筛选", exact: true })).toHaveAttribute("title", "筛选：已设置");
+  await expect(
+    page.getByRole("button", { name: "筛选", exact: true }),
+  ).toHaveAttribute("title", "筛选：已设置");
   await page.getByRole("button", { name: "筛选", exact: true }).click();
-  await expect(filters.getByRole("button", { name: "清除位置筛选" })).toBeVisible();
+  await expect(
+    filters.getByRole("button", { name: "清除位置筛选" }),
+  ).toBeVisible();
   await filters.getByRole("button", { name: "重置", exact: true }).click();
   await expect(filters.getByRole("group", { name: "位置筛选" })).toBeHidden();
   await filters.getByRole("button", { name: "应用", exact: true }).click();
-  await expect(page.getByRole("button", { name: "筛选", exact: true })).toHaveAttribute("title", "筛选");
+  await expect(
+    page.getByRole("button", { name: "筛选", exact: true }),
+  ).toHaveAttribute("title", "筛选");
   await expect(
     page.getByRole("button", {
       name: "查看 Default/2026-10-01 中文.kml",
@@ -336,7 +360,7 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
     }),
   ).toBeVisible();
 });
-test("GCJ02 basemap uses its own overview version and a style reload restores selection", async ({
+test("GCJ02 basemap retains the WGS84 overview and a style reload restores selection", async ({
   page,
 }) => {
   await loaded(page);
@@ -358,10 +382,15 @@ test("GCJ02 basemap uses its own overview version and a style reload restores se
     .fill(label);
   await page.getByRole("option").getByText(label, { exact: true }).click();
   await expect
+    .poll(() => page.evaluate(() => window.renderer!.state.style.basemap), {
+      timeout: 20000,
+    })
+    .toBe("amap-road");
+  await expect
     .poll(() => page.evaluate(() => window.renderer!.crs), { timeout: 15000 })
-    .toBe("gcj02");
+    .toBe("wgs84");
   await expect.poll(() => overviewSource(page)).toBeTruthy();
-  expect(await overviewSource(page)).not.toBe(before);
+  expect(await overviewSource(page)).toBe(before);
   await page.evaluate(() => {
     const r = window.renderer!;
     r.map.setStyle(r.map.getStyle(), { diff: false });
@@ -369,7 +398,11 @@ test("GCJ02 basemap uses its own overview version and a style reload restores se
   await page.waitForFunction(() => window.renderer!.map.isStyleLoaded());
   await expect.poll(() => overviewSource(page)).toBeTruthy();
   await tool(page, "轨迹库");
-  await expect(page.getByRole("region", { name: "轨迹详情" }).locator(".track-route > strong")).toHaveText("未知");
+  await expect(
+    page
+      .getByRole("region", { name: "轨迹详情" })
+      .locator(".track-route > strong"),
+  ).toHaveText("未知");
 });
 
 test("category colors and alpha match original KML while selection preserves category color", async ({
@@ -439,9 +472,15 @@ test("only pending work shows a translucent loading status and success notificat
   });
   try {
     await page.goto("/map?panel=library");
-  await expect(page.getByRole("complementary", { name: "地图控制面板" })).toBeVisible();
-  if (await page.getByRole("button", { name: "轨迹列表", exact: true }).isVisible())
-    await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
+    await expect(
+      page.getByRole("complementary", { name: "地图控制面板" }),
+    ).toBeVisible();
+    if (
+      await page
+        .getByRole("button", { name: "轨迹列表", exact: true })
+        .isVisible()
+    )
+      await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
     await expect(page.locator(".map-status")).toContainText(/正在/, {
       timeout: 15000,
     });
@@ -457,7 +496,9 @@ test("only pending work shows a translucent loading status and success notificat
   await expect(
     page.getByText("选择轨迹查看，拖动地图探索。", { exact: true }),
   ).toHaveCount(0);
-  await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
+  await page
+    .getByRole("button", { name: "切换当前列表可见性", exact: true })
+    .click();
   await expect(
     page.getByRole("button", { name: /^(显示|隐藏) 索引未命中$/, exact: true }),
   ).toBeEnabled();
@@ -478,8 +519,12 @@ test("browse eye buttons filter map lines and points, survive searches and style
 }) => {
   await loaded(page);
   const source = await overviewSource(page);
-  await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
-  await expect(page.getByRole("button", { name: "切换当前列表可见性", exact: true })).toHaveAttribute("data-visibility", "none");
+  await page
+    .getByRole("button", { name: "切换当前列表可见性", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "切换当前列表可见性", exact: true }),
+  ).toHaveAttribute("data-visibility", "none");
   const checkbox = page.getByRole("button", {
     name: /^(隐藏|显示) 索引未命中$/,
     exact: true,
@@ -496,7 +541,9 @@ test("browse eye buttons filter map lines and points, survive searches and style
     ]);
   await expect(checkbox).toBeEnabled();
   await checkbox.click();
-  await expect(page.getByRole("button", { name: "切换当前列表可见性", exact: true })).toHaveAttribute("data-visibility", "mixed");
+  await expect(
+    page.getByRole("button", { name: "切换当前列表可见性", exact: true }),
+  ).toHaveAttribute("data-visibility", "mixed");
   await expect(page.locator("[data-sonner-toaster]")).toContainText(
     "已更新地图显示",
   );
@@ -510,9 +557,7 @@ test("browse eye buttons filter map lines and points, survive searches and style
   for (const filter of filters)
     expect(JSON.stringify(filter)).toMatch(/"literal",\["[^"]+"\]/);
   await filterTracks(page, "no-such-track");
-  await expect(
-    page.getByText("无匹配", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("无匹配", { exact: true })).toBeVisible();
   expect(
     await page.evaluate(
       (s) => window.renderer!.map.getFilter(s + "-line"),
@@ -544,10 +589,16 @@ test("browse eye buttons filter map lines and points, survive searches and style
       exact: true,
     }),
   ).toHaveAttribute("aria-pressed", "false");
-  await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
+  await page
+    .getByRole("button", { name: "切换当前列表可见性", exact: true })
+    .click();
   await expect(checkbox).toHaveAttribute("aria-pressed", "false");
-  await expect(page.getByRole("button", { name: "切换当前列表可见性", exact: true })).toHaveAttribute("data-visibility", "none");
-  await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "切换当前列表可见性", exact: true }),
+  ).toHaveAttribute("data-visibility", "none");
+  await page
+    .getByRole("button", { name: "切换当前列表可见性", exact: true })
+    .click();
   await expect(
     page.getByRole("button", {
       name: /^(显示|隐藏) 原始中文$/,
@@ -645,17 +696,27 @@ test("multi-select separates selection scope from actions and preserves other pa
   });
   await loaded(page);
   const panel = page.getByRole("complementary", { name: "地图控制面板" });
-  const visibility = panel.getByRole("button", { name: "切换当前列表可见性", exact: true });
+  const visibility = panel.getByRole("button", {
+    name: "切换当前列表可见性",
+    exact: true,
+  });
   await expect(visibility).toHaveAttribute("data-visibility", "all");
-  await panel.getByRole("button", { name: "隐藏 批量轨迹 0", exact: true }).click();
+  await panel
+    .getByRole("button", { name: "隐藏 批量轨迹 0", exact: true })
+    .click();
   await expect(visibility).toHaveAttribute("data-visibility", "mixed");
   await panel.getByRole("button", { name: "下一页", exact: true }).click();
-  await expect(panel.getByRole("button", { name: "隐藏 批量轨迹 50", exact: true })).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "隐藏 批量轨迹 50", exact: true }),
+  ).toBeVisible();
   await expect(visibility).toHaveAttribute("data-visibility", "mixed");
   await panel.getByRole("button", { name: "上一页", exact: true }).click();
   await visibility.click();
   await expect(visibility).toHaveAttribute("data-visibility", "none");
-  await expect(visibility).toHaveAttribute("title", "全部隐藏：点击全部显示（包含所有分页）");
+  await expect(visibility).toHaveAttribute(
+    "title",
+    "全部隐藏：点击全部显示（包含所有分页）",
+  );
   await visibility.click();
   await expect(visibility).toHaveAttribute("data-visibility", "all");
   await panel.getByRole("button", { name: "批量操作", exact: true }).click();
@@ -663,10 +724,16 @@ test("multi-select separates selection scope from actions and preserves other pa
   const scope = panel.getByRole("region", { name: "多选范围" });
   const all = scope.getByRole("checkbox", { name: "全选本页" });
   await expect(actions).toBeHidden();
-  await panel.getByRole("button", { name: "勾选全部筛选结果", exact: true }).click();
+  await panel
+    .getByRole("button", { name: "勾选全部筛选结果", exact: true })
+    .click();
   await expect(actions).toContainText("已选 51 条");
-  await expect(panel.getByRole("button", { name: "切换当前列表可见性", exact: true })).toHaveCount(0);
-  await panel.getByRole("button", { name: "清空全部勾选", exact: true }).click();
+  await expect(
+    panel.getByRole("button", { name: "切换当前列表可见性", exact: true }),
+  ).toHaveCount(0);
+  await panel
+    .getByRole("button", { name: "清空全部勾选", exact: true })
+    .click();
   await expect(actions).toBeHidden();
   await expect(scope).toHaveText("全选本页");
 
@@ -677,12 +744,16 @@ test("multi-select separates selection scope from actions and preserves other pa
     panel.getByRole("checkbox", { name: "选择 批量轨迹 0", exact: true }),
   ).toBeChecked();
   await expect(all).toHaveAttribute("data-state", "indeterminate");
-  await expect(panel.getByRole("button", { name: "勾选全部筛选结果", exact: true })).toHaveAttribute("aria-pressed", "mixed");
+  await expect(
+    panel.getByRole("button", { name: "勾选全部筛选结果", exact: true }),
+  ).toHaveAttribute("aria-pressed", "mixed");
   await expect(actions).toContainText("已选 1 条");
   await expect(panel.getByRole("region", { name: "轨迹详情" })).toBeHidden();
   await all.click();
   await expect(actions).toContainText("已选 50 条");
-  await panel.getByRole("button", { name: "勾选全部筛选结果", exact: true }).click();
+  await panel
+    .getByRole("button", { name: "勾选全部筛选结果", exact: true })
+    .click();
   await expect(actions).toContainText("已选 51 条");
   await panel.getByRole("button", { name: "下一页", exact: true }).click();
   await expect(
@@ -690,10 +761,16 @@ test("multi-select separates selection scope from actions and preserves other pa
   ).toBeChecked();
   await all.click();
   await expect(actions).toContainText("已选 50 条");
-  await expect(panel.getByRole("button", { name: "勾选全部筛选结果", exact: true })).toHaveAttribute("aria-pressed", "mixed");
-  await panel.getByRole("button", { name: "勾选全部筛选结果", exact: true }).click();
+  await expect(
+    panel.getByRole("button", { name: "勾选全部筛选结果", exact: true }),
+  ).toHaveAttribute("aria-pressed", "mixed");
+  await panel
+    .getByRole("button", { name: "勾选全部筛选结果", exact: true })
+    .click();
   await expect(actions).toContainText("已选 51 条");
-  await panel.getByRole("button", { name: "清空全部勾选", exact: true }).click();
+  await panel
+    .getByRole("button", { name: "清空全部勾选", exact: true })
+    .click();
   await expect(actions).toBeHidden();
   await expect(scope).toBeVisible();
   await panel
@@ -703,63 +780,109 @@ test("multi-select separates selection scope from actions and preserves other pa
   await panel.getByRole("button", { name: "批量操作", exact: true }).click();
   await expect(scope).toHaveText("全选本页");
   await expect(actions).toBeHidden();
-  await panel.getByRole("button", { name: "勾选全部筛选结果", exact: true }).click();
+  await panel
+    .getByRole("button", { name: "勾选全部筛选结果", exact: true })
+    .click();
   await expect(actions.getByRole("button")).toHaveCount(1);
   await actions.getByRole("button", { name: "导出", exact: true }).click();
   await expect(page).toHaveURL(/panel=export/);
   await expect(panel).toContainText("已选择 51 条轨迹用于导出");
   await page.route("**/api/work/preview", (route) => route.abort());
   for (const kind of ["ZIP", "聚合KML"]) {
-    await panel.getByRole("combobox", { name: "导出类型", exact: true }).click();
+    await panel
+      .getByRole("combobox", { name: "导出类型", exact: true })
+      .click();
     await page.getByRole("option", { name: kind, exact: true }).click();
     const pending = page.waitForRequest("**/api/work/preview");
     await panel.getByRole("button", { name: "导出", exact: true }).click();
     const request = await pending;
     expect(request.postDataJSON().options.entries).toHaveLength(51);
     expect(request.postDataJSON().options.entries).toContain("batch/50.kml");
-    expect(request.postDataJSON().operation).toBe(kind === "ZIP" ? "archive:backup" : "archive:rebuild");
+    expect(request.postDataJSON().operation).toBe(
+      kind === "ZIP" ? "archive:backup" : "archive:rebuild",
+    );
   }
-
 });
 
-test("selected export loads only selected tracks after choosing PNG", async ({ page }) => {
+test("selected export loads only selected tracks after choosing PNG", async ({
+  page,
+}) => {
   await loaded(page);
   const panel = page.getByRole("complementary", { name: "地图控制面板" });
   const entry = "Default/2026-10-01 中文.kml";
   await panel.getByRole("button", { name: "批量操作", exact: true }).click();
-  await panel.getByRole("button", { name: `选择 ${entry}`, exact: true }).click();
-  await panel.getByRole("region", { name: "所选轨迹操作" }).getByRole("button", { name: "导出", exact: true }).click();
+  await panel
+    .getByRole("button", { name: `选择 ${entry}`, exact: true })
+    .click();
+  await panel
+    .getByRole("region", { name: "所选轨迹操作" })
+    .getByRole("button", { name: "导出", exact: true })
+    .click();
   await expect(panel).toContainText("已选择 1 条轨迹用于导出");
   await expect(page.getByRole("region", { name: "当前出图工程" })).toBeHidden();
   await panel.getByRole("combobox", { name: "导出类型", exact: true }).click();
   await page.getByRole("option", { name: "PNG图像", exact: true }).click();
-  await expect(page.getByRole("region", { name: "当前出图工程" })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => window.renderer!.state.tracks.map((track) => track.entry))).toEqual([entry]);
+  await expect(
+    page.getByRole("region", { name: "当前出图工程" }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.renderer!.state.tracks.map((track) => track.entry),
+      ),
+    )
+    .toEqual([entry]);
 });
 
-test("category filters support multiple choices and clearing", async ({ page }) => {
+test("category filters support multiple choices and clearing", async ({
+  page,
+}) => {
   await loaded(page);
   const filter = page.getByRole("button", { name: "筛选", exact: true });
   await filter.click();
   const dialog = page.getByRole("dialog", { name: "筛选", exact: true });
-  const categories = dialog.getByRole("combobox", { name: "轨迹分类", exact: true });
+  const categories = dialog.getByRole("combobox", {
+    name: "轨迹分类",
+    exact: true,
+  });
   await categories.click();
   await page.getByRole("option", { name: "Default", exact: true }).click();
   await page.getByRole("option", { name: "Train", exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(categories).toContainText("已选择 2 项");
   await dialog.getByRole("button", { name: "应用", exact: true }).click();
-  await expect(page.getByRole("button", { name: "查看 Default/2026-10-01 中文.kml", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "查看 Train/same.kml", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "查看 Default/2026-10-01 中文.kml",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "查看 Train/same.kml", exact: true }),
+  ).toBeVisible();
   await filter.click();
-  await dialog.getByRole("button", { name: "移除 Default", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "移除 Default", exact: true })
+    .click();
   await dialog.getByRole("button", { name: "应用", exact: true }).click();
-  await expect(page.getByRole("button", { name: "查看 Default/2026-10-01 中文.kml", exact: true })).toBeHidden();
-  await expect(page.getByRole("button", { name: "查看 Train/same.kml", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "查看 Default/2026-10-01 中文.kml",
+      exact: true,
+    }),
+  ).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "查看 Train/same.kml", exact: true }),
+  ).toBeVisible();
   await filter.click();
   await categories.click();
   await page.getByRole("option", { name: "清除选择", exact: true }).click();
   await expect(categories).toContainText("全部分类");
   await dialog.getByRole("button", { name: "应用", exact: true }).click();
-  await expect(page.getByRole("button", { name: "查看 Default/2026-10-01 中文.kml", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "查看 Default/2026-10-01 中文.kml",
+      exact: true,
+    }),
+  ).toBeVisible();
 });

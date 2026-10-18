@@ -5,7 +5,7 @@ import { api } from "./api.js";
 import { MapViewport } from "./map-viewport.js";
 import type { Viewport } from "./map-viewport.js";
 import type { Project } from "../shared/project.js";
-import type { MapConfig, Cities, SelectedTrack } from "../shared/map.js";
+import type { MapConfig, SelectedTrack } from "../shared/map.js";
 import "./map.css";
 export default function WorkMap({ id }: { id: string }) {
   const bootstrap = useQuery({
@@ -17,10 +17,6 @@ export default function WorkMap({ id }: { id: string }) {
           signal,
         ),
     }),
-    cities = useQuery({
-      queryKey: ["cities"],
-      queryFn: ({ signal }) => api<Cities>("/api/cities", undefined, signal),
-    }),
     geometry = useQuery({
       queryKey: ["work-map", id],
       queryFn: ({ signal }) =>
@@ -30,14 +26,13 @@ export default function WorkMap({ id }: { id: string }) {
           signal,
         ),
     });
-  const error = bootstrap.error ?? cities.error ?? geometry.error;
+  const error = bootstrap.error ?? geometry.error;
   if (error) return <Alert type="error" title={error.message} />;
-  if (!bootstrap.data || !cities.data || !geometry.data) return <Spin />;
+  if (!bootstrap.data || !geometry.data) return <Spin />;
   return (
     <Preview
       state={bootstrap.data.state}
       config={bootstrap.data.config}
-      cities={cities.data}
       tracks={geometry.data.tracks}
     />
   );
@@ -45,7 +40,6 @@ export default function WorkMap({ id }: { id: string }) {
 function Preview(props: {
   state: Project;
   config: MapConfig;
-  cities: Cities;
   tracks: SelectedTrack[];
 }) {
   const [state, setState] = useState(() => ({
@@ -78,7 +72,6 @@ function Preview(props: {
           ref={viewport}
           state={state}
           config={props.config}
-          cities={props.cities.labels}
           tracks={props.tracks}
           preview={false}
           onCamera={(camera) => setState((old) => ({ ...old, camera }))}

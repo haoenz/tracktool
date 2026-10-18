@@ -6,12 +6,7 @@ import { api } from "./api.js";
 import { MapViewport, type Viewport } from "./map-viewport.js";
 import type { EditGeometry } from "../shared/track-edit.js";
 import type { Project } from "../shared/project.js";
-import type {
-  Cities,
-  MapConfig,
-  SelectedTrack,
-  Feature,
-} from "../shared/map.js";
+import type { MapConfig, SelectedTrack, Feature } from "../shared/map.js";
 export function TrackEditorMap({
   geometry,
   onPick,
@@ -68,19 +63,12 @@ function StandaloneEditorMap({
         signal,
       ),
   });
-  const cities = useQuery({
-    queryKey: ["cities"],
-    queryFn: ({ signal }) => api<Cities>("/api/cities", undefined, signal),
-  });
-  if (bootstrap.error || cities.error)
-    return (
-      <Alert type="error" title={(bootstrap.error ?? cities.error)?.message} />
-    );
-  if (!bootstrap.data || !cities.data) return <Spin />;
+  if (bootstrap.error)
+    return <Alert type="error" title={bootstrap.error?.message} />;
+  if (!bootstrap.data) return <Spin />;
   return (
     <EditorMap
       {...bootstrap.data}
-      cities={cities.data}
       geometry={geometry}
       onPick={onPick}
       selectedSegment={selectedSegment}
@@ -90,14 +78,12 @@ function StandaloneEditorMap({
 function EditorMap({
   state: initial,
   config,
-  cities,
   geometry,
   onPick,
   selectedSegment,
 }: {
   state: Project;
   config: MapConfig;
-  cities: Cities;
   geometry: EditGeometry;
   onPick?: (p: [number, number]) => void;
   selectedSegment?: string;
@@ -142,7 +128,6 @@ function EditorMap({
           ref={ref}
           state={state}
           config={config}
-          cities={cities.labels}
           tracks={tracks}
           preview={false}
           onCamera={(camera) => setState((s) => ({ ...s, camera }))}

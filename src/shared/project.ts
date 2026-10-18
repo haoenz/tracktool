@@ -30,7 +30,6 @@ export const ProjectStyleSchema = z
       ),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
     width: number(0.5, 12),
-    cities: z.enum(["none", "county"]),
     features,
     overlays: z.array(
       z
@@ -112,8 +111,6 @@ export const ProjectSchema = z
       if (!overlay.enabled) continue;
       const source = presets[overlay.id];
       if (!source) continue;
-      if (source.crs !== (presets[value.style.basemap]?.crs ?? "wgs84"))
-        issue("坐标系不兼容");
       if (source.content.some((c) => content.has(c))) issue("已含同类内容");
       source.content.forEach((c) => content.add(c));
     }
@@ -131,7 +128,6 @@ export function defaultProject(
       basemap: "light",
       color: "#e05240",
       width: 3,
-      cities: "county",
       features: { ...catalog.defaults },
       overlays: [],
       power: { min_voltage: 0, facilities: "all" },

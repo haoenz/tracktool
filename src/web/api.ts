@@ -59,17 +59,24 @@ export async function readConfig(signal?: AbortSignal) {
 /** Wait for a user-requested operation without exposing its internal phases. */
 export async function waitForWorkTask(id: string) {
   for (;;) {
-    const task = await api<import("../shared/work.js").WorkTask>(`/api/work/tasks/${id}`);
+    const task = await api<import("../shared/work.js").WorkTask>(
+      `/api/work/tasks/${id}`,
+    );
     if (!["queued", "running"].includes(task.status)) {
-      if (task.status !== "succeeded") throw new Error(task.error?.message ?? "操作未完成，请检查结果后重试");
+      if (task.status !== "succeeded")
+        throw new Error(task.error?.message ?? "操作未完成，请检查结果后重试");
       return task;
     }
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
 }
-export async function downloadWorkFiles(task: import("../shared/work.js").WorkTask) {
+export async function downloadWorkFiles(
+  task: import("../shared/work.js").WorkTask,
+) {
   for (const [index, file] of (task.output?.paths ?? []).entries()) {
-    const response = await request(`/api/work/tasks/${task.id}/download?index=${index}`);
+    const response = await request(
+      `/api/work/tasks/${task.id}/download?index=${index}`,
+    );
     const url = URL.createObjectURL(await response.blob());
     const anchor = document.createElement("a");
     anchor.href = url;

@@ -9,10 +9,8 @@ export default function Settings({
 }) {
   return (
     <div className="settings-panel">
-      <p className="overview-hint">
-        {inProject
-          ? "当前在出图工程中，地图设置仅作用于当前工程。"
-          : "调整浏览地图的底图、标注和叠加层。修改会自动保存，下次打开继续使用。"}
+      <p className="settings-scope">
+        {inProject ? "当前出图工程 · 保存工程后保留" : "浏览地图 · 自动保存"}
       </p>
       {children ?? <p>地图资源就绪后可调整地图设置。</p>}
     </div>

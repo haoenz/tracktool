@@ -3,28 +3,17 @@ import type { Project } from "../shared/project.js";
 import type {
   MapConfig,
   MapPreset,
-  CityLabel,
   SelectedTrack,
   TrackGeoJSON,
   Position,
 } from "../shared/map.js";
 import { ResourceHealth, type ResourceEvent } from "./resource-health.js";
-export interface DrawnLabel {
-  id: string;
-  name: string;
-  level: number;
-  x: number;
-  y: number;
-  box: [number, number, number, number];
-  normalized: string;
-}
 export interface RenderReport {
-  labels: DrawnLabel[];
   camera: Project["camera"];
 }
 import { mapStyle, basemapPreset } from "./styles.js";
 import { displayCoordinate, displayGeometry } from "./coordinates.js";
-import { activeOverlays, cityReason, effectiveFeatures } from "./layers.js";
+import { activeOverlays, effectiveFeatures } from "./layers.js";
 /* Shared deterministic map renderer: fixed CSS-pixel frame, output DPR only. */
 export const frames = {
   "4:3": [960, 720],
@@ -39,7 +28,6 @@ export class MapCanvas {
   frame: HTMLElement;
   state: Project;
   config: MapConfig;
-  cities: CityLabel[];
   preset: MapPreset | undefined;
   crs: string;
   onCamera?: (camera: Project["camera"]) => void;
@@ -50,7 +38,6 @@ export class MapCanvas {
   }
   data: TrackGeoJSON;
   displayData?: TrackGeoJSON;
-  labels: DrawnLabel[];
   loadedFont: boolean;
   exportPreview: boolean;
   surround: { x: number; y: number };
@@ -69,7 +56,6 @@ export class MapCanvas {
     frame: HTMLElement,
     state: Project,
     config: MapConfig,
-    cities: CityLabel[],
     onCamera?: (camera: Project["camera"]) => void,
     onError?: (message: string) => void,
     handleResourceError?: (event: {
@@ -82,12 +68,10 @@ export class MapCanvas {
     this.state = state;
     this.config = config;
     this.preset = basemapPreset(state, config);
-    this.crs = this.preset?.crs || "wgs84";
-    this.cities = cities;
+    this.crs = "wgs84";
     this.onCamera = onCamera;
     this.onError = onError;
     this.data = empty;
-    this.labels = [];
     this.loadedFont = false;
     // Export always starts in fixed-frame mode. The editor can explicitly
     // switch to viewport-wide browsing without modifying the saved state.
@@ -201,8 +185,7 @@ export class MapCanvas {
     });
     return pending;
   }
-  /** The bundled CJK font is only required for export fidelity. Browsing
-   * labels use the platform font so the 16 MB asset never blocks first paint. */
+  /** Load the bundled CJK font for export titles without blocking browsing. */
   private ensureFont() {
     if (this.loadedFont) return Promise.resolve();
     if (!this.fontLoading) {
@@ -347,11 +330,6 @@ export class MapCanvas {
               ? "https://openrailwaymap.org/"
               : "https://www.openstreetmap.org/copyright",
       );
-    if (
-      this.state.style.cities === "county" &&
-      !cityReason(this.state, this.config)
-    )
-      add("GeoNames · CC BY 4.0", "https://www.geonames.org/");
   }
   setTracks(tracks: SelectedTrack[]) {
     this.data = {
@@ -385,7 +363,7 @@ export class MapCanvas {
         ])
     ) {
       this.preset = basemapPreset(state, this.config);
-      this.crs = this.preset?.crs || "wgs84";
+      this.crs = "wgs84";
       this.displayData = displayGeometry(this.data, this.crs);
       this.resources.clear();
       this.map.setStyle(mapStyle(state, this.config, this.displayData));
@@ -530,8 +508,6 @@ export class MapCanvas {
     ctx.lineWidth = 3 * unit;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const boxes: [number, number, number, number][] = [];
-    this.labels = [];
     if (this.exportPreview && this.state.title) {
       let size = 30;
       let width = this.measureText(ctx, this.state.title, size);
@@ -541,69 +517,6 @@ export class MapCanvas {
       }
       ctx.strokeText(this.state.title, w / 2, 38);
       ctx.fillText(this.state.title, w / 2, 38);
-      boxes.push([0, 0, w, 72]);
-    }
-    if (
-      this.state.style.cities === "none" ||
-      cityReason(this.state, this.config)
-    )
-      return;
-    const zoom = this.map.getZoom() + Math.log2(scale),
-      center = this.map.getCenter().lng;
-    for (const city of this.cities) {
-      if (zoom < [0, 3, 5, 6.5][city.level]!) continue;
-      const position = displayCoordinate(city.position, this.crs);
-      const lon = position[0] + 360 * Math.round((center - position[0]) / 360);
-      const projected = this.map.project([lon, position[1]]);
-      // Round sub-pixel arithmetic noise so expanded preview and isolated
-      // export have exactly the same label collision decisions and reports.
-      const x =
-        Math.round((projected.x - this.surround.x + offsetX) * 1e6) / 1e6;
-      const y =
-        Math.round((projected.y - this.surround.y + offsetY) * 1e6) / 1e6;
-      const size = [22, 20, 17, 14][city.level]! * unit;
-      const tw = this.measureText(ctx, city.name, size);
-      const box: [number, number, number, number] = [
-        x - tw / 2 - 5 * unit,
-        y - size / 2 - 5 * unit,
-        x + tw / 2 + 5 * unit,
-        y + size / 2 + 5 * unit,
-      ];
-      if (
-        box[0] < 16 * unit ||
-        box[1] < 16 * unit ||
-        box[2] > w - 16 * unit ||
-        box[3] > h - 30 * unit
-      )
-        continue;
-      const normalized = city.name.replace(/[市区县]$/, "");
-      if (
-        this.labels.some(
-          (l) =>
-            l.normalized === normalized &&
-            Math.hypot(l.x - x, l.y - y) < 90 * unit,
-        )
-      )
-        continue;
-      if (
-        boxes.some(
-          (b) =>
-            box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1],
-        )
-      )
-        continue;
-      boxes.push(box);
-      ctx.strokeText(city.name, x, y);
-      ctx.fillText(city.name, x, y);
-      this.labels.push({
-        id: city.id,
-        name: city.name,
-        level: city.level,
-        x,
-        y,
-        box,
-        normalized,
-      });
     }
   }
   async ready(
@@ -615,7 +528,7 @@ export class MapCanvas {
     if (performance.now() >= deadline)
       throw new Error("地图资源等待超时；请检查网络并重试");
     // Idle includes pending tile loads and source workers; two render frames
-    // flush our canvas labels after the idle event. No sleep-based screenshot.
+    // flush our canvas title after the idle event. No sleep-based screenshot.
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
         () => {
@@ -667,7 +580,7 @@ export class MapCanvas {
     this.draw();
     if (strict && this.errors.length)
       throw new Error("地图资源不完整，请重试后再导出或切换底图");
-    return { labels: this.labels, camera: this.state.camera };
+    return { camera: this.state.camera };
   }
   destroy() {
     if (this.destroyed) return;

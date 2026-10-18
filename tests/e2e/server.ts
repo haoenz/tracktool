@@ -32,6 +32,7 @@ const raster = await sharp({
 })
   .png()
   .toBuffer();
+const raster512 = await sharp(raster).resize(512, 512).png().toBuffer();
 const resources = new MapResources(path.join(temporary, "cache"), {
   env: {},
   fetch: async (url) => {
@@ -48,6 +49,8 @@ const resources = new MapResources(path.join(temporary, "cache"), {
         }),
       );
     if (url.startsWith("https://example.test/")) return tile;
+    if (url.includes("openrailwaymap.org")) return raster512;
+    if (url.includes("openinframap.org")) return tile;
     if (url.includes("google.com"))
       throw new Error("Synthetic unavailable provider");
     if (url.includes("bing.com")) await new Promise((r) => setTimeout(r, 400));

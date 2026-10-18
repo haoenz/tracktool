@@ -64,7 +64,12 @@ export type ArchiveRequest =
       category?: Category;
     }
   | { kind: "delete"; database: string; request: DeleteRequest }
-  | { kind: "backup" | "full-backup"; database: string; output: string; entries?: string[] }
+  | {
+      kind: "backup" | "full-backup";
+      database: string;
+      output: string;
+      entries?: string[];
+    }
   | { kind: "restore-backup"; backup: string; directory: string }
   | { kind: "rebuild"; database: string; output: string; entries?: string[] };
 export type ArchiveStatus = {
