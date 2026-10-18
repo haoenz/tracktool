@@ -30,7 +30,7 @@ tracktool-map --archive /绝对路径/轨迹归档
 
 这是本地产物安装方式；本轮没有发布到公共包仓库。已有 Python 安装时，先按[升级与回退说明](docs/install-upgrade.md)备份和核对命令路径，再切换入口。
 
-源码工作目录的本地轨迹库放在 `data/archive.sqlite3`，`data/` 整个目录不纳入 Git。后台使用 `archive_path` 配置或启动参数 `--archive` 指定位置，例如 `pnpm cli config set archive_path "$PWD/data"`。KML 文件仍可通过网页导入到这个固定库。
+后台使用 `archive_path` 配置或启动参数 `--archive` 指定轨迹库位置，例如 `pnpm cli config set archive_path ~/.local/share/tracktool`；未配置时，若 `~/.local/share/tracktool/archive.sqlite3` 存在则使用它。KML 文件仍可通过网页导入到这个固定库。
 
 ## 网页工作流
 

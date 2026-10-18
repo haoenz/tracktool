@@ -62,6 +62,8 @@ Python 调用方只需用自己的 `subprocess.run([...], check=True, capture_ou
 
 | 请求 | 作用 |
 | --- | --- |
+| `GET /api/bootstrap` | 地图资源、公开配置与已保存的浏览地图样式 |
+| `POST /api/display` | 提交 `{style}`，保存浏览地图样式；文件位于状态目录（默认 `~/.local/state/tracktool/display.json`） |
 | `GET /api/work/bootstrap` | 文件范围/归档/公开配置 |
 | `POST /api/work/preview` | 提交 `{operation,inputs,archive?,output?,options}`，返回持久任务 |
 | `GET /api/work/tasks/:id` | 状态、修订、进度、事件和结果 |

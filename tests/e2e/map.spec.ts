@@ -1,6 +1,7 @@
 import { tool, selectProjectTrack, saveProject } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 import { test, expect } from "@playwright/test";
+import { resetDisplay } from "./display-reset.js";
 import sharp from "sharp";
 import type { Project } from "../../src/shared/project.js";
 import type { Page } from "@playwright/test";
@@ -28,6 +29,10 @@ async function call<T>(
     { url, body },
   );
 }
+
+test.beforeEach(async ({ request }) => {
+  await resetDisplay(request);
+});
 
 test("archive → selection → styling → save/reopen → JSON → independent PNG", async ({
   page,
@@ -326,6 +331,70 @@ test("rapid source changes only commit the latest choice", async ({ page }) => {
     "dark",
   );
 });
+test("reselecting the applied basemap cancels a pending switch", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.goto("/map");
+  await tool(page, "地图样式");
+  let release!: () => void;
+  const waiting = new Promise<void>((r) => {
+    release = r;
+  });
+  let started!: () => void;
+  const startedPromise = new Promise<void>((r) => {
+    started = r;
+  });
+  await page.route("**/api/basemap-check", async (route) => {
+    started();
+    await waiting;
+    await route.fulfill({ json: { ok: true } });
+  });
+  const { body: bootstrap } = await call<{
+    config: { basemaps: { id: string; name: string; group: string }[] };
+  }>(page, "/api/bootstrap");
+  const bing = bootstrap.config.basemaps.find((b) => b.id.startsWith("bing-"))!;
+  const select = page.getByRole("combobox", { name: "底图", exact: true });
+  await select.click();
+  await page
+    .getByRole("combobox", { name: "搜索底图", exact: true })
+    .fill(bing.name);
+  await page.getByText(`${bing.group} · ${bing.name}`, { exact: true }).click();
+  await startedPromise;
+  await expect(page.locator(".settings-status")).toContainText("正在准备");
+  await select.click();
+  await page.getByText("浅色矢量", { exact: true }).click();
+  await expect(page.locator(".settings-status")).toHaveCount(0);
+  expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
+    "light",
+  );
+  const completed = page.waitForResponse("**/api/basemap-check");
+  release();
+  await completed;
+  await expect
+    .poll(() => page.evaluate(() => window.renderer?.state.style.basemap))
+    .toBe("light");
+});
+test("browse display style survives a reload", async ({ page }) => {
+  await page.goto("/map");
+  await tool(page, "地图样式");
+  const cities = page.getByRole("combobox", {
+    name: "城市标注",
+    exact: true,
+  });
+  await cities.click();
+  await page.getByRole("option", { name: "关闭", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.renderer?.state.style.cities))
+    .toBe("none");
+  await expect(page.getByText("地图样式已保存", { exact: true })).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.reload();
+  await expect
+    .poll(() => page.evaluate(() => window.renderer?.state.style.cities))
+    .toBe("none");
+});
 test("failed source retains the current map; a later source wins and camera/style changes avoid selection API", async ({
   page,
 }) => {
@@ -357,8 +426,8 @@ test("failed source retains the current map; a later source wins and camera/styl
   await page
     .getByText(`${google.group} · ${google.name}`, { exact: true })
     .click();
-  await expect(page.locator(".map-errors [role=alert]")).toContainText(
-    "原地图已保留",
+  await expect(page.locator(".settings-panel [role=alert]")).toContainText(
+    "仍显示",
   );
   expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
     "light",
@@ -467,7 +536,9 @@ test("the configured library stays fixed when importing a project from another m
   ).toBeVisible();
 });
 
-test("map icons directly toggle panels on desktop and mobile", async ({ page }) => {
+test("map icons directly toggle panels on desktop and mobile", async ({
+  page,
+}) => {
   await page.goto("/map");
   const tracks = page.locator(".project-icon");
   const settings = page.getByRole("button", { name: "设置", exact: true });
@@ -480,13 +551,21 @@ test("map icons directly toggle panels on desktop and mobile", async ({ page }) 
     await tracks.click();
     await expect(panel).toBeHidden();
     await expect(nav.getByRole("button")).toHaveCount(3);
-    await expect(page.locator(".map-header")).not.toContainText(/轨迹|设置|浏览地图/);
-    await nav.getByRole("button", { name: "打开轨迹列表", exact: true }).click();
+    await expect(page.locator(".map-header")).not.toContainText(
+      /轨迹|设置|浏览地图/,
+    );
+    await nav
+      .getByRole("button", { name: "打开轨迹列表", exact: true })
+      .click();
     await expect(page.getByLabel("筛选轨迹", { exact: true })).toBeVisible();
     await nav.getByRole("button", { name: "上传轨迹", exact: true }).click();
-    await expect(page.getByRole("region", { name: "轨迹库操作", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "轨迹库操作", exact: true }),
+    ).toBeVisible();
     await nav.getByRole("button", { name: "导出轨迹", exact: true }).click();
-    await expect(page.getByRole("combobox", { name: "导出类型", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("combobox", { name: "导出类型", exact: true }),
+    ).toBeVisible();
     await settings.click();
     await expect(settings).toHaveAttribute("aria-expanded", "true");
     const bounds = await settings.boundingBox();

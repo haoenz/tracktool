@@ -12,7 +12,7 @@ export default function Settings({
       <p className="overview-hint">
         {inProject
           ? "当前在出图工程中，地图设置仅作用于当前工程。"
-          : "调整浏览地图的底图、标注和叠加层。"}
+          : "调整浏览地图的底图、标注和叠加层。修改会自动保存，下次打开继续使用。"}
       </p>
       {children ?? <p>地图资源就绪后可调整地图设置。</p>}
     </div>

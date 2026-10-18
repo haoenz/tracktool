@@ -32,7 +32,7 @@ ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL
 5. 准备切换时，按原安装工具卸载旧 `tracktool` 命令，或调整 PATH。只保留一个默认 `tracktool` / `tracktool-map` 提供者。Linux/macOS 用 `command -v tracktool`，PowerShell 用 `Get-Command tracktool` 核对；执行 `tracktool --version` 应显示 2.0.0-rc.2。
 6. 使用原归档/配置启动新入口。旧 `kml_zip_path` 自动转换为同目录 `archive_path`；正常运行可原子迁移旧配置，预演不写。不要让旧进程与新进程同时迁移配置。
 
-配置位置沿用 Linux `$XDG_CONFIG_HOME/tracktool`（默认 `~/.config/tracktool`）、macOS `~/Library/Application Support/tracktool`、Windows `%APPDATA%/tracktool`。网页任务默认存入配置目录的 `web/tasks.sqlite3`，上传存入 `web/uploads/`；可指定 `--state-dir`。不要把状态目录当作永久文件备份。
+配置位置沿用 Linux `$XDG_CONFIG_HOME/tracktool`（默认 `~/.config/tracktool`）、macOS `~/Library/Application Support/tracktool`、Windows `%APPDATA%/tracktool`。网页任务默认存入 `~/.local/state/tracktool/tasks.sqlite3`，上传存入同目录 `uploads/`（macOS 在 Application Support 的 `state/` 子目录，Windows 在 `%LOCALAPPDATA%/tracktool/state`）；可指定 `--state-dir`。浏览地图的显示设置保存在同一状态目录的 `display.json`，需要随任务状态一起备份。不要把状态目录当作永久文件备份。
 
 已有 schema 2/3/4/5 归档不自动升级；新库使用 schema 6，`archive migrate` 先生成完整备份再升级。地图项目 JSON schema 3 固定库和版本；schema 1/2 按 path + SHA 唯一关联基线，不自动跟随最新轨迹。渲染器资源版本不同仍需确认后另存。新版展示 ZIP 只保留可见结果，原件和隐藏历史用 full-backup 保留。PNG 的短期出图会话不跨进程恢复。配置密钥读取优先级仍为环境变量 > CLI 参数 > 文件；网页不回显密钥。
 

@@ -111,6 +111,13 @@ type Bootstrap = {
 };
 type Loaded = { state: Project; versionsChanged: boolean } & Selection;
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const basemapLabel = (config: MapConfig, id: string) => {
+  if (id === "light") return "浅色矢量";
+  if (id === "dark") return "深色矢量";
+  if (id === "satellite") return "自定义卫星";
+  const preset = config.basemaps.find((b) => b.id === id);
+  return preset ? `${preset.group} · ${preset.name}` : id;
+};
 const download = (blob: Blob, name: string) => {
   const url = URL.createObjectURL(blob),
     a = document.createElement("a");
@@ -218,6 +225,13 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     [busy, setBusy] = useState(false),
     [exporting, setExporting] = useState(false),
     [switching, setSwitching] = useState(""),
+    [basemapError, setBasemapError] = useState(""),
+    [basemapNotes, setBasemapNotes] = useState<string[]>([]),
+    [displaySaveState, setDisplaySaveState] = useState<
+      "" | "saving" | "saved" | "error"
+    >(""),
+    [settingsDetailsOpen, setSettingsDetailsOpen] = useState(false),
+    [settingsBaseline, setSettingsBaseline] = useState<Project["style"]>(),
     [preview, setPreview] = useState(false),
     [sourceErrors, setSourceErrors] = useState<Selection["errors"]>([]),
     [versionChanged, setVersionChanged] = useState(false);
@@ -417,8 +431,41 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
     operations = useRef(0),
     sourceSequence = useRef(0),
     stateRef = useRef(state),
+    savedDisplayStyle = useRef(JSON.stringify(initial.state.style)),
+    displaySaveSequence = useRef(0),
+    displaySaveQueue = useRef<Promise<unknown>>(Promise.resolve()),
     file = useRef<HTMLInputElement>(null);
   stateRef.current = state;
+  useEffect(() => {
+    if (inProject) return;
+    const serialized = JSON.stringify(browseState.style);
+    if (serialized === savedDisplayStyle.current) {
+      setDisplaySaveState("");
+      return;
+    }
+    setDisplaySaveState("saving");
+    const sequence = ++displaySaveSequence.current;
+    const timer = setTimeout(() => {
+      // Serialize requests so a slow older save cannot land after a newer one.
+      displaySaveQueue.current = displaySaveQueue.current
+        .catch(() => {})
+        .then(() => api("/api/display", { style: browseState.style }))
+        .then(() => {
+          if (sequence !== displaySaveSequence.current) return;
+          savedDisplayStyle.current = serialized;
+          setDisplaySaveState("saved");
+        })
+        .catch(() => {
+          if (sequence === displaySaveSequence.current)
+            setDisplaySaveState("error");
+        });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [browseState.style, inProject]);
+  useEffect(() => {
+    if (panel === "settings" && !inProject && !settingsBaseline)
+      setSettingsBaseline(structuredClone(stateRef.current.style));
+  }, [panel, inProject, settingsBaseline]);
   const config = initial.config;
   const crs =
     config.basemaps.find((b) => b.id === state.style.basemap)?.crs === "gcj02"
@@ -698,12 +745,28 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
       setBusy(false);
     }
   };
-  const switchBase = async (id: string) => {
+  const cancelPendingBase = () => {
+    ++sourceSequence.current;
+    viewport.current?.cancel();
+    setSwitching("");
+  };
+  const switchBase = async (id: string, restore?: Project["style"]) => {
+    if (!restore && id === stateRef.current.style.basemap) {
+      if (switching) {
+        cancelPendingBase();
+        setBasemapError("");
+        setBasemapNotes([]);
+      }
+      return;
+    }
     const sequence = ++sourceSequence.current;
     viewport.current?.cancel();
     setSwitching(id);
     setError("");
+    setBasemapError("");
+    setBasemapNotes([]);
     const next = structuredClone(stateRef.current);
+    if (restore) next.style = structuredClone(restore);
     next.style.basemap = id;
     const notes = reconcileOverlays(next, config);
     try {
@@ -729,19 +792,55 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
         }
       }
       if (sequence !== sourceSequence.current) return;
-      if (await viewport.current?.stage(next, prepared)) {
-        change((s) => {
-          s.style.basemap = id;
-          s.style.overlays = next.style.overlays;
-        });
-        setNotice(notes.join("；"));
+      const staged = await viewport.current?.stage(next, prepared);
+      if (sequence !== sourceSequence.current) return;
+      if (staged) {
+        if (restore) {
+          change((s) => {
+            s.style = structuredClone(next.style);
+          });
+          setBasemapNotes(notes);
+          setNotice(
+            notes.length
+              ? `已恢复本次浏览的初始样式；${notes.join("；")}`
+              : "已恢复本次浏览的初始样式",
+          );
+        } else {
+          // Reconcile against the latest style so edits made while the
+          // basemap was loading are not overwritten by the starting snapshot.
+          const latest = structuredClone(stateRef.current);
+          latest.style.basemap = id;
+          const appliedNotes = reconcileOverlays(latest, config);
+          change((s) => {
+            s.style.basemap = id;
+            s.style.overlays = latest.style.overlays;
+          });
+          setBasemapNotes(appliedNotes);
+          if (appliedNotes.length) setNotice(appliedNotes.join("；"));
+        }
       }
     } catch (e) {
       if (sequence === sourceSequence.current)
-        setError(`底图切换失败，原地图已保留：${message(e)}；可再次选择重试`);
+        setBasemapError(
+          restore
+            ? `恢复设置失败：无法切换回「${basemapLabel(config, id)}」：${message(e)}`
+            : `切换到「${basemapLabel(config, id)}」失败，仍显示「${basemapLabel(config, stateRef.current.style.basemap)}」：${message(e)}；可再次选择重试`,
+        );
     } finally {
       if (sequence === sourceSequence.current) setSwitching("");
     }
+  };
+  const resetSettings = () => {
+    if (!settingsBaseline) return;
+    if (switching) cancelPendingBase();
+    if (settingsBaseline.basemap === stateRef.current.style.basemap) {
+      change((s) => {
+        s.style = structuredClone(settingsBaseline);
+      });
+      setBasemapError("");
+      setBasemapNotes([]);
+      setNotice("已恢复本次浏览的初始样式");
+    } else void switchBase(settingsBaseline.basemap, settingsBaseline);
   };
   const load = async (value?: unknown) => {
     setActivity("正在读取工程…");
@@ -1247,6 +1346,31 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
           : state,
     [inspection, state, inProject, browsing, candidateCamera],
   );
+  const cityUnavailable = cityReason(state, config);
+  let settingsAdjustments = 0;
+  for (const key of Object.keys(featureControls))
+    if (state.style.features[key] !== initial.state.style.features[key])
+      settingsAdjustments++;
+  settingsAdjustments += state.style.overlays.filter((o) => o.enabled).length;
+  if (
+    state.style.power.min_voltage !== initial.state.style.power.min_voltage ||
+    state.style.power.facilities !== initial.state.style.power.facilities
+  )
+    settingsAdjustments++;
+  const settingsChanged =
+    !!settingsBaseline &&
+    JSON.stringify(state.style) !== JSON.stringify(settingsBaseline);
+  const basemapOptions = [
+    { value: "light", label: basemapLabel(config, "light") },
+    { value: "dark", label: basemapLabel(config, "dark") },
+    ...(config.satellite
+      ? [{ value: "satellite", label: basemapLabel(config, "satellite") }]
+      : []),
+    ...config.basemaps.map((b) => ({
+      value: b.id,
+      label: basemapLabel(config, b.id),
+    })),
+  ];
   return (
     <WorkspaceContext.Provider
       value={{
@@ -1976,31 +2100,82 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
               <section>
                 <Settings inProject={inProject}>
                   <h3>地图样式</h3>
-                  <label>底图</label>
+                  {!inProject && displaySaveState && (
+                    <p
+                      className={
+                        displaySaveState === "error"
+                          ? "settings-error"
+                          : "settings-reason"
+                      }
+                      role={displaySaveState === "error" ? "alert" : "status"}
+                    >
+                      {displaySaveState === "saving"
+                        ? "正在保存地图样式…"
+                        : displaySaveState === "saved"
+                          ? "地图样式已保存"
+                          : "地图样式保存失败，将在下次修改时重试"}
+                    </p>
+                  )}
+                  <label htmlFor="settings-basemap">底图</label>
                   <Select
+                    id="settings-basemap"
                     searchable
-
                     aria-label="底图"
+                    aria-describedby={
+                      switching
+                        ? "settings-basemap-status"
+                        : basemapError
+                          ? "settings-basemap-error"
+                          : undefined
+                    }
                     value={switching || state.style.basemap}
-                    loading={!!switching}
                     onChange={(id) => void switchBase(id)}
-                    options={[
-                      { value: "light", label: "浅色矢量" },
-                      { value: "dark", label: "深色矢量" },
-                      ...(config.satellite
-                        ? [{ value: "satellite", label: "自定义卫星" }]
-                        : []),
-                      ...config.basemaps.map((b) => ({
-                        value: b.id,
-                        label: `${b.group} · ${b.name}`,
-                      })),
-                    ]}
+                    options={basemapOptions}
                   />
-                  <label>城市标注</label>
+                  {switching && (
+                    <p
+                      className="settings-status"
+                      id="settings-basemap-status"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <LoaderCircle
+                        className="size-3 animate-spin"
+                        aria-hidden="true"
+                      />
+                      <span>
+                        {`当前显示「${basemapLabel(config, state.style.basemap)}」，正在准备「${basemapLabel(config, switching)}」。可继续选择其他底图；重新选择当前底图即可返回。`}
+                      </span>
+                    </p>
+                  )}
+                  {basemapError && (
+                    <p
+                      className="settings-error"
+                      id="settings-basemap-error"
+                      role="alert"
+                    >
+                      {basemapError}
+                    </p>
+                  )}
+                  {basemapNotes.length > 0 && (
+                    <ul
+                      className="settings-notes"
+                      aria-label="底图切换后的调整"
+                    >
+                      {basemapNotes.map((note, i) => (
+                        <li key={`${i}-${note}`}>{note}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <label htmlFor="settings-cities">城市标注</label>
                   <Select
+                    id="settings-cities"
                     aria-label="城市标注"
+                    aria-describedby={
+                      cityUnavailable ? "settings-cities-reason" : undefined
+                    }
                     value={state.style.cities}
-                    disabled={!!cityReason(state, config)}
+                    disabled={!!cityUnavailable}
                     options={[
                       { value: "county", label: "县级及以上" },
                       { value: "none", label: "关闭" },
@@ -2011,106 +2186,207 @@ function Editor({ initial, cities }: { initial: Bootstrap; cities: Cities }) {
                       })
                     }
                   />
-                  <details>
-                    <summary>地图要素与叠加层</summary>
-                    {Object.entries(featureControls).map(
-                      ([key, [label, options]]) => (
-                        <div
-                          key={key}
-                          title={featureReason(state, config, key)}
-                        >
-                          <label>{label}</label>
-                          <Select
-                            aria-label={label}
-                            disabled={!!featureReason(state, config, key)}
-                            value={state.style.features[key]}
-                            options={Object.entries(options).map(
-                              ([value, label]) => ({
-                                value,
-                                label,
-                              }),
+                  {cityUnavailable && (
+                    <p className="settings-reason" id="settings-cities-reason">
+                      {cityUnavailable}
+                    </p>
+                  )}
+                  <details
+                    open={settingsDetailsOpen}
+                    onToggle={(event) =>
+                      setSettingsDetailsOpen(event.currentTarget.open)
+                    }
+                  >
+                    <summary>
+                      地图要素与叠加层
+                      {settingsAdjustments
+                        ? `（${settingsAdjustments} 项已调整）`
+                        : ""}
+                    </summary>
+                    <fieldset className="settings-group">
+                      <legend>矢量要素</legend>
+                      {Object.entries(featureControls).map(
+                        ([key, [label, options]]) => {
+                          const reason = featureReason(state, config, key);
+                          return (
+                            <div key={key}>
+                              <label htmlFor={`settings-feature-${key}`}>
+                                {label}
+                              </label>
+                              <Select
+                                id={`settings-feature-${key}`}
+                                aria-label={label}
+                                aria-describedby={
+                                  reason
+                                    ? `settings-feature-${key}-reason`
+                                    : undefined
+                                }
+                                disabled={!!reason}
+                                value={state.style.features[key]}
+                                options={Object.entries(options).map(
+                                  ([value, label]) => ({
+                                    value,
+                                    label,
+                                  }),
+                                )}
+                                onChange={(value) =>
+                                  change((s) => {
+                                    s.style.features[key] = value;
+                                  })
+                                }
+                              />
+                              {reason && (
+                                <p
+                                  className="settings-reason"
+                                  id={`settings-feature-${key}-reason`}
+                                >
+                                  {reason}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        },
+                      )}
+                    </fieldset>
+                    <fieldset className="settings-group">
+                      <legend>叠加层</legend>
+                      {config.overlays.map((o) => {
+                        const overlay = state.style.overlays.find(
+                          (s) => s.id === o.id,
+                        );
+                        const checked = overlay?.enabled === true;
+                        const reason = overlayReason(state, config, o);
+                        return (
+                          <div key={o.id} className="settings-overlay">
+                            <Checkbox
+                              aria-describedby={
+                                reason
+                                  ? `settings-overlay-${o.id}-reason`
+                                  : undefined
+                              }
+                              disabled={!!reason && !checked}
+                              checked={checked}
+                              onCheckedChange={(v) =>
+                                change((s) => {
+                                  const index = s.style.overlays.findIndex(
+                                    (i) => i.id === o.id,
+                                  );
+                                  const item = s.style.overlays[index];
+                                  if (item)
+                                    s.style.overlays[index] = {
+                                      ...item,
+                                      enabled: v,
+                                    };
+                                  else
+                                    s.style.overlays.push({
+                                      id: o.id,
+                                      enabled: v,
+                                      opacity: 1,
+                                    });
+                                })
+                              }
+                            >
+                              {o.name}
+                            </Checkbox>
+                            <InputNumber
+                              aria-label={`${o.name}透明度`}
+                              aria-describedby={
+                                reason
+                                  ? `settings-overlay-${o.id}-reason`
+                                  : undefined
+                              }
+                              min={0.1}
+                              max={1}
+                              step={0.1}
+                              disabled={!checked}
+                              value={overlay?.opacity ?? 1}
+                              onChange={(value) =>
+                                change((s) => {
+                                  const item = s.style.overlays.find(
+                                    (i) => i.id === o.id,
+                                  );
+                                  if (item) item.opacity = value ?? 1;
+                                })
+                              }
+                            />
+                            {reason && (
+                              <p
+                                className="settings-reason"
+                                id={`settings-overlay-${o.id}-reason`}
+                              >
+                                {reason}
+                              </p>
                             )}
-                            onChange={(value) =>
-                              change((s) => {
-                                s.style.features[key] = value;
-                              })
-                            }
-                          />
-                        </div>
-                      ),
-                    )}
-                    {config.overlays.map((o) => (
-                      <div key={o.id} title={overlayReason(state, config, o)}>
-                        <Checkbox
-                          disabled={!!overlayReason(state, config, o)}
-                          checked={state.style.overlays.some(
-                            (s) => s.id === o.id && s.enabled,
-                          )}
-                          onCheckedChange={(v) =>
-                            change((s) => {
-                              s.style.overlays = s.style.overlays
-                                .filter((i) => i.id !== o.id)
-                                .concat({
-                                  id: o.id,
-                                  enabled: v,
-                                  opacity: 1,
-                                });
-                            })
-                          }
+                          </div>
+                        );
+                      })}
+                    </fieldset>
+                    <fieldset className="settings-group">
+                      <legend>电力设施</legend>
+                      <label htmlFor="settings-power-facilities">
+                        电力设施
+                      </label>
+                      <Select
+                        id="settings-power-facilities"
+                        aria-label="电力设施"
+                        value={state.style.power.facilities}
+                        options={[
+                          ["none", "关闭"],
+                          ["substations", "变电站"],
+                          ["generation", "发电设施"],
+                          ["all", "全部"],
+                        ].map(([value, label]) => ({ value, label }))}
+                        onChange={(value) =>
+                          change((s) => {
+                            s.style.power.facilities = value;
+                          })
+                        }
+                      />
+                      <label htmlFor="settings-power-voltage">
+                        电力最低电压（kV）
+                      </label>
+                      <Select
+                        id="settings-power-voltage"
+                        aria-label="电力最低电压"
+                        aria-describedby={
+                          state.style.power.facilities === "none"
+                            ? "settings-power-voltage-reason"
+                            : undefined
+                        }
+                        disabled={state.style.power.facilities === "none"}
+                        value={state.style.power.min_voltage}
+                        options={[0, 110, 220, 500].map((value) => ({
+                          value,
+                          label: String(value),
+                        }))}
+                        onChange={(value) =>
+                          change((s) => {
+                            s.style.power.min_voltage = value;
+                          })
+                        }
+                      />
+                      {state.style.power.facilities === "none" && (
+                        <p
+                          className="settings-reason"
+                          id="settings-power-voltage-reason"
                         >
-                          {o.name}
-                        </Checkbox>
-                        <InputNumber
-                          aria-label={`${o.name}透明度`}
-                          min={0.1}
-                          max={1}
-                          step={0.1}
-                          value={
-                            state.style.overlays.find((s) => s.id === o.id)
-                              ?.opacity ?? 1
-                          }
-                          onChange={(value) =>
-                            change((s) => {
-                              const item = s.style.overlays.find(
-                                (i) => i.id === o.id,
-                              );
-                              if (item) item.opacity = value ?? 1;
-                            })
-                          }
-                        />
-                      </div>
-                    ))}
-                    <label>电力最低电压（kV）</label>
-                    <Select
-                      aria-label="电力最低电压"
-                      value={state.style.power.min_voltage}
-                      options={[0, 110, 220, 500].map((value) => ({
-                        value,
-                        label: String(value),
-                      }))}
-                      onChange={(value) =>
-                        change((s) => {
-                          s.style.power.min_voltage = value;
-                        })
-                      }
-                    />
-                    <label>电力设施</label>
-                    <Select
-                      aria-label="电力设施"
-                      value={state.style.power.facilities}
-                      options={[
-                        ["none", "关闭"],
-                        ["substations", "变电站"],
-                        ["generation", "发电设施"],
-                        ["all", "全部"],
-                      ].map(([value, label]) => ({ value, label }))}
-                      onChange={(value) =>
-                        change((s) => {
-                          s.style.power.facilities = value;
-                        })
-                      }
-                    />
+                          关闭电力设施时无需设置最低电压。
+                        </p>
+                      )}
+                    </fieldset>
                   </details>
+                  {!inProject && (
+                    <div className="settings-actions">
+                      <Button
+                        block
+                        variant="outline"
+                        disabled={!settingsChanged}
+                        onClick={resetSettings}
+                      >
+                        恢复本次浏览的初始样式
+                      </Button>
+                    </div>
+                  )}
                 </Settings>
               </section>
             )}

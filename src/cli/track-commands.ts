@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { readFileSync, statSync } from "node:fs";
 import { BusinessCommand } from "./business-commands.js";
-import { FileConfigStore } from "../infrastructure/config-store.js";
+import { userStateDir } from "../infrastructure/paths.js";
 import {
   databasePath,
   readTransaction,
@@ -32,15 +32,8 @@ const archive = Flags.string({ description: "SQLite 轨迹库；默认使用配�
   state = Flags.string({
     description: "编辑预览状态目录；与网页共用时指定同一目录",
   });
-function stateFile(config: string | undefined, stateDir: string | undefined) {
-  return path.join(
-    stateDir ??
-      path.join(
-        path.dirname(new FileConfigStore({ path: config }).path),
-        "web",
-      ),
-    "tasks.sqlite3",
-  );
+function stateFile(stateDir: string | undefined) {
+  return path.join(stateDir ?? userStateDir(), "tasks.sqlite3");
 }
 class TrackList extends BusinessCommand {
   static description = "列出活动行程及稳定 ID（只读）";
@@ -146,9 +139,7 @@ class TrackPreview extends BusinessCommand {
         ),
         id = randomUUID();
       const store = new EditPreviews(
-        flags["dry-run"]
-          ? ":memory:"
-          : stateFile(flags.config, flags["state-dir"]),
+        flags["dry-run"] ? ":memory:" : stateFile(flags["state-dir"]),
       );
       try {
         const preview = await store.create(
@@ -182,7 +173,7 @@ class TrackApply extends BusinessCommand {
           flags.archive ?? String(ctx.config.archive_path),
         ),
         store = new EditPreviews(
-          stateFile(flags.config, flags["state-dir"]),
+          stateFile(flags["state-dir"]),
           undefined,
           flags["dry-run"],
         );

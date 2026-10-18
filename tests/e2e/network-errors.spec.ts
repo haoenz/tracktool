@@ -1,6 +1,11 @@
 import { test, expect } from "@playwright/test";
+import { resetDisplay } from "./display-reset.js";
 import type {} from "../../src/drawing/globals.js";
 import { tool } from "./map-tools.js";
+
+test.beforeEach(async ({ request }) => {
+  await resetDisplay(request);
+});
 
 test("a transient tile failure is logged, retried and does not prevent readiness", async ({
   page,

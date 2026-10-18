@@ -4,6 +4,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { createApp } from "../../dist/node/server/app.js";
 import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js";
+import { DisplayStore } from "../../dist/node/infrastructure/display-store.js";
 import { MapResources } from "../../dist/node/infrastructure/maps/resources.js";
 import { migrateArchive } from "../../dist/node/infrastructure/archive/migrate.js";
 import { randomUUID } from "node:crypto";
@@ -20,6 +21,7 @@ const temporary = await mkdtemp(
 );
 const configPath = path.join(temporary, "config.json");
 await copyFile("tests/e2e/config.json", configPath);
+const display = new DisplayStore(path.join(temporary, "display.json"));
 const archive = path.join(temporary, "archive.sqlite3");
 await copyFile("tests/ts/fixtures/maps/archive.sqlite3", archive);
 await migrateArchive(archive);
@@ -53,6 +55,7 @@ const resources = new MapResources(path.join(temporary, "cache"), {
   },
 });
 const app = await createApp({
+  token: "e2e",
   work: {
     stateDir: path.join(temporary, "work"),
     roots: [temporary, process.cwd()],
@@ -63,7 +66,12 @@ const app = await createApp({
     initialArchive: archive,
     cache: path.join(temporary, "cache"),
     resources: () => resources,
+    display,
   },
+});
+app.post("/api/test/reset-display", async () => {
+  await display.clear();
+  return { ok: true };
 });
 let fault = "";
 app.post("/api/test/edit-fixture", async () => {

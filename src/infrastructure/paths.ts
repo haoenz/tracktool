@@ -28,6 +28,47 @@ export function userConfigPath(environment = pathEnvironment()): string {
         : p.join(home, ".config");
   return p.join(base, "tracktool", "config.json");
 }
+/**
+ * Auto-managed state (display prefs, task DB, uploads): survives restarts but
+ * is disposable, so it follows XDG_STATE_HOME instead of the config directory.
+ */
+export function userStateDir(environment = pathEnvironment()): string {
+  const { platform, home, env } = environment;
+  const p = platform.startsWith("win") ? path.win32 : path.posix;
+  if (platform === "darwin")
+    return p.join(home, "Library", "Application Support", "tracktool", "state");
+  if (platform.startsWith("win")) {
+    const base =
+      env.LOCALAPPDATA && p.isAbsolute(env.LOCALAPPDATA)
+        ? env.LOCALAPPDATA
+        : p.join(home, "AppData", "Local");
+    return p.join(base, "tracktool", "state");
+  }
+  const base =
+    env.XDG_STATE_HOME && p.isAbsolute(env.XDG_STATE_HOME)
+      ? env.XDG_STATE_HOME
+      : p.join(home, ".local", "state");
+  return p.join(base, "tracktool");
+}
+/** Fallback location for user-owned data (the track archive) when unconfigured. */
+export function userDataDir(environment = pathEnvironment()): string {
+  const { platform, home, env } = environment;
+  const p = platform.startsWith("win") ? path.win32 : path.posix;
+  if (platform === "darwin")
+    return p.join(home, "Library", "Application Support", "tracktool", "data");
+  if (platform.startsWith("win")) {
+    const base =
+      env.LOCALAPPDATA && p.isAbsolute(env.LOCALAPPDATA)
+        ? env.LOCALAPPDATA
+        : p.join(home, "AppData", "Local");
+    return p.join(base, "tracktool", "data");
+  }
+  const base =
+    env.XDG_DATA_HOME && p.isAbsolute(env.XDG_DATA_HOME)
+      ? env.XDG_DATA_HOME
+      : p.join(home, ".local", "share");
+  return p.join(base, "tracktool");
+}
 export function displayPath(
   value: string,
   environment = pathEnvironment(),

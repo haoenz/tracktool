@@ -6,14 +6,17 @@ import Fastify, { type FastifyInstance } from "fastify";
 import compress from "@fastify/compress";
 import staticFiles from "@fastify/static";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { sep } from "node:path";
+import path, { sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ConfigStore } from "../services/ports.js";
 import { createContext } from "../services/context.js";
 import { getPublicConfig } from "../services/config.js";
 import { AppError, errorInfo } from "../domain/errors.js";
 import { EditError } from "../infrastructure/archive/edit-previews.js";
+import { DisplayStore } from "../infrastructure/display-store.js";
+import { userDataDir, userStateDir } from "../infrastructure/paths.js";
 
 export async function createApp(options: {
   configStore: ConfigStore;
@@ -89,17 +92,30 @@ export async function createApp(options: {
     ),
   }));
   workRoutes(app, options.configStore, options.envKey, options.work);
+  // Unset archive_path falls back to the XDG data location only when an
+  // archive actually exists there; otherwise the web shows "not configured".
+  const archiveDefault = async () => {
+    const configured = String(
+      (await options.configStore.load()).archive_path ?? "",
+    );
+    if (configured) return configured;
+    const fallback = path.join(userDataDir(), "archive.sqlite3");
+    return existsSync(fallback) ? userDataDir() : "";
+  };
   overviewRoutes(app, {
     cache: options.maps?.cache,
     archive: async () =>
       options.maps?.initialArchive ??
       options.work?.archive ??
-      String((await options.configStore.load()).archive_path ?? ""),
+      (await archiveDefault()),
   });
+  const display =
+    options.maps?.display ??
+    new DisplayStore(path.join(userStateDir(), "display.json"));
   mapRoutes(app, token, {
     ...options.maps,
-    archiveDefault: async () =>
-      String((await options.configStore.load()).archive_path ?? ""),
+    display,
+    archiveDefault,
   });
   await app.register(staticFiles, {
     root: webRoot,

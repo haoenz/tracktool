@@ -19,6 +19,42 @@ const presets: Record<
   string,
   { kind: string; crs: string; content: readonly string[] }
 > = catalog.presets;
+export const ProjectStyleSchema = z
+  .object({
+    basemap: z
+      .string()
+      .refine(
+        (id) =>
+          ["light", "dark", "satellite"].includes(id) ||
+          presets[id]?.kind === "basemap",
+      ),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    width: number(0.5, 12),
+    cities: z.enum(["none", "county"]),
+    features,
+    overlays: z.array(
+      z
+        .object({
+          id: z.string().refine((id) => presets[id]?.kind === "overlay"),
+          enabled: z.boolean(),
+          opacity: number(0.1, 1),
+        })
+        .passthrough(),
+    ),
+    power: z
+      .object({
+        min_voltage: z.union([
+          z.literal(0),
+          z.literal(110),
+          z.literal(220),
+          z.literal(500),
+        ]),
+        facilities: z.enum(["none", "substations", "generation", "all"]),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+export type ProjectStyle = z.infer<typeof ProjectStyleSchema>;
 export const ProjectSchema = z
   .object({
     schema: z.union([z.literal(2), z.literal(3)]),
@@ -30,41 +66,7 @@ export const ProjectSchema = z
         zoom: number(0, 18),
       })
       .passthrough(),
-    style: z
-      .object({
-        basemap: z
-          .string()
-          .refine(
-            (id) =>
-              ["light", "dark", "satellite"].includes(id) ||
-              presets[id]?.kind === "basemap",
-          ),
-        color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-        width: number(0.5, 12),
-        cities: z.enum(["none", "county"]),
-        features,
-        overlays: z.array(
-          z
-            .object({
-              id: z.string().refine((id) => presets[id]?.kind === "overlay"),
-              enabled: z.boolean(),
-              opacity: number(0.1, 1),
-            })
-            .passthrough(),
-        ),
-        power: z
-          .object({
-            min_voltage: z.union([
-              z.literal(0),
-              z.literal(110),
-              z.literal(220),
-              z.literal(500),
-            ]),
-            facilities: z.enum(["none", "substations", "generation", "all"]),
-          })
-          .passthrough(),
-      })
-      .passthrough(),
+    style: ProjectStyleSchema,
     frame: z
       .object({
         ratio: z.enum(["4:3", "3:2", "16:9", "1:1", "3:4", "2:3"]),

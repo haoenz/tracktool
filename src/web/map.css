@@ -278,6 +278,63 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.settings-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 4px 0 0;
+  color: #4d6359;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-error {
+  margin: 4px 0 0;
+  color: #ad2626;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-reason {
+  margin: 2px 0 0;
+  color: #69796f;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-notes {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: #69796f;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-actions {
+  margin-top: 12px;
+}
+.settings-group {
+  min-width: 0;
+  margin: 14px 0 0;
+  padding: 0;
+  border: 0;
+}
+.settings-group > legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: #40534a;
+  font-size: 12px;
+  font-weight: 600;
+}
+.settings-overlay {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.settings-overlay .ui-number {
+  width: 80px;
+}
+.settings-overlay .settings-reason {
+  flex-basis: 100%;
+}
 .overview-row {
   display: flex;
   flex-wrap: wrap;
@@ -795,16 +852,22 @@
     user-select: none;
     cursor: grab;
   }
-  .sheet-handle:active { cursor: grabbing; }
+  .sheet-handle:active {
+    cursor: grabbing;
+  }
   .sheet-handle-bar {
     width: 36px;
     height: 4px;
     border-radius: 999px;
     background: #a6b5ad;
   }
-  .map-controls[data-dragging="true"] { transition: none; }
+  .map-controls[data-dragging="true"] {
+    transition: none;
+  }
   @media (prefers-reduced-motion: reduce) {
-    .map-controls { transition: none; }
+    .map-controls {
+      transition: none;
+    }
   }
   .project-tabs {
     top: 53px;
@@ -1378,11 +1441,17 @@
   animation: track-loading-pulse 1.6s ease-in-out infinite;
 }
 @keyframes track-loading-pulse {
-  50% { opacity: 0.45; }
+  50% {
+    opacity: 0.45;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .track-value-skeleton { animation: none; }
+  .track-value-skeleton {
+    animation: none;
+  }
   .track-detail-loading .animate-spin,
   .track-route-loading .animate-spin,
-  .track-analysis-loading .animate-spin { animation: none; }
+  .track-analysis-loading .animate-spin {
+    animation: none;
+  }
 }

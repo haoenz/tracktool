@@ -2,6 +2,7 @@ import { filterTracks, expectTrackFilter } from "./map-tools.js";
 import { tool, selectProjectTrack, saveProject } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 import { test, expect, type Page } from "@playwright/test";
+import { resetDisplay } from "./display-reset.js";
 import type { Project } from "../../src/shared/project.js";
 const track = "Train/same.kml";
 const state = (page: Page) => page.evaluate(() => window.renderer!.state);
@@ -17,6 +18,10 @@ async function title(page: Page, value: string) {
   await tool(page, "工程样式");
   await page.getByLabel("标题", { exact: true }).fill(value);
 }
+
+test.beforeEach(async ({ request }) => {
+  await resetDisplay(request);
+});
 
 test("project candidate browsing preserves composition, filters, visibility and list position; exit protects changes", async ({
   page,
@@ -64,7 +69,9 @@ test("project candidate browsing preserves composition, filters, visibility and 
     window.renderer!.map.jumpTo({ center: [101, 27], zoom: 7 }),
   );
   await page.getByRole("button", { name: "返回列表", exact: true }).click();
-  await page.getByRole("button", { name: "切换当前列表可见性", exact: true }).click();
+  await page
+    .getByRole("button", { name: "切换当前列表可见性", exact: true })
+    .click();
   await page.getByRole("button", { name: "回到工程", exact: true }).click();
   await expect.poll(() => state(page)).toEqual(composition);
   await tool(page, "返回浏览");

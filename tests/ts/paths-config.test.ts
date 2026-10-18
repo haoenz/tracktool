@@ -6,7 +6,9 @@ import { FileConfigStore } from "../../src/infrastructure/config-store.js";
 import {
   displayPath,
   resolvePath,
+  userDataDir,
   userConfigPath,
+  userStateDir,
 } from "../../src/infrastructure/paths.js";
 
 const temp: string[] = [];
@@ -42,6 +44,42 @@ it("uses platform config locations without relative XDG paths", () => {
       env: { APPDATA: "D:\\AppData" },
     }),
   ).toBe("D:\\AppData\\tracktool\\config.json");
+});
+it("resolves XDG state and data directories with platform fallbacks", () => {
+  expect(userStateDir(environment)).toBe("/home/test/.local/state/tracktool");
+  expect(userDataDir(environment)).toBe("/home/test/.local/share/tracktool");
+  // Relative XDG values are ignored, matching the config-path handling.
+  expect(
+    userStateDir({ ...environment, env: { XDG_STATE_HOME: "relative" } }),
+  ).toBe("/home/test/.local/state/tracktool");
+  expect(
+    userStateDir({ ...environment, env: { XDG_STATE_HOME: "/state" } }),
+  ).toBe("/state/tracktool");
+  expect(userDataDir({ ...environment, env: { XDG_DATA_HOME: "/data" } })).toBe(
+    "/data/tracktool",
+  );
+  expect(userStateDir({ ...environment, platform: "darwin" })).toBe(
+    "/home/test/Library/Application Support/tracktool/state",
+  );
+  expect(userDataDir({ ...environment, platform: "darwin" })).toBe(
+    "/home/test/Library/Application Support/tracktool/data",
+  );
+  expect(
+    userStateDir({
+      ...environment,
+      platform: "win32",
+      home: "C:\\Users\\test",
+      env: { LOCALAPPDATA: "D:\\Local" },
+    }),
+  ).toBe("D:\\Local\\tracktool\\state");
+  expect(
+    userDataDir({
+      ...environment,
+      platform: "win32",
+      home: "C:\\Users\\test",
+      env: {},
+    }),
+  ).toBe("C:\\Users\\test\\AppData\\Local\\tracktool\\data");
 });
 it("displays nearby paths and handles Windows drive boundaries lexically", () => {
   expect(displayPath("/home/test/projects/other", environment)).toBe(

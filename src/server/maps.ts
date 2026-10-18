@@ -9,18 +9,24 @@ import { MapService } from "../services/map-service.js";
 import { ArchiveClient } from "../infrastructure/archive/client.js";
 import { MapResources } from "../infrastructure/maps/resources.js";
 import { Exports } from "../infrastructure/maps/export.js";
+import { DisplayStore } from "../infrastructure/display-store.js";
 import { resolvePath } from "../infrastructure/paths.js";
 import {
   defaultProject,
   ProjectSchema,
+  ProjectStyleSchema,
   upgradeProject,
 } from "../shared/project.js";
+import type { Project, ProjectStyle } from "../shared/project.js";
 import { PresentationSchema } from "../shared/track-edit.js";
 import { presentationDigest } from "../infrastructure/archive/identity.js";
 import { SelectionRequest } from "../shared/map.js";
+import type { MapConfig } from "../shared/map.js";
+import { reconcileOverlays } from "../drawing/layers.js";
 export interface MapOptions {
   archiveDefault?: () => Promise<string>;
   cache?: string;
+  display?: DisplayStore;
   initialArchive?: string;
   resources?: () => MapResources;
   refresh?: boolean;
@@ -28,6 +34,28 @@ export interface MapOptions {
 const location = z.object({ path: z.string().min(1).max(4096) }),
   archive = z.object({ archive: z.string().min(1).max(4096) }),
   named = archive.extend({ name: z.string().min(1).max(240) });
+function restoreStyle(state: Project, saved: ProjectStyle, config: MapConfig) {
+  const basemap =
+    ["light", "dark"].includes(saved.basemap) ||
+    (saved.basemap === "satellite" && config.satellite) ||
+    config.basemaps.some((preset) => preset.id === saved.basemap)
+      ? saved.basemap
+      : state.style.basemap;
+  const available = new Set(config.overlays.map((preset) => preset.id));
+  const seen = new Set<string>();
+  state.style = {
+    ...state.style,
+    ...saved,
+    basemap,
+    overlays: saved.overlays.filter((overlay) => {
+      if (!available.has(overlay.id) || seen.has(overlay.id)) return false;
+      seen.add(overlay.id);
+      return true;
+    }),
+  };
+  // Drop overlays that no longer work with the selected basemap/config.
+  reconcileOverlays(state, config);
+}
 export function mapRoutes(
   app: FastifyInstance,
   token: string,
@@ -62,13 +90,30 @@ export function mapRoutes(
   };
   app.get("/api/bootstrap", async () => {
     const r = await getResources();
+    const config = r.publicConfig();
+    const state = defaultProject(r.versions());
+    const saved = await options.display?.load();
+    if (saved) restoreStyle(state, saved, config);
     return {
-      config: r.publicConfig(),
-      state: defaultProject(r.versions()),
+      config,
+      state,
       initialArchive:
         options.initialArchive ?? (await options.archiveDefault?.()) ?? "",
       directory: process.cwd(),
     };
+  });
+  app.post("/api/display", async (request) => {
+    if (!options.display)
+      throw new AppError("USER_INPUT", "当前服务没有可用的地图设置存储");
+    const body = z
+      .object({ style: ProjectStyleSchema })
+      .strict()
+      .parse(request.body);
+    const r = await getResources();
+    const state = defaultProject(r.versions());
+    restoreStyle(state, body.style, r.publicConfig());
+    await options.display.save(state.style);
+    return { style: state.style };
   });
   app.get("/api/cities", async () => {
     const cities = (await getResources()).cities;

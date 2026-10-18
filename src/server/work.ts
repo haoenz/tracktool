@@ -6,7 +6,6 @@ import type { SelectedTrack } from "../shared/map.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import path from "node:path";
-import os from "node:os";
 import { createReadStream } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -14,6 +13,7 @@ import { createHash } from "node:crypto";
 import { memberName } from "../domain/archive.js";
 import { AppError } from "../domain/errors.js";
 import { publicConfig } from "../domain/config.js";
+import { userStateDir } from "../infrastructure/paths.js";
 import type { ConfigStore } from "../services/ports.js";
 import { WorkRequestSchema } from "../shared/work.js";
 import { SqliteTasks } from "../infrastructure/task-store.js";
@@ -47,16 +47,7 @@ export function workRoutes(
   const get = () =>
     (engine ??= (async () => {
       const config = await configStore.load();
-      const stateDir = path.resolve(
-        options?.stateDir ??
-          path.join(
-            path.dirname(
-              (configStore as { path?: string }).path ??
-                path.join(os.homedir(), ".config/tracktool/config.json"),
-            ),
-            "web",
-          ),
-      );
+      const stateDir = path.resolve(options?.stateDir ?? userStateDir());
       const roots = [
         ...new Set(
           (
@@ -94,8 +85,11 @@ export function workRoutes(
       queue.start();
       const cleanup = new UploadCleanup(store, files);
       const sweep = () => {
-        try { cleanup.sweep(); }
-        catch (error) { app.log.warn({ err: error }, "Upload cleanup will retry"); }
+        try {
+          cleanup.sweep();
+        } catch (error) {
+          app.log.warn({ err: error }, "Upload cleanup will retry");
+        }
       };
       sweep();
       cleanupTimer = setInterval(sweep, 1000);

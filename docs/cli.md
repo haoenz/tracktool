@@ -107,7 +107,7 @@ operation 还支持 prune（segment_id 和半开 ranges）、draw（after_segmen
 
 整组撤销请求为 `{schema:1,archive_id,operation:{kind:"restore_group",operation_id,expected:[…]}}`，expected 从 `track operation` 各 effect.after 取出上述五个目标引用字段。全部成员仍与原操作结果一致才能撤销；生成的新行程保留为历史来源，原行程恢复活动状态。恢复历史版本同样先预览，不删除后续版本。
 
-预览保存在状态目录的 tasks.sqlite3，24 小时有效，不改轨迹库；应用从该库读取并核验产物，不重新运行编辑算法。默认状态目录与配置文件同目录下的 web 一致；网页指定了 --state-dir 时，CLI 使用相同路径即可共用预览。`--archive` 可显式指定 CLI 的库，库身份必须匹配。`track preview --dry-run` 仅在内存准备，不保存预览；`track apply --dry-run` 只读检查已有清单，不提交。下载版本继续用 `kml download --entry-id ENTRY_ID --version VERSION_ID`。
+预览保存在状态目录的 tasks.sqlite3，24 小时有效，不改轨迹库；应用从该库读取并核验产物，不重新运行编辑算法。默认状态目录是 `~/.local/state/tracktool`（macOS `~/Library/Application Support/tracktool/state`，Windows `%LOCALAPPDATA%\tracktool\state`）；网页指定了 --state-dir 时，CLI 使用相同路径即可共用预览。`--archive` 可显式指定 CLI 的库，库身份必须匹配。`track preview --dry-run` 仅在内存准备，不保存预览；`track apply --dry-run` 只读检查已有清单，不提交。下载版本继续用 `kml download --entry-id ENTRY_ID --version VERSION_ID`。
 
 ## 目录比较与重复文件查找：使用 fclones
 

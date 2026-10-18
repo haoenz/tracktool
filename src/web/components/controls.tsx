@@ -222,6 +222,7 @@ type ChoiceProps<T> = {
   maxCount?: number;
   id?: string;
   "aria-label"?: string;
+  "aria-describedby"?: string;
   style?: CSSProperties;
   className?: string;
 };
@@ -280,6 +281,7 @@ export function Select<T extends string | number | undefined | string[]>({
               id={props.id}
               role="combobox"
               aria-label={props["aria-label"]}
+              aria-describedby={props["aria-describedby"]}
               aria-expanded={open}
               disabled={disabled}
               className="w-full min-w-0 justify-between font-normal"

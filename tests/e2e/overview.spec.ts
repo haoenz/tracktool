@@ -2,6 +2,7 @@ import { filterTracks } from "./map-tools.js";
 import { tool } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 import { test, expect, type Page } from "@playwright/test";
+import { resetDisplay } from "./display-reset.js";
 
 async function loaded(page: Page) {
   await page.goto("/map?panel=library");
@@ -43,6 +44,10 @@ async function overviewSource(page: Page) {
       )?.source,
   );
 }
+
+test.beforeEach(async ({ request }) => {
+  await resetDisplay(request);
+});
 
 test("default overview requests viewport tiles, checks visible tracks, and restores camera", async ({
   page,

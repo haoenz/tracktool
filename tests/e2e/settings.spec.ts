@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { resetDisplay } from "./display-reset.js";
 import { tool } from "./map-tools.js";
+
+test.beforeEach(async ({ request }) => {
+  await resetDisplay(request);
+});
 
 test("settings contain map controls only and server configuration writes require CLI", async ({
   page,
