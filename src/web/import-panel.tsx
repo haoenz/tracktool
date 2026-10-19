@@ -3,27 +3,37 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   CircleAlert,
+  CircleMinus,
   Ellipsis,
   FileUp,
   LoaderCircle,
+  RotateCcw,
   Upload,
   X,
 } from "lucide-react";
-import { Popover as PopoverPrimitive } from "radix-ui";
-import { Alert, Button, Input, Select } from "./components/controls.js";
+import { Alert, Button, Input } from "./components/controls.js";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "./components/ui/popover.js";
+  ImportTagPicker,
+  isRegisteredImportTag,
+} from "./components/import-tag-picker.js";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./components/ui/dialog.js";
 import { api, readConfig } from "./api.js";
+import { importError } from "./import-error.js";
 import { useWorkspace } from "./workspace.js";
-import type { PublicConfig } from "../shared/contracts.js";
 import type { ImportItem, UploadResult, WorkTask } from "../shared/work.js";
+import type { PublicConfig } from "../shared/contracts.js";
 
 type Stage =
   | "queued"
   | "uploading"
+  | "ready"
   | "reading"
   | "saving"
   | "done"
@@ -41,33 +51,25 @@ type Row = {
   progress: number;
   path?: string;
   upload?: string;
-  planId?: string;
-  applyId?: string;
-  applying?: boolean;
+  reusableUntil?: number;
+  finished?: boolean;
   result?: ImportItem;
   error?: string;
 };
-const tagValues = (config?: PublicConfig) =>
-  new Set(
-    ["Default", "Train", "Flight"].flatMap(
-      (category) =>
-        (config?.[("track_tag." + category) as keyof PublicConfig] as
-          string[] | undefined) ?? [],
-    ),
-  );
 const stages: Record<Stage, string> = {
   queued: "等待上传",
   uploading: "正在上传",
-  reading: "正在读取轨迹",
+  reading: "正在检查轨迹",
+  ready: "检查通过",
   saving: "正在保存",
   done: "已导入",
-  duplicate: "重复轨迹已跳过",
-  error: "需要处理",
+  duplicate: "重复轨迹",
+  error: "导入失败",
   cancelled: "已取消",
-  uncertain: "待确认结果",
+  uncertain: "导入结果待确认",
 };
 const completed = (row: Row) =>
-  row.stage === "done" || row.stage === "duplicate";
+  row.stage === "done" || (row.stage === "duplicate" && row.finished === true);
 const working = (row: Row) =>
   ["uploading", "reading", "saving"].includes(row.stage);
 const active = (task: WorkTask) => ["queued", "running"].includes(task.status);
@@ -88,6 +90,64 @@ function uploadId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function ImportOptions({
+  row,
+  config,
+  detail,
+  onSave,
+}: {
+  row: Row;
+  config?: PublicConfig;
+  detail?: string;
+  onSave: (patch: Pick<Row, "name" | "tag">) => void;
+}) {
+  const [name, setName] = useState(row.name);
+  const [tag, setTag] = useState(row.tag);
+  const sourceTag = row.detectedTag ?? row.result?.sourceTag;
+  return (
+    <>
+      <DialogHeader className="import-options-header">
+        <DialogTitle>编辑轨迹信息</DialogTitle>
+      </DialogHeader>
+      <div className="import-options-body">
+        {row.stage === "error" && detail && (
+          <div className="import-file-error" role="note" aria-label="错误说明">
+            <p className="font-medium">错误说明</p>
+            <p>{detail}</p>
+          </div>
+        )}
+        <div className="import-file-options">
+          <label>
+            导入名称
+            <Input
+              aria-label={`${row.file.name} 导入名称`}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </label>
+          <ImportTagPicker
+            config={config}
+            sourceTag={sourceTag}
+            value={tag}
+            onChange={setTag}
+          />
+        </div>
+      </div>
+      <div className="import-options-actions">
+        <DialogClose asChild>
+          <Button
+            variant="default"
+            disabled={!isRegisteredImportTag(config, tag ?? sourceTag)}
+            onClick={() => onSave({ name, tag })}
+          >
+            保存
+          </Button>
+        </DialogClose>
+      </div>
+    </>
+  );
+}
+
 export function ImportPanel() {
   const workspace = useWorkspace();
   const cache = useQueryClient();
@@ -95,37 +155,30 @@ export function ImportPanel() {
     queryKey: ["config"],
     queryFn: () => readConfig(),
   });
-  const registeredTags = [...tagValues(config.data)].map((value) => ({
-    value,
-    label: value,
-  }));
-  const currentTag = (row: Row) => row.detectedTag ?? row.result?.sourceTag;
-  const rowTagOptions = (row: Row) => {
-    const value = currentTag(row);
-    return [
-      {
-        value: "auto",
-        label: value
-          ? tagValues(config.data).has(value)
-            ? value
-            : `${value}（未登记）`
-          : "当前标签未知",
-      },
-      ...registeredTags.filter((option) => option.value !== value),
-    ];
-  };
   const [rows, setRows] = useState<Row[]>([]);
+  const [editSession, setEditSession] = useState(0);
   const current = useRef<Row[]>([]);
   const [running, setRunning] = useState(false);
+  const [showCancel, setShowCancel] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
+  const batch = useRef<
+    | { rows: Row[]; planId: string; applyId?: string; applying: boolean }
+    | undefined
+  >(undefined);
   const busy = useRef(false);
   const stop = useRef(false);
   const mounted = useRef(true);
   const dragDepth = useRef(0);
   const input = useRef<HTMLInputElement>(null);
   const xhr = useRef<XMLHttpRequest | undefined>(undefined);
+  const checking = running && !batch.current?.applying;
+  useEffect(() => {
+    if (!checking) return;
+    const timer = window.setTimeout(() => setShowCancel(true), 1000);
+    return () => window.clearTimeout(timer);
+  }, [checking]);
   function publish() {
     if (mounted.current) setRows(current.current.map((row) => ({ ...row })));
   }
@@ -147,7 +200,7 @@ export function ImportPanel() {
       xhr.current?.abort();
       if (!busy.current)
         for (const row of current.current) {
-          if (!row.applying && !row.applyId) void cleanup(row);
+          if (!batch.current?.applying) void cleanup(row);
         }
     };
   }, []);
@@ -221,166 +274,223 @@ export function ImportPanel() {
       request.send(row.file);
     });
   }
-  async function process(row: Row) {
-    row.error = undefined;
-    // A lost apply response must resume the same idempotent operation.
-    if (!row.applying && !row.applyId) {
-      if (!/\.kml$/i.test(row.file.name)) throw new Error("请选择 KML 文件。");
-      if (!/^[^/\\:\x00-\x1f]+\.kml$/i.test(row.name) || row.name.length > 240)
-        throw new Error(
-          "名称应以 .kml 结尾，不能包含路径分隔符，且不超过 240 个字符。",
-        );
-      if (row.file.size > 8 * 1024 ** 3)
-        throw new Error("文件超过 8 GiB，请拆分后上传。");
-      if (!row.path) row.path = (await send(row)).files[0];
-      if (stop.current) return;
-      row.stage = "reading";
-      publish();
-      const queued = row.planId
-        ? await api<WorkTask>(`/api/work/tasks/${row.planId}`)
-        : await api<WorkTask>("/api/work/preview", {
-            operation: "archive:push",
-            archive: workspace.archive,
-            inputs: [row.path],
-            options: {
-              importFiles: [{ path: row.path, name: row.name, tag: row.tag }],
-            },
-          });
-      row.planId = queued.id;
-      const plan = await settle(queued, true);
-      if (stop.current) return;
-      const result = (
-        plan.output?.data as { import_items?: ImportItem[] } | undefined
-      )?.import_items?.[0];
-      row.result = result;
-      if (result?.sourceTag) row.detectedTag = result.sourceTag;
-      if (
-        plan.status !== "succeeded" ||
-        !result ||
-        ["invalid", "conflict"].includes(result.status) ||
-        plan.uploadsCleaned
-      ) {
-        const reason = (
-          result?.reason ??
-          plan.error?.message ??
-          "未能读取轨迹，请重试。"
-        )
+  function finishRun() {
+    xhr.current = undefined;
+    busy.current = false;
+    publish();
+    if (mounted.current) {
+      setRunning(false);
+      setShowCancel(false);
+      setStopping(false);
+    } else if (!batch.current?.applying) {
+      for (const row of current.current) void cleanup(row);
+    }
+  }
+  function results(task: WorkTask) {
+    return (
+      (task.output?.data as { import_items?: ImportItem[] } | undefined)
+        ?.import_items ?? []
+    );
+  }
+  function fail(row: Row, error: unknown) {
+    row.stage = stop.current ? "cancelled" : "error";
+    row.error = stop.current
+      ? undefined
+      : message(error)
           .split(row.path ?? "\u0000")
           .join(row.file.name);
-        row.planId = undefined;
-        await cleanup(row);
-        throw new Error(reason);
-      }
-      if (result.status === "duplicate") {
-        row.stage = "duplicate";
-        row.planId = undefined;
-        await cleanup(row);
-        return;
-      }
-    }
-    row.stage = "saving";
-    publish();
-    row.applying = true;
-    let applied: WorkTask;
-    try {
-      applied = row.applyId
-        ? await api<WorkTask>(`/api/work/tasks/${row.applyId}`)
-        : await api<WorkTask>(`/api/work/tasks/${row.planId}/apply`, {});
-    } catch (error) {
-      // HTTP rejection is definitive; network and decoding failures may follow a commit.
-      if (
-        !row.applyId &&
-        !(error instanceof TypeError || error instanceof SyntaxError)
-      ) {
-        row.applying = false;
-        row.planId = undefined;
-        await cleanup(row);
-      }
-      throw error;
-    }
-    row.applyId = applied.id;
-    const done = await settle(applied, false);
-    row.applying = false;
-    row.applyId = undefined;
-    row.planId = undefined;
-    const result = (
-      done.output?.data as { import_items?: ImportItem[] } | undefined
-    )?.import_items?.[0];
-    row.result = result ?? row.result;
-    if (result?.sourceTag) row.detectedTag = result.sourceTag;
-    await cleanup(row);
-    if (done.status !== "succeeded")
-      throw new Error(done.error?.message ?? "保存失败，请重试。");
-    row.stage = result?.status === "duplicate" ? "duplicate" : "done";
   }
-  async function run(ids: string[]) {
-    if (busy.current) return;
+  async function check(changed: string[] = []) {
+    if (busy.current || batch.current?.applying) return;
+    batch.current = undefined;
+    const pending = current.current.filter((row) => !completed(row));
+    if (!pending.length) {
+      publish();
+      return;
+    }
+    if (pending.length > 500) {
+      setError("一次最多检查 500 个文件，请移除多余文件。");
+      publish();
+      return;
+    }
     busy.current = true;
     stop.current = false;
     setRunning(true);
     setStopping(false);
     setError("");
-    const batch = current.current.filter(
-      (row) => ids.includes(row.id) && !completed(row),
-    );
-    batch.forEach((row) => {
-      row.stage = "queued";
-      row.error = undefined;
-    });
+    const uploaded: Row[] = [];
+    for (const row of pending) {
+      if (changed.includes(row.id) || !row.path) {
+        row.stage = "queued";
+        row.error = undefined;
+      }
+    }
     publish();
     try {
-      for (const row of batch) {
+      for (const row of pending) {
         if (stop.current) break;
         try {
-          await process(row);
+          if (!/\.kml$/i.test(row.file.name))
+            throw new Error("请选择 KML 文件。");
+          if (
+            !/^[^/\\:\x00-\x1f]+\.kml$/i.test(row.name) ||
+            row.name.length > 240
+          )
+            throw new Error(
+              "名称应以 .kml 结尾，不能包含路径分隔符，且不超过 240 个字符。",
+            );
+          if (row.file.size > 8 * 1024 ** 3)
+            throw new Error("文件超过 8 GiB，请拆分后上传。");
+          const reuse =
+            row.path && (row.reusableUntil ?? 0) > Date.now() + 1000;
+          if (!reuse) {
+            row.path = (await send(row)).files[0];
+            row.reusableUntil = Date.now() + 14 * 60_000;
+          }
+          if (!row.path) throw new Error("上传失败，请重试。");
+          uploaded.push(row);
+          if (!reuse || changed.includes(row.id)) row.stage = "reading";
         } catch (error) {
-          row.stage =
-            row.applying || row.applyId
-              ? "uncertain"
-              : stop.current
-                ? "cancelled"
-                : "error";
-          row.error =
-            row.stage === "uncertain"
-              ? "暂时无法确认导入结果，请查询结果后继续。"
-              : row.stage === "cancelled"
-                ? undefined
-                : message(error)
-                    .split(row.path ?? "\u0000")
-                    .join(row.file.name);
-        }
-        if (stop.current && !completed(row) && row.stage !== "uncertain") {
-          row.stage = "cancelled";
-          row.planId = undefined;
-          await cleanup(row);
+          fail(row, error);
         }
         publish();
       }
-    } finally {
-      for (const row of batch)
-        if (row.stage === "queued") row.stage = "cancelled";
-      xhr.current = undefined;
-      busy.current = false;
-      publish();
-      if (mounted.current) {
-        setRunning(false);
-        setStopping(false);
-      }
-      if (!mounted.current)
-        for (const row of current.current) {
-          if (!row.applying && !row.applyId) void cleanup(row);
+      if (!stop.current && uploaded.length) {
+        const plan = await settle(
+          await api<WorkTask>("/api/work/preview", {
+            operation: "archive:push",
+            archive: workspace.archive,
+            inputs: uploaded.map((row) => row.path),
+            options: {
+              retainUploads: true,
+              importFiles: uploaded.map((row) => ({
+                path: row.path,
+                name: row.name,
+                tag: row.tag,
+              })),
+            },
+          }),
+          true,
+        );
+        for (const row of uploaded) {
+          row.reusableUntil =
+            ["succeeded", "partial"].includes(plan.status) &&
+            !plan.uploadsCleaned
+              ? plan.expiresAt
+                ? Date.parse(plan.expiresAt)
+                : Date.parse(plan.updatedAt) + 15 * 60_000
+              : 0;
+          const result = results(plan).find((item) => item.path === row.path);
+          row.result = result;
+          if (result?.sourceTag) row.detectedTag = result.sourceTag;
+          if (
+            stop.current ||
+            !["succeeded", "partial"].includes(plan.status) ||
+            !result ||
+            ["invalid", "conflict"].includes(result.status)
+          ) {
+            fail(
+              row,
+              result?.reason ?? plan.error?.message ?? "未能检查轨迹，请重试。",
+            );
+          } else {
+            row.error = undefined;
+            row.stage = result.status === "duplicate" ? "duplicate" : "ready";
+          }
         }
-      if (batch.some(completed)) {
-        void cache.invalidateQueries({ queryKey: ["overview"] });
-        void cache.invalidateQueries({ queryKey: ["overview-entries"] });
-        void workspace.refresh(workspace.archive, { quiet: true }).catch(() => {
-          /* Import is committed; a refresh can retry independently. */
-        });
+        if (
+          !stop.current &&
+          plan.status === "succeeded" &&
+          !plan.uploadsCleaned &&
+          pending.every((row) => ["ready", "duplicate"].includes(row.stage))
+        ) {
+          if (pending.every((row) => row.stage === "duplicate")) {
+            for (const row of pending) row.finished = true;
+          } else {
+            batch.current = { rows: pending, planId: plan.id, applying: false };
+          }
+        }
       }
+    } catch (error) {
+      for (const row of uploaded) {
+        row.reusableUntil = 0;
+        fail(row, error);
+      }
+    } finally {
+      if (!batch.current) {
+        for (const row of pending) {
+          if (stop.current && !completed(row)) row.stage = "cancelled";
+          if (stop.current || completed(row)) await cleanup(row);
+        }
+      }
+      finishRun();
+    }
+  }
+  async function confirmImport() {
+    const confirmed = batch.current;
+    if (busy.current || !confirmed) return;
+    busy.current = true;
+    stop.current = false;
+    setRunning(true);
+    setError("");
+    for (const row of confirmed.rows) row.stage = "saving";
+    publish();
+    confirmed.applying = true;
+    try {
+      let applied: WorkTask;
+      try {
+        // Retrying a lost response resumes the same idempotent batch operation.
+        applied = confirmed.applyId
+          ? await api<WorkTask>(`/api/work/tasks/${confirmed.applyId}`)
+          : await api<WorkTask>(
+              `/api/work/tasks/${confirmed.planId}/apply`,
+              {},
+            );
+      } catch (error) {
+        if (
+          !confirmed.applyId &&
+          !(error instanceof TypeError || error instanceof SyntaxError)
+        )
+          confirmed.applying = false;
+        throw error;
+      }
+      confirmed.applyId = applied.id;
+      const done = await settle(applied, false);
+      confirmed.applying = false;
+      if (done.status !== "succeeded")
+        throw new Error(
+          done.error?.message ?? "保存失败，请重新检查后再导入。",
+        );
+      for (const row of confirmed.rows) {
+        const result = results(done).find((item) => item.path === row.path);
+        row.result = result ?? row.result;
+        row.stage = row.result?.status === "duplicate" ? "duplicate" : "done";
+        row.finished = true;
+      }
+      void cache.invalidateQueries({ queryKey: ["overview"] });
+      void cache.invalidateQueries({ queryKey: ["overview-entries"] });
+      void workspace.refresh(workspace.archive, { quiet: true }).catch(() => {
+        /* Import is committed; a refresh can retry independently. */
+      });
+    } catch (error) {
+      for (const row of confirmed.rows) {
+        if (confirmed.applying) {
+          row.stage = "uncertain";
+          row.error = "暂时无法确认导入结果，请查询结果后继续。";
+        } else {
+          fail(row, error);
+        }
+      }
+    } finally {
+      if (!confirmed.applying) {
+        batch.current = undefined;
+        for (const row of confirmed.rows) await cleanup(row);
+      }
+      finishRun();
     }
   }
   function choose(files: FileList | null) {
-    if (!files?.length || busy.current) return;
+    if (!files?.length || busy.current || batch.current?.applying) return;
     try {
       const added = Array.from(files).map((file): Row => ({
         id: uploadId(),
@@ -391,7 +501,7 @@ export function ImportPanel() {
       }));
       current.current = [...current.current, ...added];
       publish();
-      void run(added.map((row) => row.id));
+      void check(added.map((row) => row.id));
     } catch (error) {
       setError(`无法准备上传：${message(error)}`);
     } finally {
@@ -400,26 +510,40 @@ export function ImportPanel() {
   }
   function change(id: string, patch: Partial<Row>) {
     const row = current.current.find((row) => row.id === id);
-    if (!row || busy.current || row.stage === "uncertain") return;
-    Object.assign(row, patch, { planId: undefined, result: undefined });
-    publish();
+    if (!row || busy.current || batch.current?.applying) return;
+    Object.assign(row, patch);
+    void check([id]);
   }
   function remove(id: string) {
-    if (busy.current) return;
+    if (busy.current || batch.current?.applying) return;
     const row = current.current.find((row) => row.id === id);
     if (!row || row.stage === "uncertain") return;
     void cleanup(row);
     current.current = current.current.filter((row) => row.id !== id);
     publish();
+    void check();
   }
   const imported = rows.filter((row) => row.stage === "done");
   const skipped = rows.filter((row) => row.stage === "duplicate").length;
-  const retryable = rows.filter((row) =>
-    ["error", "cancelled"].includes(row.stage),
-  );
-  const processed = rows.filter(
-    (row) => !working(row) && row.stage !== "queued",
-  ).length;
+  const failed = rows.filter((row) => row.stage === "error").length;
+  const cancelled = rows.filter((row) => row.stage === "cancelled").length;
+  const uncertain = rows.filter((row) => row.stage === "uncertain").length;
+  const locked = running || uncertain > 0;
+  const ready = rows.filter((row) => row.stage === "ready").length;
+  const summary = running
+    ? `共${rows.length}个文件，${batch.current?.applying ? "正在导入" : "正在检查"}…`
+    : [
+        `共${rows.length}个文件`,
+        imported.length > 0 && `已导入${imported.length}个`,
+        ready > 0 && `待导入${ready}个`,
+        skipped > 0 &&
+          `${rows.every(completed) ? "跳过重复" : "重复"}${skipped}个`,
+        failed > 0 && `待处理${failed}个`,
+        cancelled > 0 && `已取消${cancelled}个`,
+        uncertain > 0 && `待确认${uncertain}个`,
+      ]
+        .filter(Boolean)
+        .join("，") + "。";
   return (
     <div className="import-panel" data-empty={rows.length === 0}>
       {error && <Alert type="error" title={error} />}
@@ -431,22 +555,22 @@ export function ImportPanel() {
         accept=".kml"
         multiple
         aria-label="上传输入文件"
-        disabled={running}
+        disabled={locked}
         onChange={(event) => choose(event.target.files)}
       />
       <div
         className={`import-dropzone${rows.length ? " compact" : ""}${dragging ? " dragging" : ""}`}
-        aria-disabled={running}
+        aria-disabled={locked}
         onDragEnter={(event) => {
           event.preventDefault();
-          if (!running && event.dataTransfer.types.includes("Files")) {
+          if (!locked && event.dataTransfer.types.includes("Files")) {
             dragDepth.current++;
             setDragging(true);
           }
         }}
         onDragOver={(event) => {
           event.preventDefault();
-          event.dataTransfer.dropEffect = running ? "none" : "copy";
+          event.dataTransfer.dropEffect = locked ? "none" : "copy";
         }}
         onDragLeave={(event) => {
           event.preventDefault();
@@ -469,7 +593,7 @@ export function ImportPanel() {
         </div>
         <Button
           variant={rows.length ? "outline" : "default"}
-          disabled={running}
+          disabled={locked}
           onClick={() => input.current?.click()}
         >
           {rows.length ? "添加文件" : "选择文件"}
@@ -477,213 +601,194 @@ export function ImportPanel() {
       </div>
       {rows.length > 0 && (
         <>
-          <div className="import-summary" role="status">
-            <span>
-              {running
-                ? `已处理 ${processed} / ${rows.length} 个文件`
-                : `共 ${rows.length} 个文件`}
-            </span>
-            {running && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={stopping}
-                onClick={() => {
-                  stop.current = true;
-                  xhr.current?.abort();
-                  setStopping(true);
-                }}
-              >
-                {stopping ? "正在停止…" : "停止剩余上传"}
-              </Button>
-            )}
-          </div>
-          {stopping && (
-            <p className="overview-hint">
-              正在保存的轨迹完成后停止，已导入的轨迹会保留。
-            </p>
-          )}
           <section aria-label="上传文件列表" className="import-files">
-            {rows.map((row) => (
-              <article
-                key={row.id}
-                className="import-file"
-                aria-label={row.file.name}
-                data-stage={row.stage}
-              >
-                <div className="import-file-main">
-                  <span className="import-state-icon" aria-hidden="true">
-                    {working(row) ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : completed(row) ? (
-                      <Check />
-                    ) : ["error", "uncertain"].includes(row.stage) ? (
-                      <CircleAlert />
-                    ) : (
-                      <FileUp />
-                    )}
-                  </span>
-                  <div className="import-file-info">
-                    <strong title={row.name}>{row.name}</strong>
-                    <div className="import-file-meta">
-                      <span>{size(row.file.size)}</span>
-                      {(row.tag ?? row.result?.tag) && (
-                        <span className="import-category">
-                          {row.tag ?? row.result!.tag}
-                        </span>
+            {rows.map((row) => {
+              const failure = importError(
+                row.error,
+                row.result?.status === "conflict",
+              );
+              return (
+                <article
+                  key={row.id}
+                  className="import-file"
+                  aria-label={row.file.name}
+                  data-stage={row.stage}
+                >
+                  <div className="import-file-main">
+                    <span className="import-state-icon" aria-hidden="true">
+                      {working(row) ? (
+                        <LoaderCircle className="animate-spin" />
+                      ) : row.stage === "duplicate" ? (
+                        <CircleMinus />
+                      ) : row.stage === "done" ? (
+                        <Check />
+                      ) : ["error", "uncertain"].includes(row.stage) ? (
+                        <CircleAlert />
+                      ) : (
+                        <FileUp />
                       )}
-                      <span>
-                        {row.stage === "uploading"
-                          ? `上传中 ${row.progress}%`
-                          : row.result?.status === "conflict" &&
-                              row.stage === "error"
-                            ? "名称冲突"
-                            : stages[row.stage]}
-                      </span>
+                    </span>
+                    <div className="import-file-info">
+                      <strong title={row.name}>{row.name}</strong>
+                      <div className="import-file-meta">
+                        <span>{size(row.file.size)}</span>
+                        {(row.tag ?? row.result?.tag) && (
+                          <span className="import-category">
+                            {row.tag ?? row.result!.tag}
+                          </span>
+                        )}
+                        <span>
+                          {row.stage === "uploading"
+                            ? `上传中 ${row.progress}%`
+                            : row.stage === "error"
+                              ? failure.label
+                              : stages[row.stage]}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="import-row-actions">
-                    {row.stage === "uncertain" ? (
-                      <Button
-                        size="sm"
-                        disabled={running}
-                        onClick={() => void run([row.id])}
-                      >
-                        查询导入结果
-                      </Button>
-                    ) : completed(row) ? (
-                      row.result?.entryId &&
-                      workspace.showTrack && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={running}
-                          onClick={() =>
-                            workspace.showTrack?.(row.result!.entryId!)
-                          }
-                        >
-                          查看轨迹
-                        </Button>
-                      )
-                    ) : (
-                      <>
-                        {["error", "cancelled"].includes(row.stage) && (
+                    <div className="import-row-actions">
+                      {completed(row) ? (
+                        row.result?.entryId &&
+                        workspace.showTrack && (
                           <Button
                             variant="ghost"
                             size="sm"
-                            disabled={running}
-                            onClick={() => void run([row.id])}
+                            disabled={locked}
+                            onClick={() =>
+                              workspace.showTrack?.(row.result!.entryId!)
+                            }
                           >
-                            重试
+                            查看轨迹
                           </Button>
-                        )}
-                        <Popover>
-                          <PopoverTrigger asChild>
+                        )
+                      ) : (
+                        <>
+                          {["error", "cancelled"].includes(row.stage) && (
                             <Button
                               variant="ghost"
                               size="icon"
-                              disabled={running}
-                              aria-label={`${row.file.name} 更多操作`}
+                              disabled={locked}
+                              title="重试"
+                              aria-label={`重试 ${row.file.name}`}
+                              onClick={() => void check([row.id])}
                             >
-                              <Ellipsis aria-hidden="true" />
+                              <RotateCcw aria-hidden="true" />
                             </Button>
-                          </PopoverTrigger>
-                          <PopoverContent
-                            align="end"
-                            className="import-options-popover"
+                          )}
+                          <Dialog
+                            onOpenChange={(open) => {
+                              // Reset drafts even if the previous close animation is still running.
+                              if (open) setEditSession((value) => value + 1);
+                            }}
                           >
-                            <p className="font-medium">修改名称或活动标签</p>
-                            <div className="import-file-options">
-                              <label>
-                                导入名称
-                                <Input
-                                  aria-label={`${row.file.name} 导入名称`}
-                                  value={row.name}
-                                  onChange={(event) =>
-                                    change(row.id, { name: event.target.value })
-                                  }
-                                />
-                              </label>
-                              <label>
-                                活动标签
-                                <Select
-                                  aria-label={`${row.file.name} 活动标签`}
-                                  value={row.tag ?? "auto"}
-                                  options={rowTagOptions(row)}
-                                  onChange={(value) =>
-                                    change(row.id, {
-                                      tag: value === "auto" ? undefined : value,
-                                    })
-                                  }
-                                />
-                              </label>
-                            </div>
-                            <PopoverPrimitive.Close asChild>
-                              <Button
-                                variant="default"
-                                onClick={() => void run([row.id])}
-                              >
-                                保存并重试
-                              </Button>
-                            </PopoverPrimitive.Close>
-                            <PopoverPrimitive.Close asChild>
+                            <DialogTrigger asChild>
                               <Button
                                 variant="ghost"
-                                onClick={() => remove(row.id)}
-                                aria-label={`移除 ${row.file.name}`}
+                                size="icon"
+                                disabled={locked}
+                                aria-label={`${row.file.name} 更多操作`}
                               >
-                                <X aria-hidden="true" />
-                                移除文件
+                                <Ellipsis aria-hidden="true" />
                               </Button>
-                            </PopoverPrimitive.Close>
-                          </PopoverContent>
-                        </Popover>
-                      </>
-                    )}
+                            </DialogTrigger>
+                            <DialogContent
+                              aria-describedby={undefined}
+                              className="import-options-dialog translate-x-0 translate-y-0 sm:-translate-x-1/2 sm:-translate-y-1/2"
+                            >
+                              <ImportOptions
+                                key={editSession}
+                                row={row}
+                                config={config.data}
+                                detail={failure.detail}
+                                onSave={(patch) => change(row.id, patch)}
+                              />
+                            </DialogContent>
+                          </Dialog>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            disabled={locked}
+                            title="移除文件"
+                            aria-label={`移除 ${row.file.name}`}
+                            onClick={() => remove(row.id)}
+                          >
+                            <X aria-hidden="true" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-                {row.stage === "uploading" && (
-                  <progress
-                    className="import-progress"
-                    value={row.progress}
-                    max={100}
-                    aria-label={`${row.file.name} 上传进度`}
-                  />
-                )}
-                {row.error && <p className="import-file-error">{row.error}</p>}
-              </article>
-            ))}
+                  {row.stage === "uploading" && (
+                    <progress
+                      className="import-progress"
+                      value={row.progress}
+                      max={100}
+                      aria-label={`${row.file.name} 上传进度`}
+                    />
+                  )}
+                </article>
+              );
+            })}
           </section>
-          {!running && (
-            <div className="import-actions">
-              <p role="status">
-                已导入 {imported.length} 条轨迹
-                {skipped ? `，跳过 ${skipped} 条重复轨迹` : ""}。
-                {retryable.length > 0 && ` ${retryable.length} 个文件待处理。`}
+          <div className="import-actions">
+            <div className="import-summary">
+              <p role="status">{summary}</p>
+            </div>
+            {stopping && (
+              <p className="overview-hint">
+                正在取消检查，尚未确认的轨迹不会导入。
               </p>
-              {imported.length > 0 && (
+            )}
+            {uncertain > 0 ? (
+              <Button disabled={running} onClick={() => void confirmImport()}>
+                查询导入结果
+              </Button>
+            ) : (
+              (unresolved || checking) && (
                 <Button
-                  variant="default"
+                  variant={checking ? "outline" : "default"}
+                  disabled={
+                    checking
+                      ? !showCancel || stopping
+                      : running || !batch.current || ready === 0
+                  }
                   onClick={() => {
-                    const ids = imported.flatMap((row) =>
-                      row.result?.entryId ? [row.result.entryId] : [],
-                    );
-                    if (workspace.showTracks) workspace.showTracks(ids);
-                    else workspace.open("library", "imported");
+                    if (checking) {
+                      stop.current = true;
+                      xhr.current?.abort();
+                      setStopping(true);
+                    } else {
+                      void confirmImport();
+                    }
                   }}
                 >
-                  查看已导入轨迹
+                  {checking
+                    ? stopping
+                      ? "正在取消…"
+                      : showCancel
+                        ? "取消检查"
+                        : "检查中…"
+                    : batch.current?.applying
+                      ? "正在导入…"
+                      : "导入"}
                 </Button>
-              )}
-              {retryable.length > 0 && (
-                <Button
-                  onClick={() => void run(retryable.map((row) => row.id))}
-                >
-                  重试失败文件
-                </Button>
-              )}
-            </div>
-          )}
+              )
+            )}
+            {!running && imported.length > 0 && (
+              <Button
+                variant="default"
+                onClick={() => {
+                  const ids = imported.flatMap((row) =>
+                    row.result?.entryId ? [row.result.entryId] : [],
+                  );
+                  if (workspace.showTracks) workspace.showTracks(ids);
+                  else workspace.open("library", "imported");
+                }}
+              >
+                查看已导入轨迹
+              </Button>
+            )}
+          </div>
         </>
       )}
     </div>

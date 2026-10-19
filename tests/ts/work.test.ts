@@ -21,6 +21,7 @@ import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js"
 import { SqliteTasks } from "../../dist/node/infrastructure/task-store.js";
 import { TaskQueue } from "../../dist/node/infrastructure/task-queue.js";
 import { WorkFiles } from "../../dist/node/infrastructure/work-files.js";
+import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
 import { BusinessRunner } from "../../dist/node/infrastructure/work-runner.js";
 import { AppError } from "../../dist/node/domain/errors.js";
 import { WorkRequestSchema } from "../../dist/node/shared/work.js";
@@ -1111,5 +1112,183 @@ it("import automatically fills endpoint administrative locations when enabled", 
     ]);
   } finally {
     db.close();
+  }
+});
+
+it("batch preview catches internal name conflicts without writing and rechecks after removing a file", async () => {
+  const { dir, archive, call, settled } = await server();
+  const bytes = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
+  const files = [
+    path.join(dir, "2026-10-01 第一.kml"),
+    path.join(dir, "2026-10-01 第二.kml"),
+  ];
+  await writeFile(files[0]!, bytes);
+  await writeFile(
+    files[1]!,
+    bytes.toString().replace("</kml>", "<!-- changed --></kml>"),
+  );
+  const catalog = async () =>
+    (
+      await call<{ catalog: { entries: unknown[] } }>("/api/work/catalog", {
+        archive,
+      })
+    ).catalog.entries;
+  const before = await catalog();
+  const preview = async (inputs: string[]) =>
+    settled(
+      (
+        await call<WorkTask>("/api/work/preview", {
+          operation: "archive:push",
+          archive,
+          inputs,
+          options: {
+            importFiles: inputs.map((path) => ({
+              path,
+              name: "2026-10-01 同名.kml",
+            })),
+          },
+        })
+      ).id,
+    );
+  const conflict = await preview(files);
+  expect(conflict.output?.data).toMatchObject({
+    import_items: [{ status: "new" }, { status: "conflict" }],
+  });
+  expect(await catalog()).toEqual(before);
+  const rejected = await call<WorkTask>(
+    `/api/work/tasks/${conflict.id}/apply`,
+    {},
+  );
+  expect((await settled(rejected.id)).status).toBe("failed");
+  expect(await catalog()).toEqual(before);
+  await writeFile(files[1]!, bytes);
+  const duplicate = await preview(files);
+  expect(duplicate.output?.data).toMatchObject({
+    import_items: [{ status: "new" }, { status: "duplicate" }],
+  });
+  expect(await catalog()).toEqual(before);
+  const remaining = await preview([files[1]!]);
+  expect(remaining.output?.data).toMatchObject({
+    import_items: [{ status: "new" }],
+  });
+  expect(await catalog()).toEqual(before);
+  const applied = await call<WorkTask>(
+    `/api/work/tasks/${remaining.id}/apply`,
+    {},
+  );
+  expect((await settled(applied.id)).status).toBe("succeeded");
+  expect(await catalog()).toHaveLength(before.length + 1);
+});
+
+it("incremental import previews reuse parsing while refreshing config, archive and content changes", async () => {
+  const { dir, archive, config, call, settled } = await server();
+  const bytes = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
+  const files = [
+    path.join(dir, "2026-10-01 缓存一.kml"),
+    path.join(dir, "2026-10-01 缓存二.kml"),
+  ];
+  for (const file of files) await writeFile(file, bytes);
+  const xml = vi.spyOn(XmlWorkers.prototype, "run");
+  const overrides = files.map((path, index) => ({
+    path,
+    name: `2026-10-01 缓存${index}.kml`,
+    tag: undefined as string | undefined,
+  }));
+  const preview = async () =>
+    settled(
+      (
+        await call<WorkTask>("/api/work/preview", {
+          operation: "archive:push",
+          archive,
+          inputs: files,
+          options: { importFiles: overrides },
+        })
+      ).id,
+    );
+  try {
+    const first = await preview();
+    expect(first.status).toBe("succeeded");
+    expect(xml.mock.calls.map((call) => call[1].kind)).toEqual([
+      "content",
+      "tracks",
+      "content",
+      "tracks",
+    ]);
+    overrides[0]!.name = "2026-10-02 改名.kml";
+    await preview();
+    expect(xml).toHaveBeenCalledTimes(4);
+    overrides[0]!.tag = "徒步";
+    await preview();
+    expect(xml).toHaveBeenCalledTimes(5);
+    expect(xml.mock.calls[4]![1].kind).toBe("edit");
+    await preview();
+    expect(xml).toHaveBeenCalledTimes(5);
+    const previousStat = await stat(files[1]!);
+    const changed = Buffer.from(bytes.toString().replace("火车", "飞机"));
+    expect(changed.length).toBe(bytes.length);
+    await writeFile(files[1]!, changed);
+    await utimes(files[1]!, previousStat.atime, previousStat.mtime);
+    const updated = await preview();
+    expect(updated.output?.data).toMatchObject({
+      import_items: expect.arrayContaining([
+        {
+          path: files[1],
+          member: "Flight/2026-10/2026-10-01 缓存1.kml",
+          category: "Flight",
+          tag: "飞机",
+          sourceTag: "飞机",
+          status: "new",
+          reason: "新增轨迹",
+        },
+      ]),
+    });
+    expect(xml).toHaveBeenCalledTimes(7);
+    const settings = await new FileConfigStore({ path: config }).load();
+    settings["track_tag.Flight"] = (
+      settings["track_tag.Flight"] as string[]
+    ).filter((tag) => tag !== "飞机");
+    settings["track_tag.Train"] = [
+      ...(settings["track_tag.Train"] as string[]),
+      "飞机",
+    ];
+    await writeFile(config, JSON.stringify(settings));
+    await expect(
+      call(`/api/work/tasks/${updated.id}/apply`, {}),
+    ).rejects.toThrow();
+    const recategorized = await preview();
+    expect(recategorized.output?.data).toMatchObject({
+      import_items: expect.arrayContaining([
+        expect.objectContaining({ path: files[1], category: "Train" }),
+      ]),
+    });
+    expect(xml).toHaveBeenCalledTimes(7);
+    const copy = path.join(dir, "2026-10-01 另一个来源.kml");
+    await writeFile(copy, changed);
+    const other = await settled(
+      (
+        await call<WorkTask>("/api/work/preview", {
+          operation: "archive:push",
+          archive,
+          inputs: [copy],
+          options: { importFiles: [{ path: copy, name: overrides[1]!.name }] },
+        })
+      ).id,
+    );
+    const apply = await call<WorkTask>(`/api/work/tasks/${other.id}/apply`, {});
+    expect((await settled(apply.id)).status).toBe("succeeded");
+    await expect(
+      call(`/api/work/tasks/${recategorized.id}/apply`, {}),
+    ).rejects.toThrow();
+    xml.mockClear();
+    const latest = await preview();
+    expect(latest.output?.data).toMatchObject({
+      import_items: expect.arrayContaining([
+        expect.objectContaining({ path: files[1], status: "duplicate" }),
+      ]),
+    });
+    expect(xml).not.toHaveBeenCalled();
+    expect(await readFile(files[0]!)).toEqual(bytes);
+  } finally {
+    xml.mockRestore();
   }
 });

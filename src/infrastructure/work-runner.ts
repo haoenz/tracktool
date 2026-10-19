@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 import { entryName, filenameDate } from "../domain/archive.js";
 import { activeEntries } from "./archive/database.js";
 import type { ImportItem } from "../shared/work.js";
-import { AppError, checkCancelled } from "../domain/errors.js";
+import { AppError, checkCancelled, errorInfo } from "../domain/errors.js";
 import { TAGS as T } from "../domain/tags.js";
 import { coordinate, gpsTags } from "../domain/media.js";
 import { parseMediaTime, formatWall } from "../domain/media-time.js";
@@ -23,6 +23,7 @@ import { MediaService } from "../services/media-service.js";
 import { ArchiveClient } from "./archive/client.js";
 import { readZip } from "./archive/zip.js";
 import { XmlWorkers } from "./xml/client.js";
+import { ImportPreviewCache } from "./import-preview-cache.js";
 import { LocalKmlFiles } from "./kml-files.js";
 import { LocalMediaFiles } from "./media-files.js";
 import { ExifMetadata } from "./metadata.js";
@@ -73,6 +74,7 @@ class ScopedKmlFiles extends LocalKmlFiles {
   }
 }
 export class BusinessRunner implements WorkRunner {
+  private readonly importPreviews = new ImportPreviewCache();
   constructor(
     readonly files: WorkFiles,
     private readonly config: ConfigStore,
@@ -519,6 +521,7 @@ export class BusinessRunner implements WorkRunner {
           );
           db.close();
           const items: ImportItem[] = [];
+          const failures = new Map<string, ReturnType<typeof errorInfo>>();
           const adjustments = new Map(
             (o.importFiles ?? []).map((item) => [item.path, item]),
           );
@@ -529,42 +532,39 @@ export class BusinessRunner implements WorkRunner {
             try {
               const adjustment = adjustments.get(file);
               const tag = adjustment?.tag;
-              let { source, content, category } = await kml.importContent(
-                ctx,
-                file,
-              );
+              const readPreview = async () => {
+                const source = await new ScopedKmlFiles(this.files).read(file);
+                const cached = await this.importPreviews.inspect(
+                  source,
+                  xml,
+                  tag,
+                  signal,
+                );
+                return {
+                  source: { ...source, sha256: cached.sha256 },
+                  content: { tag: cached.tag },
+                  category: (tags.get(cached.tag) ?? null) as
+                    "Default" | "Train" | "Flight" | null,
+                };
+              };
+              let { source, content, category } =
+                mode === "plan"
+                  ? await readPreview()
+                  : await kml.importContent(ctx, file);
               sourceTag = content.tag || undefined;
               if (tag !== undefined) {
                 category = (tags.get(tag) ?? null) as typeof category;
-                if (content.tag !== tag) {
-                  if (mode === "apply") {
-                    await kml.edit(ctx, file, {
-                      kind: "set-tag",
-                      tag,
-                      create: true,
-                    });
-                    ({ source, content, category } = await kml.importContent(
-                      ctx,
-                      file,
-                    ));
-                    category = (tags.get(tag) ?? null) as typeof category;
-                  } else {
-                    // Preview the exact bytes the apply phase will publish.
-                    const edited = await xml.run(
-                      source.bytes,
-                      {
-                        kind: "edit",
-                        operation: { kind: "set-tag", tag, create: true },
-                      },
-                      signal,
-                    );
-                    const bytes = Buffer.from(edited.edit!.outputs[0]!.xml);
-                    source = {
-                      ...source,
-                      bytes,
-                      sha256: createHash("sha256").update(bytes).digest("hex"),
-                    };
-                  }
+                if (content.tag !== tag && mode === "apply") {
+                  await kml.edit(ctx, file, {
+                    kind: "set-tag",
+                    tag,
+                    create: true,
+                  });
+                  ({ source, content, category } = await kml.importContent(
+                    ctx,
+                    file,
+                  ));
+                  category = (tags.get(tag) ?? null) as typeof category;
                 }
               }
               const chosen = category ?? o.category;
@@ -604,6 +604,7 @@ export class BusinessRunner implements WorkRunner {
               if (!sha) existing.set(member, source.sha256);
             } catch (e) {
               if (e instanceof AppError && e.code === "CANCELLED") throw e;
+              failures.set(file, errorInfo(e));
               items.push({
                 path: file,
                 tag: sourceTag,
@@ -612,6 +613,12 @@ export class BusinessRunner implements WorkRunner {
                 reason: e instanceof Error ? e.message : String(e),
               });
             }
+            if (mode === "plan")
+              report({
+                type: "progress",
+                completed: items.length,
+                total: files.length,
+              });
           }
           output.data = { import_items: items };
           if (
@@ -622,8 +629,26 @@ export class BusinessRunner implements WorkRunner {
               "USER_INPUT",
               "入库校验失败，本批次未写入任何轨迹；请修正后重新上传",
             );
-          // Show all conflicts in the preview; application rejects the entire batch above.
-          if (!items.some((i) => i.status === "conflict"))
+          // Preview already validated every file; do not parse the batch a second time.
+          // Conflicts retain their existing successful-plan status and are blocked by apply.
+          if (
+            mode === "plan" &&
+            !items.some((item) => item.status === "conflict")
+          ) {
+            result = {
+              items: items.map((item) =>
+                item.status === "invalid"
+                  ? {
+                      status: "failed",
+                      path: item.path,
+                      error: failures.get(item.path)!,
+                    }
+                  : { status: "succeeded", path: item.path },
+              ),
+              exitCode: items.some((item) => item.status === "invalid") ? 3 : 0,
+            };
+          }
+          if (mode === "apply")
             result = await kml.push(
               ctx,
               files,

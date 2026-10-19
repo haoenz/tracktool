@@ -53,6 +53,7 @@ export const WorkRequestSchema = z
     options: z
       .object({
         category: z.enum(["Default", "Train", "Flight"]).optional(),
+        retainUploads: z.boolean().optional(),
         importFiles: z
           .array(
             z

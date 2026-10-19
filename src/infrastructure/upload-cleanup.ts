@@ -34,6 +34,17 @@ export class UploadCleanup {
         const active = tasks.filter((t) =>
           ["queued", "running"].includes(t.status),
         );
+        // A newer preview may reuse files referenced by an older failed/expired plan.
+        const retained = tasks.filter(
+          (task) =>
+            task.request.operation === "archive:push" &&
+            task.mode === "plan" &&
+            task.request.options.retainUploads &&
+            !task.uploadsCleaned &&
+            (task.expiresAt
+              ? Date.parse(task.expiresAt)
+              : Date.parse(task.updatedAt) + 15 * 60_000) > now,
+        );
         for (const task of tasks) {
           if (
             task.request.operation !== "archive:push" ||
@@ -51,7 +62,7 @@ export class UploadCleanup {
               ["invalid", "conflict"].includes(item.status),
             ) ||
             (!!task.expiresAt && Date.parse(task.expiresAt) <= now);
-          if (!finished) continue;
+          if (!finished || retained.includes(task)) continue;
           const files = task.request.inputs.filter((file) => {
             const parts = path
               .relative(this.files.uploads, file)
@@ -72,10 +83,13 @@ export class UploadCleanup {
           let complete = true;
           for (const file of files) {
             if (
-              active.some((other) =>
-                [...other.request.inputs, other.request.output ?? ""]
-                  .filter(Boolean)
-                  .some((input) => within(input, file) || within(file, input)),
+              [...active, ...(task.mode === "plan" ? retained : [])].some(
+                (other) =>
+                  [...other.request.inputs, other.request.output ?? ""]
+                    .filter(Boolean)
+                    .some(
+                      (input) => within(input, file) || within(file, input),
+                    ),
               )
             ) {
               complete = false;

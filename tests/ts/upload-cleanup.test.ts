@@ -103,3 +103,75 @@ it("startup recovery cleans interrupted imports without deleting task history", 
   expect(store.read(task.id)?.status).toBe("interrupted");
   expect(store.read(task.id)?.uploadsCleaned).toBe(true);
 });
+
+it.each(["partial", "failed", "cancelled"] as const)(
+  "retains opted-in %s previews for corrections until expiration",
+  async (status) => {
+    const { store, files, input, enqueue } = await setup();
+    const task = enqueue();
+    store.change(task.id, (value) => {
+      value.request.options.retainUploads = true;
+    });
+    store.claim("test");
+    store.finish(task.id, "test", status, {});
+    // Retention survives a new cleanup instance, as after server restart.
+    const cleaner = new UploadCleanup(store, files);
+    cleaner.sweep();
+    expect(existsSync(input)).toBe(true);
+    expect(store.read(task.id)?.uploadsCleaned).toBeUndefined();
+    cleaner.sweep(Date.now() + 16 * 60_000);
+    expect(existsSync(input)).toBe(false);
+    expect(store.read(task.id)?.uploadsCleaned).toBe(true);
+  },
+);
+
+it.each(["failed", "succeeded"] as const)(
+  "an older %s plan cannot delete a newer preview's reused upload",
+  async (status) => {
+    const { store, cleaner, input, enqueue } = await setup();
+    const older = enqueue();
+    store.claim("test");
+    store.finish(older.id, "test", status, {});
+    const newer = enqueue();
+    store.change(newer.id, (value) => {
+      value.request.options.retainUploads = true;
+    });
+    store.claim("test");
+    store.finish(newer.id, "test", "succeeded", {});
+    cleaner.sweep();
+    expect(existsSync(input)).toBe(true);
+    expect(store.read(older.id)?.uploadsCleaned).toBeUndefined();
+    store.change(older.id, (value) => {
+      value.request.options.retainUploads = true;
+      value.expiresAt = new Date(Date.now() - 1).toISOString();
+    });
+    cleaner.sweep();
+    expect(existsSync(input)).toBe(true);
+    cleaner.sweep(Date.now() + 16 * 60_000);
+    expect(existsSync(input)).toBe(false);
+    expect(store.read(older.id)?.uploadsCleaned).toBe(true);
+    expect(store.read(newer.id)?.uploadsCleaned).toBe(true);
+  },
+);
+
+it("a completed apply cleans reused uploads even while earlier previews retain them", async () => {
+  const { store, cleaner, input, enqueue } = await setup();
+  const preview = enqueue();
+  store.change(preview.id, (value) => {
+    value.request.options.retainUploads = true;
+  });
+  store.claim("test");
+  store.finish(preview.id, "test", "succeeded", {});
+  const apply = enqueue();
+  store.change(apply.id, (value) => {
+    value.mode = "apply";
+    value.previewId = preview.id;
+    value.request.options.retainUploads = true;
+  });
+  store.claim("test");
+  store.finish(apply.id, "test", "succeeded", {});
+  cleaner.sweep();
+  expect(existsSync(input)).toBe(false);
+  expect(store.read(apply.id)?.uploadsCleaned).toBe(true);
+  expect(store.read(preview.id)?.uploadsCleaned).toBe(true);
+});

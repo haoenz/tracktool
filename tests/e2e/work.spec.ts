@@ -13,6 +13,17 @@ async function upload(page: Page, name: string, buffer: Buffer) {
     page.getByRole("article", { name, exact: true }).last(),
   ).toBeVisible();
 }
+async function confirmImport(page: Page, count = 1) {
+  const button = page.getByRole("button", {
+    name: "导入",
+    exact: true,
+  });
+  await expect(button).toBeEnabled({ timeout: 20000 });
+  await expect(page.locator('.import-file[data-stage="ready"]')).toHaveCount(
+    count,
+  );
+  await button.click();
+}
 async function confirm(page: Page) {
   await expect(
     page
@@ -46,8 +57,9 @@ test("archive upload, backup, read-only download and real deletion use separate 
     "2026-10-01 网页归档.kml",
     await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml"),
   );
+  await confirmImport(page);
   await expect(
-    page.getByText("已导入 1 条轨迹。", { exact: true }),
+    page.getByText("共1个文件，已导入1个。", { exact: true }),
   ).toBeVisible({
     timeout: 20000,
   });
@@ -219,9 +231,29 @@ for (const width of [1280, 390]) {
     const list = page.getByRole("region", { name: "上传文件列表" });
     await expect(list.getByRole("article")).toHaveCount(2);
     await expect(
-      page.getByText("已导入 1 条轨迹。 1 个文件待处理。", { exact: true }),
+      page.getByText("共2个文件，待导入1个，待处理1个。", {
+        exact: true,
+      }),
     ).toBeVisible({ timeout: 20000 });
-    await expect(list).toContainText("需要处理");
+    const summary = page.locator(".import-actions > .import-summary");
+    await expect(summary).toHaveCount(1);
+    await expect(summary.getByRole("status")).toHaveText(
+      "共2个文件，待导入1个，待处理1个。",
+    );
+    await expect(
+      page.getByRole("button", {
+        name: "全部重试",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    const summaryBox = (await summary.boundingBox())!;
+    const listBox = (await list.boundingBox())!;
+    expect(summaryBox.y).toBeGreaterThanOrEqual(listBox.y + listBox.height);
+    const invalid = list.getByRole("article", { name: "2026-10-02 损坏.kml" });
+    await expect(invalid.locator(".import-file-meta")).toContainText(
+      "KML 格式或编码无效",
+    );
+    await expect(invalid.locator(".import-file-error")).toHaveCount(0);
     await expect(page.locator(".task-detail")).toHaveCount(0);
     await page
       .getByRole("button", {
@@ -229,13 +261,41 @@ for (const width of [1280, 390]) {
         exact: true,
       })
       .click();
-    await page
-      .getByRole("button", { name: "移除 2026-10-02 损坏.kml", exact: true })
-      .click();
+    await expect(
+      page.getByRole("button", { name: "保存", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("group", { name: "活动标签", exact: true }),
+    ).toContainText("活动标签 缺失");
+    await expect(
+      page.locator(".import-options-actions").getByRole("button"),
+    ).toHaveCount(1);
+    await expect(
+      page
+        .locator(".import-options-dialog")
+        .getByRole("button", { name: /^移除 |^重试 / }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    const remove = invalid.getByRole("button", {
+      name: "移除 2026-10-02 损坏.kml",
+      exact: true,
+    });
+    await expect(remove).toHaveText("");
+    await expect(
+      invalid.getByRole("button", {
+        name: "重试 2026-10-02 损坏.kml",
+        exact: true,
+      }),
+    ).toHaveText("");
+    await expect(
+      page.getByRole("button", { name: "导入", exact: true }),
+    ).toBeDisabled();
+    await remove.click();
     await expect(list.getByRole("article")).toHaveCount(1);
+    await confirmImport(page);
     expect(uploads.filter((value) => value === name)).toHaveLength(1);
     await expect(
-      page.getByText("已导入 1 条轨迹。", { exact: true }),
+      page.getByText("共1个文件，已导入1个。", { exact: true }),
     ).toBeVisible();
     await expect(
       page.getByText("轨迹库已刷新；当前地图选择和构图已保留。", {
@@ -245,7 +305,9 @@ for (const width of [1280, 390]) {
     await page.screenshot({ path: info.outputPath(`upload-${width}.png`) });
     await upload(page, name, buffer);
     await expect(
-      page.getByText("已导入 1 条轨迹，跳过 1 条重复轨迹。", { exact: true }),
+      page.getByText("共2个文件，已导入1个，跳过重复1个。", {
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: /^导入 \d+ 条轨迹$/ }),
@@ -260,16 +322,123 @@ for (const width of [1280, 390]) {
     );
     await upload(page, name, changed);
     await expect(list).toContainText("名称冲突");
+    await expect(list.locator(".import-file-error")).toHaveCount(0);
     await page
       .getByRole("button", { name: `${name} 更多操作`, exact: true })
       .click();
+    const picker = page.getByRole("group", { name: "活动标签", exact: true });
+    await expect(picker.getByRole("tab", { name: "轨道" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(
+      picker.getByRole("button", { name: "火车", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.getByRole("button", { name: "保存", exact: true }),
+    ).toBeEnabled();
+    await expect(
+      picker.getByRole("button", { name: "保留原标签" }),
+    ).toHaveCount(0);
+    await picker.getByRole("tab", { name: "轨道" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(picker.getByRole("tab", { name: "飞行" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(picker.locator('button[aria-pressed="true"]')).toHaveCount(0);
+    await expect(
+      picker.getByRole("button", { name: "火车", exact: true }),
+    ).toHaveCount(0);
+    await picker.getByRole("button", { name: "飞机", exact: true }).click();
+    await expect(
+      picker.getByRole("button", { name: "飞机", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Escape");
+    await page
+      .getByRole("button", { name: `${name} 更多操作`, exact: true })
+      .click();
+    await expect(picker.getByRole("tab", { name: "轨道" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await picker.getByRole("tab", { name: "飞行" }).click();
+    await picker.getByRole("button", { name: "飞机", exact: true }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    const pending = list.getByRole("article", { name, exact: true }).last();
+    await expect(pending).toHaveAttribute("data-stage", "ready");
+    await expect(pending.locator(".import-category")).toHaveText("飞机");
+    await page
+      .getByRole("button", { name: `${name} 更多操作`, exact: true })
+      .click();
+    await expect(picker.getByRole("tab", { name: "飞行" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await picker.getByRole("tab", { name: "轨道" }).click();
+    await expect(
+      picker.getByRole("button", { name: "火车", exact: true }),
+    ).toHaveAttribute("aria-pressed", "false");
+    await picker.getByRole("button", { name: "火车", exact: true }).click();
+    await expect(
+      picker.getByRole("button", { name: "火车", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await picker.getByRole("tab", { name: "普通", exact: true }).click();
+    const hiking = picker.getByRole("button", { name: "徒步", exact: true });
+    await hiking.focus();
+    await page.keyboard.press("Enter");
+    await expect(hiking).toHaveAttribute("aria-pressed", "true");
+    const bounds = await page.locator(".import-options-dialog").boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    const dialog = page.getByRole("dialog", { name: "编辑轨迹信息" });
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "关闭", exact: true }),
+    ).toBeVisible();
+    if (width >= 640) {
+      expect(Math.abs(bounds!.x + bounds!.width / 2 - width / 2)).toBeLessThan(
+        2,
+      );
+      expect(Math.abs(bounds!.y + bounds!.height / 2 - 450)).toBeLessThan(2);
+    } else {
+      expect(Math.abs(bounds!.y + bounds!.height - 900)).toBeLessThan(2);
+      expect(bounds!.width).toBe(width);
+    }
+
+    const actionsBox = (await page
+      .locator(".import-options-actions")
+      .boundingBox())!;
+    const saveBox = (await page
+      .getByRole("button", { name: "保存", exact: true })
+      .boundingBox())!;
+    expect(
+      Math.abs(
+        actionsBox.x +
+          actionsBox.width -
+          saveBox.x -
+          saveBox.width -
+          (width >= 640 ? 24 : 20),
+      ),
+    ).toBeLessThan(2);
+    await page.screenshot({
+      path: info.outputPath(`upload-tags-${width}.png`),
+    });
     await page
       .getByLabel(`${name} 导入名称`, { exact: true })
       .fill(name.replace(".kml", "-修正.kml"));
-    await page.getByRole("button", { name: "保存并重试", exact: true }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".import-options-dialog")).toHaveCount(0);
+    await expect(pending).toHaveAttribute("data-stage", "ready");
+    await expect(pending.locator("strong")).toHaveText(
+      name.replace(".kml", "-修正.kml"),
+    );
+    await confirmImport(page);
     await expect(
-      page.getByText("已导入 2 条轨迹，跳过 1 条重复轨迹。", { exact: true }),
-    ).toBeVisible();
+      page.getByText("共3个文件，已导入2个，跳过重复1个。", {
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 20000 });
     await page
       .getByRole("button", { name: "查看已导入轨迹", exact: true })
       .click();
@@ -291,9 +460,119 @@ for (const width of [1280, 390]) {
   });
 }
 
-test("failed upload retries only the failed file and preserves successful imports", async ({
+test("upload summarizes input errors and shows unexpected error details in the file menu", async ({
   page,
 }) => {
+  await page.goto("/map?panel=library");
+  await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
+  const detail = "临时存储空间不足，无法写入上传文件";
+  await page.route("**/api/work/uploads?**", async (route) => {
+    if (
+      new URL(route.request().url()).searchParams.get("name") === "存储失败.kml"
+    )
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { message: detail } }),
+      });
+    else await route.continue();
+  });
+  const buffer = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
+  const files = [
+    { name: "格式错误.txt", buffer },
+    { name: "缺少日期.kml", buffer },
+    {
+      name: "2026-10-01 空轨迹.kml",
+      buffer: Buffer.from(
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>',
+      ),
+    },
+    { name: "存储失败.kml", buffer },
+  ];
+  await page
+    .getByLabel("上传输入文件")
+    .setInputFiles(
+      files.map((file) => ({ ...file, mimeType: "application/octet-stream" })),
+    );
+  await expect(page.getByText("共4个文件，待处理4个。")).toBeVisible({
+    timeout: 20000,
+  });
+  for (const [name, label] of [
+    ["格式错误.txt", "不支持的文件格式（仅支持 KML）"],
+    ["缺少日期.kml", "文件名缺少日期（YYYY-MM-DD）"],
+    ["2026-10-01 空轨迹.kml", "没有有效轨迹点"],
+  ] as const) {
+    const row = page.getByRole("article", { name, exact: true });
+    await expect(row.locator(".import-file-meta")).toContainText(label);
+    await expect(row.locator(".import-file-error")).toHaveCount(0);
+  }
+  const failed = page.getByRole("article", {
+    name: "存储失败.kml",
+    exact: true,
+  });
+  await expect(failed.locator(".import-file-meta")).toContainText("导入失败");
+  await expect(failed.locator("details")).toHaveCount(0);
+  await expect(page.getByText("查看错误详情", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(detail, { exact: true })).not.toBeVisible();
+  await failed.getByRole("button", { name: "存储失败.kml 更多操作" }).click();
+  const explanation = page
+    .locator(".import-options-dialog")
+    .getByRole("note", { name: "错误说明" });
+  await expect(explanation).toContainText(detail);
+  await expect(explanation).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByText(detail, { exact: true })).not.toBeVisible();
+});
+
+test("upload requires a registered tag when the source tag is unregistered", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=library");
+  await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
+  const name = `2026-10-01 未登记标签-${Date.now()}.kml`;
+  const buffer = Buffer.from(
+    (
+      await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml", "utf8")
+    ).replace("<value>火车</value>", "<value>未登记活动</value>"),
+  );
+  await upload(page, name, buffer);
+  const row = page.getByRole("article", { name, exact: true });
+  await expect(row.locator(".import-file-meta")).toContainText(
+    "未登记的活动标签",
+    { timeout: 20000 },
+  );
+  await expect(row).not.toContainText("需要处理");
+  await expect(row).not.toContainText("无法识别活动标签");
+  await expect(row.locator(".import-file-error")).toHaveCount(0);
+  await expect(page.locator(".import-actions").getByRole("status")).toHaveText(
+    "共1个文件，待处理1个。",
+  );
+  await page
+    .getByRole("button", { name: `${name} 更多操作`, exact: true })
+    .click();
+  const picker = page.getByRole("group", { name: "活动标签", exact: true });
+  const save = page.getByRole("button", { name: "保存", exact: true });
+  await expect(picker).toContainText("活动标签 未登记活动（未登记）");
+  await expect(picker.getByRole("button", { name: "保留原标签" })).toHaveCount(
+    0,
+  );
+  await expect(picker.locator('button[aria-pressed="true"]')).toHaveCount(0);
+  await expect(save).toBeDisabled();
+  await picker.getByRole("tab", { name: "轨道" }).click();
+  await expect(save).toBeDisabled();
+  await picker.getByRole("button", { name: "火车", exact: true }).click();
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(row).toHaveAttribute("data-stage", "ready");
+  await confirmImport(page);
+  await expect(row).toContainText("已导入", { timeout: 20000 });
+  await expect(row.locator(".import-category")).toHaveText("火车");
+});
+
+test("failed upload blocks the batch and retry rechecks before confirmation", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
   await page.goto("/map?panel=library");
   await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
   const names = [
@@ -320,18 +599,29 @@ test("failed upload retries only the failed file and preserves successful import
     })),
   );
   await expect(
-    page.getByText("已导入 1 条轨迹。 1 个文件待处理。", { exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "重试失败文件", exact: true }).click();
+    page.getByText("共2个文件，待导入1个，待处理1个。", {
+      exact: true,
+    }),
+  ).toBeVisible({ timeout: 20000 });
+  const failed = page.getByRole("article", { name: names[1]!, exact: true });
+  await expect(failed.locator(".import-file-meta")).toContainText(
+    "上传连接中断",
+  );
+  await expect(failed.locator(".import-file-error")).toHaveCount(0);
+  await failed
+    .getByRole("button", { name: `重试 ${names[1]!}`, exact: true })
+    .click();
+  await confirmImport(page, 2);
   await expect(
-    page.getByText("已导入 2 条轨迹。", { exact: true }),
-  ).toBeVisible();
+    page.getByText("共2个文件，已导入2个。", { exact: true }),
+  ).toBeVisible({ timeout: 20000 });
   expect(uploads.filter((name) => name === names[0])).toHaveLength(1);
   expect(uploads.filter((name) => name === names[1])).toHaveLength(2);
   await upload(page, `2026-10-01 新增-${Date.now()}.kml`, buffer);
+  await confirmImport(page);
   await expect(
-    page.getByText("已导入 3 条轨迹。", { exact: true }),
-  ).toBeVisible();
+    page.getByText("共3个文件，已导入3个。", { exact: true }),
+  ).toBeVisible({ timeout: 20000 });
   expect(uploads).toHaveLength(4);
 });
 
@@ -403,12 +693,24 @@ test("lost import response can recover the same committed result", async ({
     `2026-10-01 断网响应-${Date.now()}.kml`,
     await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml"),
   );
+  await confirmImport(page);
   await expect(
     page.getByRole("button", { name: "查询导入结果", exact: true }),
   ).toBeVisible();
+  const uncertain = page.locator('.import-file[data-stage="uncertain"]');
+  await expect(uncertain.locator(".import-file-meta")).toContainText(
+    "导入结果待确认",
+  );
+  await expect(uncertain.locator(".import-file-error")).toHaveCount(0);
+  await expect(page.locator(".import-actions").getByRole("status")).toHaveText(
+    "共1个文件，待确认1个。",
+  );
+  await expect(
+    page.getByRole("button", { name: "全部重试", exact: true }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "查询导入结果", exact: true }).click();
   await expect(
-    page.getByText("已导入 1 条轨迹。", { exact: true }),
+    page.getByText("共1个文件，已导入1个。", { exact: true }),
   ).toBeVisible();
   expect(recoveredTask).toBe(committedTask);
 });
@@ -429,8 +731,9 @@ test("upload works without secure-context randomUUID and explains name conflicts
   const name = `2026-10-01 HTTP上传-${Date.now()}.kml`;
   const buffer = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
   await upload(page, name, buffer);
+  await confirmImport(page);
   await expect(
-    page.getByText("已导入 1 条轨迹。", { exact: true }),
+    page.getByText("共1个文件，已导入1个。", { exact: true }),
   ).toBeVisible();
   await upload(
     page,
@@ -441,7 +744,112 @@ test("upload works without secure-context randomUUID and explains name conflicts
     page.getByRole("region", { name: "上传文件列表" }),
   ).toContainText("名称冲突");
   await expect(
-    page.getByRole("button", { name: "重试失败文件", exact: true }),
+    page.getByRole("button", { name: "全部重试", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: `重试 ${name}`, exact: true }),
   ).toBeEnabled();
   expect(errors).toEqual([]);
+});
+
+test("import editor presents missing and empty tags inline without repeating the filename", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=library");
+  await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
+  const xml = await readFile(
+    "tests/ts/fixtures/m4/2026-10-01 轨迹.kml",
+    "utf8",
+  );
+  const contents = [
+    xml.replace('<Data name="TrackTags"><value>火车</value></Data>', ""),
+    xml.replace("<value>火车</value>", "<value></value>"),
+    xml.replace("<value>火车</value>", "<value>  </value>"),
+  ];
+  const names = contents.map((_, index) => `2026-10-01 缺失标签${index}.kml`);
+  await page.getByLabel("上传输入文件").setInputFiles(
+    contents.map((content, index) => ({
+      name: names[index]!,
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(content),
+    })),
+  );
+  await expect(
+    page.getByText("共3个文件，待处理3个。", { exact: true }),
+  ).toBeVisible();
+  for (const name of names) {
+    await page
+      .getByRole("button", { name: `${name} 更多操作`, exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "编辑轨迹信息",
+      exact: true,
+    });
+    await expect(dialog.getByText(name, { exact: true })).toHaveCount(0);
+    await expect(
+      dialog.getByLabel(`${name} 导入名称`, { exact: true }),
+    ).toHaveValue(name);
+    const legend = dialog.locator("legend");
+    await expect(legend).toHaveText("活动标签 缺失");
+    const missing = legend.getByText("缺失", { exact: true });
+    await expect(missing).toHaveCSS("color", "oklch(0.577 0.245 27.325)");
+    await expect(
+      dialog.getByText("请选择已登记的活动标签后保存。", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      dialog.getByRole("button", { name: "保存", exact: true }),
+    ).toBeDisabled();
+    await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+  }
+});
+
+test("desktop import footer aligns right, fits content and scrolls with the panel", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/map?panel=library");
+  await page.getByRole("button", { name: "上传轨迹", exact: true }).click();
+  const files = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      name: `不支持的文件${index}.txt`,
+      mimeType: "text/plain",
+      buffer: Buffer.from("fixture"),
+    }));
+  await page.getByLabel("上传输入文件").setInputFiles(files(2));
+  await expect(
+    page.getByText("共2个文件，待处理2个。", { exact: true }),
+  ).toBeVisible();
+  const panel = page.locator(".map-controls");
+  const footer = page.locator(".import-actions");
+  const button = footer.getByRole("button", { name: "导入", exact: true });
+  await expect(button).toBeDisabled();
+  await expect(page.locator(".import-summary")).toHaveCSS(
+    "text-align",
+    "right",
+  );
+  await expect(footer).toHaveCSS("position", "static");
+  const panelBox = (await panel.boundingBox())!;
+  const footerBox = (await footer.boundingBox())!;
+  const buttonBox = (await button.boundingBox())!;
+  expect(
+    panelBox.y + panelBox.height - footerBox.y - footerBox.height,
+  ).toBeLessThanOrEqual(16);
+  expect(
+    Math.abs(buttonBox.x + buttonBox.width - footerBox.x - footerBox.width),
+  ).toBeLessThan(2);
+  await page.getByLabel("上传输入文件").setInputFiles(files(16));
+  await expect(
+    page.getByText("共18个文件，待处理18个。", { exact: true }),
+  ).toBeAttached();
+  await panel.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(button).toBeInViewport();
+  const bottom = (await footer.boundingBox())!;
+  await panel.evaluate((element) => {
+    element.scrollTop -= 80;
+  });
+  await expect
+    .poll(async () => (await footer.boundingBox())!.y - bottom.y)
+    .toBeCloseTo(80, 0);
 });

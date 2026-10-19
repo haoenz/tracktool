@@ -166,7 +166,7 @@ input[type="file"] {
 
 /* Upload rows keep their layout as progress changes. */
 .import-panel {
-  padding: 0.75rem 0;
+  padding: 0.75rem 0 0;
 }
 .import-dropzone {
   display: flex;
@@ -220,14 +220,24 @@ input[type="file"] {
 }
 .import-summary {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
+  text-align: right;
   align-items: center;
-  min-height: 48px;
+  width: 100%;
   gap: 0.5rem;
   color: var(--muted-foreground);
   font-size: 0.8rem;
 }
+.import-summary p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.import-summary button {
+  flex-shrink: 0;
+}
 .import-files {
+  margin-top: 0.75rem;
   border-top: 1px solid var(--border);
 }
 .import-file {
@@ -287,8 +297,57 @@ input[type="file"] {
   flex-shrink: 0;
   gap: 0.15rem;
 }
-.import-options-popover {
-  width: min(320px, calc(100vw - 32px));
+.import-options-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-width: 520px;
+  max-height: calc(100dvh - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.import-options-header {
+  flex-shrink: 0;
+  padding: 24px 48px 16px 24px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.import-options-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 24px;
+}
+.import-options-dialog .import-options-actions {
+  flex-shrink: 0;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+}
+@media (max-width: 639px) {
+  .import-options-dialog {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - 24px);
+    border-radius: 16px 16px 0 0;
+    animation: none;
+  }
+  .import-options-header {
+    padding: 20px 48px 12px 20px;
+  }
+  .import-options-body {
+    padding: 0 20px;
+  }
+  .import-options-dialog .import-options-actions {
+    padding: 16px 20px max(16px, env(safe-area-inset-bottom));
+  }
+}
+.import-options-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 .import-file-options {
   display: grid;
@@ -305,11 +364,47 @@ input[type="file"] {
   width: 100%;
   min-width: 0;
 }
+.import-tag-picker {
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.import-tag-picker legend {
+  margin-bottom: 0.35rem;
+  font-size: 0.8rem;
+}
+.import-tag-missing {
+  color: var(--destructive);
+}
+.import-tag-source {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.import-tag-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.import-tag-grid button {
+  height: auto;
+  min-height: 2.75rem;
+  padding: 0.5rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.import-tag-grid button[aria-pressed="true"] {
+  border-color: var(--primary);
+  color: var(--primary);
+}
 .import-file-error {
-  margin: 0.5rem 0 0 1.8rem;
+  margin: 0.75rem 0;
   overflow-wrap: anywhere;
   color: var(--destructive);
   font-size: 0.8rem;
+}
+.import-file-error p + p {
+  margin-top: 0.35rem;
 }
 .import-progress {
   display: block;
@@ -332,16 +427,14 @@ input[type="file"] {
   background: var(--primary);
 }
 .import-actions {
-  position: sticky;
-  bottom: 0;
-  background: var(--background);
-  padding: 0.85rem 0;
+  padding: 0.85rem 0 0;
   display: flex;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.5rem;
 }
-.import-actions p {
+.import-actions > p {
   flex-basis: 100%;
   margin: 0 0 0.25rem;
   font-size: 0.85rem;
