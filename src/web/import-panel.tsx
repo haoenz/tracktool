@@ -12,10 +12,8 @@ import {
   X,
 } from "lucide-react";
 import { Alert, Button, Input } from "./components/controls.js";
-import {
-  ImportTagPicker,
-  isRegisteredImportTag,
-} from "./components/import-tag-picker.js";
+import { ImportTagPicker } from "./components/import-tag-picker.js";
+import { isRegisteredTag } from "./components/tag-picker.js";
 import {
   Dialog,
   DialogClose,
@@ -130,6 +128,7 @@ function ImportOptions({
             sourceTag={sourceTag}
             value={tag}
             onChange={setTag}
+            pending={["queued", "uploading", "reading"].includes(row.stage)}
           />
         </div>
       </div>
@@ -137,7 +136,7 @@ function ImportOptions({
         <DialogClose asChild>
           <Button
             variant="default"
-            disabled={!isRegisteredImportTag(config, tag ?? sourceTag)}
+            disabled={!isRegisteredTag(config, tag ?? sourceTag)}
             onClick={() => onSave({ name, tag })}
           >
             保存

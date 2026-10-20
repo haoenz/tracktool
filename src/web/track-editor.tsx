@@ -20,6 +20,7 @@ import {
 } from "./components/controls.js";
 import { api, waitForWorkTask } from "./api.js";
 import { useWorkspace } from "./workspace.js";
+import { isRegisteredTag, TagPicker } from "./components/tag-picker.js";
 import { TrackEditorMap } from "./track-editor-map.js";
 import type {
   EditRequest,
@@ -356,7 +357,7 @@ function TrackEditor({
         })()
       : undefined;
   const importFailureInfo = importError(importFailure);
-  const showDraftState = mode !== "draw";
+  const showDraftState = mode !== "draw" && mode !== "set_tag";
   function tagCategory(value: string): "Default" | "Train" | "Flight" {
     return (
       (["Default", "Train", "Flight"] as const).find((category) =>
@@ -1185,18 +1186,30 @@ function TrackEditor({
                     为整段缺失高程的轨迹片段查询海拔，已有高程的片段保持不变。计算完成后查看结果，再决定是否保存。
                   </p>
                 )}
-                {mode === "set_tag" && (
-                  <>
-                    <p>当前标签：{currentTag ?? "未设置"}</p>
-                    <Select
-                      aria-label="活动标签"
-                      placeholder="选择新标签"
+                {mode === "set_tag" &&
+                  (tagData.data && config.data ? (
+                    <TagPicker
+                      config={config.data.config}
                       value={tag ?? currentTag}
                       onChange={setTag}
-                      options={tagOptions}
+                      legend={
+                        !currentTag ||
+                        !isRegisteredTag(config.data.config, currentTag) ? (
+                          <span
+                            className={
+                              currentTag
+                                ? "tag-picker-note"
+                                : "tag-picker-missing"
+                            }
+                          >
+                            当前：{currentTag || "未设置"}
+                          </span>
+                        ) : undefined
+                      }
                     />
-                  </>
-                )}
+                  ) : (
+                    !tagData.error && !config.error && <Spin />
+                  ))}
                 {mode === "split_journey" && (
                   <div onClickCapture={() => setEditTouched(true)}>
                     <p>

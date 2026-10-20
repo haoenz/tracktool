@@ -374,36 +374,36 @@ input[type="file"] {
   width: 100%;
   min-width: 0;
 }
-.import-tag-picker {
+.tag-picker {
   display: grid;
   gap: 0.6rem;
   min-width: 0;
 }
-.import-tag-picker legend {
+.tag-picker legend {
   margin-bottom: 0.35rem;
   font-size: 0.8rem;
 }
-.import-tag-missing {
+.tag-picker-missing {
   color: var(--destructive);
 }
-.import-tag-source {
+.tag-picker-note {
   font-size: 0.75rem;
   color: var(--muted-foreground);
   overflow-wrap: anywhere;
 }
-.import-tag-grid {
+.tag-picker-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.5rem;
 }
-.import-tag-grid button {
+.tag-picker-grid button {
   height: auto;
   min-height: 2.75rem;
   padding: 0.5rem;
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.import-tag-grid button[aria-pressed="true"] {
+.tag-picker-grid button[aria-pressed="true"] {
   border-color: var(--primary);
   color: var(--primary);
 }

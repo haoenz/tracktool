@@ -227,7 +227,7 @@ export function TrackInsights({
               : number(distance / 1000, " km")}
           </dd>
         </div>
-        <div>
+        <div className="track-stat-duration">
           <dt className="sr-only">耗时</dt>
           <dd>{data ? duration(data.elapsed_s) : pendingText}</dd>
         </div>
