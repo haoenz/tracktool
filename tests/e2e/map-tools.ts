@@ -18,9 +18,13 @@ export async function tool(page: Page, name: string) {
     await tracks.click();
   await expect(tracks).toHaveAttribute("aria-expanded", "true");
   if (name === "轨迹库") {
-    await page
-      .getByRole("button", { name: "打开轨迹列表", exact: true })
-      .click();
+    const list = page.getByRole("button", {
+      name: "打开轨迹列表",
+      exact: true,
+    });
+    if ((await list.getAttribute("aria-expanded")) !== "true")
+      await list.click();
+    await expect(list).toHaveAttribute("aria-expanded", "true");
     return;
   }
   const currentPanel = new URL(page.url()).searchParams.get("panel");
@@ -111,8 +115,35 @@ export async function expectTrackFilter(page: Page, search: string) {
   );
 }
 
-export async function pickEditorPoint(page: Page, index: number) {
-  await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
+export async function pickEditorPoint(
+  page: Page,
+  index: number,
+  locate = true,
+) {
+  if (locate)
+    await page
+      .getByLabel("选择编辑片段", { exact: true })
+      .getByRole("button", { pressed: true })
+      .click();
+  const handle = page.getByRole("button", { name: /调整面板高度/ });
+  const sheet = await page.locator(".map-app").getAttribute("data-sheet");
+  const mobile = await handle.isVisible();
+  if (mobile) {
+    await handle.press("Home");
+    await expect
+      .poll(
+        async () =>
+          (await page
+            .getByRole("complementary", { name: "地图控制面板" })
+            .boundingBox())!.height,
+      )
+      .toBeLessThan(60);
+  }
+  await expect
+    .poll(() =>
+      page.evaluate(() => !!window.renderer && !window.renderer.map.isMoving()),
+    )
+    .toBe(true);
   await expect
     .poll(() =>
       page.evaluate(
@@ -128,7 +159,7 @@ export async function pickEditorPoint(page: Page, index: number) {
     .toBe(true);
   const point = await page.evaluate((index) => {
     const r = window.renderer!;
-    const feature = r.data!.features.find(
+    const feature = (r.displayData ?? r.data)!.features.find(
       (f) =>
         f.properties?.segment_id &&
         !String(f.properties.segment_id).startsWith("ux-") &&
@@ -144,5 +175,23 @@ export async function pickEditorPoint(page: Page, index: number) {
       y: box.top + (p.y * box.height) / r.mapElement.clientHeight,
     };
   }, index);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ x, y }) =>
+          document
+            .elementFromPoint(x, y)
+            ?.classList.contains("maplibregl-canvas"),
+        point,
+      ),
+    )
+    .toBe(true);
   await page.mouse.click(point.x, point.y);
+  if (mobile && sheet !== "collapsed") {
+    await handle.press(sheet === "full" ? "End" : "ArrowUp");
+    await expect(page.locator(".map-app")).toHaveAttribute(
+      "data-sheet",
+      sheet!,
+    );
+  }
 }

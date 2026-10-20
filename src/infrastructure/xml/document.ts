@@ -38,7 +38,15 @@ export function executeXml(
   bytes: Uint8Array,
   operation: Exclude<
     XmlOperation,
-    { kind: "tracks" | "content" | "edit" | "segment-edit" | "analysis" }
+    {
+      kind:
+        | "tracks"
+        | "content"
+        | "edit"
+        | "segment-edit"
+        | "analysis"
+        | "import-line";
+    }
   >,
 ): XmlResult {
   return withDocument(bytes, (doc) => {

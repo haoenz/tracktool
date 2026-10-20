@@ -835,6 +835,7 @@ function CatalogPanel({
       extra={<Button onClick={() => void catalog.refetch()}>刷新归档</Button>}
     >
       <ErrorBox error={catalog.error} />
+      {catalog.isPending && <PanelLoading>正在读取轨迹库内容…</PanelLoading>}
       {catalog.data && (
         <>
           <p className="ui-typography ">

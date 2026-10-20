@@ -121,7 +121,7 @@ test("single-track panel previews and saves tag, split and cleanup with history"
   });
   await choose("删除轨迹点");
   await pickEditorPoint(page, 0);
-  await pickEditorPoint(page, 0);
+  await pickEditorPoint(page, 0, false);
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toContainText("编辑已保存，旧版本保留在历史中。", {
     timeout: 20000,

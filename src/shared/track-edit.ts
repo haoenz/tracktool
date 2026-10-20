@@ -106,6 +106,11 @@ export const SegmentEditSchema = z.discriminatedUnion("kind", [
       kind: z.literal("draw"),
       after_segment_id: id.nullable(),
       coordinates: z.array(coordinate).min(2).max(2_000_000),
+      import_kml: z
+        .string()
+        .min(1)
+        .max(8 * 1024 * 1024)
+        .optional(),
       snap_start: snap.optional(),
       snap_end: snap.optional(),
     })

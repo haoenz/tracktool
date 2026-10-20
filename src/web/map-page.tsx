@@ -211,6 +211,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
     [projectTab, setProjectTab] = useState("content"),
     [projectSearch, setProjectSearch] = useState(""),
     [error, setError] = useState(""),
+    [catalogError, setCatalogError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
     [exporting, setExporting] = useState(false),
@@ -581,6 +582,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
     selection.current?.abort();
     setBusy(true);
     setError("");
+    setCatalogError("");
     try {
       const data = await api<Catalog>("/api/archive", { path });
       if (sequence !== operations.current) return;
@@ -592,7 +594,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
       setBaseline("");
       await refreshNames(data.archive);
     } catch (e) {
-      setError(message(e));
+      const text = message(e);
+      setError(text);
+      setCatalogError(text);
     } finally {
       if (sequence === operations.current) setBusy(false);
     }
@@ -1070,6 +1074,8 @@ function Editor({ initial }: { initial: Bootstrap }) {
         ? (overview.query.error?.message ?? overview.query.data?.error ?? "")
         : "")
     : "";
+  const listLoading =
+    overview.list.isFetching || (overview.list.isPending && !overviewError);
   const loadingText = exporting
     ? "正在导出地图…"
     : switching
@@ -1694,9 +1700,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
               }
             >
               <div className="track-list-content">
-                {overview.query.data?.state === "unconfigured" && (
-                  <p>后台尚未配置轨迹库</p>
-                )}
                 {overview.query.data?.summary?.entries === 0 && (
                   <p>
                     轨迹库为空，可以导入 KML 开始浏览。
@@ -1711,16 +1714,18 @@ function Editor({ initial }: { initial: Bootstrap }) {
                     条轨迹存在异常，可在列表查看原因。
                   </p>
                 )}
-                {!catalog && (
-                  <Button
-                    loading={busy}
-                    onClick={() =>
-                      void openArchive(initial.initialArchive, true)
-                    }
-                  >
-                    重新读取轨迹库
-                  </Button>
-                )}
+                {!catalog &&
+                  (!initial.initialArchive ? (
+                    <div className="track-list-status" role="status">
+                      后台尚未配置轨迹库
+                    </div>
+                  ) : catalogError ? (
+                    <div className="track-list-status" role="alert">
+                      轨迹库读取失败：{catalogError}
+                    </div>
+                  ) : (
+                    <PanelLoading>正在读取轨迹库…</PanelLoading>
+                  ))}
                 {catalog && (
                   <>
                     <div className="list-visibility-toolbar">
@@ -1887,18 +1892,15 @@ function Editor({ initial }: { initial: Bootstrap }) {
                         <ListChecks size={20} aria-hidden="true" />
                       </Button>
                     </div>
-                    <div
-                      className="map-track-list"
-                      aria-busy={overview.list.isFetching}
-                    >
-                      {overview.list.isFetching ? (
+                    <div className="map-track-list" aria-busy={listLoading}>
+                      {listLoading ? (
                         <PanelLoading>正在读取轨迹列表…</PanelLoading>
                       ) : overview.list.data?.total === 0 ? (
                         <div className="track-list-status" role="status">
                           无匹配
                         </div>
                       ) : null}
-                      {!overview.list.isFetching &&
+                      {!listLoading &&
                         visible.map((e, index) => (
                           <Fragment key={e.id}>
                             {(index === 0 ||

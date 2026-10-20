@@ -14,6 +14,7 @@ export interface ConfigStore {
   load(): Promise<ConfigData>;
 }
 export type XmlOperation =
+  | { kind: "import-line" }
   | { kind: "content" }
   | { kind: "edit"; operation: EditOperation }
   | {
@@ -32,6 +33,7 @@ export type XmlResult = {
   placemarks: number;
   coordinateNodes: number;
   xml?: string;
+  imported_line?: ([number, number] | [number, number, number])[];
   tracks?: TrackData;
   analysis?: TrackAnalysis;
   content?: Content;

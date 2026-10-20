@@ -1,3 +1,4 @@
+import { importLine } from "./import-line.js";
 import { randomUUID } from "node:crypto";
 import { XmlElement, type XmlDocument, type XmlNode } from "libxml2-wasm";
 import { AppError } from "../../domain/errors.js";
@@ -421,7 +422,11 @@ export function editSegments(
     let settings = structuredClone(input.settings);
     const patches: { mark: string; replacement: string }[] = [];
     if (op.kind === "draw") {
-      const coordinates = op.coordinates.map((p) => [...p]);
+      let coordinates = op.coordinates.map((p) => [...p]);
+      if (op.import_kml) {
+        if (op.snap_start || op.snap_end) fail("导入轨迹不能吸附端点");
+        coordinates = importLine(bytes(op.import_kml));
+      }
       const data = bindSegments(readTrackData(doc), input.segments);
       for (const [end, snap] of [
         [0, op.snap_start],

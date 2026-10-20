@@ -1,3 +1,4 @@
+import { importLine } from "./import-line.js";
 import { analyzeTrack } from "../../domain/track-analysis.js";
 import { executeEdit, readContent } from "./edit.js";
 import { editSegments } from "./segment-edit.js";
@@ -48,6 +49,15 @@ setImmediate(() => {
         },
         buffers,
       );
+    } else if (operation.kind === "import-line") {
+      parentPort?.postMessage({
+        result: {
+          name: "",
+          placemarks: 1,
+          coordinateNodes: 1,
+          imported_line: importLine(bytes),
+        },
+      });
     } else if (operation.kind === "segment-edit") {
       parentPort?.postMessage({
         result: {

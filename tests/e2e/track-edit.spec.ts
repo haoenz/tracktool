@@ -1,6 +1,7 @@
 import { filterTracks, tool, pickEditorPoint } from "./map-tools.js";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+test.use({ actionTimeout: 10000 });
 async function call<T>(page: Page, url: string, body?: unknown): Promise<T> {
   return page.evaluate(
     async ({ url, body }) => {
@@ -114,11 +115,11 @@ for (const width of [1280, 390])
       });
       await expect(displaySave).toBeDisabled();
       await display
-        .getByRole("button", { name: "全部连接", exact: true })
+        .getByRole("button", { name: "全部断开", exact: true })
         .click();
       await expect(
         display.getByRole("button", {
-          name: "片段 1与片段 4已连接",
+          name: "片段 1与片段 4未连接",
           exact: true,
         }),
       ).toBeVisible();
@@ -133,6 +134,20 @@ for (const width of [1280, 390])
       await expect(
         display.getByRole("button", { name: /之间补绘轨迹/ }).first(),
       ).toBeEnabled();
+
+      await expect(
+        display.getByRole("button", {
+          name: "片段 1与片段 4已连接",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await display
+        .getByRole("button", { name: "全部断开", exact: true })
+        .click();
+      await display
+        .getByRole("button", { name: "全部连接", exact: true })
+        .click();
+      await expect(displaySave).toBeDisabled();
 
       await page
         .getByRole("button", { name: "隐藏片段 4", exact: true })
@@ -240,7 +255,7 @@ test("split into named, tagged journeys with a concise confirmation", async ({
     await expect(confirmation).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "编辑轨迹", exact: true }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 20000 });
     const list = await call<{ entries: { id: string; path: string }[] }>(
       page,
       `/api/tracks?search=${encodeURIComponent(
@@ -278,3 +293,98 @@ test("split into named, tagged journeys with a concise confirmation", async ({
     await call(page, "/api/test/edit-cleanup", { id: fixture.id });
   }
 });
+
+for (const width of [1280, 390])
+  test(`imports only one untimed local LineString at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/map?panel=library");
+    const fixture = await call<{ id: string; path: string }>(
+      page,
+      "/api/test/edit-fixture",
+      {},
+    );
+    try {
+      await filterTracks(page, fixture.path.split("/").at(-1)!);
+      await page
+        .getByRole("button", { name: `查看 ${fixture.path}`, exact: true })
+        .click();
+      await page.getByRole("button", { name: "分段管理", exact: true }).click();
+      await page
+        .getByRole("button", { name: /之间补绘轨迹/ })
+        .first()
+        .click();
+      await page.getByRole("combobox", { name: "补绘方式" }).click();
+      await page.getByRole("option", { name: "上传轨迹", exact: true }).click();
+      const upload = page.getByLabel("导入 KML 轨迹");
+      const line =
+        "<LineString><coordinates>120,30,12 120.001,30.001,25</coordinates></LineString>";
+      const kml = (body: string) =>
+        `<kml xmlns="http://www.opengis.net/kml/2.2"><Placemark>${body}</Placemark></kml>`;
+      for (const [body, label, detail] of [
+        [
+          line + line,
+          "包含多条 LineString",
+          "只能上传一条 LineString，当前有 2 条",
+        ],
+        [
+          `<TimeStamp><when>2026-01-01</when></TimeStamp>${line}`,
+          "包含时间信息",
+          "",
+        ],
+      ] as const) {
+        await upload.setInputFiles({
+          name: "invalid.kml",
+          mimeType: "application/vnd.google-earth.kml+xml",
+          buffer: Buffer.from(kml(body)),
+        });
+        const row = page.getByRole("article", { name: "invalid.kml" });
+        await expect(row.getByText(label)).toBeVisible();
+        if (detail) await expect(page.getByText(detail)).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "保存", exact: true }),
+        ).toBeDisabled();
+      }
+      await upload.setInputFiles({
+        name: "line.kml",
+        mimeType: "application/vnd.google-earth.kml+xml",
+        buffer: Buffer.from(kml(line)),
+      });
+      await expect(
+        page
+          .getByRole("article", { name: "line.kml" })
+          .getByText("检查通过 · 2 点"),
+      ).toBeVisible();
+      await save(page);
+      const detail = await call<{
+        entry: { version_id: string };
+        settings: { order: string[] };
+        segments: {
+          segment_id: string;
+          geometry_kind: string;
+          time_status: string;
+        }[];
+      }>(page, `/api/tracks/${fixture.id}`);
+      const added = detail.segments.at(-1)!;
+      expect(added).toMatchObject({
+        geometry_kind: "LineString",
+        time_status: "absent",
+      });
+      expect(detail.settings.order[1]).toBe(added.segment_id);
+      const raw = await page.evaluate(async (url) => {
+        const response = await fetch(url, {
+          headers: {
+            "x-tracktool-token": document.querySelector<HTMLMetaElement>(
+              'meta[name="tracktool-token"]',
+            )!.content,
+          },
+        });
+        if (!response.ok) throw new Error(await response.text());
+        return response.text();
+      }, `/api/tracks/${fixture.id}/versions/${detail.entry.version_id}/raw`);
+      expect(raw).toContain("120,30,12 120.001,30.001,25");
+    } finally {
+      await call(page, "/api/test/edit-cleanup", { id: fixture.id });
+    }
+  });

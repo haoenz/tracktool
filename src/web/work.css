@@ -126,6 +126,10 @@ input[type="file"] {
 .track-editor {
   min-width: 0;
 }
+/* The editor is embedded under the panel header; .work-main margins would double the gap. */
+.map-controls .track-editor {
+  margin: 0;
+}
 .track-editor > * {
   margin-bottom: 12px;
 }
@@ -150,6 +154,12 @@ input[type="file"] {
 }
 .track-editor .ui-space > * {
   max-width: 100%;
+}
+/* The editor sits in a narrow side panel, so its upload affordance stays compact. */
+.track-editor .import-dropzone {
+  min-height: 0;
+  padding: 1rem;
+  gap: 0.75rem;
 }
 .track-editor .work-map {
   height: 420px;

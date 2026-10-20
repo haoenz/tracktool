@@ -289,17 +289,40 @@ export function trackRoutes(
       await xml.close();
     }
   });
-  app.post("/api/tracks/edit-previews", async (req, reply) => {
-    const input = EditRequestSchema.parse(req.body),
-      preview_id = randomUUID(),
-      { queue } = await get();
-    const task = await queue.preview({
-      operation: "track:preview",
-      inputs: [],
-      options: { trackPreview: { id: preview_id, request: input } },
-    });
-    return reply.code(202).send({ task_id: task.id, preview_id });
-  });
+  app.post(
+    "/api/tracks/import-line",
+    { bodyLimit: 16 * 1024 * 1024 },
+    async (req) => {
+      const { kml } = z
+        .object({
+          kml: z
+            .string()
+            .min(1)
+            .max(8 * 1024 * 1024),
+        })
+        .strict()
+        .parse(req.body);
+      const result = await analysisWorkers.run(new TextEncoder().encode(kml), {
+        kind: "import-line",
+      });
+      return { coordinates: result.imported_line! };
+    },
+  );
+  app.post(
+    "/api/tracks/edit-previews",
+    { bodyLimit: 32 * 1024 * 1024 },
+    async (req, reply) => {
+      const input = EditRequestSchema.parse(req.body),
+        preview_id = randomUUID(),
+        { queue } = await get();
+      const task = await queue.preview({
+        operation: "track:preview",
+        inputs: [],
+        options: { trackPreview: { id: preview_id, request: input } },
+      });
+      return reply.code(202).send({ task_id: task.id, preview_id });
+    },
+  );
   app.get("/api/tracks/edit-previews/:previewId", async (req) => {
     const p = z.object({ previewId: z.string().uuid() }).parse(req.params),
       { edits, file } = await get();

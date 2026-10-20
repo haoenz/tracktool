@@ -4,9 +4,11 @@ import { editTracks } from "./track-editor-map.js";
 import { TrackHistory } from "./track-history.js";
 import "./work.css";
 import { useEditSnapshot } from "./edit-snapshot.js";
+import { importError } from "./import-error.js";
 import { nearestPoint, previewAnnotations } from "../shared/edit-map.js";
 import { useEffect, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, CircleAlert, LoaderCircle, Upload, X } from "lucide-react";
 import {
   Alert,
   Button,
@@ -47,6 +49,13 @@ const groupColors = [
   "#d97706",
   "#0891b2",
 ];
+// Draw mode colors the track before and after the insertion point differently.
+const drawBeforeColor = "#0891b2";
+const drawAfterColor = "#9333ea";
+const fileSize = (bytes: number) =>
+  bytes < 1024 * 1024
+    ? `${Math.max(1, Math.ceil(bytes / 1024))} KB`
+    : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const reference = (e: VersionRef): VersionRef => ({
   entry_id: e.entry_id,
   version_id: e.version_id,
@@ -113,9 +122,19 @@ function TrackEditor({
         tag?: string;
       }[]
     >([]);
+  const [drawMethod, setDrawMethod] = useState("map");
+  const [importKml, setImportKml] = useState("");
+  const [importFile, setImportFile] = useState<{
+    name: string;
+    size: number;
+  }>();
+  const [importFailure, setImportFailure] = useState("");
+  const [importDragging, setImportDragging] = useState(false);
   const [taskId, taskLink] = useState<string | null>(null);
   const [editTouched, setEditTouched] = useState(false);
   const rangeAnchor = useRef<number | undefined>(undefined);
+  const importInput = useRef<HTMLInputElement>(null);
+  const importDragDepth = useRef(0);
   const [candidates, setCandidates] = useState<
     { start: number; end: number }[]
   >([]);
@@ -317,12 +336,27 @@ function TrackEditor({
         ? candidates.length > 0 ||
           (end > start && rangeAnchor.current === undefined)
         : mode === "draw"
-          ? drawing.length >= 2
+          ? drawing.length >= 2 && (drawMethod === "map" || !!importKml)
           : mode === "set_tag"
             ? !!tagData.data && !!tag && tag !== currentTag
             : mode === "split_journey"
               ? !splitError
               : mode === "fill_altitude");
+  const importLocked = busy || !!active || !!preview;
+  const drawSegmentColors =
+    mode === "draw" && settings
+      ? (() => {
+          const at = after === null ? 0 : settings.order.indexOf(after) + 1;
+          return Object.fromEntries(
+            settings.order.map((id, i) => [
+              id,
+              i < at ? drawBeforeColor : drawAfterColor,
+            ]),
+          );
+        })()
+      : undefined;
+  const importFailureInfo = importError(importFailure);
+  const showDraftState = mode !== "draw";
   function tagCategory(value: string): "Default" | "Train" | "Flight" {
     return (
       (["Default", "Train", "Flight"] as const).find((category) =>
@@ -353,6 +387,10 @@ function TrackEditor({
     setEditTouched(false);
     clearSelection();
     setDrawing([]);
+    setImportKml("");
+    setImportFile(undefined);
+    setImportFailure("");
+    setImportDragging(false);
     setSnapStart(undefined);
     setSnapEnd(undefined);
     setTag(undefined);
@@ -381,6 +419,45 @@ function TrackEditor({
       );
     }
   }
+  function clearImport() {
+    setImportKml("");
+    setImportFile(undefined);
+    setImportFailure("");
+    setDrawing([]);
+    setImportDragging(false);
+    setError("");
+    setNote("");
+  }
+  function acceptImport(file: File) {
+    if (busy || active || preview) return;
+    setDrawing([]);
+    setImportKml("");
+    setImportFailure("");
+    setImportFile({ name: file.name, size: file.size });
+    void run(async () => {
+      if (!/\.kml$/i.test(file.name)) throw new Error("请选择 KML 文件。");
+      if (file.size > 8 * 1024 * 1024)
+        throw new Error("KML 文件不能超过 8 MiB");
+      const kml = await file.text();
+      const result = await api<{ coordinates: [number, number][] }>(
+        "/api/tracks/import-line",
+        { kml },
+      );
+      setImportKml(kml);
+      setDrawing(result.coordinates.map(([x, y]) => [x, y]));
+      workspace.fit?.(
+        editTracks({
+          segments: [
+            {
+              segment_id: "new-drawing",
+              coordinates: result.coordinates,
+            },
+          ],
+          connections: [],
+        }),
+      );
+    }, setImportFailure);
+  }
   function locateSegment(id: string) {
     const segment = geometry.data?.segments.find((s) => s.segment_id === id);
     if (segment)
@@ -403,14 +480,19 @@ function TrackEditor({
         }),
       );
   }
-  async function run(action: () => Promise<void>) {
+  async function run(
+    action: () => Promise<void>,
+    onError?: (message: string) => void,
+  ) {
     setBusy(true);
     setError("");
     try {
       await action();
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
       setDirectSave(false);
-      setError(e instanceof Error ? e.message : String(e));
+      if (onError) onError(message);
+      else setError(message);
     } finally {
       setBusy(false);
     }
@@ -486,6 +568,7 @@ function TrackEditor({
         kind: "draw",
         after_segment_id: after,
         coordinates: drawing,
+        ...(drawMethod === "import" ? { import_kml: importKml } : {}),
         ...(snapStart
           ? { snap_start: { segment_id: snapStart, endpoint: "end" as const } }
           : {}),
@@ -524,6 +607,7 @@ function TrackEditor({
     )
       return;
     if (mode === "draw") {
+      if (drawMethod !== "map") return;
       const endpoint = geometry.data?.segments
         .map((s) => ({
           id: s.segment_id,
@@ -916,47 +1000,183 @@ function TrackEditor({
                 )}
                 {mode === "draw" && (
                   <>
-                    <p>
-                      点击地图依次画线，至少两个点。靠近已有端点时会自动吸附；手绘部分没有时间信息。
-                    </p>
-                    <p>已画 {drawing.length} 点。</p>
-                    <Space wrap>
-                      <Button
-                        disabled={!drawing.length}
-                        onClick={() => {
-                          setDrawing(drawing.slice(0, -1));
-                          setSnapEnd(undefined);
-                          if (drawing.length <= 1) setSnapStart(undefined);
-                        }}
-                      >
-                        撤回一点
-                      </Button>
-                      <Button
-                        disabled={!drawing.length}
-                        onClick={() => {
-                          setDrawing([]);
-                          setSnapStart(undefined);
-                          setSnapEnd(undefined);
-                        }}
-                      >
-                        重新绘制
-                      </Button>
-                    </Space>
-                    {snapStart && (
-                      <p>
-                        起点已吸附到片段末尾{" "}
-                        <Button onClick={() => setSnapStart(undefined)}>
-                          取消起点吸附
-                        </Button>
-                      </p>
-                    )}
-                    {snapEnd && (
-                      <p>
-                        终点已吸附到片段开头{" "}
-                        <Button onClick={() => setSnapEnd(undefined)}>
-                          取消终点吸附
-                        </Button>
-                      </p>
+                    <Select
+                      aria-label="补绘方式"
+                      value={drawMethod}
+                      options={[
+                        { value: "map", label: "地图绘制" },
+                        { value: "import", label: "上传轨迹" },
+                      ]}
+                      onChange={(value) => {
+                        resetDraft();
+                        setDrawMethod(value);
+                      }}
+                    />
+                    {drawMethod === "import" ? (
+                      <>
+                        <input
+                          ref={importInput}
+                          className="sr-only"
+                          tabIndex={-1}
+                          type="file"
+                          accept=".kml,application/vnd.google-earth.kml+xml"
+                          aria-label="导入 KML 轨迹"
+                          disabled={importLocked}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (file) acceptImport(file);
+                          }}
+                        />
+                        <div
+                          className={`import-dropzone compact${importDragging ? " dragging" : ""}`}
+                          aria-disabled={importLocked}
+                          onDragEnter={(event) => {
+                            event.preventDefault();
+                            if (
+                              !importLocked &&
+                              event.dataTransfer.types.includes("Files")
+                            ) {
+                              importDragDepth.current++;
+                              setImportDragging(true);
+                            }
+                          }}
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = importLocked
+                              ? "none"
+                              : "copy";
+                          }}
+                          onDragLeave={(event) => {
+                            event.preventDefault();
+                            if (--importDragDepth.current <= 0) {
+                              importDragDepth.current = 0;
+                              setImportDragging(false);
+                            }
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            importDragDepth.current = 0;
+                            setImportDragging(false);
+                            const files = event.dataTransfer.files;
+                            if (importLocked) return;
+                            if (files.length > 1) {
+                              setError("补绘一次只能导入一个 KML 文件。");
+                              return;
+                            }
+                            const file = files[0];
+                            if (file) acceptImport(file);
+                          }}
+                        >
+                          <Upload
+                            className="import-upload-icon"
+                            aria-hidden="true"
+                          />
+                          <div>
+                            {importFile && <strong>更换补绘文件</strong>}
+                            <span>支持格式：.kml</span>
+                          </div>
+                          <Button
+                            variant={importFile ? "outline" : "default"}
+                            disabled={importLocked}
+                            onClick={() => importInput.current?.click()}
+                          >
+                            {importFile ? "更换文件" : "选择文件"}
+                          </Button>
+                        </div>
+                        {importFile && (
+                          <section
+                            aria-label="已选 KML 文件"
+                            className="import-files"
+                          >
+                            <article
+                              className="import-file"
+                              aria-label={importFile.name}
+                              data-stage={
+                                importKml ? "done" : busy ? "reading" : "error"
+                              }
+                            >
+                              <div className="import-file-main">
+                                <span
+                                  className="import-state-icon"
+                                  aria-hidden="true"
+                                >
+                                  {busy ? (
+                                    <LoaderCircle className="animate-spin" />
+                                  ) : importKml ? (
+                                    <Check />
+                                  ) : (
+                                    <CircleAlert />
+                                  )}
+                                </span>
+                                <div className="import-file-info">
+                                  <strong title={importFile.name}>
+                                    {importFile.name}
+                                  </strong>
+                                  <div className="import-file-meta">
+                                    <span>{fileSize(importFile.size)}</span>
+                                    <span>
+                                      {busy
+                                        ? "正在检查轨迹"
+                                        : importKml
+                                          ? `检查通过 · ${drawing.length} 点`
+                                          : importFailureInfo.label}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="import-row-actions">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    disabled={importLocked}
+                                    title="移除文件"
+                                    aria-label={`移除 ${importFile.name}`}
+                                    onClick={clearImport}
+                                  >
+                                    <X aria-hidden="true" />
+                                  </Button>
+                                </div>
+                              </div>
+                              {!busy &&
+                                !importKml &&
+                                importFailureInfo.detail && (
+                                  <p className="import-file-error">
+                                    {importFailureInfo.detail}
+                                  </p>
+                                )}
+                            </article>
+                          </section>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-muted-foreground">
+                          点击地图绘制至少两个点，靠近端点自动吸附。
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          <span style={{ color: drawBeforeColor }}>青色</span>
+                          为插入点之前的轨迹，
+                          <span style={{ color: drawAfterColor }}>紫色</span>
+                          为之后的轨迹。
+                        </p>
+                        <p className="text-right">已画 {drawing.length} 点。</p>
+                        {snapStart && (
+                          <p>
+                            起点已吸附到片段末尾{" "}
+                            <Button onClick={() => setSnapStart(undefined)}>
+                              取消起点吸附
+                            </Button>
+                          </p>
+                        )}
+                        {snapEnd && (
+                          <p>
+                            终点已吸附到片段开头{" "}
+                            <Button onClick={() => setSnapEnd(undefined)}>
+                              取消终点吸附
+                            </Button>
+                          </p>
+                        )}
+                      </>
                     )}
                   </>
                 )}
@@ -1111,10 +1331,24 @@ function TrackEditor({
                 <span className="mr-auto text-sm">
                   {busy || active
                     ? "正在处理…"
-                    : draftDirty
-                      ? "未保存修改"
-                      : "尚未修改"}
+                    : showDraftState
+                      ? draftDirty
+                        ? "未保存修改"
+                        : "尚未修改"
+                      : ""}
                 </span>
+                {mode === "draw" && drawMethod === "map" && (
+                  <Button
+                    disabled={!drawing.length || busy || !!active || !!preview}
+                    onClick={() => {
+                      setDrawing(drawing.slice(0, -1));
+                      setSnapEnd(undefined);
+                      if (drawing.length <= 1) setSnapStart(undefined);
+                    }}
+                  >
+                    撤回
+                  </Button>
+                )}
                 <Button
                   disabled={busy || !!active || !draftDirty}
                   onClick={resetDraft}
@@ -1208,7 +1442,7 @@ function TrackEditor({
                         groupColors[group % groupColors.length]!,
                       ]),
                     )
-                  : undefined
+                  : drawSegmentColors
               }
               onPick={pick}
               selectedSegment={

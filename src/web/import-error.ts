@@ -25,6 +25,13 @@ const labels: Record<string, string> = {
   "XML 处理超时": "轨迹读取超时",
   "XML 工作队列已满": "服务繁忙，请稍后重试",
   "已有同名轨迹，但内容不同；请修改名称或移除此文件": "名称冲突",
+  "不是有效的 KML 文件": "不是有效的 KML 文件",
+  "不支持 gx:Track，请改用 LineString": "不支持 gx:Track 轨迹",
+  "补绘轨迹不能包含时间信息（TimeStamp、TimeSpan 或 when）": "包含时间信息",
+  "只支持 LineString，不能包含 Point、Polygon 或 LinearRing":
+    "包含其他几何类型",
+  "KML 中没有 LineString": "没有 LineString",
+  "LineString 无法解析，请检查坐标格式": "LineString 无法解析",
 };
 
 export function importError(
@@ -53,6 +60,10 @@ export function importError(
     return { label: "轨迹坐标无效", detail: message };
   if (/: Invalid timestamp /.test(message))
     return { label: "轨迹时间无效", detail: message };
+  if (message.startsWith("只能上传一条 LineString，当前有"))
+    return { label: "包含多条 LineString", detail: message };
+  if (message.startsWith("LineString 至少需要两个点，当前有"))
+    return { label: "轨迹点不足", detail: message };
   // Keep unrecognized failures available instead of guessing their cause.
   return { label: "导入失败", detail: message };
 }
