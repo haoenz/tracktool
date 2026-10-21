@@ -6,9 +6,18 @@ import "./work.css";
 import { useEditSnapshot } from "./edit-snapshot.js";
 import { importError } from "./import-error.js";
 import { nearestPoint, previewAnnotations } from "../shared/edit-map.js";
-import { useEffect, useState, useRef } from "react";
+import { Fragment, useEffect, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CircleAlert, LoaderCircle, Upload, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  CircleAlert,
+  LoaderCircle,
+  LocateFixed,
+  Upload,
+  X,
+} from "lucide-react";
 import {
   Alert,
   Button,
@@ -26,6 +35,7 @@ import type {
   EditRequest,
   EditPreview,
   EditGeometry,
+  AltitudePreview,
   TrackDetail,
   Presentation,
   VersionRef,
@@ -38,7 +48,7 @@ const editActions: Record<string, string> = {
   split_segment: "断开轨迹",
   prune: "删除轨迹点",
   draw: "补绘轨迹",
-  fill_altitude: "补高程",
+  fill_altitude: "填充高程",
   set_tag: "修改标签",
   split_journey: "拆分行程",
 };
@@ -115,6 +125,14 @@ function TrackEditor({
     [preview, setPreview] = useState<EditPreview>(),
     [outputIndex, setOutputIndex] = useState(0),
     [showBefore, setShowBefore] = useState(false);
+  const [collapsedAltitude, setCollapsedAltitude] = useState<
+    Record<string, boolean>
+  >({});
+  const [locatedAltitude, setLocatedAltitude] = useState<{
+    segment_id: string;
+    longitude: number;
+    latitude: number;
+  }>();
   const [assign, setAssign] = useState<Record<string, number>>({}),
     [journeys, setJourneys] = useState<
       {
@@ -185,6 +203,14 @@ function TrackEditor({
         `/api/tracks/edit-previews/${preview!.preview_id}/geometry?index=${outputIndex}&before=${showBefore}`,
       ),
     enabled: !!preview,
+  });
+  const altitudeResult = useQuery({
+    queryKey: ["edit-altitude", preview?.preview_id, outputIndex],
+    queryFn: () =>
+      api<AltitudePreview>(
+        `/api/tracks/edit-previews/${preview!.preview_id}/altitude?index=${outputIndex}`,
+      ),
+    enabled: !!preview && preview.operation.kind === "fill_altitude",
   });
   useEffect(() => {
     const d = target.data;
@@ -327,6 +353,59 @@ function TrackEditor({
               )
             ? "还有片段未分配。"
             : "";
+  const missingAltitude =
+    mode === "fill_altitude"
+      ? geometry.data?.missing_altitude_points
+      : undefined;
+  const hasMissingAltitude =
+    missingAltitude === undefined || missingAltitude > 0;
+  const altitudeSegments =
+    missingAltitude && geometry.data
+      ? geometry.data.segments.flatMap((segment, index) => {
+          const missing = segment.missing_altitude_points ?? 0;
+          if (!missing) return [];
+          return [
+            {
+              id: segment.segment_id,
+              ordinal:
+                d?.segments.find((s) => s.segment_id === segment.segment_id)
+                  ?.ordinal ?? index,
+              points: segment.coordinates.length,
+              missing,
+            },
+          ];
+        })
+      : [];
+  const altitudePoints =
+    geometry.data?.segments.reduce(
+      (n, segment) => n + segment.coordinates.length,
+      0,
+    ) ?? 0;
+  const fillAltitudeFailure =
+    mode === "fill_altitude" && !preview && (!!error || !!task.data?.error);
+  const altitudeWholeById = new Map(
+    altitudeResult.data?.segments.map((segment) => [
+      segment.segment_id,
+      segment.whole,
+    ]) ?? [],
+  );
+  const altitudeGroups: {
+    segment_id: string;
+    segment_ordinal: number;
+    whole: boolean;
+    points: AltitudePreview["points"];
+  }[] = [];
+  for (const point of altitudeResult.data?.points ?? []) {
+    const last = altitudeGroups.at(-1);
+    if (last?.segment_id === point.segment_id) last.points.push(point);
+    else
+      altitudeGroups.push({
+        segment_id: point.segment_id,
+        segment_ordinal: point.segment_ordinal,
+        whole: altitudeWholeById.get(point.segment_id) ?? false,
+        points: [point],
+      });
+  }
   const canSave =
     !!d &&
     d.entry.state === "active" &&
@@ -342,7 +421,9 @@ function TrackEditor({
             ? !!tagData.data && !!tag && tag !== currentTag
             : mode === "split_journey"
               ? !splitError
-              : mode === "fill_altitude");
+              : mode === "fill_altitude"
+                ? hasMissingAltitude
+                : true);
   const importLocked = busy || !!active || !!preview;
   const drawSegmentColors =
     mode === "draw" && settings
@@ -463,6 +544,39 @@ function TrackEditor({
     const segment = geometry.data?.segments.find((s) => s.segment_id === id);
     if (segment)
       workspace.fit?.(editTracks({ segments: [segment], connections: [] }));
+  }
+  const pendingLocate = useRef(false);
+  function locateTrack() {
+    if (!geometry.data) {
+      pendingLocate.current = true;
+      return;
+    }
+    workspace.fit?.(editTracks(geometry.data));
+  }
+  useEffect(() => {
+    if (!pendingLocate.current || !geometry.data) return;
+    pendingLocate.current = false;
+    workspace.fit?.(editTracks(geometry.data));
+  }, [geometry.data, workspace.fit]);
+  useEffect(() => {
+    setLocatedAltitude(undefined);
+  }, [preview?.preview_id]);
+  function locateAltitudePoint(point: {
+    segment_id: string;
+    longitude: number;
+    latitude: number;
+  }) {
+    workspace.fit?.(
+      editTracks({
+        segments: [
+          {
+            segment_id: point.segment_id,
+            coordinates: [[point.longitude, point.latitude]],
+          },
+        ],
+        connections: [],
+      }),
+    );
   }
   function chooseSegment(id: string) {
     setSegment(id);
@@ -789,6 +903,19 @@ function TrackEditor({
       ...(preview && !showBefore
         ? previewAnnotations(geometry.data, preview, mapData)
         : []),
+      ...(mode === "fill_altitude" && preview && locatedAltitude
+        ? [
+            {
+              segment_id: "ux-located",
+              coordinates: [
+                [locatedAltitude.longitude, locatedAltitude.latitude] as [
+                  number,
+                  number,
+                ],
+              ],
+            },
+          ]
+        : []),
     ],
   };
   return (
@@ -809,7 +936,7 @@ function TrackEditor({
       {note && (
         <Alert type="info" title={note} closable onClose={() => setNote("")} />
       )}
-      {(error || task.data?.error) && (
+      {(error || task.data?.error) && !fillAltitudeFailure && (
         <Button
           disabled={busy || !!active}
           onClick={() => {
@@ -856,6 +983,7 @@ function TrackEditor({
                 resetDraft();
                 setAfter(id);
                 setMode("draw");
+                locateTrack();
               }}
               onChange={setSettings}
               onSelect={(id) => {
@@ -889,6 +1017,7 @@ function TrackEditor({
                     onClick={() => {
                       resetDraft();
                       setMode(key);
+                      locateTrack();
                     }}
                   >
                     {label}
@@ -898,494 +1027,702 @@ function TrackEditor({
           )}
           {(view === "edit" || view === "display") && mode && (
             <section aria-label={editActions[mode]} className="space-y-3">
-              <fieldset
-                disabled={busy || !!active || !!preview}
-                className="min-w-0 space-y-3"
-              >
-                {["split_segment", "prune"].includes(mode) && (
-                  <div className="space-y-2" aria-label="选择编辑片段">
-                    <p>
-                      选择片段，地图会高亮并定位；绿色点为起点，橙色点为终点。
-                    </p>
-                    {segmentOptions.map((option) => (
-                      <Button
-                        key={option.value}
-                        className="h-auto w-full justify-start whitespace-normal"
-                        aria-pressed={segmentId === option.value}
-                        variant={
-                          segmentId === option.value ? "default" : "outline"
-                        }
-                        onClick={() => chooseSegment(option.value)}
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
-                  </div>
-                )}
-                {mode === "split_segment" && (
-                  <>
-                    <p>
-                      点击地图上的断开位置，再点同一位置可取消。断开后仍是一条行程。
-                    </p>
-                    <p>
-                      已选 {breaks.length} 处断点，将形成 {breaks.length + 1}{" "}
-                      个片段。
-                    </p>
-                    <Space wrap>
-                      <Button onClick={() => void run(detect)}>
-                        查找可能的断点
-                      </Button>
-                      <Button
-                        disabled={!breaks.length}
-                        onClick={() => setIndices("")}
-                      >
-                        清除选择
-                      </Button>
-                    </Space>
-                    {breaks.map((point, i) => (
-                      <div key={point} className="flex items-center gap-2">
-                        <Button onClick={() => locateRange(point, point + 1)}>
-                          查看断点 {i + 1}
-                        </Button>
-                        <Button
-                          onClick={() =>
-                            setIndices(
-                              breaks.filter((p) => p !== point).join(","),
-                            )
-                          }
-                        >
-                          取消断点 {i + 1}
-                        </Button>
+              {mode === "fill_altitude" && preview ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    {preview.altitude
+                      ? `查询成功 ${preview.altitude.filled} 个点${
+                          preview.altitude.remaining
+                            ? `（失败 ${preview.altitude.remaining} 个点）`
+                            : ""
+                        }。`
+                      : "高程查询完成。"}
+                  </p>
+                  {altitudeResult.isPending && <Spin />}
+                  {altitudeResult.error && (
+                    <Alert type="error" title={altitudeResult.error.message} />
+                  )}
+                  {altitudeResult.data &&
+                    altitudeResult.data.points.length > 0 && (
+                      <div className="max-h-72 overflow-auto rounded-md border">
+                        <table className="w-full text-sm">
+                          <thead className="sticky top-0 bg-muted">
+                            <tr>
+                              <th className="w-10 p-2">
+                                <span className="sr-only">定位</span>
+                              </th>
+                              <th className="p-2 text-left">经度</th>
+                              <th className="p-2 text-left">纬度</th>
+                              <th className="p-2 text-left">高程</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {altitudeGroups.map((group) => {
+                              const collapsed =
+                                altitudeGroups.length > 1 &&
+                                !!collapsedAltitude[group.segment_id];
+                              return (
+                                <Fragment key={group.segment_id}>
+                                  {altitudeGroups.length > 1 && (
+                                    <tr className="border-t bg-muted/60">
+                                      <th colSpan={4} className="p-0">
+                                        <button
+                                          type="button"
+                                          className="flex w-full items-center gap-1 p-2 text-left font-medium"
+                                          aria-expanded={!collapsed}
+                                          onClick={() =>
+                                            setCollapsedAltitude((value) => ({
+                                              ...value,
+                                              [group.segment_id]:
+                                                !value[group.segment_id],
+                                            }))
+                                          }
+                                        >
+                                          {collapsed ? (
+                                            <ChevronRight className="size-4" />
+                                          ) : (
+                                            <ChevronDown className="size-4" />
+                                          )}
+                                          段 {group.segment_ordinal + 1}
+                                          {group.whole
+                                            ? "（整段缺失）"
+                                            : "（部分缺失）"}{" "}
+                                          · {group.points.length} 个点
+                                        </button>
+                                      </th>
+                                    </tr>
+                                  )}
+                                  {!collapsed &&
+                                    group.points.map((point) => (
+                                      <tr
+                                        key={`${point.segment_id}:${point.index}`}
+                                        className="border-t"
+                                      >
+                                        <td className="p-2">
+                                          <Button
+                                            variant="ghost"
+                                            className="h-7 w-7 p-0"
+                                            aria-label={`定位第 ${point.index + 1} 点`}
+                                            title="定位"
+                                            onClick={() => {
+                                              setLocatedAltitude(point);
+                                              locateAltitudePoint(point);
+                                            }}
+                                          >
+                                            <LocateFixed className="size-4" />
+                                          </Button>
+                                        </td>
+                                        <td className="p-2">
+                                          {point.longitude.toFixed(6)}
+                                        </td>
+                                        <td className="p-2">
+                                          {point.latitude.toFixed(6)}
+                                        </td>
+                                        <td className="p-2">
+                                          {point.altitude === null
+                                            ? "未补齐"
+                                            : `${point.altitude.toFixed(2)} m`}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                </Fragment>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
-                    ))}
-                  </>
-                )}
-                {mode === "prune" && (
-                  <>
-                    <p>
-                      {rangeAnchor.current !== undefined
-                        ? "请选择删除范围的终点。"
-                        : end > start || candidates.length
-                          ? "红色部分将被删除，保存前请检查。"
-                          : "请在地图选择删除范围的起点，然后选择终点。"}
-                    </p>
-                    <p>
-                      将删除{" "}
-                      {candidates.length
-                        ? candidates.reduce((n, r) => n + r.end - r.start, 0)
-                        : Math.max(0, end - start)}{" "}
-                      个轨迹点。
-                    </p>
-                    <Space wrap>
-                      <Button onClick={() => void run(detect)}>
-                        查找漂移点
-                      </Button>
-                      <Button onClick={clearSelection}>重新选择</Button>
-                      <Button onClick={clearSelection}>清除选择</Button>
-                    </Space>
-                    {candidates.map((r, i) => (
-                      <div key={i} className="flex items-center gap-2">
-                        <Button onClick={() => locateRange(r.start, r.end)}>
-                          查看范围 {i + 1}（{r.end - r.start} 点）
-                        </Button>
-                        <Button
-                          onClick={() =>
-                            setCandidates(candidates.filter((_, j) => j !== i))
-                          }
-                        >
-                          保留此范围
-                        </Button>
-                      </div>
-                    ))}
-                  </>
-                )}
-                {mode === "draw" && (
-                  <>
-                    <Select
-                      aria-label="补绘方式"
-                      value={drawMethod}
-                      options={[
-                        { value: "map", label: "地图绘制" },
-                        { value: "import", label: "上传轨迹" },
-                      ]}
-                      onChange={(value) => {
-                        resetDraft();
-                        setDrawMethod(value);
+                    )}
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-background py-3">
+                    <Button
+                      disabled={busy || !!active}
+                      onClick={() => {
+                        setPreview(undefined);
+                        taskLink(null);
                       }}
-                    />
-                    {drawMethod === "import" ? (
-                      <>
-                        <input
-                          ref={importInput}
-                          className="sr-only"
-                          tabIndex={-1}
-                          type="file"
-                          accept=".kml,application/vnd.google-earth.kml+xml"
-                          aria-label="导入 KML 轨迹"
-                          disabled={importLocked}
-                          onChange={(event) => {
-                            const file = event.target.files?.[0];
-                            event.target.value = "";
-                            if (file) acceptImport(file);
-                          }}
-                        />
-                        <div
-                          className={`import-dropzone compact${importDragging ? " dragging" : ""}`}
-                          aria-disabled={importLocked}
-                          onDragEnter={(event) => {
-                            event.preventDefault();
-                            if (
-                              !importLocked &&
-                              event.dataTransfer.types.includes("Files")
-                            ) {
-                              importDragDepth.current++;
-                              setImportDragging(true);
-                            }
-                          }}
-                          onDragOver={(event) => {
-                            event.preventDefault();
-                            event.dataTransfer.dropEffect = importLocked
-                              ? "none"
-                              : "copy";
-                          }}
-                          onDragLeave={(event) => {
-                            event.preventDefault();
-                            if (--importDragDepth.current <= 0) {
-                              importDragDepth.current = 0;
-                              setImportDragging(false);
-                            }
-                          }}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            importDragDepth.current = 0;
-                            setImportDragging(false);
-                            const files = event.dataTransfer.files;
-                            if (importLocked) return;
-                            if (files.length > 1) {
-                              setError("补绘一次只能导入一个 KML 文件。");
-                              return;
-                            }
-                            const file = files[0];
-                            if (file) acceptImport(file);
-                          }}
-                        >
-                          <Upload
-                            className="import-upload-icon"
-                            aria-hidden="true"
-                          />
-                          <div>
-                            {importFile && <strong>更换补绘文件</strong>}
-                            <span>支持格式：.kml</span>
-                          </div>
+                    >
+                      取消
+                    </Button>
+                    <Button
+                      variant="default"
+                      loading={busy || !!active}
+                      onClick={() => void run(() => applyPreview(preview))}
+                    >
+                      保存
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <fieldset
+                    disabled={busy || !!active || !!preview}
+                    className="min-w-0 space-y-3"
+                  >
+                    {["split_segment", "prune"].includes(mode) && (
+                      <div className="space-y-2" aria-label="选择编辑片段">
+                        <p>
+                          选择片段，地图会高亮并定位；绿色点为起点，橙色点为终点。
+                        </p>
+                        {segmentOptions.map((option) => (
                           <Button
-                            variant={importFile ? "outline" : "default"}
-                            disabled={importLocked}
-                            onClick={() => importInput.current?.click()}
+                            key={option.value}
+                            className="h-auto w-full justify-start whitespace-normal"
+                            aria-pressed={segmentId === option.value}
+                            variant={
+                              segmentId === option.value ? "default" : "outline"
+                            }
+                            onClick={() => chooseSegment(option.value)}
                           >
-                            {importFile ? "更换文件" : "选择文件"}
+                            {option.label}
                           </Button>
-                        </div>
-                        {importFile && (
-                          <section
-                            aria-label="已选 KML 文件"
-                            className="import-files"
+                        ))}
+                      </div>
+                    )}
+                    {mode === "split_segment" && (
+                      <>
+                        <p>
+                          点击地图上的断开位置，再点同一位置可取消。断开后仍是一条行程。
+                        </p>
+                        <p>
+                          已选 {breaks.length} 处断点，将形成{" "}
+                          {breaks.length + 1} 个片段。
+                        </p>
+                        <Space wrap>
+                          <Button onClick={() => void run(detect)}>
+                            查找可能的断点
+                          </Button>
+                          <Button
+                            disabled={!breaks.length}
+                            onClick={() => setIndices("")}
                           >
-                            <article
-                              className="import-file"
-                              aria-label={importFile.name}
-                              data-stage={
-                                importKml ? "done" : busy ? "reading" : "error"
+                            清除选择
+                          </Button>
+                        </Space>
+                        {breaks.map((point, i) => (
+                          <div key={point} className="flex items-center gap-2">
+                            <Button
+                              onClick={() => locateRange(point, point + 1)}
+                            >
+                              查看断点 {i + 1}
+                            </Button>
+                            <Button
+                              onClick={() =>
+                                setIndices(
+                                  breaks.filter((p) => p !== point).join(","),
+                                )
                               }
                             >
-                              <div className="import-file-main">
-                                <span
-                                  className="import-state-icon"
-                                  aria-hidden="true"
-                                >
-                                  {busy ? (
-                                    <LoaderCircle className="animate-spin" />
-                                  ) : importKml ? (
-                                    <Check />
-                                  ) : (
-                                    <CircleAlert />
-                                  )}
-                                </span>
-                                <div className="import-file-info">
-                                  <strong title={importFile.name}>
-                                    {importFile.name}
-                                  </strong>
-                                  <div className="import-file-meta">
-                                    <span>{fileSize(importFile.size)}</span>
-                                    <span>
-                                      {busy
-                                        ? "正在检查轨迹"
-                                        : importKml
-                                          ? `检查通过 · ${drawing.length} 点`
-                                          : importFailureInfo.label}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="import-row-actions">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    disabled={importLocked}
-                                    title="移除文件"
-                                    aria-label={`移除 ${importFile.name}`}
-                                    onClick={clearImport}
-                                  >
-                                    <X aria-hidden="true" />
-                                  </Button>
-                                </div>
-                              </div>
-                              {!busy &&
-                                !importKml &&
-                                importFailureInfo.detail && (
-                                  <p className="import-file-error">
-                                    {importFailureInfo.detail}
-                                  </p>
-                                )}
-                            </article>
-                          </section>
-                        )}
+                              取消断点 {i + 1}
+                            </Button>
+                          </div>
+                        ))}
                       </>
-                    ) : (
+                    )}
+                    {mode === "prune" && (
                       <>
-                        <p className="text-xs text-muted-foreground">
-                          点击地图绘制至少两个点，靠近端点自动吸附。
+                        <p>
+                          {rangeAnchor.current !== undefined
+                            ? "请选择删除范围的终点。"
+                            : end > start || candidates.length
+                              ? "红色部分将被删除，保存前请检查。"
+                              : "请在地图选择删除范围的起点，然后选择终点。"}
                         </p>
-                        <p className="text-xs text-muted-foreground">
-                          <span style={{ color: drawBeforeColor }}>青色</span>
-                          为插入点之前的轨迹，
-                          <span style={{ color: drawAfterColor }}>紫色</span>
-                          为之后的轨迹。
+                        <p>
+                          将删除{" "}
+                          {candidates.length
+                            ? candidates.reduce(
+                                (n, r) => n + r.end - r.start,
+                                0,
+                              )
+                            : Math.max(0, end - start)}{" "}
+                          个轨迹点。
                         </p>
-                        <p className="text-right">已画 {drawing.length} 点。</p>
-                        {snapStart && (
-                          <p>
-                            起点已吸附到片段末尾{" "}
-                            <Button onClick={() => setSnapStart(undefined)}>
-                              取消起点吸附
+                        <Space wrap>
+                          <Button onClick={() => void run(detect)}>
+                            查找漂移点
+                          </Button>
+                          <Button onClick={clearSelection}>重新选择</Button>
+                          <Button onClick={clearSelection}>清除选择</Button>
+                        </Space>
+                        {candidates.map((r, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <Button onClick={() => locateRange(r.start, r.end)}>
+                              查看范围 {i + 1}（{r.end - r.start} 点）
                             </Button>
-                          </p>
-                        )}
-                        {snapEnd && (
-                          <p>
-                            终点已吸附到片段开头{" "}
-                            <Button onClick={() => setSnapEnd(undefined)}>
-                              取消终点吸附
+                            <Button
+                              onClick={() =>
+                                setCandidates(
+                                  candidates.filter((_, j) => j !== i),
+                                )
+                              }
+                            >
+                              保留此范围
                             </Button>
-                          </p>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                    {mode === "draw" && (
+                      <>
+                        <Select
+                          aria-label="补绘方式"
+                          value={drawMethod}
+                          options={[
+                            { value: "map", label: "地图绘制" },
+                            { value: "import", label: "上传轨迹" },
+                          ]}
+                          onChange={(value) => {
+                            resetDraft();
+                            setDrawMethod(value);
+                          }}
+                        />
+                        {drawMethod === "import" ? (
+                          <>
+                            <input
+                              ref={importInput}
+                              className="sr-only"
+                              tabIndex={-1}
+                              type="file"
+                              accept=".kml,application/vnd.google-earth.kml+xml"
+                              aria-label="导入 KML 轨迹"
+                              disabled={importLocked}
+                              onChange={(event) => {
+                                const file = event.target.files?.[0];
+                                event.target.value = "";
+                                if (file) acceptImport(file);
+                              }}
+                            />
+                            <div
+                              className={`import-dropzone compact${importDragging ? " dragging" : ""}`}
+                              aria-disabled={importLocked}
+                              onDragEnter={(event) => {
+                                event.preventDefault();
+                                if (
+                                  !importLocked &&
+                                  event.dataTransfer.types.includes("Files")
+                                ) {
+                                  importDragDepth.current++;
+                                  setImportDragging(true);
+                                }
+                              }}
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                                event.dataTransfer.dropEffect = importLocked
+                                  ? "none"
+                                  : "copy";
+                              }}
+                              onDragLeave={(event) => {
+                                event.preventDefault();
+                                if (--importDragDepth.current <= 0) {
+                                  importDragDepth.current = 0;
+                                  setImportDragging(false);
+                                }
+                              }}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                importDragDepth.current = 0;
+                                setImportDragging(false);
+                                const files = event.dataTransfer.files;
+                                if (importLocked) return;
+                                if (files.length > 1) {
+                                  setError("补绘一次只能导入一个 KML 文件。");
+                                  return;
+                                }
+                                const file = files[0];
+                                if (file) acceptImport(file);
+                              }}
+                            >
+                              <Upload
+                                className="import-upload-icon"
+                                aria-hidden="true"
+                              />
+                              <div>
+                                {importFile && <strong>更换补绘文件</strong>}
+                                <span>支持格式：.kml</span>
+                              </div>
+                              <Button
+                                variant={importFile ? "outline" : "default"}
+                                disabled={importLocked}
+                                onClick={() => importInput.current?.click()}
+                              >
+                                {importFile ? "更换文件" : "选择文件"}
+                              </Button>
+                            </div>
+                            {importFile && (
+                              <section
+                                aria-label="已选 KML 文件"
+                                className="import-files"
+                              >
+                                <article
+                                  className="import-file"
+                                  aria-label={importFile.name}
+                                  data-stage={
+                                    importKml
+                                      ? "done"
+                                      : busy
+                                        ? "reading"
+                                        : "error"
+                                  }
+                                >
+                                  <div className="import-file-main">
+                                    <span
+                                      className="import-state-icon"
+                                      aria-hidden="true"
+                                    >
+                                      {busy ? (
+                                        <LoaderCircle className="animate-spin" />
+                                      ) : importKml ? (
+                                        <Check />
+                                      ) : (
+                                        <CircleAlert />
+                                      )}
+                                    </span>
+                                    <div className="import-file-info">
+                                      <strong title={importFile.name}>
+                                        {importFile.name}
+                                      </strong>
+                                      <div className="import-file-meta">
+                                        <span>{fileSize(importFile.size)}</span>
+                                        <span>
+                                          {busy
+                                            ? "正在检查轨迹"
+                                            : importKml
+                                              ? `检查通过 · ${drawing.length} 点`
+                                              : importFailureInfo.label}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="import-row-actions">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        disabled={importLocked}
+                                        title="移除文件"
+                                        aria-label={`移除 ${importFile.name}`}
+                                        onClick={clearImport}
+                                      >
+                                        <X aria-hidden="true" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  {!busy &&
+                                    !importKml &&
+                                    importFailureInfo.detail && (
+                                      <p className="import-file-error">
+                                        {importFailureInfo.detail}
+                                      </p>
+                                    )}
+                                </article>
+                              </section>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-xs text-muted-foreground">
+                              点击地图绘制至少两个点，靠近端点自动吸附。
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              <span style={{ color: drawBeforeColor }}>
+                                青色
+                              </span>
+                              为插入点之前的轨迹，
+                              <span style={{ color: drawAfterColor }}>
+                                紫色
+                              </span>
+                              为之后的轨迹。
+                            </p>
+                            <p className="text-right">
+                              已画 {drawing.length} 点。
+                            </p>
+                            {snapStart && (
+                              <p>
+                                起点已吸附到片段末尾{" "}
+                                <Button onClick={() => setSnapStart(undefined)}>
+                                  取消起点吸附
+                                </Button>
+                              </p>
+                            )}
+                            {snapEnd && (
+                              <p>
+                                终点已吸附到片段开头{" "}
+                                <Button onClick={() => setSnapEnd(undefined)}>
+                                  取消终点吸附
+                                </Button>
+                              </p>
+                            )}
+                          </>
                         )}
                       </>
                     )}
-                  </>
-                )}
-                {mode === "fill_altitude" && (
-                  <p>
-                    为整段缺失高程的轨迹片段查询海拔，已有高程的片段保持不变。计算完成后查看结果，再决定是否保存。
-                  </p>
-                )}
-                {mode === "set_tag" &&
-                  (tagData.data && config.data ? (
-                    <TagPicker
-                      config={config.data.config}
-                      value={tag ?? currentTag}
-                      onChange={setTag}
-                      legend={
-                        !currentTag ||
-                        !isRegisteredTag(config.data.config, currentTag) ? (
-                          <span
-                            className={
-                              currentTag
-                                ? "tag-picker-note"
-                                : "tag-picker-missing"
-                            }
-                          >
-                            当前：{currentTag || "未设置"}
-                          </span>
-                        ) : undefined
-                      }
-                    />
-                  ) : (
-                    !tagData.error && !config.error && <Spin />
-                  ))}
-                {mode === "split_journey" && (
-                  <div onClickCapture={() => setEditTouched(true)}>
-                    <p>
-                      把片段分到不同的行程中。需要从片段中间拆开时，请先使用“断开轨迹”。
-                    </p>
-                    {journeys.map((journey, i) => (
-                      <div key={i} className="rounded-md border p-3 space-y-2">
-                        <strong
-                          style={{ color: groupColors[i % groupColors.length] }}
-                        >
-                          行程 {i + 1}
-                        </strong>
-                        <label>
-                          名称
-                          <Input
-                            aria-label={`行程 ${i + 1} 名称`}
-                            value={journey.path
-                              .split("/")
-                              .at(-1)!
-                              .replace(/\.kml$/i, "")}
-                            onChange={(e) =>
-                              setJourneys(
-                                journeys.map((j, k) =>
-                                  k === i
-                                    ? {
-                                        ...j,
-                                        path: journeyPath(
-                                          e.target.value,
-                                          j.category,
-                                        ),
-                                      }
-                                    : j,
-                                ),
-                              )
-                            }
-                          />
-                        </label>
-                        <Select
-                          aria-label={`行程 ${i + 1} 活动标签`}
-                          placeholder="选择活动标签"
-                          value={journey.tag}
-                          onChange={(value) => {
-                            const category = tagCategory(value);
-                            setJourneys(
-                              journeys.map((j, k) =>
-                                k === i
-                                  ? {
-                                      ...j,
-                                      tag: value,
-                                      category,
-                                      path: journeyPath(
-                                        j.path
-                                          .split("/")
-                                          .at(-1)!
-                                          .replace(/\.kml$/i, ""),
-                                        category,
-                                      ),
-                                    }
-                                  : j,
-                              ),
-                            );
-                          }}
-                          options={tagOptions}
+                    {mode === "fill_altitude" &&
+                      (missingAltitude === undefined ? (
+                        <Spin />
+                      ) : missingAltitude === 0 ? (
+                        <Alert
+                          type="info"
+                          title="该轨迹的高程数据完整，无需填充。"
                         />
-                        {segmentOptions
-                          .filter((o) => assign[o.value] === i)
-                          .map((o) => (
-                            <label key={o.value} className="block">
-                              <Button
-                                variant="ghost"
-                                onClick={() => locateSegment(o.value)}
+                      ) : (
+                        <div className="space-y-2">
+                          <dl className="grid grid-cols-3 gap-2 rounded-md border p-3 text-sm">
+                            <div>
+                              <dt className="text-xs text-muted-foreground">
+                                轨迹点
+                              </dt>
+                              <dd className="font-medium">{altitudePoints}</dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs text-muted-foreground">
+                                缺失高程
+                              </dt>
+                              <dd className="font-medium">{missingAltitude}</dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs text-muted-foreground">
+                                涉及片段
+                              </dt>
+                              <dd className="font-medium">
+                                {altitudeSegments.length}
+                              </dd>
+                            </div>
+                          </dl>
+                          <ul className="max-h-40 space-y-1 overflow-auto text-sm">
+                            {altitudeSegments.map((segment) => (
+                              <li
+                                key={segment.id}
+                                className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2"
                               >
-                                {o.label}
-                              </Button>
-                              <Select
-                                aria-label={`${o.label} 分配到`}
-                                value={assign[o.value]}
-                                onChange={(value) =>
-                                  setAssign({ ...assign, [o.value]: value })
+                                <span className="font-medium">
+                                  段 {segment.ordinal + 1}
+                                </span>
+                                <span className="flex items-center gap-2 text-muted-foreground">
+                                  <span>
+                                    缺 {segment.missing} / {segment.points} 点
+                                  </span>
+                                  <span className="rounded-full border px-2 py-0.5 text-xs">
+                                    {segment.missing === segment.points
+                                      ? "整段缺失"
+                                      : "部分缺失"}
+                                  </span>
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    {mode === "set_tag" &&
+                      (tagData.data && config.data ? (
+                        <TagPicker
+                          config={config.data.config}
+                          value={tag ?? currentTag}
+                          onChange={setTag}
+                          legend={
+                            !currentTag ||
+                            !isRegisteredTag(config.data.config, currentTag) ? (
+                              <span
+                                className={
+                                  currentTag
+                                    ? "tag-picker-note"
+                                    : "tag-picker-missing"
                                 }
-                                options={journeys.map((_, j) => ({
-                                  value: j,
-                                  label: `行程 ${j + 1}`,
-                                }))}
+                              >
+                                当前：{currentTag || "未设置"}
+                              </span>
+                            ) : undefined
+                          }
+                        />
+                      ) : (
+                        !tagData.error && !config.error && <Spin />
+                      ))}
+                    {mode === "split_journey" && (
+                      <div onClickCapture={() => setEditTouched(true)}>
+                        <p>
+                          把片段分到不同的行程中。需要从片段中间拆开时，请先使用“断开轨迹”。
+                        </p>
+                        {journeys.map((journey, i) => (
+                          <div
+                            key={i}
+                            className="rounded-md border p-3 space-y-2"
+                          >
+                            <strong
+                              style={{
+                                color: groupColors[i % groupColors.length],
+                              }}
+                            >
+                              行程 {i + 1}
+                            </strong>
+                            <label>
+                              名称
+                              <Input
+                                aria-label={`行程 ${i + 1} 名称`}
+                                value={journey.path
+                                  .split("/")
+                                  .at(-1)!
+                                  .replace(/\.kml$/i, "")}
+                                onChange={(e) =>
+                                  setJourneys(
+                                    journeys.map((j, k) =>
+                                      k === i
+                                        ? {
+                                            ...j,
+                                            path: journeyPath(
+                                              e.target.value,
+                                              j.category,
+                                            ),
+                                          }
+                                        : j,
+                                    ),
+                                  )
+                                }
                               />
                             </label>
-                          ))}
-                        {!Object.values(assign).includes(i) && (
-                          <>
-                            <p>尚未分配片段</p>
-                            <Button
-                              disabled={journeys.length <= 2}
-                              onClick={() => {
-                                setJourneys(journeys.filter((_, j) => j !== i));
-                                setAssign(
-                                  Object.fromEntries(
-                                    Object.entries(assign).map(([id, n]) => [
-                                      id,
-                                      n > i ? n - 1 : n,
-                                    ]),
+                            <Select
+                              aria-label={`行程 ${i + 1} 活动标签`}
+                              placeholder="选择活动标签"
+                              value={journey.tag}
+                              onChange={(value) => {
+                                const category = tagCategory(value);
+                                setJourneys(
+                                  journeys.map((j, k) =>
+                                    k === i
+                                      ? {
+                                          ...j,
+                                          tag: value,
+                                          category,
+                                          path: journeyPath(
+                                            j.path
+                                              .split("/")
+                                              .at(-1)!
+                                              .replace(/\.kml$/i, ""),
+                                            category,
+                                          ),
+                                        }
+                                      : j,
                                   ),
                                 );
                               }}
-                            >
-                              删除空行程
-                            </Button>
-                          </>
-                        )}
+                              options={tagOptions}
+                            />
+                            {segmentOptions
+                              .filter((o) => assign[o.value] === i)
+                              .map((o) => (
+                                <label key={o.value} className="block">
+                                  <Button
+                                    variant="ghost"
+                                    onClick={() => locateSegment(o.value)}
+                                  >
+                                    {o.label}
+                                  </Button>
+                                  <Select
+                                    aria-label={`${o.label} 分配到`}
+                                    value={assign[o.value]}
+                                    onChange={(value) =>
+                                      setAssign({ ...assign, [o.value]: value })
+                                    }
+                                    options={journeys.map((_, j) => ({
+                                      value: j,
+                                      label: `行程 ${j + 1}`,
+                                    }))}
+                                  />
+                                </label>
+                              ))}
+                            {!Object.values(assign).includes(i) && (
+                              <>
+                                <p>尚未分配片段</p>
+                                <Button
+                                  disabled={journeys.length <= 2}
+                                  onClick={() => {
+                                    setJourneys(
+                                      journeys.filter((_, j) => j !== i),
+                                    );
+                                    setAssign(
+                                      Object.fromEntries(
+                                        Object.entries(assign).map(
+                                          ([id, n]) => [id, n > i ? n - 1 : n],
+                                        ),
+                                      ),
+                                    );
+                                  }}
+                                >
+                                  删除空行程
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                        <Button
+                          onClick={() =>
+                            setJourneys([
+                              ...journeys,
+                              {
+                                path: journeyPath(
+                                  `新行程 ${journeys.length + 1}`,
+                                  d.entry.category,
+                                ),
+                                category: d.entry.category,
+                              },
+                            ])
+                          }
+                        >
+                          增加行程
+                        </Button>
+                        {splitError && <p role="status">{splitError}</p>}
                       </div>
-                    ))}
+                    )}
+                  </fieldset>
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-background py-3">
+                    {mode !== "fill_altitude" && (
+                      <span className="mr-auto text-sm">
+                        {busy || active
+                          ? "正在处理…"
+                          : showDraftState
+                            ? draftDirty
+                              ? "未保存修改"
+                              : "尚未修改"
+                            : ""}
+                      </span>
+                    )}
+                    {mode === "draw" && drawMethod === "map" && (
+                      <Button
+                        disabled={
+                          !drawing.length || busy || !!active || !!preview
+                        }
+                        onClick={() => {
+                          setDrawing(drawing.slice(0, -1));
+                          setSnapEnd(undefined);
+                          if (drawing.length <= 1) setSnapStart(undefined);
+                        }}
+                      >
+                        撤回
+                      </Button>
+                    )}
+                    {mode !== "fill_altitude" && (
+                      <Button
+                        disabled={busy || !!active || !draftDirty}
+                        onClick={resetDraft}
+                      >
+                        取消
+                      </Button>
+                    )}
                     <Button
-                      onClick={() =>
-                        setJourneys([
-                          ...journeys,
-                          {
-                            path: journeyPath(
-                              `新行程 ${journeys.length + 1}`,
-                              d.entry.category,
-                            ),
-                            category: d.entry.category,
-                          },
-                        ])
-                      }
+                      variant="default"
+                      loading={busy || !!active}
+                      disabled={!canSave || busy || !!active || !!preview}
+                      onClick={() => void run(prepare)}
                     >
-                      增加行程
+                      {mode === "fill_altitude"
+                        ? "查询"
+                        : mode === "split_journey"
+                          ? "确认拆分…"
+                          : "保存"}
                     </Button>
-                    {splitError && <p role="status">{splitError}</p>}
                   </div>
-                )}
-              </fieldset>
-              <div className="flex flex-wrap items-center gap-2 border-t bg-background py-3">
-                <span className="mr-auto text-sm">
-                  {busy || active
-                    ? "正在处理…"
-                    : showDraftState
-                      ? draftDirty
-                        ? "未保存修改"
-                        : "尚未修改"
-                      : ""}
-                </span>
-                {mode === "draw" && drawMethod === "map" && (
-                  <Button
-                    disabled={!drawing.length || busy || !!active || !!preview}
-                    onClick={() => {
-                      setDrawing(drawing.slice(0, -1));
-                      setSnapEnd(undefined);
-                      if (drawing.length <= 1) setSnapStart(undefined);
-                    }}
-                  >
-                    撤回
-                  </Button>
-                )}
-                <Button
-                  disabled={busy || !!active || !draftDirty}
-                  onClick={resetDraft}
-                >
-                  取消
-                </Button>
-                <Button
-                  variant="default"
-                  loading={busy || !!active}
-                  disabled={!canSave || busy || !!active || !!preview}
-                  onClick={() => void run(prepare)}
-                >
-                  {mode === "fill_altitude"
-                    ? "计算高程"
-                    : mode === "split_journey"
-                      ? "确认拆分…"
-                      : "保存"}
-                </Button>
-              </div>
+                </>
+              )}
             </section>
           )}
-          {preview && !directSave && (
+          {preview && !directSave && mode === "split_journey" && (
             <Modal
-              title={mode === "fill_altitude" ? "补高程结果" : "确认拆分行程"}
+              title="确认拆分行程"
               open
               closable={!busy && !active}
               onCancel={() => {
@@ -1408,32 +1745,21 @@ function TrackEditor({
                     loading={busy || !!active}
                     onClick={() => void run(() => applyPreview(preview))}
                   >
-                    {mode === "fill_altitude" ? "保存高程" : "确认拆分"}
+                    确认拆分
                   </Button>
                 </>
               }
             >
-              {mode === "fill_altitude" ? (
-                <p>
-                  {preview.altitude
-                    ? `已补齐 ${preview.altitude.filled} 个点，仍有 ${preview.altitude.remaining} 个点未补齐。`
-                    : "高程计算完成。"}
-                </p>
-              ) : (
-                <>
-                  <p>
-                    将生成以下 {preview.outputs.length}{" "}
-                    条行程，原行程保留在历史中。
-                  </p>
-                  <ul>
-                    {preview.outputs.map((o, i) => (
-                      <li key={i}>
-                        {o.path.split("/").at(-1)} · {o.segments.length} 个片段
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
+              <p>
+                将生成以下 {preview.outputs.length} 条行程，原行程保留在历史中。
+              </p>
+              <ul>
+                {preview.outputs.map((o, i) => (
+                  <li key={i}>
+                    {o.path.split("/").at(-1)} · {o.segments.length} 个片段
+                  </li>
+                ))}
+              </ul>
               {preview.changes
                 .flatMap((c) => c.warnings)
                 .map((warning, i) => (
@@ -1459,9 +1785,13 @@ function TrackEditor({
               }
               onPick={pick}
               selectedSegment={
-                mode === "draw" && drawing.length && !preview
-                  ? "new-drawing"
-                  : segmentId
+                view === "display" && !mode
+                  ? segmentId
+                  : mode === "draw" && drawing.length && !preview
+                    ? "new-drawing"
+                    : mode === "split_segment" || mode === "prune"
+                      ? segmentId
+                      : undefined
               }
             />
           )}

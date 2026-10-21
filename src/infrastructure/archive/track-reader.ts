@@ -2,6 +2,7 @@ import { endpointLocations } from "./endpoint-locations.js";
 import type Database from "better-sqlite3";
 import { AppError } from "../../domain/errors.js";
 import { validatePresentation } from "../../domain/track-version.js";
+import { missingAltitudePoints } from "../../domain/trackdata.js";
 import type { SegmentInput } from "../../domain/segment-edit.js";
 import type {
   EditGeometry,
@@ -192,7 +193,7 @@ export function trackTimeline(file: string, entryId: string, cursor = 0) {
       baseline: "初始轨迹",
       split_segment: "断开轨迹",
       prune: "删除轨迹点",
-      fill_altitude: "补充高程",
+      fill_altitude: "填充高程",
       set_tag: "修改活动标签",
       draw: "插入手绘轨迹",
       split_journey: "拆成独立行程",
@@ -287,8 +288,10 @@ export async function inputGeometry(
           s.longitude,
           (lon, i) => [lon, s.latitude[i]!] as [number, number],
         ),
+        missing_altitude_points: missingAltitudePoints([s]),
       })),
       connections: display.connections.map((c) => c.coordinates),
+      missing_altitude_points: missingAltitudePoints(segments),
     };
   } finally {
     await xml.close();

@@ -154,7 +154,7 @@ it("set-tag preserves custom namespaces, CDATA, and creates a missing tag only e
   ).edit!.outputs[0]!.xml;
   expect(summary(Buffer.from(created)).tags).toEqual(["火车"]);
 });
-it("altitude excludes a whole Placemark if any segment has elevation", async () => {
+it("altitude targets individual points without a usable height", async () => {
   const input = Buffer.from(
     '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>D</name><Style id="s"><LineStyle><width>4</width></LineStyle></Style><Placemark><name>A</name><MultiGeometry><LineString><coordinates>100,26,0</coordinates></LineString><LineString><coordinates>101,27,2</coordinates></LineString></MultiGeometry></Placemark><Placemark><name>B</name><LineString><coordinates>102,28 103,29,-0</coordinates></LineString></Placemark></Document></kml>',
   );
@@ -167,19 +167,48 @@ it("altitude excludes a whole Placemark if any segment has elevation", async () 
       })
     ).edit!.locations,
   ).toEqual([
+    [26, 100],
     [28, 102],
     [29, 103],
   ]);
   const result = (
     await p.run(input, {
       kind: "edit",
-      operation: { kind: "altitude-apply", values: [12.34, null] },
+      operation: { kind: "altitude-apply", values: [12.34, null, 7] },
     })
   ).edit!;
   expect(summary(Buffer.from(result.outputs[0]!.xml)).lines).toEqual([
-    "100,26,0",
+    "100,26,12.34",
     "101,27,2",
-    "102,28,12.34 103,29,0",
+    "102,28,0 103,29,7",
+  ]);
+});
+it("altitude targets individual gx:Track coordinates", async () => {
+  const input = Buffer.from(
+    '<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Placemark><gx:Track><gx:coord>120 30 8</gx:coord><gx:coord>120.1 30</gx:coord><gx:coord>120.2 30 0</gx:coord></gx:Track></Placemark></kml>',
+  );
+  const p = pool();
+  expect(
+    (
+      await p.run(input, {
+        kind: "edit",
+        operation: { kind: "altitude-targets" },
+      })
+    ).edit!.locations,
+  ).toEqual([
+    [30, 120.1],
+    [30, 120.2],
+  ]);
+  const result = (
+    await p.run(input, {
+      kind: "edit",
+      operation: { kind: "altitude-apply", values: [42, null] },
+    })
+  ).edit!;
+  expect(summary(Buffer.from(result.outputs[0]!.xml)).coords).toEqual([
+    "120 30 8",
+    "120.1 30 42",
+    "120.2 30 0",
   ]);
 });
 it("plan mode never writes, moves or calls Google; edits reject changed originals", async () => {

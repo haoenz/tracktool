@@ -345,6 +345,16 @@ export function trackRoutes(
       q.before === "true",
     );
   });
+  app.get("/api/tracks/edit-previews/:previewId/altitude", async (req) => {
+    const p = z.object({ previewId: z.string().uuid() }).parse(req.params),
+      q = z
+        .object({
+          index: z.coerce.number().int().min(0).max(100).default(0),
+        })
+        .parse(req.query),
+      { edits, file } = await get();
+    return edits.altitude(file, p.previewId, q.index);
+  });
   app.get("/api/tracks/edit-previews/:previewId/raw", async (req, reply) => {
     const p = z.object({ previewId: z.string().uuid() }).parse(req.params),
       q = z

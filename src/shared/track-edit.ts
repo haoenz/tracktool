@@ -269,9 +269,42 @@ export type EditPreview = {
     warnings: string[];
   }[];
 };
+export type AltitudePreviewPoint = {
+  segment_id: string;
+  /** Segment position in the version, before presentation filtering. */
+  segment_ordinal: number;
+  /** Zero-based point index within the segment. */
+  index: number;
+  longitude: number;
+  latitude: number;
+  /** New height, or null when the provider still returned no usable value. */
+  altitude: number | null;
+};
+export type AltitudePreviewSegment = {
+  segment_id: string;
+  segment_ordinal: number;
+  points: number;
+  missing: number;
+  filled: number;
+  /** True when every point in the segment lacked height before the preview. */
+  whole: boolean;
+};
+export type AltitudePreview = {
+  /** Segments that contained points missing height before the preview ran. */
+  segments: AltitudePreviewSegment[];
+  /** Points that were missing height before the preview ran. */
+  points: AltitudePreviewPoint[];
+};
 export type EditGeometry = {
-  segments: { segment_id: string; coordinates: [number, number][] }[];
+  segments: {
+    segment_id: string;
+    coordinates: [number, number][];
+    /** Points in this segment whose height is absent or zero. */
+    missing_altitude_points?: number;
+  }[];
   connections: [number, number][][];
+  /** Points whose height is absent or zero across the whole version. */
+  missing_altitude_points?: number;
 };
 
 export type HistoryEvent = {

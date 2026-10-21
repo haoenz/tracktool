@@ -70,13 +70,13 @@ export const MapViewport = memo(
     const analysisLayers = useRef(new Map<MapCanvas, AnalysisLayer>());
     latest.current = props;
     const highlight = (map: MapCanvas) => {
-      if (latest.current.highlightSegment === undefined) return;
+      const selected = latest.current.highlightSegment;
       for (const [layer, property] of [
         ["track-lines", "line-color"],
         ["track-points", "circle-color"],
       ]) {
-        if (map.map.getLayer(layer!))
-          map.map.setPaintProperty(layer!, property!, [
+        if (map.map.getLayer(layer!)) {
+          const color: unknown[] = [
             "case",
             ["==", ["get", "segment_id"], "ux-delete"],
             "#dc2626",
@@ -84,12 +84,34 @@ export const MapViewport = memo(
             "#16a34a",
             ["==", ["get", "segment_id"], "ux-break"],
             "#ea580c",
+            ["==", ["get", "segment_id"], "ux-located"],
+            "#e11d48",
             ["has", "edit_color"],
             ["get", "edit_color"],
-            ["==", ["get", "segment_id"], latest.current.highlightSegment],
-            "#1677ff",
-            "#64748b",
-          ]);
+          ];
+          if (selected !== undefined)
+            color.push(["==", ["get", "segment_id"], selected], "#1677ff");
+          color.push(
+            selected !== undefined
+              ? "#64748b"
+              : latest.current.state.style.color,
+          );
+          map.map.setPaintProperty(layer!, property!, color);
+        }
+      }
+      if (map.map.getLayer("track-points")) {
+        map.map.setPaintProperty("track-points", "circle-radius", [
+          "case",
+          ["==", ["get", "segment_id"], "ux-located"],
+          7,
+          latest.current.state.style.width / 2,
+        ]);
+        map.map.setPaintProperty("track-points", "circle-stroke-width", [
+          "case",
+          ["==", ["get", "segment_id"], "ux-located"],
+          2,
+          1,
+        ]);
       }
     };
     const updateOverview = (map: MapCanvas, status = latest.current.overview) =>

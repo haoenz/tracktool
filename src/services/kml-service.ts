@@ -226,7 +226,7 @@ export class KmlService {
       )
     ).edit!.locations!;
     if (!locations.length) {
-      this.log(ctx, "No missing altitude tracks");
+      this.log(ctx, "No missing altitude points");
       return;
     }
     if (ctx.mode === "plan") {

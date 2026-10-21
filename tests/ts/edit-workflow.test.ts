@@ -810,8 +810,39 @@ it.each(["set_tag", "fill_altitude"] as const)(
       async () => transformed,
     );
     expect(snap(f.file)).toEqual(before);
-    if (kind === "fill_altitude")
+    if (kind === "fill_altitude") {
       expect(p.altitude).toEqual({ filled: 1, remaining: 5 });
+      const altitude = await f.previews.altitude(f.file, p.preview_id, 0);
+      expect(altitude.points).toHaveLength(6);
+      expect(altitude.points[0]).toMatchObject({
+        segment_ordinal: 0,
+        index: 0,
+        longitude: 120,
+        latitude: 30,
+        altitude: 42,
+      });
+      expect(
+        altitude.points.filter((point) => point.altitude === null),
+      ).toHaveLength(5);
+      expect(altitude.segments).toEqual([
+        {
+          segment_id: f.detail.segments[0]!.segment_id,
+          segment_ordinal: 0,
+          points: 4,
+          missing: 4,
+          filled: 1,
+          whole: true,
+        },
+        {
+          segment_id: f.detail.segments[1]!.segment_id,
+          segment_ordinal: 1,
+          points: 2,
+          missing: 2,
+          filled: 0,
+          whole: true,
+        },
+      ]);
+    }
     expect(p.outputs[0]!.settings).toEqual(f.detail.settings);
     expect(p.outputs[0]!.segments.map((s) => s.segment_id)).toEqual(
       f.detail.segments.map((s) => s.segment_id),

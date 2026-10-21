@@ -39,6 +39,7 @@ it("preview overlays preserve deleted coordinates and exact split positions", ()
       },
     ],
     connections: [],
+    missing_altitude_points: 0,
   };
   const preview = {
     operation: {
@@ -70,7 +71,10 @@ it("draw preview marks new full-precision coordinates without changing the sourc
     changes: [],
   } as unknown as EditPreview;
   expect(
-    previewAnnotations({ segments: [], connections: [] }, preview),
+    previewAnnotations(
+      { segments: [], connections: [], missing_altitude_points: 0 },
+      preview,
+    ),
   ).toEqual([
     {
       segment_id: "ux-add",

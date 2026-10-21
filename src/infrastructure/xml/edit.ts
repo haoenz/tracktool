@@ -89,31 +89,66 @@ function rename(doc: XmlDocument, name: string): void {
   const node = doc.get("/kml:kml/kml:Document/kml:name", ns(doc));
   if (node instanceof XmlElement) replaceText(node, name);
 }
-function altitudeNodes(doc: XmlDocument) {
-  const nodes = elements(doc.find("//kml:LineString/kml:coordinates", ns(doc)));
-  const groups: { owner: XmlNode; nodes: XmlElement[] }[] = [];
-  for (const node of nodes) {
-    const owner =
-      node.get("ancestor::kml:Placemark[1]", ns(doc)) ?? node.parent!;
-    let group = groups.find((g) => g.owner.isSameNode(owner));
-    if (!group) {
-      group = { owner, nodes: [] };
-      groups.push(group);
+type AltitudeTarget =
+  | {
+      kind: "coordinates";
+      node: XmlElement;
+      tuples: string[];
+      missing: { index: number; location: [number, number] }[];
     }
-    group.nodes.push(node);
+  | {
+      kind: "coord";
+      node: XmlElement;
+      tokens: string[];
+      location: [number, number];
+    };
+function coordinateLocation(parts: string[], text: string): [number, number] {
+  const lon = Number(parts[0]),
+    lat = Number(parts[1]);
+  if (
+    parts.length < 2 ||
+    !Number.isFinite(lon) ||
+    !Number.isFinite(lat) ||
+    Math.abs(lon) > 180 ||
+    Math.abs(lat) > 90
+  )
+    throw new AppError("USER_INPUT", `Invalid coordinate: ${text}`);
+  return [lat, lon];
+}
+const missingHeight = (text: string | undefined) =>
+  text === undefined || !text.trim() || Number(text) === 0;
+/** Target individual points: mixed-height lines and gx:Tracks are no longer skipped. */
+function altitudeTargets(doc: XmlDocument) {
+  const namespaces = ns(doc),
+    targets: AltitudeTarget[] = [],
+    locations: [number, number][] = [];
+  for (const node of elements(
+    doc.find("//kml:LineString/kml:coordinates", namespaces),
+  )) {
+    const text = directText(node).trim();
+    if (!text) continue;
+    const tuples = text.split(/\s+/),
+      missing: { index: number; location: [number, number] }[] = [];
+    for (const [index, tuple] of tuples.entries()) {
+      const parts = tuple.split(",");
+      if (!missingHeight(parts[2])) continue;
+      const location = coordinateLocation(parts, tuple);
+      missing.push({ index, location });
+      locations.push(location);
+    }
+    if (missing.length)
+      targets.push({ kind: "coordinates", node, tuples, missing });
   }
-  const missing = (tuple: string) => {
-    const a = tuple.split(",")[2];
-    return a === undefined || !a.trim() || Number(a) === 0;
-  };
-  return groups
-    .filter((g) =>
-      g.nodes.every((n) =>
-        directText(n).trim().split(/\s+/).filter(Boolean).every(missing),
-      ),
-    )
-    .flatMap((g) => g.nodes)
-    .filter((n) => directText(n).trim());
+  for (const node of elements(doc.find("//gx:coord", namespaces))) {
+    const text = directText(node).trim();
+    if (!text) continue;
+    const tokens = text.split(/\s+/);
+    if (!missingHeight(tokens[2])) continue;
+    const location = coordinateLocation(tokens, text);
+    targets.push({ kind: "coord", node, tokens, location });
+    locations.push(location);
+  }
+  return { targets, locations };
 }
 export function executeEdit(
   bytes: Uint8Array,
@@ -245,41 +280,28 @@ export function executeEdit(
       }
       case "altitude-targets":
       case "altitude-apply": {
-        const nodes = altitudeNodes(doc);
-        const locations: [number, number][] = [];
-        for (const n of nodes)
-          for (const t of directText(n).trim().split(/\s+/)) {
-            const parts = t.split(",");
-            const lon = Number(parts[0]),
-              lat = Number(parts[1]);
-            if (
-              parts.length < 2 ||
-              !Number.isFinite(lon) ||
-              !Number.isFinite(lat) ||
-              Math.abs(lon) > 180 ||
-              Math.abs(lat) > 90
-            )
-              throw new AppError("USER_INPUT", `Invalid coordinate: ${t}`);
-            locations.push([lat, lon]);
-          }
+        const { targets, locations } = altitudeTargets(doc);
         if (operation.kind === "altitude-targets")
           return { outputs: [], locations };
         if (operation.values.length !== locations.length)
           throw new AppError("TOOL", "Elevation response length mismatch");
         let i = 0;
-        for (const node of nodes)
-          replaceText(
-            node,
-            directText(node)
-              .trim()
-              .split(/\s+/)
-              .map((tuple) => {
-                const parts = tuple.split(",");
-                return `${parts[0]},${parts[1]},${operation.values[i++] ?? 0}`;
-              })
-              .join(" "),
-          );
-        return nodes.length
+        for (const target of targets) {
+          if (target.kind === "coord") {
+            const tokens = [...target.tokens];
+            tokens[2] = String(operation.values[i++] ?? 0);
+            replaceText(target.node, tokens.join(" "));
+          } else {
+            const tuples = [...target.tuples];
+            for (const { index } of target.missing) {
+              const parts = tuples[index]!.split(",");
+              tuples[index] =
+                `${parts[0]},${parts[1]},${operation.values[i++] ?? 0}`;
+            }
+            replaceText(target.node, tuples.join(" "));
+          }
+        }
+        return targets.length
           ? { ...output(), count: i }
           : { outputs: [], count: 0 };
       }

@@ -29,6 +29,20 @@ export function pointCount(data: TrackData): number {
     0,
   );
 }
+/** Zero heights count as absent, matching the fill-altitude preview and CLI. */
+export function missingAltitudePoints(
+  segments: readonly TrackSegment[],
+): number {
+  return segments.reduce(
+    (n, s) =>
+      n +
+      (s.altitude
+        ? Array.from(s.altitude).filter((a) => !Number.isFinite(a) || a === 0)
+            .length
+        : s.longitude.length),
+    0,
+  );
+}
 const numeric = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
 export function coordinateNumber(
   text: string,

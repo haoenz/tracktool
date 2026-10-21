@@ -93,11 +93,11 @@ test("single-track panel previews and saves tag, split and cleanup with history"
     ).toBeVisible();
     await expect(back).toHaveCount(1);
   };
-  await choose("补高程");
-  await expect(dialog).toContainText("缺失高程的轨迹片段查询海拔");
+  await choose("填充高程");
+  await expect(dialog).toContainText("涉及片段");
   await choose("修改标签");
-  await dialog.getByRole("combobox", { name: "活动标签", exact: true }).click();
-  await page.getByRole("option", { name: "徒步", exact: true }).click();
+  await dialog.getByRole("tab", { name: "普通", exact: true }).click();
+  await dialog.getByRole("button", { name: "徒步", exact: true }).click();
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toContainText("编辑已保存，旧版本保留在历史中。", {
     timeout: 20000,

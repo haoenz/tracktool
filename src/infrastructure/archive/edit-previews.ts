@@ -4,11 +4,15 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { AppError, checkCancelled } from "../../domain/errors.js";
 import { memberName } from "../../domain/archive.js";
-import { MAX_KML_BYTES } from "../../domain/trackdata.js";
+import {
+  MAX_KML_BYTES,
+  missingAltitudePoints,
+} from "../../domain/trackdata.js";
 import type {
   SegmentInput,
   SegmentEditResult,
 } from "../../domain/segment-edit.js";
+import { bindSegments } from "../../domain/presentation.js";
 import {
   EditRequestSchema,
   EditApplySchema,
@@ -16,6 +20,7 @@ import {
   type EditApply,
   type EditPreview,
   type EntrySnapshot,
+  type AltitudePreview,
 } from "../../shared/track-edit.js";
 import { readManifest } from "../xml/manifest.js";
 import { digest } from "../durable-files.js";
@@ -269,20 +274,8 @@ export class EditPreviews {
                   signal,
                 )
               ).tracks!;
-              return data.tracks.reduce(
-                (n, track) =>
-                  n +
-                  track.segments.reduce(
-                    (n, segment) =>
-                      n +
-                      (segment.altitude
-                        ? Array.from(segment.altitude).filter(
-                            (a) => !Number.isFinite(a) || a === 0,
-                          ).length
-                        : segment.longitude.length),
-                    0,
-                  ),
-                0,
+              return missingAltitudePoints(
+                data.tracks.flatMap((track) => track.segments),
               );
             };
             const before = await countMissing(source.raw),
@@ -724,6 +717,88 @@ export class EditPreviews {
       },
       signal,
     );
+  }
+  /** Only points that lacked height before the preview are part of the result. */
+  async altitude(
+    file: string,
+    id: string,
+    index: number,
+    signal?: AbortSignal,
+  ): Promise<AltitudePreview> {
+    const { m } = this.read(file, id),
+      out = m.outputs[index];
+    if (m.operation.kind !== "fill_altitude")
+      throw new AppError("USER_INPUT", "该预览不是填充高程操作");
+    if (!out) throw new AppError("USER_INPUT", "输出不存在");
+    const entry = m.before[Math.min(index, m.before.length - 1)];
+    if (!entry) throw new AppError("USER_INPUT", "输入不存在");
+    const input = readTransaction(file, (db) =>
+      versionInput(db, entry.entry_id, entry.version_id, entry.presentation_id),
+    );
+    const xml = new XmlWorkers(1, 0);
+    try {
+      const before = (
+        await xml.run(
+          input.raw,
+          { kind: "tracks", source: "altitude-result" },
+          signal,
+        )
+      ).tracks!;
+      const after = (
+        await xml.run(
+          this.object(id, index, m),
+          { kind: "tracks", source: "altitude-result" },
+          signal,
+        )
+      ).tracks!;
+      const source = bindSegments(before, input.segments),
+        result = bindSegments(after, out.segments),
+        points: AltitudePreview["points"] = [],
+        segments: AltitudePreview["segments"] = [];
+      for (const [ordinal, segment] of source.entries()) {
+        const updated = result[ordinal];
+        if (!updated || updated.longitude.length !== segment.longitude.length)
+          throw new AppError("USER_INPUT", "查询结果与来源片段不一致");
+        let missing = 0,
+          filled = 0;
+        for (let i = 0; i < segment.longitude.length; i++) {
+          const original = segment.altitude?.[i];
+          if (
+            original !== undefined &&
+            Number.isFinite(original) &&
+            original !== 0
+          )
+            continue;
+          const value = updated.altitude?.[i];
+          const altitude =
+            value !== undefined && Number.isFinite(value) && value !== 0
+              ? value
+              : null;
+          missing++;
+          if (altitude !== null) filled++;
+          points.push({
+            segment_id: segment.segment_id,
+            segment_ordinal: ordinal,
+            index: i,
+            longitude: segment.longitude[i]!,
+            latitude: segment.latitude[i]!,
+            altitude,
+          });
+        }
+        if (missing)
+          segments.push({
+            segment_id: segment.segment_id,
+            segment_ordinal: ordinal,
+            points: segment.longitude.length,
+            missing,
+            filled,
+            whole: missing === segment.longitude.length,
+          });
+      }
+      return { segments, points };
+    } finally {
+      await xml.close();
+    }
   }
   apply(file: string, input: EditApply, signal?: AbortSignal): PublishResult {
     const request = EditApplySchema.parse(input);
