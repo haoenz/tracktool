@@ -623,6 +623,11 @@
   height: auto;
   white-space: normal;
 }
+/* The alert close icon overlays the box, so touch sizing must not exceed it. */
+.map-controls .ui-alert > [data-slot="button"] {
+  min-height: 2rem;
+  height: 2rem;
+}
 .map-controls .ui-select,
 .map-controls [data-slot="input"],
 .map-controls .ui-number {
