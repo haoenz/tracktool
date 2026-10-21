@@ -806,6 +806,9 @@ function TrackEditor({
       );
     } else setNote("未检测到候选漂移点。");
   }
+  const pruneCount = candidates.length
+    ? candidates.reduce((n, r) => n + r.end - r.start, 0)
+    : Math.max(0, end - start);
 
   const segmentOptions =
     d?.segments.map((s) => ({
@@ -1161,9 +1164,6 @@ function TrackEditor({
                   >
                     {["split_segment", "prune"].includes(mode) && (
                       <div className="space-y-2" aria-label="选择编辑片段">
-                        <p>
-                          选择片段，地图会高亮并定位；绿色点为起点，橙色点为终点。
-                        </p>
                         {segmentOptions.map((option) => (
                           <Button
                             key={option.value}
@@ -1221,30 +1221,16 @@ function TrackEditor({
                     )}
                     {mode === "prune" && (
                       <>
-                        <p>
-                          {rangeAnchor.current !== undefined
-                            ? "请选择删除范围的终点。"
-                            : end > start || candidates.length
-                              ? "红色部分将被删除，保存前请检查。"
-                              : "请在地图选择删除范围的起点，然后选择终点。"}
-                        </p>
-                        <p>
-                          将删除{" "}
-                          {candidates.length
-                            ? candidates.reduce(
-                                (n, r) => n + r.end - r.start,
-                                0,
-                              )
-                            : Math.max(0, end - start)}{" "}
-                          个轨迹点。
-                        </p>
-                        <Space wrap>
-                          <Button onClick={() => void run(detect)}>
-                            查找漂移点
-                          </Button>
-                          <Button onClick={clearSelection}>重新选择</Button>
-                          <Button onClick={clearSelection}>清除选择</Button>
-                        </Space>
+                        {rangeAnchor.current !== undefined ? (
+                          <p>请选择删除范围的终点。</p>
+                        ) : !(end > start || candidates.length) ? (
+                          <p>请在地图选择删除范围的起点，然后选择终点。</p>
+                        ) : null}
+                        {(end > start || !!candidates.length) && (
+                          <p className="text-xs text-destructive">
+                            {`将删除${pruneCount}个轨迹点`}
+                          </p>
+                        )}
                         {candidates.map((r, i) => (
                           <div key={i} className="flex items-center gap-2">
                             <Button onClick={() => locateRange(r.start, r.end)}>
@@ -1697,6 +1683,14 @@ function TrackEditor({
                         撤回
                       </Button>
                     )}
+                    {mode === "prune" && (
+                      <Button
+                        disabled={busy || !!active}
+                        onClick={() => void run(detect)}
+                      >
+                        查找漂移点
+                      </Button>
+                    )}
                     {mode !== "fill_altitude" && (
                       <Button
                         disabled={busy || !!active || !draftDirty}
@@ -1706,7 +1700,7 @@ function TrackEditor({
                       </Button>
                     )}
                     <Button
-                      variant="default"
+                      variant={mode === "prune" ? "destructive" : "default"}
                       loading={busy || !!active}
                       disabled={!canSave || busy || !!active || !!preview}
                       onClick={() => void run(prepare)}
@@ -1715,7 +1709,9 @@ function TrackEditor({
                         ? "查询"
                         : mode === "split_journey"
                           ? "确认拆分…"
-                          : "保存"}
+                          : mode === "prune"
+                            ? "删除"
+                            : "保存"}
                     </Button>
                   </div>
                 </>
