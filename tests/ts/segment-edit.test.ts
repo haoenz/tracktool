@@ -499,12 +499,21 @@ it("detects gaps and returning drift only within a fully timed segment and retur
   expect(() =>
     detectSegmentGaps({ ...s, time_us: null }, { gapSeconds: 1, gapMeters: 1 }),
   ).toThrow("完整的轨迹时间戳");
-  expect(() =>
+  expect(
     detectSegmentGaps(
       { ...s, time_us: BigInt64Array.from([...s.time_us!].reverse()) },
       { gapSeconds: 1, gapMeters: 1 },
     ),
-  ).toThrow("严格递增");
+  ).toEqual([]);
+  const flat = { ...s, time_us: s.time_us!.map(() => 0n) };
+  expect(
+    detectSegmentDrift(flat, {
+      speedMps: 1,
+      jumpMeters: 1e9,
+      returnMeters: 0,
+      maxSeconds: 10,
+    }),
+  ).toEqual([]);
 });
 
 const dirs: string[] = [];

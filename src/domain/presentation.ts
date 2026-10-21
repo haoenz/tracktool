@@ -171,9 +171,6 @@ function texts(s: TrackSegment) {
 function timed(s: TrackSegment) {
   if (!s.time_us || s.time_us.length !== s.longitude.length)
     throw new AppError("USER_INPUT", "自动检测需要完整的轨迹时间戳");
-  for (let i = 1; i < s.time_us.length; i++)
-    if (s.time_us[i]! <= s.time_us[i - 1]!)
-      throw new AppError("USER_INPUT", "自动检测需要严格递增的轨迹时间戳");
 }
 function thresholds(options: Record<string, number>) {
   if (Object.values(options).some((n) => !Number.isFinite(n) || n < 0))

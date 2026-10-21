@@ -108,10 +108,7 @@ export function driftIndices(
   while (i < points.length - 1) {
     const step = distance(points[i]!, points[i + 1]!);
     const delta = Number(times[i + 1]! - times[i]!) / 1e6;
-    if (
-      step >= op.jumpMeters ||
-      (delta <= 0 ? Infinity : step / delta) >= op.speedMps
-    ) {
+    if (step >= op.jumpMeters || (delta > 0 && step / delta >= op.speedMps)) {
       let found = -1;
       for (let k = i + 1; k < points.length; k++) {
         if (Number(times[k]! - times[i]!) / 1e6 > op.maxSeconds) break;
