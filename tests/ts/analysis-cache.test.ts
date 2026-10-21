@@ -125,7 +125,7 @@ it("deduplicates concurrent requests and shares identical content across entries
   ).toBe(true);
   expect(rows(file)).toHaveLength(1);
   await expect(cache.get(file, "missing", entry.sha256)).rejects.toThrow(
-    "Entry not found",
+    "找不到轨迹",
   );
   await expect(cache.get(file, entry.id, "a".repeat(64))).rejects.toThrow(
     "版本已不可用",

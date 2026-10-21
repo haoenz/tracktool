@@ -28,7 +28,7 @@ export class XmlWorkers implements XmlPort {
       queueLimit < 0 ||
       timeoutMs <= 0
     )
-      throw new Error("Invalid worker limits");
+      throw new Error("XML 工作线程数量无效");
   }
   run(
     bytes: Uint8Array,
@@ -46,7 +46,7 @@ export class XmlWorkers implements XmlPort {
           operation.additional.reduce((n, s) => n + s.raw.byteLength, 0) >
           128 * 1024 * 1024
       )
-        throw new AppError("USER_INPUT", "Composition inputs exceed 128 MiB");
+        throw new AppError("USER_INPUT", "组合输入超过 128 MiB");
       if (
         this.active.size >= this.concurrency &&
         this.queue.length >= this.queueLimit

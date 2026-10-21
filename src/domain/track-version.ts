@@ -14,7 +14,7 @@ export function validatePresentation(
   segments: string[],
 ): Presentation {
   const result = PresentationSchema.safeParse(input);
-  if (!result.success) throw new AppError("USER_INPUT", result.error.message);
+  if (!result.success) throw new AppError("USER_INPUT", "展示设置校验失败");
   const value = result.data,
     available = new Set(segments);
   if (
@@ -22,9 +22,6 @@ export function validatePresentation(
     available.size !== value.order.length ||
     value.order.some((s) => !available.has(s))
   )
-    throw new AppError(
-      "USER_INPUT",
-      "Presentation must include every version segment exactly once",
-    );
+    throw new AppError("USER_INPUT", "展示设置必须且只能包含每个版本片段一次");
   return value;
 }

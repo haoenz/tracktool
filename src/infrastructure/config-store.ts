@@ -97,7 +97,7 @@ export class FileConfigStore implements ConfigStore {
   }
   async set(key: string, value: string, plan = false): Promise<ConfigData> {
     if (!Object.hasOwn(DEFAULTS, key))
-      throw new AppError("USER_INPUT", `Unknown config key: ${key}`);
+      throw new AppError("USER_INPUT", `未知的配置项：${key}`);
     const before = present(this.path) ? await readFile(this.path) : undefined;
     const current = await this.load();
     const next = key.startsWith("track_tag.")

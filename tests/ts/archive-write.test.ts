@@ -196,7 +196,7 @@ it("push deduplicates bytes/revisions, preserves conflicting backup sources, pop
       name: path.basename(source),
       output: out,
     }),
-  ).rejects.toThrow("overwrite");
+  ).rejects.toThrow(/拒绝覆盖|overwrite/);
   expect(w.status(file).entries).toBe(1);
   mkdirSync(path.join(d, "Backup"));
   writeFileSync(path.join(d, "Backup", path.basename(source)), "different");
@@ -291,7 +291,7 @@ it("changed source and symlink recovery targets are never overwritten or removed
   expect(recovery.status(file).pending).toBe(1);
   rmSync(path.join(d, "Backup/a.kml"));
   symlinkSync(source, path.join(d, "Backup/a.kml"));
-  await expect(recovery.recover(file)).rejects.toThrow("overwrite");
+  await expect(recovery.recover(file)).rejects.toThrow(/拒绝覆盖|overwrite/);
   expect(readFileSync(source, "utf8")).toBe("changed");
 });
 it.each(["export-published", "before-export-commit"] as FaultPoint[])(
@@ -486,7 +486,7 @@ it("download preview checks target conflicts without recovery or mutation", asyn
       output: directory,
       preview: true,
     }),
-  ).rejects.toThrow("overwrite");
+  ).rejects.toThrow(/拒绝覆盖|overwrite/);
 });
 it("reads Python forced ZIP64 and CP437 names; validates directory CRC and duplicate names", async () => {
   const names: string[] = [];

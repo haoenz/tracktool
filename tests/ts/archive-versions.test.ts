@@ -300,16 +300,16 @@ it("keeps versions and deduplicates objects, rejects stale refs and replays requ
   expect(Buffer.from(store.read(entry.version_id))).toEqual(raw);
   expect(() =>
     store.publish({ ...request, params: { different: true } }),
-  ).toThrow("Idempotency");
+  ).toThrow("幂等标识");
   expect(() => store.publish({ ...request, request_key: "stale" })).toThrow(
-    "changed since preview",
+    "预览后轨迹已变化",
   );
   expect(() =>
     store.publish({
       ...change(archive, updated, "wrong-archive"),
       archive_id: "other",
     }),
-  ).toThrow("identity");
+  ).toThrow("轨迹库已切换");
   const restored = store.restoreVersion(
     archive,
     updated,
@@ -350,7 +350,7 @@ it("stores presentation snapshots separately and rolls invalid settings back com
       },
     ],
   };
-  expect(() => store.publish(request)).toThrow("every version segment");
+  expect(() => store.publish(request)).toThrow("每个版本片段一次");
   expect(logical(file)).toEqual(before);
   request.outputs = [
     {
@@ -404,7 +404,7 @@ it("publishes and restores a split group atomically and protects later edits", a
       "incomplete",
       result.entries.slice(1),
     ),
-  ).toThrow("complete operation group");
+  ).toThrow("完整的操作组");
   const restored = store.restore(
     archive,
     result.operation_id,
@@ -439,7 +439,7 @@ it("publishes and restores a split group atomically and protects later edits", a
         (e) => modified.entries.find((m) => m.entry_id === e.entry_id) ?? e,
       ),
     ),
-  ).toThrow("group changed");
+  ).toThrow("操作组已变化");
 });
 it("supplements provenance without making the display revision dirty; rejects cycles and wrong source hashes", async () => {
   const { file, store, entry, archive } = await initialized(),
@@ -489,7 +489,7 @@ it("supplements provenance without making the display revision dirty; rejects cy
       request_key: "wrong",
       locations: [{ ...link.locations[0]!, sha256: "0".repeat(64) }],
     }),
-  ).toThrow("Source bytes");
+  ).toThrow("来源内容与存储版本不匹配");
   expect(() =>
     store.linkSources({
       ...link,
@@ -699,14 +699,14 @@ it("refuses stale recovery intents before publishing a target and blocks edits w
       ),
   );
   expect(() => store.publish(change(archive, entry, "blocked"))).toThrow(
-    "pending file operation",
+    "未完成的文件操作",
   );
   transaction(file, true, (db) =>
     db
       .prepare("UPDATE archive_entries SET generation=generation+1 WHERE id=?")
       .run(entry.entry_id),
   );
-  await expect(writer.recover(file)).rejects.toThrow("changed since preview");
+  await expect(writer.recover(file)).rejects.toThrow("预览后轨迹已变化");
   expect(existsSync(path.join(output, "a.kml"))).toBe(false);
   expect(writer.status(file).pending).toBe(1);
 });

@@ -369,8 +369,7 @@ export async function fillEndpointLocations(
           queriedAt = cached.queried_at;
           summary.reused++;
         } else {
-          if (!key)
-            throw new AppError("USER_INPUT", "Google API key is required");
+          if (!key) throw new AppError("USER_INPUT", "未配置 Google API 密钥");
           let lookup = pending.get(coordinateKey);
           if (!lookup) {
             summary.queries++;

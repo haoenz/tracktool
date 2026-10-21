@@ -218,7 +218,7 @@ it("ignores unrelated revisions but rejects stale presentation generations even 
     timeline.events[1]!.after.presentation_id,
   );
 
-  expect(() => f.previews.apply(f.file, apply(p))).toThrow(/changed/);
+  expect(() => f.previews.apply(f.file, apply(p))).toThrow(/已变化|changed/);
   const d = trackDetail(f.file, f.id),
     next = EditRequestSchema.parse({ ...f.split(), target: ref(d.entry) });
   const valid = await f.previews.create(f.file, randomUUID(), next);
@@ -362,7 +362,7 @@ it("group restore detects later edits to any member at apply time", async () => 
     ],
   });
   const before = snap(f.file);
-  expect(() => f.previews.apply(f.file, apply(undo))).toThrow(/changed/);
+  expect(() => f.previews.apply(f.file, apply(undo))).toThrow(/已变化|changed/);
   expect(snap(f.file)).toEqual(before);
 });
 it("cancellation before commit does not change the archive", async () => {
@@ -643,7 +643,7 @@ it("regroups complete legacy members atomically, preserves display and restores 
       randomUUID(),
       reapplied.entries.map((e) => ref(f.version.current(e.entry_id))),
     ),
-  ).toThrow(/changed/);
+  ).toThrow(/已变化|changed/);
 });
 it("rejects partial, duplicate, mixed-category and stale regroup members without publishing", async () => {
   const f = await fixture();
@@ -723,7 +723,7 @@ it("rejects partial, duplicate, mixed-category and stale regroup members without
     ],
   });
   const current = snap(f.file);
-  expect(() => f.previews.apply(f.file, apply(p))).toThrow("changed");
+  expect(() => f.previews.apply(f.file, apply(p))).toThrow(/已变化|changed/);
   expect(snap(f.file)).toEqual(current);
   expect(f.version.current(f.id)).toEqual(f.detail.entry);
   expect(before.entries).toHaveLength(2);

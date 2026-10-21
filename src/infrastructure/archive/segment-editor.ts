@@ -43,25 +43,19 @@ export async function prepareSegmentEdit(
   port?: XmlPort,
 ) {
   const parsed = SegmentEditRequestSchema.safeParse(input);
-  if (!parsed.success) throw new AppError("USER_INPUT", parsed.error.message);
+  if (!parsed.success) throw new AppError("USER_INPUT", "编辑请求校验失败");
   const request = parsed.data;
   const loaded = readTransaction(file, (db) => {
     if (archiveId(db) !== request.archive_id)
-      throw new AppError("USER_INPUT", "Archive identity changed");
+      throw new AppError("USER_INPUT", "轨迹库已切换");
     const target = checkRef(db, request.target);
     if (target.state !== "active")
-      throw new AppError(
-        "USER_INPUT",
-        "Editing requires an active target entry",
-      );
+      throw new AppError("USER_INPUT", "只能编辑活动行程");
     const refs = [request.target, ...request.sources];
     if (new Set(refs.map((r) => r.version_id)).size !== refs.length)
-      throw new AppError("USER_INPUT", "Duplicate edit source version");
+      throw new AppError("USER_INPUT", "编辑来源版本重复");
     if (request.operation.kind !== "compose" && request.sources.length)
-      throw new AppError(
-        "USER_INPUT",
-        "Additional sources require composition",
-      );
+      throw new AppError("USER_INPUT", "多个来源版本需要使用组合操作");
     let sourceBytes = 0;
     const sources: SegmentInput[] = refs.map((ref) => {
       const row = db
@@ -78,13 +72,10 @@ export async function prepareSegmentEdit(
           }
         | undefined;
       if (!row || row.sha256 !== ref.sha256 || row.manifest_status !== "ready")
-        throw new AppError(
-          "USER_INPUT",
-          "Source version, presentation or content is unavailable",
-        );
+        throw new AppError("USER_INPUT", "来源版本、展示设置或内容不可用");
       sourceBytes += row.raw_size;
       if (sourceBytes > MAX_KML_BYTES)
-        throw new AppError("USER_INPUT", "Composition inputs exceed 128 MiB");
+        throw new AppError("USER_INPUT", "组合输入超过 128 MiB");
       const segments = (
         db
           .prepare(
@@ -102,7 +93,7 @@ export async function prepareSegmentEdit(
         segments.map((s) => s.segment_id),
       );
       if (presentationDigest(settings) !== row.settings_sha256)
-        throw new AppError("USER_INPUT", "Presentation checksum mismatch");
+        throw new AppError("USER_INPUT", "展示设置校验失败");
       return {
         version_id: ref.version_id,
         raw: rawObject(db, row.sha256),

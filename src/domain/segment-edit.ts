@@ -39,7 +39,7 @@ export type SegmentEditResult = {
 };
 export function checkedEdit(input: unknown): SegmentEdit {
   const result = SegmentEditSchema.safeParse(input);
-  if (!result.success) throw new AppError("USER_INPUT", result.error.message);
+  if (!result.success) throw new AppError("USER_INPUT", "展示设置校验失败");
   return result.data;
 }
 export function checkedRanges(
@@ -57,10 +57,7 @@ export function checkedRanges(
       !Number.isInteger(r.start) ||
       !Number.isInteger(r.end)
     )
-      throw new AppError(
-        "USER_INPUT",
-        "Point ranges overlap or exceed segment bounds",
-      );
+      throw new AppError("USER_INPUT", "轨迹点范围重叠或超出片段范围");
     end = r.end;
   }
   return sorted;
@@ -76,7 +73,7 @@ export function keptRanges(removed: PointRange[], count: number): PointRange[] {
   if (!kept.length)
     throw new AppError(
       "USER_INPUT",
-      "Cannot remove every point; use ignore to hide a segment",
+      "不能删除全部轨迹点；如需隐藏片段请使用忽略",
     );
   return kept;
 }
@@ -109,7 +106,7 @@ export function insertSettings(
 ): { settings: Presentation; removed: Presentation["connections"] } {
   const at = after === null ? 0 : settings.order.indexOf(after) + 1;
   if (after !== null && at === 0)
-    throw new AppError("USER_INPUT", "Unknown insertion segment");
+    throw new AppError("USER_INPUT", "未知的插入片段");
   const left = new Set(settings.order.slice(0, at)),
     right = new Set(settings.order.slice(at));
   // Any old cross-boundary override would bypass the newly inserted geometry.

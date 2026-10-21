@@ -23,7 +23,7 @@ export class GoogleElevation implements ElevationPort {
     key: string,
     signal: AbortSignal,
   ): Promise<(number | null)[]> {
-    if (!key) throw new AppError("TOOL", "Google API key is required");
+    if (!key) throw new AppError("TOOL", "未配置 Google API 密钥");
     const batches: string[][] = [];
     let batch: string[] = [];
     const prefix =
@@ -56,28 +56,25 @@ export class GoogleElevation implements ElevationPort {
             `${prefix}${group.join("|")}&key=${encodeURIComponent(key)}`,
             { signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) },
           );
-          if (!response.ok) throw new Error("HTTP request failed");
+          if (!response.ok) throw new Error("HTTP 请求失败");
           payload = (await response.json()) as typeof payload;
           break;
         } catch {
           checkCancelled(signal);
           if (attempt === 2)
-            throw new AppError(
-              "TOOL",
-              "Google elevation request failed after 3 attempts",
-            );
+            throw new AppError("TOOL", "Google 高程请求连续失败 3 次");
           try {
             await this.sleep(1000 * 2 ** attempt, signal);
           } catch {
             checkCancelled(signal);
-            throw new AppError("TOOL", "Google elevation retry failed");
+            throw new AppError("TOOL", "Google 高程请求重试失败");
           }
         }
       }
       if (!payload || !["OK", "ZERO_RESULTS"].includes(payload.status ?? ""))
         throw new AppError(
           "TOOL",
-          `Google elevation API: ${["OVER_QUERY_LIMIT", "REQUEST_DENIED", "INVALID_REQUEST", "UNKNOWN_ERROR"].includes(payload?.status ?? "") ? payload!.status : "invalid response"}`,
+          `Google 高程接口返回：${["OVER_QUERY_LIMIT", "REQUEST_DENIED", "INVALID_REQUEST", "UNKNOWN_ERROR"].includes(payload?.status ?? "") ? payload!.status : "invalid response"}`,
         );
       for (let i = 0; i < group.length; i++) {
         const elevation =

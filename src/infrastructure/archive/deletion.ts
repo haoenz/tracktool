@@ -16,7 +16,7 @@ function requireDeletionSchema(db: Database.Database): void {
   if (schemaVersion(db) < 4)
     throw new AppError(
       "USER_INPUT",
-      "Deletion requires schema 4; run archive migrate explicitly",
+      "删除需要 schema 4；请先显式执行 archive migrate",
     );
 }
 function dependencies(
@@ -157,7 +157,7 @@ export function deleteEntryInTransaction(
   input: DeleteRequest,
   fault: DeleteFault = () => {},
 ): DeleteResult {
-  if (!db.inTransaction) throw new Error("Deletion requires a transaction");
+  if (!db.inTransaction) throw new Error("删除需要事务");
   const parsed = DeleteRequestSchema.safeParse(input);
   if (!parsed.success) throw new AppError("USER_INPUT", parsed.error.message);
   const request = parsed.data,
@@ -165,7 +165,7 @@ export function deleteEntryInTransaction(
   {
     requireDeletionSchema(db);
     if (archiveId(db) !== request.archive_id)
-      throw new AppError("USER_INPUT", "Archive identity changed");
+      throw new AppError("USER_INPUT", "轨迹库已切换");
     const prior = db
       .prepare(
         "SELECT request_sha256,result_json FROM track_deletions WHERE request_key=?",
@@ -174,10 +174,7 @@ export function deleteEntryInTransaction(
       { request_sha256: string; result_json: string } | undefined;
     if (prior) {
       if (prior.request_sha256 !== hash)
-        throw new AppError(
-          "USER_INPUT",
-          "Idempotency key reused with different deletion request",
-        );
+        throw new AppError("USER_INPUT", "幂等标识已用于不同的删除请求");
       return JSON.parse(prior.result_json) as DeleteResult;
     }
     checkRef(db, request.expected, true);
@@ -185,7 +182,7 @@ export function deleteEntryInTransaction(
     if (plan.dependencies.length)
       throw new AppError(
         "USER_INPUT",
-        `Deletion blocked by dependencies: ${plan.dependencies.map((d) => `${d.kind}: ${d.id} (${d.detail})`).join("; ")}`,
+        `删除被依赖项阻止：${plan.dependencies.map((d) => `${d.kind}: ${d.id} (${d.detail})`).join("; ")}`,
       );
     const id = request.expected.entry_id;
     const scope = new Map<string, Set<number>>();
@@ -266,12 +263,9 @@ export function deleteEntryInTransaction(
       for (const row of scope.get("kml_objects")!)
         removed += clean.run(row).changes;
       if (removed !== result.deleted_objects)
-        throw new AppError(
-          "TOOL",
-          "Object deletion count differs from the checked plan",
-        );
+        throw new AppError("TOOL", "对象删除数量与检查结果不一致");
       if ((db.pragma("foreign_key_check") as unknown[]).length)
-        throw new AppError("TOOL", "Deletion would leave invalid references");
+        throw new AppError("TOOL", "删除后会留下无效引用");
       fault("delete-before-commit");
       return result;
     } finally {

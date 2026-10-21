@@ -43,7 +43,7 @@ export function readManifest(
           const ordinal = segments.length,
             track = tracks[ordinal];
           if (!track || track.kind !== kind)
-            throw new Error("Ambiguous geometry manifest");
+            throw new Error("轨迹几何清单存在歧义");
           const count = track.longitude.length;
           const times =
             kind === "gx:Track" ? node.find("kml:when | gx:when", ns) : [];
@@ -69,7 +69,7 @@ export function readManifest(
       };
       visit(doc.root, [], false);
       if (segments.length !== tracks.length)
-        throw new Error("Incomplete geometry manifest");
+        throw new Error("轨迹几何清单不完整");
       return { status: "ready", error: null, segments };
     });
   } catch (error) {

@@ -936,22 +936,24 @@ function TrackEditor({
       {note && (
         <Alert type="info" title={note} closable onClose={() => setNote("")} />
       )}
-      {(error || task.data?.error) && !fillAltitudeFailure && (
-        <Button
-          disabled={busy || !!active}
-          onClick={() => {
-            if (
-              draftDirty &&
-              !window.confirm("重新载入会放弃当前修改，是否继续？")
-            )
-              return;
-            resetDraft();
-            void target.refetch();
-          }}
-        >
-          重新载入轨迹
-        </Button>
-      )}
+      {(error || task.data?.error) &&
+        !fillAltitudeFailure &&
+        mode !== "prune" && (
+          <Button
+            disabled={busy || !!active}
+            onClick={() => {
+              if (
+                draftDirty &&
+                !window.confirm("重新载入会放弃当前修改，是否继续？")
+              )
+                return;
+              resetDraft();
+              void target.refetch();
+            }}
+          >
+            重新载入轨迹
+          </Button>
+        )}
       {target.isFetching && <Spin />}
       {d && settings && (
         <>
@@ -1670,7 +1672,7 @@ function TrackEditor({
                     )}
                   </fieldset>
                   <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-background py-3">
-                    {mode !== "fill_altitude" && (
+                    {mode !== "fill_altitude" && mode !== "prune" && (
                       <span className="mr-auto text-sm">
                         {busy || active
                           ? "正在处理…"

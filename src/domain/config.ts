@@ -39,19 +39,12 @@ export function parseTagSpec(spec: string): { sign: string; names: string[] } {
   const sign = /^[+-]/.test(spec) ? spec[0]! : "";
   const body = spec.slice(sign.length);
   if (!body.trim()) {
-    if (sign)
-      throw new AppError(
-        "USER_INPUT",
-        `Nothing follows ${sign} in activity specification`,
-      );
+    if (sign) throw new AppError("USER_INPUT", `${sign} 后缺少活动名称`);
     return { sign, names: [] };
   }
   const names = body.split(",").map((s) => s.trim());
   if (names.some((n) => !n))
-    throw new AppError(
-      "USER_INPUT",
-      "Empty activity name (names are comma-separated)",
-    );
+    throw new AppError("USER_INPUT", "活动名称为空（多个名称用逗号分隔）");
   return { sign, names: [...new Set(names)] };
 }
 export function tagMap(data: ConfigData): ReadonlyMap<string, string> {
@@ -60,24 +53,17 @@ export function tagMap(data: ConfigData): ReadonlyMap<string, string> {
     if (!key.startsWith("track_tag.")) continue;
     const category = key.slice("track_tag.".length);
     if (!CategorySchema.safeParse(category).success)
-      throw new AppError(
-        "USER_INPUT",
-        `Unknown track category in config: ${key}`,
-      );
+      throw new AppError("USER_INPUT", `配置中存在未知的轨迹分类：${key}`);
     if (!Array.isArray(values))
-      throw new AppError(
-        "USER_INPUT",
-        `${key} must be a list of activity names`,
-      );
+      throw new AppError("USER_INPUT", `${key} 必须是活动名称列表`);
     for (const activity of values) {
       const name = String(activity).trim();
-      if (!name)
-        throw new AppError("USER_INPUT", `Empty activity name in ${key}`);
+      if (!name) throw new AppError("USER_INPUT", `${key} 中存在空的活动名称`);
       const owner = result.get(name);
       if (owner !== undefined && owner !== category)
         throw new AppError(
           "USER_INPUT",
-          `Activity "${name}" is listed under both ${owner} and ${category}`,
+          `活动“${name}”同时出现在 ${owner} 和 ${category} 中`,
         );
       result.set(name, category);
     }
@@ -93,7 +79,7 @@ export function changeTagList(
     !key.startsWith("track_tag.") ||
     !CategorySchema.safeParse(key.slice(10)).success
   )
-    throw new AppError("USER_INPUT", `Unknown track category: ${key}`);
+    throw new AppError("USER_INPUT", `未知的轨迹分类：${key}`);
   const result = structuredClone(data);
   const { sign, names } = parseTagSpec(spec);
   const current = Array.isArray(data[key]) ? data[key].map(String) : [];
@@ -113,17 +99,17 @@ export function changeTagList(
 }
 export function normalizeScalar(key: string, value: string): unknown {
   if (!Object.hasOwn(DEFAULTS, key))
-    throw new AppError("USER_INPUT", `Unknown config key: ${key}`);
+    throw new AppError("USER_INPUT", `未知的配置项：${key}`);
   if (key === "log_level") {
     const parsed = LogLevelSchema.safeParse(value.toUpperCase());
     if (!parsed.success)
-      throw new AppError("USER_INPUT", `Unknown log level: ${value}`);
+      throw new AppError("USER_INPUT", `未知的日志级别：${value}`);
     return parsed.data;
   }
   if (key === "archive_history" || key === "auto_fill_locations") {
     const parsed = parseBool(value);
     if (parsed === undefined)
-      throw new AppError("USER_INPUT", `${key} is true or false`);
+      throw new AppError("USER_INPUT", `${key} 必须是 true 或 false`);
     return parsed;
   }
   if (key.startsWith("track_tag.")) parseTagSpec(value);

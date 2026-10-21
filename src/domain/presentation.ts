@@ -24,7 +24,7 @@ export function bindSegments(
 ): BoundSegment[] {
   const geometries = data.tracks.flatMap((t) => t.segments);
   if (geometries.length !== manifest.length)
-    throw new AppError("USER_INPUT", "Segment manifest differs from geometry");
+    throw new AppError("USER_INPUT", "轨迹片段清单与几何数据不一致");
   const ids = new Set<string>();
   return manifest.map((s, i) => {
     const g = geometries[i]!;
@@ -37,10 +37,7 @@ export function bindSegments(
       (g.altitude !== null && g.altitude.length !== s.point_count) ||
       (g.time_us !== null && g.time_us.length !== s.point_count)
     )
-      throw new AppError(
-        "USER_INPUT",
-        "Segment manifest differs from geometry",
-      );
+      throw new AppError("USER_INPUT", "轨迹片段清单与几何数据不一致");
     ids.add(s.segment_id);
     return { ...g, segment_id: s.segment_id, source_kind: s.source_kind };
   });
@@ -173,21 +170,12 @@ function texts(s: TrackSegment) {
 }
 function timed(s: TrackSegment) {
   if (!s.time_us || s.time_us.length !== s.longitude.length)
-    throw new AppError(
-      "USER_INPUT",
-      "Automatic detection requires complete timestamps",
-    );
+    throw new AppError("USER_INPUT", "自动检测需要完整的轨迹时间戳");
   for (let i = 1; i < s.time_us.length; i++)
     if (s.time_us[i]! <= s.time_us[i - 1]!)
-      throw new AppError(
-        "USER_INPUT",
-        "Automatic detection requires increasing timestamps",
-      );
+      throw new AppError("USER_INPUT", "自动检测需要严格递增的轨迹时间戳");
 }
 function thresholds(options: Record<string, number>) {
   if (Object.values(options).some((n) => !Number.isFinite(n) || n < 0))
-    throw new AppError(
-      "USER_INPUT",
-      "Detection thresholds must be finite and nonnegative",
-    );
+    throw new AppError("USER_INPUT", "检测阈值必须是非负有限数");
 }

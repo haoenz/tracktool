@@ -450,7 +450,7 @@ it("geocode chooses locality across all results, retries transport errors and hi
           JSON.stringify({ status: "REQUEST_DENIED", error_message: "secret" }),
         ),
     ).get([0, 0], "secret", "en", signal),
-  ).rejects.toThrow(/^Google geocoding API: REQUEST_DENIED$/);
+  ).rejects.toThrow(/^Google 地理编码接口返回：REQUEST_DENIED$/);
 });
 it("config set validates tag ownership, persists Unicode atomically and previews without files", async () => {
   const file = path.join(tmp(), "config.json"),

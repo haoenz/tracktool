@@ -29,11 +29,11 @@ export function selectEntry(
       )
       .get(selector.entry_id) as
       { id: string; path: string; sha256: string } | undefined;
-    if (!row) throw new AppError("USER_INPUT", "Entry not found");
+    if (!row) throw new AppError("USER_INPUT", "找不到轨迹");
     return row;
   }
   if (!selector.name)
-    throw new AppError("USER_INPUT", "Select a track by entry ID or name");
+    throw new AppError("USER_INPUT", "请按行程 ID 或名称选择轨迹");
   const rows = (
     db
       .prepare(
@@ -60,7 +60,7 @@ export function selectEntry(
       "USER_INPUT",
       rows.length
         ? "Ambiguous name; use the full member path or entry ID"
-        : "Entry not found",
+        : "找不到轨迹",
     );
   return rows[0]!;
 }
@@ -78,21 +78,14 @@ export function downloadReference(
     name = entry.path;
   if (selector.version_id) {
     if (schemaVersion(db) < 3)
-      throw new AppError(
-        "USER_INPUT",
-        "Historical download requires a versioned archive",
-      );
+      throw new AppError("USER_INPUT", "下载历史版本需要支持版本功能的轨迹库");
     const row = db
       .prepare(
         "SELECT sha256,path FROM track_versions WHERE id=? AND entry_id=?",
       )
       .get(selector.version_id, entry.id) as
       { sha256: string; path: string } | undefined;
-    if (!row)
-      throw new AppError(
-        "USER_INPUT",
-        "Version does not belong to the selected entry",
-      );
+    if (!row) throw new AppError("USER_INPUT", "版本不属于所选行程");
     sha256 = row.sha256;
     name = row.path;
   }
@@ -134,10 +127,7 @@ export function downloadFile(
   const result = downloadBytes(file, selector),
     target = path.join(output, result.name);
   if (present(target))
-    throw new AppError(
-      "USER_INPUT",
-      `Refusing to overwrite existing target: ${target}`,
-    );
+    throw new AppError("USER_INPUT", `拒绝覆盖已存在的目标：${target}`);
   if (!preview) exclusive(target, result.bytes);
   return {
     message: preview

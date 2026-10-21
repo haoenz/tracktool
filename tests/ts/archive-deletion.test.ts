@@ -178,7 +178,7 @@ it("rolls back replacement publication and legacy cleanup together on failure", 
   expect(
     rows(file, "SELECT version_no FROM track_versions ORDER BY version_no"),
   ).toEqual([{ version_no: 1 }, { version_no: 2 }]);
-  expect(() => entry(file, id)).toThrow("Entry not found");
+  expect(() => entry(file, id)).toThrow("找不到轨迹");
 });
 it.each([2, 3, 4, 5])(
   "downloads schema %s with no recovery, database writes or target overwrite",
@@ -205,7 +205,7 @@ it.each([2, 3, 4, 5])(
     expect(readFileSync(target)).toEqual(raw());
     expect(() =>
       downloadFile(file, { name: "a" }, path.join(dir, "out")),
-    ).toThrow("overwrite");
+    ).toThrow("拒绝覆盖");
     const blocked = path.join(dir, "blocked");
     writeFileSync(blocked, "file");
     expect(() => downloadFile(file, { name: "a" }, blocked)).toThrow();
@@ -256,7 +256,7 @@ it("downloads exact current, historical and source-only versions without alterin
   ).toEqual(raw(123));
   expect(() =>
     downloadBytes(file, { entry_id: id, version_id: source.version_id }),
-  ).toThrow("does not belong");
+  ).toThrow("不属于");
   expect(snapshot(file)).toEqual(before);
   deleteEntry(file, request(file, source.entry_id));
   expect(store.history(source.entry_id)).toEqual([]);
@@ -307,11 +307,11 @@ it("deletes all owned history, prevents replay, frees the path and preserves an 
     "kml_index",
   ])
     expect(rows(file, `SELECT * FROM ${table}`), table).toEqual([]);
-  expect(() => store.read(original.version_id)).toThrow("not found");
-  expect(() => store.publish(change)).toThrow("deleted members");
+  expect(() => store.read(original.version_id)).toThrow("版本不存在");
+  expect(() => store.publish(change)).toThrow("已删除的行程");
   expect(() =>
     store.restore(archive, edited.operation_id, "undo", edited.entries),
-  ).toThrow("deleted members");
+  ).toThrow("已删除的行程");
   expect(new ArchiveWriter().status(file).revision).toBeGreaterThan(
     before.revision,
   );
@@ -326,7 +326,7 @@ it("deletes all owned history, prevents replay, frees the path and preserves an 
       ...request(file, replacement.id),
       request_key: req.request_key,
     }),
-  ).toThrow("Idempotency");
+  ).toThrow("幂等标识");
   expect(readFileSync(output)).toEqual(raw());
   expect(snapshot(backup)).toEqual(previous);
   const restored = path.join(dir, "restored");
@@ -372,7 +372,7 @@ it("keeps shared content and other split members but disables shared-operation u
   expect(Buffer.from(store.read(second.version_id))).toEqual(raw());
   expect(() =>
     store.restore(archive, group.operation_id, "undo", group.entries),
-  ).toThrow("deleted members");
+  ).toThrow("已删除的行程");
   deleteEntry(file, request(file, second.entry_id, "second"));
   expect(rows(file, "SELECT * FROM kml_objects")).toHaveLength(1);
   deleteEntry(file, request(file, id, "source"));
@@ -453,10 +453,10 @@ it("rejects stale references, changed archives, pending file intents and reused 
   const { file, id, archive, store } = await fixture(),
     req = request(file, id);
   expect(() => deleteEntry(file, { ...req, archive_id: "elsewhere" })).toThrow(
-    "identity",
+    "轨迹库已切换",
   );
   store.publish(edit(archive, entry(file, id)));
-  expect(() => deleteEntry(file, req)).toThrow("changed since preview");
+  expect(() => deleteEntry(file, req)).toThrow("预览后轨迹已变化");
   const current = entry(file, id),
     fresh = request(file, id);
   expect(() => deleteEntry(file, { ...fresh, request_key: "edit" })).toThrow(

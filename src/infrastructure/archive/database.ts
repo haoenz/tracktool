@@ -32,7 +32,7 @@ export function connect(
   } catch (cause) {
     throw new AppError(
       "USER_INPUT",
-      `SQLite archive not found or cannot open: ${file}; run archive import-zip explicitly`,
+      `找不到或无法打开 SQLite 轨迹库：${file}；请显式执行 archive import-zip`,
       { cause },
     );
   }
@@ -44,7 +44,7 @@ export function connect(
     if (!allowedSchemas.includes(version as number))
       throw new AppError(
         "USER_INPUT",
-        `Unsupported database schema ${String(version)}; expected 2, 3, 4, 5 or 6; run archive migrate`,
+        `不支持的数据库 schema ${String(version)}；需要 2、3、4、5 或 6；请先执行 archive migrate`,
       );
     // Concurrent first opens of an older DELETE-mode database can fail journal-mode
     // conversion immediately, before SQLite's normal BEGIN busy timeout applies.
@@ -98,26 +98,23 @@ export function rawObject(db: Database.Database, digest: string): Uint8Array {
     .prepare("SELECT codec,raw_size,payload FROM kml_objects WHERE sha256=?")
     .get(digest) as
     { codec: string; raw_size: number; payload: Buffer } | undefined;
-  if (!row) throw new AppError("USER_INPUT", `Missing KML object: ${digest}`);
+  if (!row) throw new AppError("USER_INPUT", `缺少 KML 对象：${digest}`);
   if (row.codec !== "zlib" || row.raw_size > MAX_KML_BYTES)
     throw new AppError(
       "USER_INPUT",
-      "KML entry exceeds the 128 MiB read limit or uses an unsupported codec",
+      "KML 内容超过 128 MiB 读取限制或使用了不支持的编码",
     );
   let bytes: Buffer;
   try {
     bytes = inflateSync(row.payload, { maxOutputLength: MAX_KML_BYTES });
   } catch (cause) {
-    throw new AppError("USER_INPUT", "Corrupt KML object", { cause });
+    throw new AppError("USER_INPUT", "KML 对象已损坏", { cause });
   }
   if (
     bytes.length !== row.raw_size ||
     createHash("sha256").update(bytes).digest("hex") !== digest
   )
-    throw new AppError(
-      "USER_INPUT",
-      `KML object integrity check failed: ${digest}`,
-    );
+    throw new AppError("USER_INPUT", `KML 对象校验失败：${digest}`);
   return bytes;
 }
 
@@ -153,7 +150,7 @@ export function readTransaction<T>(
     if (![2, 3, 4, 5, 6].includes(schemaVersion(db)))
       throw new AppError(
         "USER_INPUT",
-        "Unsupported archive schema; run archive migrate",
+        "不支持的轨迹库 schema；请先执行 archive migrate",
       );
     db.pragma("query_only=ON");
     db.exec("BEGIN");

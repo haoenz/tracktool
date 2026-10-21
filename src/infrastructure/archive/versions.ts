@@ -106,7 +106,7 @@ export function currentEntry(db: Database.Database, id: string): EntrySnapshot {
     FROM archive_entries e JOIN track_versions v ON e.current_version_id=v.id WHERE e.id=?`,
     )
     .get(id) as EntrySnapshot | undefined;
-  if (!row) throw new AppError("USER_INPUT", `Entry not found: ${id}`);
+  if (!row) throw new AppError("USER_INPUT", `找不到轨迹：${id}`);
   return row;
 }
 export function checkRef(
@@ -121,10 +121,7 @@ export function checkRef(
     current.presentation_id !== ref.presentation_id ||
     current.sha256 !== ref.sha256
   )
-    throw new AppError(
-      "USER_INPUT",
-      "Track changed since preview; refresh and retry",
-    );
+    throw new AppError("USER_INPUT", "预览后轨迹已变化，请刷新后重试");
   if (
     !allowPending &&
     db
@@ -133,7 +130,7 @@ export function checkRef(
   )
     throw new AppError(
       "USER_INPUT",
-      "Entry has a pending file operation; run archive recover",
+      "行程存在未完成的文件操作；请先执行 archive recover",
     );
   return current;
 }
@@ -172,7 +169,7 @@ export function insertVersion(
   versionNo: number,
 ): void {
   if (raw.length > MAX_KML_BYTES)
-    throw new AppError("USER_INPUT", "KML entry exceeds the 128 MiB limit");
+    throw new AppError("USER_INPUT", "KML 超过 128 MiB 限制");
   db.prepare("INSERT OR IGNORE INTO kml_objects VALUES (?,'zlib',?,?)").run(
     entry.sha256,
     raw.length,
@@ -304,7 +301,7 @@ function checkDeletedOperation(
   )
     throw new AppError(
       "USER_INPUT",
-      "Operation contains deleted members; replay and group restore are unavailable",
+      "操作包含已删除的行程，无法重放或整组恢复",
     );
 }
 function replay(
@@ -321,22 +318,17 @@ function replay(
   if (!prior) return;
   checkDeletedOperation(db, prior.id);
   if (prior.request_sha256 !== hash)
-    throw new AppError(
-      "USER_INPUT",
-      "Idempotency key reused with different request",
-    );
+    throw new AppError("USER_INPUT", "幂等标识已用于不同的请求");
   return JSON.parse(prior.result_json) as PublishResult;
 }
 function requireArchive(db: Database.Database, id: string): void {
   if (schemaVersion(db) < 3)
     throw new AppError(
       "USER_INPUT",
-      "Version writes require schema 3 or later; run archive migrate explicitly",
+      "版本写入需要 schema 3 或更高；请先执行 archive migrate",
     );
-  if (archiveId(db) !== id)
-    throw new AppError("USER_INPUT", "Archive identity changed");
-  if (!db.inTransaction)
-    throw new Error("Version writes require a transaction");
+  if (archiveId(db) !== id) throw new AppError("USER_INPUT", "轨迹库已切换");
+  if (!db.inTransaction) throw new Error("版本写入需要事务");
 }
 /** Called inside one reserved transaction. All outputs and pointer changes commit together. */
 export function publishVersions(
@@ -345,10 +337,7 @@ export function publishVersions(
 ): PublishResult {
   requireArchive(db, request.archive_id);
   if (!request.request_key || !request.outputs.length)
-    throw new AppError(
-      "USER_INPUT",
-      "Operation requires a request key and outputs",
-    );
+    throw new AppError("USER_INPUT", "操作缺少请求标识或输出");
   const hash = hashJson({
     ...request,
     outputs: request.outputs.map((o) =>
@@ -361,7 +350,7 @@ export function publishVersions(
     request.inputs.map((ref) => [ref.entry_id, checkRef(db, ref)]),
   );
   if (before.size !== request.inputs.length)
-    throw new AppError("USER_INPUT", "Duplicate operation input");
+    throw new AppError("USER_INPUT", "操作输入重复");
   for (const ref of request.historical_inputs ?? []) {
     if (
       db
@@ -372,17 +361,14 @@ export function publishVersions(
     )
       throw new AppError(
         "USER_INPUT",
-        "Historical input has a pending file operation; run archive recover",
+        "历史来源存在未完成的文件操作；请先执行 archive recover",
       );
     if (
       !db
         .prepare("SELECT 1 FROM track_versions WHERE id=? AND sha256=?")
         .get(ref.version_id, ref.sha256)
     )
-      throw new AppError(
-        "USER_INPUT",
-        "Historical input is missing or differs",
-      );
+      throw new AppError("USER_INPUT", "历史来源缺失或已变化");
   }
   const operation = stableId(
       `${request.archive_id}:operation:${request.request_key}`,
@@ -391,10 +377,7 @@ export function publishVersions(
   const prepared = request.outputs.map((output, index) => {
     const old = output.entry_id ? before.get(output.entry_id) : undefined;
     if (output.entry_id && !old)
-      throw new AppError(
-        "USER_INPUT",
-        "Every changed entry requires a current source reference",
-      );
+      throw new AppError("USER_INPUT", "每个变更行程都需要当前来源引用");
     const entryId = old?.entry_id ?? stableId(`${operation}:entry:${index}`);
     const version =
       output.kind === "version"
@@ -421,7 +404,7 @@ export function publishVersions(
           : (output.state ?? "active"),
     };
     if (output.kind === "version" && !entry.path.toLowerCase().endsWith(".kml"))
-      throw new AppError("USER_INPUT", "Archive entries must be KML");
+      throw new AppError("USER_INPUT", "轨迹库条目必须是 KML");
     const manifest =
       output.kind === "version"
         ? readManifest(output.raw, (n) => stableId(`${version}:segment:${n}`))
@@ -433,18 +416,14 @@ export function publishVersions(
           new Set(output.segment_ids).size !== output.segment_ids.length ||
           output.segment_ids.some((id) => !id || id.length > 200)
         )
-          throw new AppError(
-            "USER_INPUT",
-            "Segment identities must match the complete output manifest",
-          );
+          throw new AppError("USER_INPUT", "片段标识必须与完整输出清单一致");
         manifest.segments.forEach((segment, index) => {
           segment.segment_id = output.segment_ids![index]!;
         });
       }
       for (const [ordinal, kind] of Object.entries(output.source_kinds ?? {})) {
         const segment = manifest.segments[Number(ordinal)];
-        if (!segment)
-          throw new AppError("USER_INPUT", "Unknown provenance segment");
+        if (!segment) throw new AppError("USER_INPUT", "未知的来源片段");
         segment.source_kind = kind;
       }
       if (
@@ -455,13 +434,13 @@ export function publishVersions(
       )
         throw new AppError(
           "USER_INPUT",
-          `Cannot publish edited KML: ${manifest.error}`,
+          `无法发布编辑后的 KML：${manifest.error}`,
         );
     }
     return { output, old: old ?? null, entry, manifest };
   });
   if (new Set(prepared.map((p) => p.entry.entry_id)).size !== prepared.length)
-    throw new AppError("USER_INPUT", "Duplicate output entry");
+    throw new AppError("USER_INPUT", "输出行程重复");
   const result = {
     operation_id: operation,
     entries: prepared.map((p) => p.entry),
@@ -520,7 +499,7 @@ export function publishVersions(
         if (!segment || !inputVersions.has(source.source_version_id))
           throw new AppError(
             "USER_INPUT",
-            "Lineage must reference an operation input and output segment",
+            "片段来源必须引用操作输入和输出片段",
           );
         db.prepare(
           "INSERT INTO track_segment_sources VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -574,10 +553,7 @@ export function addVersionedEntry(
   if (found) {
     const old = currentEntry(db, found.id);
     if (old.sha256 !== digest(raw) || old.state !== "active")
-      throw new AppError(
-        "USER_INPUT",
-        `Archive path conflict; source retained: ${name}`,
-      );
+      throw new AppError("USER_INPUT", `轨迹路径冲突；源文件已保留：${name}`);
     return { id: old.entry_id, path: old.path, sha256: old.sha256 };
   }
   const entry = publishVersions(db, {
@@ -623,7 +599,7 @@ export class VersionStore {
       const row = db
         .prepare("SELECT sha256 FROM track_versions WHERE id=?")
         .get(versionId) as { sha256: string } | undefined;
-      if (!row) throw new AppError("USER_INPUT", "Version not found");
+      if (!row) throw new AppError("USER_INPUT", "版本不存在");
       return rawObject(db, row.sha256);
     });
   }
@@ -651,7 +627,7 @@ export class VersionStore {
         !request.request_key ||
         (!request.locations.length && !request.lineage?.length)
       )
-        throw new AppError("USER_INPUT", "Source linking requires evidence");
+        throw new AppError("USER_INPUT", "补充来源信息需要提供依据");
       const operation = stableId(
           `${request.archive_id}:operation:${request.request_key}`,
         ),
@@ -678,10 +654,7 @@ export class VersionStore {
           .get(item.version_id, item.sha256) as
           { entry_id: string } | undefined;
         if (!version)
-          throw new AppError(
-            "USER_INPUT",
-            "Source bytes do not match the stored version",
-          );
+          throw new AppError("USER_INPUT", "来源内容与存储版本不匹配");
         insertLocation(
           db,
           {
@@ -743,10 +716,7 @@ export class VersionStore {
           }
         | undefined;
       if (!target)
-        throw new AppError(
-          "USER_INPUT",
-          "Restore target does not belong to this entry/version",
-        );
+        throw new AppError("USER_INPUT", "恢复目标不属于该行程或版本");
       const segments = db
         .prepare(
           "SELECT segment_id,ordinal,source_kind FROM track_segments WHERE version_id=? ORDER BY ordinal",
@@ -848,10 +818,7 @@ export class VersionStore {
         effects.length !== expected.length ||
         new Set(expected.map((e) => e.entry_id)).size !== effects.length
       )
-        throw new AppError(
-          "USER_INPUT",
-          "Restore requires the complete operation group",
-        );
+        throw new AppError("USER_INPUT", "恢复需要完整的操作组");
       const current = new Map(
         expected.map((ref) => [ref.entry_id, checkRef(db, ref)]),
       );
@@ -859,10 +826,7 @@ export class VersionStore {
         const old = current.get(effect.entry_id),
           applied = JSON.parse(effect.after_json) as EntrySnapshot;
         if (!old || canonical(old) !== canonical(applied))
-          throw new AppError(
-            "USER_INPUT",
-            "Operation group changed; restore is no longer safe",
-          );
+          throw new AppError("USER_INPUT", "操作组已变化，无法安全恢复");
         const value = effect.before_json
           ? (JSON.parse(effect.before_json) as EntrySnapshot)
           : { ...old, state: "source_only" as const };

@@ -64,7 +64,7 @@ function track(doc: XmlDocument): XmlElement {
   if (!(node instanceof XmlElement))
     throw new AppError(
       "USER_INPUT",
-      "No gx:Track found under Document/Folder/Placemark",
+      "在 Document/Folder/Placemark 下未找到 gx:Track",
     );
   return node;
 }
@@ -74,10 +74,7 @@ function series(doc: XmlDocument, parseTimes = true) {
   const coords = elements(node.find("./gx:coord", namespaces));
   const whens = elements(node.find("./kml:when", namespaces));
   if (!whens.length || whens.length !== coords.length)
-    throw new AppError(
-      "USER_INPUT",
-      "Track points must carry matching timestamps",
-    );
+    throw new AppError("USER_INPUT", "轨迹点必须带有匹配的时间戳");
   return {
     node,
     coords,
@@ -112,7 +109,7 @@ function coordinateLocation(parts: string[], text: string): [number, number] {
     Math.abs(lon) > 180 ||
     Math.abs(lat) > 90
   )
-    throw new AppError("USER_INPUT", `Invalid coordinate: ${text}`);
+    throw new AppError("USER_INPUT", `坐标无效：${text}`);
   return [lat, lon];
 }
 const missingHeight = (text: string | undefined) =>
@@ -171,11 +168,11 @@ export function executeEdit(
           if (!operation.create)
             throw new AppError(
               "USER_INPUT",
-              "TrackTags missing; use --create-tag",
+              "缺少 TrackTags；请使用 --create-tag",
             );
           const root = doc.get("/kml:kml/kml:Document", namespaces);
           if (!(root instanceof XmlElement))
-            throw new AppError("USER_INPUT", "KML has no Document");
+            throw new AppError("USER_INPUT", "KML 缺少 Document 节点");
           let data = root.get("./kml:ExtendedData", namespaces);
           if (!(data instanceof XmlElement)) {
             const name = root.get("./kml:name", namespaces);
@@ -246,10 +243,7 @@ export function executeEdit(
           remove = driftIndices(coords.map(directText), times, operation);
         else {
           if (operation.points.length < 1 || operation.points.length > 2)
-            throw new AppError(
-              "USER_INPUT",
-              "Prune requires one or two points",
-            );
+            throw new AppError("USER_INPUT", "删除轨迹点需要选择一个或两个点");
           const indices = operation.points.map((p) => {
             let i = whens.findIndex((w) => directText(w) === p);
             if (i < 0) i = coords.findIndex((c) => directText(c) === p);
@@ -284,7 +278,7 @@ export function executeEdit(
         if (operation.kind === "altitude-targets")
           return { outputs: [], locations };
         if (operation.values.length !== locations.length)
-          throw new AppError("TOOL", "Elevation response length mismatch");
+          throw new AppError("TOOL", "高程查询结果数量与请求不匹配");
         let i = 0;
         for (const target of targets) {
           if (target.kind === "coord") {
@@ -306,6 +300,6 @@ export function executeEdit(
           : { outputs: [], count: 0 };
       }
     }
-    throw new AppError("USER_INPUT", "Unsupported or retired XML operation");
+    throw new AppError("USER_INPUT", "不支持或已停用的 KML 操作");
   });
 }

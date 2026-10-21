@@ -449,7 +449,7 @@ it("does not bridge an ignored middle segment, supports explicit cross-links and
       { ...input.settings, order: [c, b, a] },
       input.settings.order,
     ),
-  ).toThrow("follow segment order");
+  ).toThrow("展示设置校验失败");
 });
 it("binds same-content geometry independently to presentation snapshots and excludes drawn segments from timed speed", () => {
   const input = source();
@@ -498,13 +498,13 @@ it("detects gaps and returning drift only within a fully timed segment and retur
   ).toEqual([0, 1]);
   expect(() =>
     detectSegmentGaps({ ...s, time_us: null }, { gapSeconds: 1, gapMeters: 1 }),
-  ).toThrow("complete timestamps");
+  ).toThrow("完整的轨迹时间戳");
   expect(() =>
     detectSegmentGaps(
       { ...s, time_us: BigInt64Array.from([...s.time_us!].reverse()) },
       { gapSeconds: 1, gapMeters: 1 },
     ),
-  ).toThrow("increasing");
+  ).toThrow("严格递增");
 });
 
 const dirs: string[] = [];
@@ -588,7 +588,7 @@ it("prepares without writes, publishes identities/settings/lineage atomically, r
   );
   await expect(
     prepareSegmentEdit(file, { ...request, request_key: "stale" }),
-  ).rejects.toThrow("changed since preview");
+  ).rejects.toThrow("预览后轨迹已变化");
   const updated = output.entries[0]!;
   const target = {
     entry_id: updated.entry_id,
@@ -622,7 +622,7 @@ it("prepares without writes, publishes identities/settings/lineage atomically, r
     ),
   };
   const state = snapshot(file);
-  expect(() => store.publish(bad)).toThrow("identities");
+  expect(() => store.publish(bad)).toThrow("片段标识");
   expect(snapshot(file)).toEqual(state);
 });
 
@@ -746,7 +746,7 @@ it("drops explicit bypasses around an insertion and requires deliberate fixes fo
       { kind: "presentation", settings: { ...input.settings, order } },
       "reorder",
     ),
-  ).toThrow("follow segment order");
+  ).toThrow("展示设置校验失败");
   const changed = editSegments(
     input,
     {

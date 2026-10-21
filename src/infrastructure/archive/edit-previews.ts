@@ -241,7 +241,7 @@ export class EditPreviews {
         }
       });
     } else {
-      if (!("target" in request)) throw new Error("Missing target");
+      if (!("target" in request)) throw new Error("缺少编辑目标");
       if (before[0]!.state !== "active")
         throw new AppError(
           "USER_INPUT",
@@ -477,8 +477,7 @@ export class EditPreviews {
               settings.connections.push({ from: a, to: b, connect: false });
           }
           const output = prepared.publish.outputs[0]!;
-          if (output.kind !== "version")
-            throw new Error("Expected content output");
+          if (output.kind !== "version") throw new Error("缺少内容输出");
           if (out.tag) {
             if (!transform)
               throw new AppError("USER_INPUT", "活动标签处理未初始化");
@@ -567,7 +566,7 @@ export class EditPreviews {
             if (o.kind !== "version") return o;
             const { raw, ...rest } = o;
             const object = objects.findIndex((a) => a.sha256 === digest(raw));
-            if (object < 0) throw new Error("Missing artifact");
+            if (object < 0) throw new Error("缺少预览产物");
             return { ...rest, object };
           }),
         }
@@ -856,7 +855,7 @@ export class EditPreviews {
           m.request.operation.expected,
           context,
         );
-      if (!m.publish) throw new Error("Missing prepared request");
+      if (!m.publish) throw new Error("缺少已准备的请求");
       const prepared: PublishRequest = {
         ...m.publish,
         request_key: request.request_key,

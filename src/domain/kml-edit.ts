@@ -53,7 +53,7 @@ export function coordinate(value: string): [number, number] {
     Math.abs(lon) > 180 ||
     Math.abs(lat) > 90
   )
-    throw new AppError("USER_INPUT", `Invalid coordinate: ${value}`);
+    throw new AppError("USER_INPUT", `坐标无效：${value}`);
   return [lon, lat];
 }
 export function distance(a: [number, number], b: [number, number]): number {
@@ -77,8 +77,7 @@ export function splitIndices(
     for (const point of op.points) {
       if (/^-?\d{1,3}(\.\d+)?\s-?\d{1,2}(\.\d+)?\s\d+(\.\d+)?$/.test(point)) {
         const i = coords.indexOf(point);
-        if (i < 0)
-          throw new AppError("USER_INPUT", `Point not found: ${point}`);
+        if (i < 0) throw new AppError("USER_INPUT", `找不到轨迹点：${point}`);
         indices.push(i);
       } else {
         const t = editTime(point);
@@ -95,7 +94,7 @@ export function splitIndices(
       }
     }
   if (indices.includes(coords.length - 1))
-    throw new AppError("USER_INPUT", "Cannot split at the last point");
+    throw new AppError("USER_INPUT", "不能在最后一个点之后断开");
   return [...new Set(indices)].sort((a, b) => a - b);
 }
 export function driftIndices(

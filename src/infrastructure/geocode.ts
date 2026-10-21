@@ -61,7 +61,7 @@ export class GoogleGeocode implements GeocodePort {
     language: string,
     signal: AbortSignal,
   ) {
-    if (!key) throw new AppError("TOOL", "Google API key is required");
+    if (!key) throw new AppError("TOOL", "未配置 Google API 密钥");
     const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
     url.search = new URLSearchParams({
       latlng: point.join(","),
@@ -81,30 +81,27 @@ export class GoogleGeocode implements GeocodePort {
         const response = await this.request(url, {
           signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
         });
-        if (!response.ok) throw new Error("HTTP failure");
+        if (!response.ok) throw new Error("HTTP 请求失败");
         payload = (await response.json()) as typeof payload;
         break;
       } catch {
         checkCancelled(signal);
         if (attempt === 2)
-          throw new AppError(
-            "TOOL",
-            "Google geocoding request failed after 3 attempts",
-          );
+          throw new AppError("TOOL", "Google 地理编码请求连续失败 3 次");
         try {
           await this.sleep(1000 * 2 ** attempt, signal);
         } catch {
           checkCancelled(signal);
-          throw new AppError("TOOL", "Google retry failed");
+          throw new AppError("TOOL", "Google 请求重试失败");
         }
       }
     if (!payload || !["OK", "ZERO_RESULTS"].includes(payload.status ?? ""))
       throw new AppError(
         "TOOL",
-        `Google geocoding API: ${["OVER_QUERY_LIMIT", "REQUEST_DENIED", "INVALID_REQUEST", "UNKNOWN_ERROR"].includes(payload?.status ?? "") ? payload!.status : "invalid response"}`,
+        `Google 地理编码接口返回：${["OVER_QUERY_LIMIT", "REQUEST_DENIED", "INVALID_REQUEST", "UNKNOWN_ERROR"].includes(payload?.status ?? "") ? payload!.status : "invalid response"}`,
       );
     if (!Array.isArray(payload.results))
-      throw new AppError("TOOL", "Google geocoding API: invalid response");
+      throw new AppError("TOOL", "Google 地理编码接口返回无效响应");
     return payload as GeocodeResponse;
   }
 }

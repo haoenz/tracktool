@@ -124,7 +124,7 @@ it("auto split retains each original point exactly once, last-point split fails"
         points: ["2026-10-01T00:10:04.000001Z"],
       },
     }),
-  ).rejects.toThrow("last point");
+  ).rejects.toThrow("最后一个点");
 });
 it("set-tag preserves custom namespaces, CDATA, and creates a missing tag only explicitly", async () => {
   const p = pool();
@@ -273,7 +273,7 @@ it("Google batches at 512, aligns missing results and retries transport only wit
   });
   await expect(
     new GoogleElevation(fail, async () => {}).get([[1, 2]], "secret", signal),
-  ).rejects.toThrow("3 attempts");
+  ).rejects.toThrow("连续失败 3 次");
   expect(fail).toHaveBeenCalledTimes(3);
   const denied = vi.fn(
     async () =>

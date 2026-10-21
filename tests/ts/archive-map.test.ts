@@ -234,7 +234,7 @@ it("rejects unknown schemas without upgrading or creating missing files", async 
   await expect(client.catalog(archive)).rejects.toThrow("schema 99");
   await expect(
     client.catalog(path.join(directory, "missing.sqlite3")),
-  ).rejects.toThrow("not found");
+  ).rejects.toThrow("找不到");
   const check = new Database(archive);
   expect(check.pragma("user_version", { simple: true })).toBe(99);
   check.close();
