@@ -6,7 +6,12 @@ import type {
   RasterSourceSpecification,
 } from "maplibre-gl";
 type Layer = Record<string, unknown>;
-import { presetFor, activeOverlays, effectiveFeatures } from "./layers.js";
+import {
+  presetFor,
+  activeOverlays,
+  canvasCrs,
+  effectiveFeatures,
+} from "./layers.js";
 export const basemapPreset = presetFor;
 const empty: TrackGeoJSON = { type: "FeatureCollection", features: [] };
 const name = [
@@ -21,6 +26,27 @@ const major = [
   ["get", "class"],
   ["literal", ["motorway", "trunk", "primary", "secondary", "tertiary"]],
 ];
+const minorClasses = [
+  "in",
+  ["get", "class"],
+  [
+    "literal",
+    [
+      "motorway",
+      "trunk",
+      "primary",
+      "secondary",
+      "tertiary",
+      "minor",
+      "service",
+    ],
+  ],
+];
+const paths = [
+  "in",
+  ["get", "class"],
+  ["literal", ["path", "track", "pedestrian"]],
+];
 const roadClasses = [
   "in",
   ["get", "class"],
@@ -34,10 +60,9 @@ const roadClasses = [
       "tertiary",
       "minor",
       "service",
-      "track",
       "path",
+      "track",
       "pedestrian",
-      "construction",
     ],
   ],
 ];
@@ -47,11 +72,9 @@ export function mapStyle(
   data?: TrackGeoJSON,
 ): StyleSpecification {
   const preset = presetFor(state, config),
-    raster = !!preset || state.style.basemap === "satellite";
-  const dark =
-    state.style.basemap === "dark" ||
-    preset?.imagery ||
-    state.style.basemap === "satellite";
+    raster = !!preset,
+    canvas = canvasCrs(state, config);
+  const dark = state.style.appearance === "dark" || !!preset?.imagery;
   const p = dark
     ? {
         ground: "#202c33",
@@ -61,6 +84,8 @@ export function mapStyle(
         minor: "#526970",
         border: "#d0bd99",
         building: "#637774",
+        park: "#31443a",
+        aeroway: "#556a6f",
         text: "#f1f0e8",
         halo: "#18242c",
       }
@@ -72,6 +97,8 @@ export function mapStyle(
         minor: "#b5aca0",
         border: "#998570",
         building: "#c6baaa",
+        park: "#cfe0bb",
+        aeroway: "#d8d0c4",
         text: "#273b43",
         halo: "#faf8f2",
       };
@@ -89,7 +116,10 @@ export function mapStyle(
     labels: Layer[] = [],
     themes: Layer[] = [];
   const f = effectiveFeatures(state, config);
-  const vector = !raster || Object.values(f).some((v) => v !== "none");
+  // GCJ-02 canvases accept raster tiles only; vector tiles stay WGS84.
+  const vector =
+    canvas === "wgs84" &&
+    (!raster || Object.values(f).some((v) => v !== "none"));
   if (vector)
     sources.base = {
       type: "vector",
@@ -101,14 +131,16 @@ export function mapStyle(
     id: string,
   ): RasterSourceSpecification => ({
     type: "raster",
-    tiles: [`${location.origin}/tiles/${id}/{z}/{x}/{y}.png`],
+    tiles: [
+      `${location.origin}/tiles/${id}/{z}/{x}/{y}.png${canvas === "gcj02" ? "?crs=gcj02" : ""}`,
+    ],
     tileSize: s?.tile_display_size || s?.tile_size || 256,
     minzoom: s?.minzoom || 0,
     maxzoom: s?.maxzoom || 18,
     scheme: "xyz",
   });
   if (raster) {
-    sources.satellite = rasterSource(preset, preset?.id || "satellite");
+    sources.satellite = rasterSource(preset, preset!.id);
     base.push({
       id: "satellite",
       type: "raster",
@@ -116,10 +148,10 @@ export function mapStyle(
       paint: { "raster-fade-duration": 0 },
     });
   } else {
-    for (const [id, type, paint] of [
-      ["landcover", "fill", { "fill-color": p.land, "fill-opacity": 0.55 }],
-      ["landuse", "fill", { "fill-color": p.land, "fill-opacity": 0.35 }],
-      ["water", "fill", { "fill-color": p.water }],
+    const surfaces = [
+      ["landcover", "fill", { "fill-color": p.land, "fill-opacity": 0.55 }, 0],
+      ["landuse", "fill", { "fill-color": p.land, "fill-opacity": 0.35 }, 0],
+      ["water", "fill", { "fill-color": p.water }, 0],
       [
         "waterway",
         "line",
@@ -127,10 +159,20 @@ export function mapStyle(
           "line-color": p.water,
           "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.5, 14, 2],
         },
+        0,
       ],
-    ] as [string, string, Record<string, unknown>][])
-      if (config.vectorLayers?.[id])
-        base.push({ id, type, source: "base", "source-layer": id, paint });
+      ["park", "fill", { "fill-color": p.park, "fill-opacity": 0.5 }, 11],
+    ] as [string, string, Record<string, unknown>, number][];
+    for (const [id, type, paint, minzoom] of surfaces)
+      if (f[id] !== "none" && config.vectorLayers?.[id])
+        base.push({
+          id,
+          type,
+          source: "base",
+          "source-layer": id,
+          paint,
+          ...(minzoom ? { minzoom } : {}),
+        });
   }
   const geom = (
     id: string,
@@ -175,6 +217,29 @@ export function mapStyle(
       },
       { minzoom: 13 },
     );
+  if (f.aeroway !== "none")
+    geom(
+      "aeroway",
+      "aeroway",
+      "line",
+      {
+        "line-color": p.aeroway,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.5, 16, 2.5],
+      },
+      { minzoom: 11 },
+    );
+  if (f.paths !== "none")
+    geom(
+      "paths",
+      "transportation",
+      "line",
+      {
+        "line-color": p.minor,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 12, 0.5, 17, 1.8],
+        "line-dasharray": [2, 1.5],
+      },
+      { minzoom: 12, filter: paths },
+    );
   if (f.roads !== "none") {
     if (f.roads === "all")
       geom(
@@ -185,7 +250,7 @@ export function mapStyle(
           "line-color": p.minor,
           "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.5, 16, 3],
         },
-        { minzoom: 9, filter: ["all", roadClasses, ["!", major]] },
+        { minzoom: 9, filter: ["all", minorClasses, ["!", major]] },
       );
     geom(
       "roads-major",
@@ -313,6 +378,14 @@ export function mapStyle(
     );
   if (f.water_names !== "none")
     symbol("water-names", "water_name", 4, null, name, { "text-size": 13 });
+  if (f.park !== "none")
+    symbol("park-names", "park", 13, ["has", "name"], name, {
+      "text-size": 11,
+    });
+  if (f.aerodrome !== "none")
+    symbol("aerodrome", "aerodrome_label", 10, ["has", "name"], name, {
+      "text-size": 11,
+    });
   const annotations: Layer[] = [];
   for (const o of activeOverlays(state, config)) {
     if (o.format === "vector") {

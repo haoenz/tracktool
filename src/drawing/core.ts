@@ -13,7 +13,7 @@ export interface RenderReport {
 }
 import { mapStyle, basemapPreset } from "./styles.js";
 import { displayCoordinate, displayGeometry } from "./coordinates.js";
-import { activeOverlays, effectiveFeatures } from "./layers.js";
+import { activeOverlays, canvasCrs, effectiveFeatures } from "./layers.js";
 /* Shared deterministic map renderer: fixed CSS-pixel frame, output DPR only. */
 export const frames = {
   "4:3": [960, 720],
@@ -68,7 +68,7 @@ export class MapCanvas {
     this.state = state;
     this.config = config;
     this.preset = basemapPreset(state, config);
-    this.crs = "wgs84";
+    this.crs = canvasCrs(state, config);
     this.onCamera = onCamera;
     this.onError = onError;
     this.data = empty;
@@ -293,10 +293,6 @@ export class MapCanvas {
     };
     if (this.preset)
       this.credit.append(document.createTextNode(this.preset.attribution));
-    else if (this.state.style.basemap === "satellite")
-      this.credit.append(
-        document.createTextNode(this.config.satelliteAttribution + " "),
-      );
     else if (this.config.customVectorAttribution)
       this.credit.append(
         document.createTextNode(this.config.customVectorAttribution),
@@ -310,7 +306,7 @@ export class MapCanvas {
       );
     }
     if (
-      (this.preset || this.state.style.basemap === "satellite") &&
+      this.preset &&
       Object.values(effectiveFeatures(this.state, this.config)).some(
         (value) => value !== "none",
       )
@@ -351,6 +347,7 @@ export class MapCanvas {
     this.state = state;
     if (
       old.style.basemap !== state.style.basemap ||
+      old.style.appearance !== state.style.appearance ||
       JSON.stringify([
         old.style.features,
         old.style.overlays,
@@ -363,7 +360,7 @@ export class MapCanvas {
         ])
     ) {
       this.preset = basemapPreset(state, this.config);
-      this.crs = "wgs84";
+      this.crs = canvasCrs(state, this.config);
       this.displayData = displayGeometry(this.data, this.crs);
       this.resources.clear();
       this.map.setStyle(mapStyle(state, this.config, this.displayData));
@@ -501,7 +498,7 @@ export class MapCanvas {
     ctx.clearRect(0, 0, w, h);
     const dark = this.preset
       ? this.preset.imagery
-      : this.state.style.basemap !== "light";
+      : this.state.style.appearance === "dark";
     ctx.fillStyle = dark ? "#f0eee5" : "#273b43";
     ctx.strokeStyle = dark ? "#202c33" : "#faf8f2";
     ctx.lineJoin = "round";

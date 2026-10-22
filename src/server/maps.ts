@@ -33,11 +33,13 @@ export interface MapOptions {
 }
 const location = z.object({ path: z.string().min(1).max(4096) }),
   archive = z.object({ archive: z.string().min(1).max(4096) }),
-  named = archive.extend({ name: z.string().min(1).max(240) });
+  named = archive.extend({ name: z.string().min(1).max(240) }),
+  tileCrs = z
+    .object({ crs: z.enum(["wgs84", "gcj02"]).default("wgs84") })
+    .strict();
 function restoreStyle(state: Project, saved: ProjectStyle, config: MapConfig) {
   const basemap =
-    ["light", "dark"].includes(saved.basemap) ||
-    (saved.basemap === "satellite" && config.satellite) ||
+    saved.basemap === "vector" ||
     config.basemaps.some((preset) => preset.id === saved.basemap)
       ? saved.basemap
       : state.style.basemap;
@@ -267,8 +269,6 @@ export function mapRoutes(
         "USER_INPUT",
         "项目资源版本不同，请确认使用当前资源并另存项目",
       );
-    if (result.state.style.basemap === "satellite" && !r.satellite)
-      throw new AppError("USER_INPUT", "卫星底图未配置");
     r.checkText(result.state.title);
     return { job: jobs.submit(result.state, result.tracks) };
   });
@@ -323,6 +323,7 @@ export function mapRoutes(
     "/tiles/:source/:z/:x/:y",
     async (request, reply) => {
       const p = request.params,
+        { crs } = tileCrs.parse(request.query),
         r = await (
           await getResources()
         ).displayTile(
@@ -332,6 +333,7 @@ export function mapRoutes(
           Number(p.y.replace(/\.(pbf|png)$/, "")),
           cancellation(request, reply),
           request.headers["x-tracktool-render"] === token,
+          crs,
         );
       return reply.type(r.mime).send(r.data);
     },

@@ -821,17 +821,48 @@ export function RadioGroup({
   value,
   onValueChange,
   options,
+  className,
+  "aria-label": ariaLabel,
+  variant = "list",
 }: {
   value: string;
   onValueChange: (value: string) => void;
   options: { value: string; label: string }[];
+  className?: string;
+  "aria-label"?: string;
+  /** "segmented" renders the choices as one pill split into sections. */
+  variant?: "list" | "segmented";
 }) {
   const id = useId();
+  if (variant === "segmented")
+    return (
+      <BaseRadioGroup
+        value={value}
+        onValueChange={onValueChange}
+        aria-label={ariaLabel}
+        className={cn(
+          "inline-flex w-fit flex-wrap items-center gap-0.5 rounded-full border border-border bg-muted p-0.5",
+          className,
+        )}
+      >
+        {options.map((o) => (
+          <RadioGroupItem
+            key={o.value}
+            value={o.value}
+            variant="segment"
+            className="px-2.5 py-0.5 text-xs text-muted-foreground data-[state=checked]:bg-background data-[state=checked]:font-semibold data-[state=checked]:text-foreground data-[state=checked]:shadow-xs"
+          >
+            {o.label}
+          </RadioGroupItem>
+        ))}
+      </BaseRadioGroup>
+    );
   return (
     <BaseRadioGroup
       value={value}
       onValueChange={onValueChange}
-      className="mb-3 flex flex-wrap gap-4"
+      aria-label={ariaLabel}
+      className={cn("mb-3 flex flex-wrap gap-4", className)}
     >
       {options.map((o) => (
         <div key={o.value} className="flex items-center gap-2">

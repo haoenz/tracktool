@@ -7,7 +7,9 @@ import { reprojectGcjTile } from "../../src/infrastructure/maps/raster-reproject
 import { MapResources } from "../../src/infrastructure/maps/resources.js";
 import { defaultProject, ProjectSchema } from "../../src/shared/project.js";
 import {
+  canvasCrs,
   effectiveFeatures,
+  featureReason,
   overlayReason,
   reconcileOverlays,
 } from "../../src/drawing/layers.js";
@@ -191,24 +193,34 @@ it("rejects incomplete source mosaics and retries without caching a partial resu
   );
 });
 
-it("accepts mixed coordinate sources and OSM features while retaining content conflict checks", async () => {
+it("derives the canvas CRS from the basemap and keeps WGS overlays off it", async () => {
   const r = await resources(async () => Buffer.alloc(0));
   const config = r.publicConfig();
   config.vectorLayers = { transportation: { class: "String" }, building: {} };
   const project = defaultProject();
+  expect(canvasCrs(project, config)).toBe("wgs84");
   project.style.basemap = "amap-satellite";
+  expect(canvasCrs(project, config)).toBe("gcj02");
   project.style.overlays = [
     "openrailwaymap-standard",
     "openinframap-power",
   ].map((id) => ({ id, enabled: true, opacity: 1 }));
   expect(ProjectSchema.safeParse(project).success).toBe(true);
-  expect(reconcileOverlays(project, config)).toEqual([]);
-  expect(effectiveFeatures(project, config).roads).toBe("all");
-  expect(effectiveFeatures(project, config).buildings).toBe("all");
+  // WGS84 overlays and vector features cannot join a GCJ-02 canvas.
+  expect(reconcileOverlays(project, config)).toHaveLength(2);
+  expect(project.style.overlays.every((overlay) => !overlay.enabled)).toBe(
+    true,
+  );
+  expect(featureReason(project, config, "roads")).toContain("GCJ-02");
+  expect(effectiveFeatures(project, config).roads).toBe("none");
+  expect(effectiveFeatures(project, config).buildings).toBe("none");
   project.style.basemap = "esri-satellite";
+  expect(canvasCrs(project, config)).toBe("wgs84");
   project.style.overlays = [{ id: "amap-labels", enabled: true, opacity: 1 }];
   expect(ProjectSchema.safeParse(project).success).toBe(true);
   expect(reconcileOverlays(project, config)).toEqual([]);
+  // The GCJ annotation now provides road content on the WGS84 canvas.
+  expect(featureReason(project, config, "roads")).toContain("高德路网注记");
   project.style.basemap = "osm-standard";
   expect(ProjectSchema.safeParse(project).success).toBe(false);
   expect(
@@ -218,4 +230,23 @@ it("accepts mixed coordinate sources and OSM features while retaining content co
       config.overlays.find((o) => o.id === "amap-labels")!,
     ),
   ).toContain("同类内容");
+});
+
+it("serves raw GCJ-02 tiles for a GCJ-02 canvas and rejects WGS84 sources", async () => {
+  const input = await solid(256);
+  const r = await resources(async () => input);
+  const raw = await r.tile("amap-road", 12, 3372, 1552);
+  const served = await r.displayTile(
+    "amap-road",
+    12,
+    3372,
+    1552,
+    undefined,
+    false,
+    "gcj02",
+  );
+  expect(served.data).toEqual(raw.data);
+  await expect(
+    r.displayTile("osm-standard", 12, 3372, 1552, undefined, false, "gcj02"),
+  ).rejects.toThrow("GCJ-02");
 });

@@ -56,10 +56,7 @@ export class Transport {
         if (!response.ok) {
           await response.body?.cancel();
           if (railway) this.failed();
-          throw new AppError(
-            "USER_INPUT",
-            `地图服务返回 HTTP ${status}；请重试或更换底图`,
-          );
+          throw new AppError("USER_INPUT", `HTTP ${status}`);
         }
         const reader = response.body?.getReader();
         if (!reader) throw new AppError("USER_INPUT", "地图资源为空");

@@ -1,4 +1,4 @@
-import { filterTracks } from "./map-tools.js";
+import { filterTracks, pickBasemap } from "./map-tools.js";
 import { tool } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 import { test, expect, type Page } from "@playwright/test";
@@ -165,11 +165,10 @@ test("style reload restores the overview; export preview excludes it; mobile pan
 }) => {
   await loaded(page);
   await tool(page, "地图样式");
-  await page.getByRole("combobox", { name: "底图", exact: true }).click();
-  await page.getByRole("option").getByText("深色矢量", { exact: true }).click();
+  await page.getByRole("button", { name: "深色", exact: true }).click();
   await expect.poll(() => overviewSource(page)).toBeTruthy();
   await expect
-    .poll(() => page.evaluate(() => window.renderer!.state.style.basemap), {
+    .poll(() => page.evaluate(() => window.renderer!.state.style.appearance), {
       timeout: 20000,
     })
     .toBe("dark");
@@ -360,7 +359,7 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
     }),
   ).toBeVisible();
 });
-test("GCJ02 basemap retains the WGS84 overview and a style reload restores selection", async ({
+test("GCJ02 basemap switches the canvas and overview together", async ({
   page,
 }) => {
   await loaded(page);
@@ -369,28 +368,17 @@ test("GCJ02 basemap retains the WGS84 overview and a style reload restores selec
     .getByRole("button", { name: "查看 Train/same.kml", exact: true })
     .click();
   await tool(page, "地图样式");
-  const label = await page.evaluate(() => {
-    const b = window.renderer!.config.basemaps.find(
-      (b) => b.id === "amap-road",
-    )!;
-    return `${b.group} · ${b.name}`;
-  });
-  const select = page.getByRole("combobox", { name: "底图", exact: true });
-  await select.click();
-  await page
-    .getByRole("combobox", { name: "搜索底图", exact: true })
-    .fill(label);
-  await page.getByRole("option").getByText(label, { exact: true }).click();
+  await pickBasemap(page, "amap-road");
   await expect
     .poll(() => page.evaluate(() => window.renderer!.state.style.basemap), {
       timeout: 20000,
     })
     .toBe("amap-road");
   await expect
-    .poll(() => page.evaluate(() => window.renderer!.crs), { timeout: 15000 })
-    .toBe("wgs84");
+    .poll(() => page.evaluate(() => window.renderer!.crs), { timeout: 20000 })
+    .toBe("gcj02");
   await expect.poll(() => overviewSource(page)).toBeTruthy();
-  expect(await overviewSource(page)).toBe(before);
+  expect(await overviewSource(page)).not.toBe(before);
   await page.evaluate(() => {
     const r = window.renderer!;
     r.map.setStyle(r.map.getStyle(), { diff: false });

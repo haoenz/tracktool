@@ -23,11 +23,9 @@ export const ProjectStyleSchema = z
   .object({
     basemap: z
       .string()
-      .refine(
-        (id) =>
-          ["light", "dark", "satellite"].includes(id) ||
-          presets[id]?.kind === "basemap",
-      ),
+      .refine((id) => id === "vector" || presets[id]?.kind === "basemap"),
+    // Vector tiles carry no palette; light/dark stays independent of the source.
+    appearance: z.enum(["light", "dark"]),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
     width: number(0.5, 12),
     features,
@@ -125,7 +123,8 @@ export function defaultProject(
     tracks: [],
     camera: { center: [105, 35], zoom: 3.5 },
     style: {
-      basemap: "light",
+      basemap: "vector",
+      appearance: "light",
       color: "#e05240",
       width: 3,
       features: { ...catalog.defaults },
@@ -153,6 +152,11 @@ export function upgradeProject(input: unknown): unknown {
   style.features ??= { ...catalog.defaults };
   style.overlays ??= [];
   style.power ??= { min_voltage: 0, facilities: "all" };
+  if (style.basemap === "light" || style.basemap === "dark") {
+    style.appearance = style.basemap;
+    style.basemap = "vector";
+  }
+  style.appearance ??= "light";
   const legacy: Record<string, string> = catalog.legacy;
   if (
     typeof style.basemap === "string" &&

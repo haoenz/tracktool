@@ -48,12 +48,10 @@ test("project candidate browsing preserves composition, filters, visibility and 
   await selectProjectTrack(page, track);
   await title(page, "保留的工程修改");
   await tool(page, "设置");
-  await page.getByRole("combobox", { name: "底图", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "搜索底图", exact: true })
-    .fill("深色矢量");
-  await page.getByText("深色矢量", { exact: true }).click();
-  await expect.poll(async () => (await state(page)).style.basemap).toBe("dark");
+  await page.getByRole("button", { name: "深色", exact: true }).click();
+  await expect
+    .poll(async () => (await state(page)).style.appearance)
+    .toBe("dark");
   await page.evaluate(() =>
     window.renderer!.map.jumpTo({ center: [120, 40], zoom: 9 }),
   );

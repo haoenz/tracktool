@@ -1,4 +1,23 @@
 import { expect, type Page } from "@playwright/test";
+import type {} from "../../src/drawing/globals.js";
+const openVendors = ["OSM", "memomaps", "OpenTopoMap", "OpenFreeMap"];
+/** Pick a basemap through the two-level vendor picker. */
+export async function pickBasemap(page: Page, id: string) {
+  const { vendor, name } = await page.evaluate(
+    ({ id, open }) => {
+      if (id === "vector")
+        return { vendor: "开放地图", name: "OpenFreeMap 矢量底图" };
+      const preset = window.renderer!.config.basemaps.find((b) => b.id === id)!;
+      return {
+        vendor: open.includes(preset.group) ? "开放地图" : preset.group,
+        name: preset.name,
+      };
+    },
+    { id, open: openVendors },
+  );
+  await page.getByRole("button", { name: vendor, exact: true }).click();
+  await page.getByRole("button", { name, exact: true }).click();
+}
 /** Navigate only through visible workspace controls. */
 export async function tool(page: Page, name: string) {
   await expect(page.locator(".project-icon")).toBeVisible();

@@ -237,7 +237,7 @@
     },
     {
       "id": "bing-satellite",
-      "name": "BING卫星图",
+      "name": "必应卫星图",
       "qr_id": 610,
       "url": "https://ecn.dynamic.t0.tiles.virtualearth.net/comp/ch/{quadkey}?mkt=en-us&it=A&shading=hill&n=z&cb=1",
       "tile_size": 256,
@@ -255,7 +255,7 @@
         "mf": "3",
         "he": "2"
       },
-      "group": "Bing",
+      "group": "必应",
       "kind": "basemap",
       "format": "raster",
       "minzoom": 0,
@@ -268,7 +268,7 @@
     },
     {
       "id": "bing-terrain",
-      "name": "Bing地形图",
+      "name": "必应地形图",
       "qr_id": 207,
       "url": "https://t.ssl.ak.dynamic.tiles.virtualearth.net/comp/ch/{quadkey}?mkt=zh-CN&it=G,LC,BX,RL&shading=t&n=z&og=1526&cstl=vb&o=webp",
       "tile_size": 256,
@@ -287,7 +287,7 @@
         "pn": "1",
         "mf": "3"
       },
-      "group": "Bing",
+      "group": "必应",
       "kind": "basemap",
       "format": "raster",
       "minzoom": 0,
@@ -328,7 +328,7 @@
         "oy": "1",
         "df": "408,16777215,408,16777215"
       },
-      "group": "ArcGIS / Esri",
+      "group": "ArcGIS",
       "kind": "basemap",
       "format": "raster",
       "minzoom": 0,
@@ -366,7 +366,7 @@
       "invalid_tile_sha256": [
         "9eafd300d61393184a4abc1d458564cfd1cd9b6f9c4e9c74687045c0a0e5b858"
       ],
-      "group": "ArcGIS / Esri",
+      "group": "ArcGIS",
       "kind": "basemap",
       "format": "raster",
       "minzoom": 0,

@@ -1,50 +1,71 @@
 import { useState } from "react";
+import { ChevronRightIcon } from "lucide-react";
 import type { Project } from "../shared/project.js";
 import type { MapConfig, MapPreset } from "../shared/map.js";
 import {
   featureControls,
+  featureGroups,
   featureReason,
   overlayReason,
 } from "../drawing/layers.js";
 import {
-  Button,
-  Checkbox,
   InputNumber,
+  RadioGroup,
+  Switch,
   Select,
 } from "./components/controls.js";
-import {
-  Popover,
-  PopoverContent,
-  PopoverAnchor,
-} from "./components/ui/popover.js";
 
-export function ReprojectionHelp() {
-  const [open, setOpen] = useState(false);
+const powerFacilities = [
+  { value: "none", label: "仅线路" },
+  { value: "substations", label: "线路与变电站" },
+  { value: "generation", label: "线路与发电设施" },
+  { value: "all", label: "线路与全部设施" },
+];
+function FeatureGroup({
+  label,
+  keys,
+  state,
+  config,
+  change,
+}: {
+  label: string;
+  keys: string[];
+  state: Project;
+  config: MapConfig;
+  change: (edit: (next: Project) => void) => void;
+}) {
+  const items = keys
+    .filter((key) => !featureReason(state, config, key))
+    .map((key) => {
+      const [name, options] = featureControls[key]!;
+      return { key, label: name, options };
+    });
+  if (!items.length) return null;
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverAnchor asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          onFocus={() => setOpen(true)}
-          onClick={() => setOpen(true)}
-          aria-expanded={open}
-          aria-label="需重投影说明"
-        >
-          需重投影说明
-        </Button>
-      </PopoverAnchor>
-      <PopoverContent
-        onOpenAutoFocus={(event) => event.preventDefault()}
-        onCloseAutoFocus={(event) => event.preventDefault()}
-      >
-        标有“需重投影”的图层会自动对齐坐标，首次加载可能稍慢，文字和细线可能略有柔化。
-      </PopoverContent>
-    </Popover>
+    <fieldset className="settings-group settings-subgroup">
+      <legend>{label}</legend>
+      {items.map((item) => (
+        <div className="settings-feature" key={item.key}>
+          <span className="settings-choice-label">{item.label}</span>
+          <RadioGroup
+            aria-label={item.label}
+            variant="segmented"
+            value={state.style.features[item.key] ?? "none"}
+            // Strongest option first, "关闭" last.
+            options={Object.entries(item.options)
+              .reverse()
+              .map(([value, name]) => ({ value, label: name }))}
+            onValueChange={(value) =>
+              change((next) => {
+                next.style.features[item.key] = value;
+              })
+            }
+          />
+        </div>
+      ))}
+    </fieldset>
   );
 }
-const hint = (source: MapPreset) =>
-  source.crs === "gcj02" && source.format !== "vector" ? "需重投影" : undefined;
 
 export function MapContentSettings({
   state,
@@ -57,21 +78,67 @@ export function MapContentSettings({
   change: (edit: (next: Project) => void) => void;
   notify: (message: string) => void;
 }) {
+  const [expanded, setExpanded] = useState<string[]>([]);
+  const toggle = (id: string) =>
+    setExpanded((ids) =>
+      ids.includes(id) ? ids.filter((o) => o !== id) : [...ids, id],
+    );
   const annotations = config.overlays.filter(
     (o) => o.category === "annotation",
   );
   const railways = config.overlays.filter((o) => o.content.includes("railway"));
-  const enabled = (id: string) =>
-    state.style.overlays.some((o) => o.id === id && o.enabled);
-  function choose(sources: MapPreset[], id: string) {
+  const topics = [
+    { id: "railway", label: "铁路", sources: railways },
+    ...config.overlays
+      .filter(
+        (o) => o.category !== "annotation" && !o.content.includes("railway"),
+      )
+      .map((o) => ({
+        id: o.id,
+        label:
+          o.id === "openinframap-power"
+            ? "电力"
+            : o.id === "openseamap-seamarks"
+              ? "航标"
+              : o.name,
+        sources: [o],
+      })),
+  ];
+  const stored = (id: string) => state.style.overlays.find((o) => o.id === id);
+  const available = (source: MapPreset) =>
+    !overlayReason(state, config, source, false);
+  const selectedAnnotation = annotations.find((o) => stored(o.id)?.enabled);
+  const availableAnnotations = annotations.filter(available);
+  // Older projects can retain several disabled railway variants. Present them
+  // as one layer, preferring the active variant, without rewriting on load.
+  const selectedSource = (sources: MapPreset[]) =>
+    sources.find((o) => stored(o.id)?.enabled) ??
+    sources.find((o) => stored(o.id));
+  const sourceFor = (sources: MapPreset[]) =>
+    selectedSource(sources) ?? sources.find(available) ?? sources[0];
+  // Incompatible sources are hidden instead of explained.
+  const visibleTopics = topics.filter((topic) => {
+    const source = sourceFor(topic.sources);
+    return Boolean(source && available(source));
+  });
+  const hasFeatureControls = featureGroups.some((group) =>
+    group.keys.some((key) => !featureReason(state, config, key)),
+  );
+
+  function choose(sources: MapPreset[], id: string, enable = true) {
     const source = sources.find((o) => o.id === id);
+    if (source && enable && !available(source)) return;
     const replaced = config.overlays.filter(
       (o) =>
-        enabled(o.id) &&
+        stored(o.id)?.enabled &&
         o.id !== id &&
         (sources.some((s) => s.id === o.id) ||
-          source?.content.some((c) => o.content.includes(c))),
+          (enable && source?.content.some((c) => o.content.includes(c)))),
     );
+    const previousOpacity =
+      sources.map((o) => stored(o.id)).find((o) => o?.enabled)?.opacity ??
+      stored(selectedSource(sources)?.id ?? "")?.opacity ??
+      1;
     change((next) => {
       for (const overlay of next.style.overlays)
         if (
@@ -81,176 +148,246 @@ export function MapContentSettings({
           overlay.enabled = false;
       if (source) {
         const old = next.style.overlays.find((o) => o.id === id);
-        if (old) old.enabled = true;
-        else next.style.overlays.push({ id, enabled: true, opacity: 1 });
+        if (old) old.enabled = enable;
+        else
+          next.style.overlays.push({
+            id,
+            enabled: enable,
+            opacity: previousOpacity,
+          });
+        // Source changes replace a topic's saved variant; toggling it off keeps
+        // that variant and its parameters available on the main list.
+        next.style.overlays = next.style.overlays.filter(
+          (o) => o.id === id || !sources.some((s) => s.id === o.id),
+        );
       }
     });
-    if (source && replaced.length)
+    if (source && enable && replaced.length)
       notify(
         `已用「${source.name}」替换「${replaced.map((o) => o.name).join("、")}」`,
       );
   }
-  function opacity(source: MapPreset) {
-    const overlay = state.style.overlays.find((o) => o.id === source.id);
-    if (!overlay?.enabled) return null;
-    return (
-      <div className="settings-layer-options">
-        <label htmlFor={`opacity-${source.id}`}>透明度（%）</label>
-        <InputNumber
-          id={`opacity-${source.id}`}
-          aria-label={`${source.name}透明度`}
-          min={10}
-          max={100}
-          step={10}
-          value={Math.round(overlay.opacity * 100)}
-          onChange={(value) =>
-            change((next) => {
-              const item = next.style.overlays.find((o) => o.id === source.id);
-              if (item) item.opacity = (value ?? 100) / 100;
-            })
-          }
-        />
-      </div>
-    );
-  }
-  function group(label: string, id: string, sources: MapPreset[]) {
-    const selected = sources.find((o) => enabled(o.id));
-    return (
-      <div className="settings-content-row">
-        <label htmlFor={id}>{label}</label>
-        <Select
-          id={id}
-          searchable
-          aria-label={label}
-          value={selected?.id ?? "none"}
-          options={[
-            { value: "none", label: "无" },
-            ...sources.map((o) => {
-              const reason = overlayReason(state, config, o, false);
-              return {
-                value: o.id,
-                label: o.name,
-                hint:
-                  [hint(o), reason].filter(Boolean).join(" · ") || undefined,
-                disabled: !!reason,
-              };
-            }),
-          ]}
-          onChange={(value) => choose(sources, value)}
-        />
-        {sources.length > 0 &&
-          sources.every((o) => overlayReason(state, config, o, false)) && (
-            <p className="settings-reason">
-              由底图提供同类内容，无法单独关闭或替换。
-            </p>
-          )}
-        {selected && opacity(selected)}
-      </div>
-    );
-  }
   return (
     <>
-      <fieldset className="settings-group">
-        <legend>地图内容</legend>
-        {group("路网与地名注记", "settings-annotation", annotations)}
-        <p className="settings-reason">
-          底图或注记提供的内容随来源控制；其他内容可独立调整。
-        </p>
-        {Object.entries(featureControls).map(([key, [label, options]]) => {
-          const reason = featureReason(state, config, key);
-          return (
-            <div className="settings-content-row" key={key}>
-              <label htmlFor={`settings-feature-${key}`}>{label}</label>
-              {reason ? (
-                <p className="settings-provided" id={`settings-feature-${key}`}>
-                  {reason}
-                </p>
-              ) : (
+      {(availableAnnotations.length > 0 || hasFeatureControls) && (
+        <fieldset className="settings-group">
+          {availableAnnotations.length > 0 && (
+            <>
+              <span className="settings-field-label">路网</span>
+              <div className="settings-annotation-row">
                 <Select
-                  id={`settings-feature-${key}`}
-                  aria-label={label}
-                  value={state.style.features[key]}
-                  options={Object.entries(options).map(([value, name]) => ({
-                    value,
-                    label: name,
-                  }))}
-                  onChange={(value) =>
-                    change((next) => {
-                      next.style.features[key] = value;
-                    })
-                  }
+                  aria-label="路网"
+                  value={selectedAnnotation?.id ?? "none"}
+                  options={[
+                    { value: "none", label: "关闭" },
+                    ...availableAnnotations.map((o) => ({
+                      value: o.id,
+                      label: o.name,
+                    })),
+                  ]}
+                  onChange={(value) => choose(annotations, value)}
                 />
-              )}
-            </div>
-          );
-        })}
-      </fieldset>
-      <fieldset className="settings-group">
-        <legend>专题图层</legend>
-        {group("铁路", "settings-railway", railways)}
-        {config.overlays
-          .filter(
-            (o) =>
-              o.category !== "annotation" && !o.content.includes("railway"),
-          )
-          .map((o) => {
-            const checked = enabled(o.id);
-            const reason = overlayReason(state, config, o, false);
+                {selectedAnnotation && (
+                  <span className="settings-inline-opacity">
+                    <span className="settings-inline-opacity-label">
+                      不透明度
+                    </span>
+                    <InputNumber
+                      aria-label="路网不透明度"
+                      min={1}
+                      max={100}
+                      step={1}
+                      precision={0}
+                      value={Math.round(
+                        (stored(selectedAnnotation.id)?.opacity ?? 1) * 100,
+                      )}
+                      onChange={(value) =>
+                        change((next) => {
+                          const item = next.style.overlays.find(
+                            (o) => o.id === selectedAnnotation.id,
+                          );
+                          if (item) item.opacity = (value ?? 100) / 100;
+                        })
+                      }
+                    />
+                    <span aria-hidden="true">%</span>
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+          {hasFeatureControls && (
+            <>
+              <span className="settings-field-label settings-section-label">
+                常用信息
+              </span>
+              {featureGroups.map((group) => (
+                <FeatureGroup
+                  key={group.label}
+                  label={group.label}
+                  keys={group.keys}
+                  state={state}
+                  config={config}
+                  change={change}
+                />
+              ))}
+            </>
+          )}
+        </fieldset>
+      )}
+      {visibleTopics.length > 0 && (
+        <fieldset className="settings-group">
+          <legend>附加图层</legend>
+          {visibleTopics.map((topic) => {
+            const source = sourceFor(topic.sources)!;
+            const overlay = stored(source.id);
+            const enabled = overlay?.enabled ?? false;
+            // The summary sits beside the layer name and only moves below it when
+            // the name leaves too little room for one line.
+            const summary =
+              topic.id === "railway"
+                ? source.name
+                : topic.id === "openinframap-power"
+                  ? `${powerFacilities.find((o) => o.value === state.style.power.facilities)?.label} · ${state.style.power.min_voltage ? `≥ ${state.style.power.min_voltage} kV` : "电压不限"}`
+                  : "";
+            const expandable =
+              topic.sources.length > 1 || topic.id === "openinframap-power";
+            const open = expanded.includes(topic.id);
+            const heading = (
+              <>
+                <span className="settings-layer-chevron" aria-hidden="true">
+                  {expandable && (
+                    <ChevronRightIcon className="settings-layer-chevron-icon" />
+                  )}
+                </span>
+                <span className="settings-layer-name">{topic.label}</span>
+                {summary && (
+                  <span className="settings-layer-note">{summary}</span>
+                )}
+              </>
+            );
             return (
-              <div key={o.id} className="settings-content-row">
-                <Checkbox
-                  checked={checked}
-                  disabled={!!reason && !checked}
-                  onCheckedChange={(value) =>
-                    choose([o], value ? o.id : "none")
-                  }
-                >
-                  {o.name}
-                </Checkbox>
-                {reason && <p className="settings-reason">{reason}</p>}
-                {opacity(o)}
-                {checked && o.id === "openinframap-power" && (
-                  <div className="settings-layer-options">
-                    <label htmlFor="settings-power-facilities">电力设施</label>
-                    <Select
-                      id="settings-power-facilities"
-                      aria-label="电力设施"
-                      value={state.style.power.facilities}
-                      options={[
-                        { value: "none", label: "仅线路" },
-                        { value: "substations", label: "线路与变电站" },
-                        { value: "generation", label: "线路与发电设施" },
-                        { value: "all", label: "线路与全部设施" },
-                      ]}
+              <div
+                className="settings-layer"
+                key={topic.id}
+                role="group"
+                aria-label={`${topic.label}图层`}
+              >
+                <div className="settings-layer-heading">
+                  {expandable ? (
+                    <button
+                      type="button"
+                      className="settings-layer-toggle"
+                      aria-expanded={open}
+                      aria-controls={`layer-panel-${topic.id}`}
+                      onClick={() => toggle(topic.id)}
+                    >
+                      {heading}
+                    </button>
+                  ) : (
+                    <div className="settings-layer-toggle">{heading}</div>
+                  )}
+                  {/* The width stays reserved while the layer is off, otherwise the
+                    summary would reflow and change the card height. */}
+                  <span
+                    className="settings-inline-opacity"
+                    data-hidden={!enabled}
+                    aria-hidden={!enabled}
+                  >
+                    <span className="settings-inline-opacity-label">
+                      不透明度
+                    </span>
+                    <InputNumber
+                      aria-label={`${topic.label}不透明度`}
+                      min={1}
+                      max={100}
+                      step={1}
+                      precision={0}
+                      disabled={!enabled}
+                      value={Math.round((overlay?.opacity ?? 1) * 100)}
                       onChange={(value) =>
                         change((next) => {
-                          next.style.power.facilities = value;
+                          const item = next.style.overlays.find(
+                            (o) => o.id === source.id,
+                          );
+                          if (item) item.opacity = (value ?? 100) / 100;
                         })
                       }
                     />
-                    <label htmlFor="settings-power-voltage">
-                      最低电压（kV）
-                    </label>
-                    <Select
-                      id="settings-power-voltage"
-                      aria-label="电力最低电压"
-                      value={state.style.power.min_voltage}
-                      options={[0, 110, 220, 500].map((value) => ({
-                        value,
-                        label: value ? String(value) : "不限",
-                      }))}
-                      onChange={(value) =>
-                        change((next) => {
-                          next.style.power.min_voltage = value;
-                        })
-                      }
-                    />
+                    <span aria-hidden="true">%</span>
+                  </span>
+                  <Switch
+                    id={`layer-${topic.id}`}
+                    aria-label={`${topic.label}图层`}
+                    checked={enabled}
+                    onCheckedChange={(checked) =>
+                      choose(topic.sources, source.id, checked)
+                    }
+                  />
+                </div>
+                {expandable && (
+                  <div
+                    className="settings-layer-panel"
+                    id={`layer-panel-${topic.id}`}
+                    hidden={!open}
+                  >
+                    {topic.sources.length > 1 && (
+                      <div className="settings-content-row">
+                        <Select
+                          id={`source-${topic.id}`}
+                          aria-label={`${topic.label}显示内容`}
+                          value={source.id}
+                          options={topic.sources
+                            .filter((o) => available(o) || o.id === source.id)
+                            .map((o) => ({ value: o.id, label: o.name }))}
+                          onChange={(value) =>
+                            choose(topic.sources, value, enabled)
+                          }
+                        />
+                      </div>
+                    )}
+                    {topic.id === "openinframap-power" && (
+                      <div className="settings-layer-options">
+                        <label htmlFor="settings-power-facilities">
+                          电力设施
+                        </label>
+                        <Select
+                          id="settings-power-facilities"
+                          aria-label="电力设施"
+                          value={state.style.power.facilities}
+                          options={powerFacilities}
+                          onChange={(value) =>
+                            change((next) => {
+                              next.style.power.facilities = value;
+                            })
+                          }
+                        />
+                        <label htmlFor="settings-power-voltage">
+                          最低电压（kV）
+                        </label>
+                        <Select
+                          id="settings-power-voltage"
+                          aria-label="电力最低电压"
+                          value={state.style.power.min_voltage}
+                          options={[0, 110, 220, 500].map((value) => ({
+                            value,
+                            label: value ? String(value) : "不限",
+                          }))}
+                          onChange={(value) =>
+                            change((next) => {
+                              next.style.power.min_voltage = value;
+                            })
+                          }
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             );
           })}
-      </fieldset>
+        </fieldset>
+      )}
     </>
   );
 }

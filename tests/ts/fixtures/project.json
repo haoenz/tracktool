@@ -7,19 +7,28 @@
     "zoom": 3.5
   },
   "style": {
-    "basemap": "light",
+    "basemap": "vector",
+    "appearance": "light",
     "color": "#e05240",
     "width": 3,
     "features": {
       "places": "none",
       "roads": "all",
+      "paths": "all",
       "road_names": "none",
       "boundaries": "region",
       "poi": "none",
       "buildings": "all",
       "housenumbers": "none",
       "peaks": "none",
-      "water_names": "none"
+      "water": "all",
+      "waterway": "all",
+      "water_names": "none",
+      "landcover": "all",
+      "landuse": "all",
+      "park": "none",
+      "aerodrome": "none",
+      "aeroway": "none"
     },
     "overlays": [],
     "power": {

@@ -1,4 +1,9 @@
-import { tool, selectProjectTrack, saveProject } from "./map-tools.js";
+import {
+  pickBasemap,
+  tool,
+  selectProjectTrack,
+  saveProject,
+} from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 import { test, expect } from "@playwright/test";
 import { resetDisplay } from "./display-reset.js";
@@ -129,7 +134,7 @@ test("archive → selection → styling → save/reopen → JSON → independent
   ).toBe(true);
   await page.screenshot({ path: info.outputPath("map-mobile.png") });
   await tool(page, "设置");
-  await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => !!window.renderer)).toBe(true);
   expect(errors).toEqual([]);
 });
@@ -194,7 +199,7 @@ test("missing tiles, missing fonts and unsupported title glyphs block independen
   test.setTimeout(120_000);
   await page.goto("/map");
   await tool(page, "地图样式");
-  await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   const bootstrap = await call<{ state: Project }>(page, "/api/bootstrap");
   const state = bootstrap.body.state;
   for (const mode of ["tiles", "font"]) {
@@ -286,7 +291,7 @@ test("rapid source changes only commit the latest choice", async ({ page }) => {
   test.setTimeout(60_000);
   await page.goto("/map");
   await tool(page, "地图样式");
-  await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   let release!: () => void;
   const waiting = new Promise<void>((r) => {
     release = r;
@@ -304,31 +309,26 @@ test("rapid source changes only commit the latest choice", async ({ page }) => {
     config: { basemaps: { id: string; name: string; group: string }[] };
   }>(page, "/api/bootstrap");
   const bing = bootstrap.config.basemaps.find((b) => b.id.startsWith("bing-"))!;
-  await page.getByRole("combobox", { name: "底图", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "搜索底图", exact: true })
-    .fill(bing.name);
-  await page.getByText(`${bing.group} · ${bing.name}`, { exact: true }).click();
+  const later = bootstrap.config.basemaps.find((b) => b.id === "amap-road")!;
+  await pickBasemap(page, bing.id);
   await startedPromise;
   expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
-    "light",
+    "vector",
   );
-  await page.getByRole("combobox", { name: "底图", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "搜索底图", exact: true })
-    .fill("深色矢量");
-  await page.getByText("深色矢量", { exact: true }).click();
+  await pickBasemap(page, later.id);
+  // Both switches are still waiting for their source check: nothing commits
+  // until the checks settle, then only the latest choice applies.
+  expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
+    "vector",
+  );
+  const completed = page.waitForResponse("**/api/basemap-check");
+  release();
+  await completed;
   await expect
     .poll(() => page.evaluate(() => window.renderer?.state.style.basemap), {
       timeout: 20000,
     })
-    .toBe("dark");
-  const completed = page.waitForResponse("**/api/basemap-check");
-  release();
-  await completed;
-  expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
-    "dark",
-  );
+    .toBe("amap-road");
 });
 test("reselecting the applied basemap cancels a pending switch", async ({
   page,
@@ -353,48 +353,39 @@ test("reselecting the applied basemap cancels a pending switch", async ({
     config: { basemaps: { id: string; name: string; group: string }[] };
   }>(page, "/api/bootstrap");
   const bing = bootstrap.config.basemaps.find((b) => b.id.startsWith("bing-"))!;
-  const select = page.getByRole("combobox", { name: "底图", exact: true });
-  await select.click();
-  await page
-    .getByRole("combobox", { name: "搜索底图", exact: true })
-    .fill(bing.name);
-  await page.getByText(`${bing.group} · ${bing.name}`, { exact: true }).click();
+  await pickBasemap(page, bing.id);
   await startedPromise;
-  await expect(page.locator(".settings-status")).toContainText("正在准备");
-  await select.click();
-  await page.getByText("浅色矢量", { exact: true }).click();
-  await expect(page.locator(".settings-status")).toHaveCount(0);
+  await pickBasemap(page, "vector");
   expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
-    "light",
+    "vector",
   );
   const completed = page.waitForResponse("**/api/basemap-check");
   release();
   await completed;
   await expect
     .poll(() => page.evaluate(() => window.renderer?.state.style.basemap))
-    .toBe("light");
+    .toBe("vector");
 });
 test("browse display style survives a reload", async ({ page }) => {
   await page.goto("/map");
   await tool(page, "地图样式");
-  const places = page.getByRole("combobox", {
-    name: "地名",
-    exact: true,
-  });
-  await places.click();
-  await page.getByRole("option", { name: "国家与城市", exact: true }).click();
+  const roads = page
+    .getByRole("radiogroup", { name: "道路", exact: true })
+    .first();
+  const saved = page.waitForResponse(
+    (response) => response.url().endsWith("/api/display") && response.ok(),
+  );
+  await roads.getByRole("radio", { name: "主干道路", exact: true }).check();
   await expect
     .poll(() =>
-      page.evaluate(() => window.renderer?.state.style.features.places),
+      page.evaluate(() => window.renderer?.state.style.features.roads),
     )
     .toBe("major");
-  await expect(page.getByText("地图样式已保存", { exact: true })).toBeVisible({
-    timeout: 10_000,
-  });
+  await saved;
   await page.reload();
   await expect
     .poll(() =>
-      page.evaluate(() => window.renderer?.state.style.features.places),
+      page.evaluate(() => window.renderer?.state.style.features.roads),
     )
     .toBe("major");
 });
@@ -408,7 +399,7 @@ test("failed source retains the current map; a later source wins and camera/styl
   });
   await page.goto("/map");
   await tool(page, "地图样式");
-  await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   const config = await page.evaluate(async () => {
     const token = document.querySelector<HTMLMetaElement>(
       'meta[name="tracktool-token"]',
@@ -422,26 +413,20 @@ test("failed source retains the current map; a later source wins and camera/styl
     ).config as { basemaps: { id: string; name: string; group: string }[] };
   });
   const google = config.basemaps.find((b) => b.id.startsWith("google-"))!;
-  await page.getByRole("combobox", { name: "底图", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "搜索底图", exact: true })
-    .fill(google.name);
-  await page
-    .getByText(`${google.group} · ${google.name}`, { exact: true })
-    .click();
+  const esri = config.basemaps.find((b) => b.id === "esri-satellite")!;
+  await pickBasemap(page, google.id);
   await expect(page.locator(".settings-panel [role=alert]")).toContainText(
-    "仍显示",
+    "失败：",
   );
   expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
-    "light",
+    "vector",
   );
-  await page.getByLabel("底图", { exact: true }).click();
-  await page.getByText("深色矢量", { exact: true }).click();
+  await pickBasemap(page, esri.id);
   await expect
     .poll(() => page.evaluate(() => window.renderer?.state.style.basemap), {
       timeout: 20000,
     })
-    .toBe("dark");
+    .toBe("esri-satellite");
   await expect(page.getByLabel("标题", { exact: true })).not.toBeVisible();
   expect(selections).toBe(0);
 });
@@ -459,7 +444,7 @@ test("panels preserve the map, selection and unfinished edits on desktop and mob
   const camera = await page.evaluate(() => window.renderer!.state.camera);
   const canvas = await page.locator(".maplibregl-canvas").elementHandle();
   await tool(page, "设置");
-  await expect(page.getByLabel("底图", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   await tool(page, "轨迹库");
   await expect(
     page.getByRole("button", { name: "隐藏 索引未命中", exact: true }),
@@ -528,12 +513,13 @@ test("the configured library stays fixed when importing a project from another m
   );
   await tool(page, "轨迹库");
   await expect(track).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "归档状态", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "归档状态", exact: true }),
+  ).toHaveCount(0);
   await expect(page.getByLabel("归档目录", { exact: true })).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "建立归档", exact: true }),
   ).toHaveCount(0);
-  await page.getByRole("button", { name: "返回列表", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "上传轨迹", exact: true }),
   ).toBeVisible();
@@ -581,10 +567,10 @@ test("map icons directly toggle panels on desktop and mobile", async ({
 });
 
 for (const [basemap, overlay] of [
-  ["amap-satellite", "openrailwaymap-standard"],
+  ["amap-satellite", "amap-labels"],
   ["esri-satellite", "amap-labels"],
 ] as const) {
-  test(`mixed coordinates ${basemap} + ${overlay} persist and export PNG`, async ({
+  test(`${basemap} + ${overlay} keeps its canvas CRS and exports PNG`, async ({
     page,
   }, info) => {
     test.setTimeout(120_000);
@@ -595,45 +581,50 @@ for (const [basemap, overlay] of [
         const config = window.renderer!.config;
         const base = config.basemaps.find((b) => b.id === basemap)!;
         return {
-          base: `${base.group} · ${base.name}`,
+          vendor: ["OSM", "memomaps", "OpenTopoMap", "OpenFreeMap"].includes(
+            base.group,
+          )
+            ? "开放地图"
+            : base.group,
+          base: base.name,
           overlay: config.overlays.find((o) => o.id === overlay)!.name,
         };
       },
       { basemap, overlay },
     );
-    await page.getByRole("combobox", { name: "底图", exact: true }).click();
-    await page
-      .getByRole("combobox", { name: "搜索底图", exact: true })
-      .fill(names.base);
-    const baseHint = page
-      .getByRole("option")
-      .getByText("需重投影", { exact: true });
+    // The badge describes the CRS relative to the current canvas, so check it
+    // before switching the basemap (which derives a new canvas).
+    await page.getByRole("button", { name: names.vendor, exact: true }).click();
+    const baseButton = page.getByRole("button", {
+      name: names.base,
+      exact: true,
+    });
+    const baseHint = baseButton.getByText("GCJ-02", { exact: true });
     if (basemap === "amap-satellite") await expect(baseHint).toBeVisible();
     else await expect(baseHint).toHaveCount(0);
-    await page
-      .getByRole("option")
-      .getByText(names.base, { exact: true })
-      .click();
+    await baseButton.click();
     await expect
       .poll(() => page.evaluate(() => window.renderer!.state.style.basemap), {
         timeout: 20000,
       })
       .toBe(basemap);
-    if (basemap === "amap-satellite")
+    const gcjCanvas = basemap === "amap-satellite";
+    if (gcjCanvas) {
       await expect(
-        page.getByRole("combobox", { name: "道路", exact: true }),
+        page.getByRole("radiogroup", { name: "道路", exact: true }),
+      ).toHaveCount(0);
+    } else
+      await expect(
+        page.getByRole("radio", { name: "主干道路", exact: true }),
       ).toBeEnabled();
     const overlaySelect = page.getByRole("combobox", {
-      name: overlay === "amap-labels" ? "路网与地名注记" : "铁路",
+      name: "路网",
       exact: true,
     });
     await overlaySelect.click();
     const option = page.getByRole("option").filter({
       has: page.getByText(names.overlay, { exact: true }),
     });
-    const overlayHint = option.getByText("需重投影", { exact: true });
-    if (overlay === "amap-labels") await expect(overlayHint).toBeVisible();
-    else await expect(overlayHint).toHaveCount(0);
     await expect(option).toBeEnabled();
     await option.click();
     await expect

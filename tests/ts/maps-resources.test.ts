@@ -143,10 +143,10 @@ it("uses Python cache identities, validates tiles, preserves attribution and hid
     })
       .png()
       .toBuffer();
-    await r.validate("satellite", png);
-    await expect(r.validate("satellite", png.subarray(0, 40))).rejects.toThrow(
-      "无效",
-    );
+    await r.validate("osm-standard", png);
+    await expect(
+      r.validate("osm-standard", png.subarray(0, 40)),
+    ).rejects.toThrow("无效");
     expect(() => r.checkText("路线 🦄")).toThrow("缺少字符");
     expect(() => r.checkText("中文路线")).not.toThrow();
   } finally {

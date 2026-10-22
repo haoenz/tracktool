@@ -278,15 +278,6 @@
   font-size: 12px;
   line-height: 1.5;
 }
-.settings-status {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 4px 0 0;
-  color: #4d6359;
-  font-size: 12px;
-  line-height: 1.5;
-}
 .settings-error {
   margin: 4px 0 0;
   color: #ad2626;
@@ -298,16 +289,6 @@
   color: #69796f;
   font-size: 12px;
   line-height: 1.5;
-}
-.settings-notes {
-  margin: 4px 0 0;
-  padding-left: 18px;
-  color: #69796f;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.settings-actions {
-  margin-top: 12px;
 }
 .settings-group {
   min-width: 0;
@@ -321,6 +302,28 @@
   color: #40534a;
   font-size: 12px;
   font-weight: 600;
+}
+/* Second level: categories indented under the "常用信息" heading. */
+.settings-subgroup {
+  margin: 14px 0 0 10px;
+}
+.settings-subgroup > legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: #69796f;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* Third level: the individual feature rows inside a category. */
+.settings-choice-label {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 400;
+}
+.settings-subgroup .settings-feature {
+  padding-left: 6px;
 }
 .settings-scope {
   position: sticky;
@@ -341,13 +344,145 @@
   display: block;
   margin-bottom: 4px;
 }
-.settings-provided {
-  margin: 4px 0;
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  background: var(--muted);
-  color: var(--muted-foreground);
+.settings-field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #40534a;
   font-size: 12px;
+  font-weight: 600;
+}
+.settings-basemap-columns {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+  height: 15rem;
+}
+.settings-vendor-list,
+.settings-map-list {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.settings-vendor-option,
+.settings-map-option {
+  width: 100%;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.settings-vendor-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-vendor-dot {
+  margin-left: auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+  visibility: hidden;
+}
+.settings-vendor-dot[data-active="true"] {
+  visibility: visible;
+}
+.settings-vendor-option:hover,
+.settings-map-option:hover {
+  background: var(--accent);
+}
+.settings-vendor-option[aria-pressed="true"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.settings-map-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.settings-map-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.settings-map-badge {
+  flex: none;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.settings-map-hint {
+  flex: none;
+  align-self: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.settings-map-option[aria-pressed="true"] {
+  background: var(--accent);
+}
+.settings-map-option[aria-pressed="true"] .settings-map-name {
+  color: var(--primary);
+  font-weight: 600;
+}
+.settings-vendor-option:focus-visible,
+.settings-map-option:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.settings-appearance {
+  margin-top: 12px;
+}
+.settings-choice-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.settings-feature {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 2px 0;
+}
+.settings-feature + .settings-feature {
+  margin-top: 8px;
+}
+.settings-feature > [role="radiogroup"] {
+  margin-left: auto;
+}
+.settings-section-label {
+  margin-top: 16px;
+}
+.settings-choice-group button[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: var(--accent);
+  color: var(--primary);
+}
+.settings-choice-hint {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 400;
 }
 .settings-layer-options {
   display: grid;
@@ -355,21 +490,141 @@
   align-items: center;
   gap: 8px;
   margin-top: 8px;
-  padding: 8px 0 8px 12px;
-  border-left: 2px solid var(--border);
+  padding: 8px 0;
 }
-.settings-layer-options .ui-number {
-  width: 100%;
+.settings-details {
+  margin-top: 12px;
+  font-size: 12px;
 }
-.settings-actions {
+.settings-details > summary {
+  width: fit-content;
+  padding: 6px 0;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.settings-details > summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+.settings-layer {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.settings-layer-heading {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 1.5rem;
 }
-.settings-actions .settings-reason {
-  flex-basis: 100%;
+.settings-layer-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.settings-layer-toggle {
+  cursor: pointer;
+}
+button.settings-layer-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+.settings-layer-chevron {
+  display: inline-flex;
+  flex: none;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+.settings-layer-chevron-icon {
+  width: 14px;
+  height: 14px;
+  transition: transform 120ms ease;
+}
+.settings-layer-toggle[aria-expanded="true"] .settings-layer-chevron-icon {
+  transform: rotate(90deg);
+}
+.settings-inline-opacity[data-hidden="true"] {
+  visibility: hidden;
+}
+.settings-inline-opacity {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.settings-inline-opacity-label {
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+/* Compact by design: the row must not grow when the layer is switched on,
+   so the map panel's 40px touch minimum does not apply here. */
+.settings-layer-heading .settings-inline-opacity .ui-number {
+  width: 2.75rem;
+  height: 1.5rem;
+  min-height: 1.5rem;
+  padding: 0 3px;
+  font-size: 11px;
+  text-align: right;
+}
+.settings-annotation-row .settings-inline-opacity .ui-number {
+  width: 4.5rem;
+  text-align: right;
+}
+/* Keep the network row compact so it matches the segmented choices below. */
+.map-controls .settings-annotation-row .ui-select,
+.map-controls .settings-annotation-row .settings-inline-opacity .ui-number {
+  height: 1.75rem;
+  min-height: 1.75rem;
+  padding-block: 0;
+  font-size: 12px;
+}
+.settings-annotation-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-annotation-row .ui-select {
+  flex: 1 1 auto;
+}
+.settings-layer-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.settings-layer-panel[hidden] {
+  display: none;
+}
+.settings-layer-name {
+  flex: none;
+}
+/* Shrink-proof so the note wraps as a whole to the next line instead of
+   leaving a stub of text beside the name. */
+.settings-layer-note {
+  flex: none;
+  max-width: 100%;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .overview-row {
   display: flex;
@@ -591,9 +846,10 @@
   z-index: 5;
   top: 82px;
   left: 16px;
-  bottom: 64px;
+  /* Height follows the content so short panels do not show dead space; the
+     cap keeps long panels scrolling inside the viewport. */
   max-width: calc(100% - 32px);
-  max-height: none;
+  max-height: calc(100% - 146px);
   border: 1px solid #dbe4df;
   border-radius: 14px;
   box-shadow: 0 8px 30px #19332a18;

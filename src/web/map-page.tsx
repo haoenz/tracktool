@@ -32,11 +32,7 @@ import {
   PopoverTrigger,
 } from "./components/ui/popover.js";
 import { SheetHandle } from "./components/sheet-handle.js";
-import {
-  MapContentSettings,
-  ReprojectionHelp,
-} from "./map-content-settings.js";
-import { defaultProject } from "../shared/project.js";
+import { MapContentSettings } from "./map-content-settings.js";
 import { StartupScreen } from "./components/startup-screen.js";
 import { PanelHeader } from "./components/panel-header.js";
 import {
@@ -78,7 +74,7 @@ import type { OverviewHit, OverviewVisibility } from "./overview-layer.js";
 import type { OverviewEntry, OverviewStatus } from "../shared/overview.js";
 import type { Project } from "../shared/project.js";
 import { frames } from "../drawing/core.js";
-import { reconcileOverlays } from "../drawing/layers.js";
+import { canvasCrs, reconcileOverlays } from "../drawing/layers.js";
 import { api, request } from "./api.js";
 import { MapViewport, type Viewport } from "./map-viewport.js";
 import { ProjectPresentation } from "./project-presentation.js";
@@ -109,12 +105,80 @@ type Bootstrap = {
 };
 type Loaded = { state: Project; versionsChanged: boolean } & Selection;
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+// Open-map vendors share one heading so the list reads by licensing, not by
+// whoever happens to host the tiles.
+const openVendors = new Set(["OSM", "memomaps", "OpenTopoMap", "OpenFreeMap"]);
+const vendorName = (group: string) =>
+  openVendors.has(group) ? "开放地图" : group;
+const vendorOrder = [
+  "开放地图",
+  "高德",
+  "谷歌",
+  "ArcGIS",
+  "必应",
+  "腾讯",
+  "360",
+];
 const basemapLabel = (config: MapConfig, id: string) => {
-  if (id === "light") return "浅色矢量";
-  if (id === "dark") return "深色矢量";
-  if (id === "satellite") return "自定义卫星";
+  if (id === "vector") return "开放地图 · OpenFreeMap 矢量底图";
   const preset = config.basemaps.find((b) => b.id === id);
-  return preset ? `${preset.group} · ${preset.name}` : id;
+  return preset ? `${vendorName(preset.group)} · ${preset.name}` : id;
+};
+type BasemapChoice = {
+  value: string;
+  label: string;
+  vendor: string;
+  hint?: string;
+};
+const basemapVendorRank = (vendor: string) => {
+  const index = vendorOrder.indexOf(vendor);
+  return index === -1 ? vendorOrder.length : index;
+};
+// Hand-picked order inside each vendor: general maps first, then imagery,
+// then the large-font variants.
+const basemapOrder = [
+  "vector",
+  "osm-standard",
+  "opentopomap-terrain",
+  "memomaps-transport",
+  "amap-road",
+  "amap-satellite",
+  "amap-road-legacy",
+  "google-satellite",
+  "google-road",
+  "google-terrain",
+  "google-hybrid",
+  "google-hybrid-large",
+  "google-road-large",
+  "google-terrain-large",
+  "esri-satellite",
+  "esri-topo",
+  "bing-satellite",
+  "bing-terrain",
+  "tencent-satellite",
+  "tencent-road",
+  "tencent-terrain",
+  "360-road",
+];
+const basemapRank = (id: string) => {
+  const index = basemapOrder.indexOf(id);
+  return index === -1 ? basemapOrder.length : index;
+};
+const groupBasemaps = (choices: BasemapChoice[]) => {
+  const groups = new Map<string, BasemapChoice[]>();
+  for (const choice of choices) {
+    const vendor = vendorName(choice.vendor);
+    const items = groups.get(vendor);
+    if (items) items.push(choice);
+    else groups.set(vendor, [choice]);
+  }
+  for (const items of groups.values())
+    items.sort(
+      (left, right) => basemapRank(left.value) - basemapRank(right.value),
+    );
+  return [...groups].sort(
+    ([left], [right]) => basemapVendorRank(left) - basemapVendorRank(right),
+  );
 };
 const download = (blob: Blob, name: string) => {
   const url = URL.createObjectURL(blob),
@@ -216,8 +280,8 @@ function Editor({ initial }: { initial: Bootstrap }) {
     [busy, setBusy] = useState(false),
     [exporting, setExporting] = useState(false),
     [switching, setSwitching] = useState(""),
+    [pickerVendor, setPickerVendor] = useState(""),
     [basemapError, setBasemapError] = useState(""),
-    [basemapNotes, setBasemapNotes] = useState<string[]>([]),
     [displaySaveState, setDisplaySaveState] = useState<
       "" | "saving" | "saved" | "error"
     >(""),
@@ -225,9 +289,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
       id: string;
       style?: Project["style"];
     }>(),
-    [baseUndo, setBaseUndo] = useState<Project["style"]>(),
     [displayRetry, setDisplayRetry] = useState(0),
-    [settingsBaseline, setSettingsBaseline] = useState<Project["style"]>(),
     [preview, setPreview] = useState(false),
     [sourceErrors, setSourceErrors] = useState<Selection["errors"]>([]),
     [versionChanged, setVersionChanged] = useState(false);
@@ -459,21 +521,14 @@ function Editor({ initial }: { initial: Bootstrap }) {
     return () => clearTimeout(timer);
   }, [browseState.style, inProject, displayRetry]);
   useEffect(() => {
-    setSettingsBaseline(
-      panel === "settings"
-        ? structuredClone(stateRef.current.style)
-        : undefined,
-    );
-    setBaseUndo(undefined);
-    setBasemapNotes([]);
     setBasemapError("");
     setBaseRetry(undefined);
     cancelPendingBase();
   }, [panel, inProject, currentName]);
   const config = initial.config;
-  // Raster sources are normalized by the tile service before rendering.
-  const crs = "wgs84";
-  const browseCrs = "wgs84";
+  // The basemap covers the viewport, so its CRS decides the render canvas.
+  const crs = canvasCrs(state, config);
+  const browseCrs = crs;
   const browseOverview = useOverview(
     browseCrs,
     browseFilter,
@@ -756,7 +811,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
       if (switching) {
         cancelPendingBase();
         setBasemapError("");
-        setBasemapNotes([]);
       }
       return;
     }
@@ -766,16 +820,15 @@ function Editor({ initial }: { initial: Bootstrap }) {
     setError("");
     setBasemapError("");
     setBaseRetry(undefined);
-    setBasemapNotes([]);
     const next = structuredClone(stateRef.current);
     if (restore) next.style = structuredClone(restore);
     next.style.basemap = id;
-    const notes = reconcileOverlays(next, config);
+    reconcileOverlays(next, config);
     try {
       if (config.basemaps.some((b) => b.id === id))
         await api("/api/basemap-check", { id });
       if (sequence !== sourceSequence.current) return;
-      const targetCrs = "wgs84";
+      const targetCrs = canvasCrs(next, config);
       let prepared: OverviewStatus | undefined;
       if (browsing) {
         const deadline = Date.now() + 120000;
@@ -796,30 +849,20 @@ function Editor({ initial }: { initial: Bootstrap }) {
       if (!staged) throw new Error("底图未准备完成，请重试");
       if (staged) {
         if (restore) {
-          setBaseUndo(undefined);
           change((s) => {
             s.style = structuredClone(next.style);
           });
-          setBasemapNotes(notes);
-          setNotice(
-            notes.length
-              ? `已恢复地图设置；${notes.join("；")}`
-              : "已恢复地图设置",
-          );
+          setNotice("已恢复地图设置");
         } else {
           // Reconcile against the latest style so edits made while the
           // basemap was loading are not overwritten by the starting snapshot.
           const latest = structuredClone(stateRef.current);
-          const previousStyle = structuredClone(latest.style);
           latest.style.basemap = id;
-          const appliedNotes = reconcileOverlays(latest, config);
+          reconcileOverlays(latest, config);
           change((s) => {
             s.style.basemap = id;
             s.style.overlays = latest.style.overlays;
           });
-          setBaseUndo(previousStyle);
-          setBasemapNotes(appliedNotes);
-          if (appliedNotes.length) setNotice(appliedNotes.join("；"));
         }
       }
     } catch (e) {
@@ -827,26 +870,13 @@ function Editor({ initial }: { initial: Bootstrap }) {
         setBaseRetry({ id, style: restore });
         setBasemapError(
           restore
-            ? `恢复设置失败：无法切换回「${basemapLabel(config, id)}」：${message(e)}`
-            : `切换到「${basemapLabel(config, id)}」失败，仍显示「${basemapLabel(config, stateRef.current.style.basemap)}」：${message(e)}；可再次选择重试`,
+            ? `切换回「${basemapLabel(config, id)}」失败：${message(e)}`
+            : `切换到「${basemapLabel(config, id)}」失败：${message(e)}`,
         );
       }
     } finally {
       if (sequence === sourceSequence.current) setSwitching("");
     }
-  };
-  const restoreSettings = (style: Project["style"]) => {
-    cancelPendingBase();
-    setBaseUndo(undefined);
-    setBaseRetry(undefined);
-    if (style.basemap === stateRef.current.style.basemap) {
-      change((s) => {
-        s.style = structuredClone(style);
-      });
-      setBasemapError("");
-      setBasemapNotes([]);
-      setNotice("已恢复地图设置");
-    } else void switchBase(style.basemap, style);
   };
   const load = async (value?: unknown) => {
     setActivity("正在读取工程…");
@@ -1354,21 +1384,45 @@ function Editor({ initial }: { initial: Bootstrap }) {
           : state,
     [inspection, state, inProject, browsing, candidateCamera],
   );
-  const settingsChanged =
-    !!settingsBaseline &&
-    JSON.stringify(state.style) !== JSON.stringify(settingsBaseline);
-  const basemapOptions = [
-    { value: "light", label: basemapLabel(config, "light") },
-    { value: "dark", label: basemapLabel(config, "dark") },
-    ...(config.satellite
-      ? [{ value: "satellite", label: basemapLabel(config, "satellite") }]
-      : []),
+  const basemapList = useRef<HTMLDivElement | null>(null);
+  // Badges only mark sources whose CRS differs from the render canvas.
+  const crsBadge = (source: string) =>
+    source === "gcj02" ? "GCJ-02" : "WGS84";
+  const presetCrs = (b: MapConfig["basemaps"][number]) =>
+    b.format === "vector" ? "wgs84" : b.crs;
+  const basemapGroups = groupBasemaps([
+    {
+      value: "vector",
+      label: "OpenFreeMap 矢量底图",
+      vendor: "OpenFreeMap",
+      hint: crs === "gcj02" ? "WGS84" : undefined,
+    },
     ...config.basemaps.map((b) => ({
       value: b.id,
-      label: basemapLabel(config, b.id),
-      hint: b.crs === "gcj02" && b.format !== "vector" ? "需重投影" : undefined,
+      label: b.name,
+      vendor: b.group,
+      hint: presetCrs(b) === crs ? undefined : crsBadge(presetCrs(b)),
     })),
-  ];
+  ]);
+  const activeBasemapVendor =
+    basemapGroups.find(([, items]) =>
+      items.some((item) => item.value === state.style.basemap),
+    )?.[0] ??
+    basemapGroups[0]?.[0] ??
+    "";
+  const shownVendor = basemapGroups.some(([vendor]) => vendor === pickerVendor)
+    ? pickerVendor
+    : activeBasemapVendor;
+  const shownBasemaps =
+    basemapGroups.find(([vendor]) => vendor === shownVendor)?.[1] ?? [];
+  // Switching the basemap (including undo) realigns the vendor column.
+  useEffect(() => setPickerVendor(""), [state.style.basemap]);
+  // Keep the active row visible when the column scrolls.
+  useEffect(() => {
+    basemapList.current
+      ?.querySelector('[aria-pressed="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [shownVendor, state.style.basemap]);
   return (
     <WorkspaceContext.Provider
       value={{
@@ -2093,7 +2147,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
             {panel === "settings" && (
               <section>
                 <Settings inProject={inProject}>
-                  <h3>底图</h3>
                   {inProject && (
                     <p className="settings-reason" role="status">
                       {dirty
@@ -2101,72 +2154,120 @@ function Editor({ initial }: { initial: Bootstrap }) {
                         : "工程无未保存的修改"}
                     </p>
                   )}
-                  {!inProject && displaySaveState && (
-                    <p
-                      className={
-                        displaySaveState === "error"
-                          ? "settings-error"
-                          : "settings-reason"
-                      }
-                      role={displaySaveState === "error" ? "alert" : "status"}
-                    >
-                      {displaySaveState === "saving"
-                        ? "正在保存地图样式…"
-                        : displaySaveState === "saved"
-                          ? "地图样式已保存"
-                          : "地图样式保存失败"}
-                      {displaySaveState === "error" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setDisplayRetry((n) => n + 1)}
-                        >
-                          重试保存
-                        </Button>
-                      )}
-                    </p>
-                  )}
-                  <label htmlFor="settings-basemap">底图</label>
-                  <Select
-                    id="settings-basemap"
-                    searchable
-                    aria-label="底图"
-                    aria-describedby={[
-                      switching
-                        ? "settings-basemap-status"
-                        : basemapError
-                          ? "settings-basemap-error"
-                          : undefined,
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    value={state.style.basemap}
-                    onChange={(id) => void switchBase(id)}
-                    options={basemapOptions}
-                  />
-                  <ReprojectionHelp />
-                  {switching && (
-                    <p
-                      className="settings-status"
-                      id="settings-basemap-status"
-                      role="status"
-                      aria-live="polite"
-                    >
-                      <LoaderCircle
-                        className="size-3 animate-spin"
-                        aria-hidden="true"
-                      />
-                      <span>
-                        {`当前显示「${basemapLabel(config, state.style.basemap)}」，正在准备「${basemapLabel(config, switching)}」。`}
-                      </span>
+                  {!inProject && displaySaveState === "error" && (
+                    <p className="settings-error" role="alert">
+                      地图样式保存失败
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={cancelPendingBase}
+                        onClick={() => setDisplayRetry((n) => n + 1)}
                       >
-                        取消
+                        重试保存
                       </Button>
                     </p>
+                  )}
+                  <span
+                    className="settings-field-label"
+                    id="settings-basemap-label"
+                  >
+                    图源
+                  </span>
+                  <div
+                    className="settings-basemap"
+                    role="group"
+                    aria-labelledby="settings-basemap-label"
+                    aria-describedby={
+                      basemapError ? "settings-basemap-error" : undefined
+                    }
+                  >
+                    <div className="settings-basemap-columns">
+                      <div
+                        className="settings-vendor-list"
+                        role="group"
+                        aria-label="供应商"
+                      >
+                        {basemapGroups.map(([vendor]) => (
+                          <button
+                            key={vendor}
+                            type="button"
+                            className="settings-vendor-option"
+                            aria-pressed={vendor === shownVendor}
+                            onClick={() => setPickerVendor(vendor)}
+                          >
+                            {vendor}
+                            <span
+                              className="settings-vendor-dot"
+                              data-active={vendor === activeBasemapVendor}
+                              aria-hidden="true"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                      <div
+                        className="settings-map-list"
+                        role="group"
+                        aria-label={shownVendor}
+                        ref={basemapList}
+                      >
+                        {shownBasemaps.map((item) => (
+                          <button
+                            key={item.value}
+                            type="button"
+                            className="settings-map-option"
+                            aria-label={item.label}
+                            aria-pressed={state.style.basemap === item.value}
+                            onClick={() => void switchBase(item.value)}
+                          >
+                            <span className="settings-map-name">
+                              {item.label}
+                            </span>
+                            {state.style.basemap === item.value && (
+                              <span className="settings-map-badge">当前</span>
+                            )}
+                            {item.hint && (
+                              <span className="settings-map-hint">
+                                {item.hint}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  {state.style.basemap === "vector" && (
+                    <div className="settings-appearance">
+                      <span
+                        className="settings-field-label"
+                        id="settings-appearance-label"
+                      >
+                        配色
+                      </span>
+                      <div
+                        className="settings-choice-group"
+                        role="group"
+                        aria-labelledby="settings-appearance-label"
+                      >
+                        {[
+                          { value: "light", label: "浅色" },
+                          { value: "dark", label: "深色" },
+                        ].map((item) => (
+                          <Button
+                            key={item.value}
+                            size="sm"
+                            variant="outline"
+                            aria-pressed={state.style.appearance === item.value}
+                            onClick={() =>
+                              change((next) => {
+                                next.style.appearance =
+                                  item.value === "dark" ? "dark" : "light";
+                              })
+                            }
+                          >
+                            {item.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
                   )}
                   {basemapError && (
                     <p
@@ -2188,61 +2289,12 @@ function Editor({ initial }: { initial: Bootstrap }) {
                       )}
                     </p>
                   )}
-                  {baseUndo && !switching && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        restoreSettings({
-                          ...stateRef.current.style,
-                          basemap: baseUndo.basemap,
-                          overlays: structuredClone(baseUndo.overlays),
-                        })
-                      }
-                    >
-                      撤销底图切换
-                    </Button>
-                  )}
-                  {basemapNotes.length > 0 && (
-                    <ul
-                      className="settings-notes"
-                      aria-label="底图切换后的调整"
-                    >
-                      {basemapNotes.map((note, i) => (
-                        <li key={`${i}-${note}`}>{note}</li>
-                      ))}
-                    </ul>
-                  )}
                   <MapContentSettings
                     state={state}
                     config={config}
-                    change={(edit) => {
-                      setBaseUndo(undefined);
-                      setBasemapNotes([]);
-                      change(edit);
-                    }}
+                    change={change}
                     notify={setNotice}
                   />
-                  <div className="settings-actions">
-                    <p className="settings-reason">
-                      撤销将恢复到本次打开面板时的设置；恢复默认将使用应用初始设置。
-                    </p>
-                    <Button
-                      variant="outline"
-                      disabled={!settingsChanged && !switching}
-                      onClick={() =>
-                        settingsBaseline && restoreSettings(settingsBaseline)
-                      }
-                    >
-                      撤销本次修改
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => restoreSettings(defaultProject().style)}
-                    >
-                      恢复默认设置
-                    </Button>
-                  </div>
                 </Settings>
               </section>
             )}

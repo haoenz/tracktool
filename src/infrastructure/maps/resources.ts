@@ -78,7 +78,6 @@ export class MapResources {
   private vector?: Vector;
   private preparing?: Promise<void>;
   private font?: opentype.Font;
-  readonly satellite: string;
   private env: Record<string, string | undefined>;
   private fetcher: (url: string) => Promise<Buffer>;
   constructor(
@@ -110,18 +109,6 @@ export class MapResources {
         "USER_INPUT",
         "自定义矢量源需配置 TRACKTOOL_MAP_VECTOR_ATTRIBUTION 以保留实际来源署名",
       );
-    this.satellite = this.env.TRACKTOOL_MAP_SATELLITE_URL ?? "";
-    if (
-      this.satellite &&
-      !(
-        this.env.TRACKTOOL_MAP_SATELLITE_ATTRIBUTION &&
-        this.env.TRACKTOOL_MAP_SATELLITE_VERSION
-      )
-    )
-      throw new AppError(
-        "USER_INPUT",
-        "卫星数据源需同时配置 URL、ATTRIBUTION 和 VERSION",
-      );
     const setting = (
       name: string,
       value: number,
@@ -140,7 +127,6 @@ export class MapResources {
       google: 8,
       bing: 4,
       vector: 6,
-      custom: 4,
       openrailwaymap: 2,
       openseamap: 2,
       openinframap: 2,
@@ -266,10 +252,7 @@ export class MapResources {
         }),
         sha256: hash(JSON.stringify(templates)),
       },
-      satellite: this.env.TRACKTOOL_MAP_SATELLITE_VERSION ?? "",
-      satellite_sha256: this.satellite ? hash(this.satellite) : "",
       vector_attribution: this.env.TRACKTOOL_MAP_VECTOR_ATTRIBUTION ?? credit,
-      satellite_attribution: this.env.TRACKTOOL_MAP_SATELLITE_ATTRIBUTION ?? "",
     };
   }
   checkText(text: string) {
@@ -329,7 +312,6 @@ export class MapResources {
     return {
       versions: this.versions(),
       vectorMaxZoom: Math.min(14, this.vector?.maxzoom ?? 14),
-      satellite: !!this.satellite,
       basemaps: presets.filter((s) => s.kind === "basemap"),
       overlays: presets.filter((s) => s.kind === "overlay"),
       vectorLayers: Object.fromEntries(
@@ -337,7 +319,6 @@ export class MapResources {
       ),
       attribution: credit,
       customVectorAttribution: this.env.TRACKTOOL_MAP_VECTOR_ATTRIBUTION ?? "",
-      satelliteAttribution: this.env.TRACKTOOL_MAP_SATELLITE_ATTRIBUTION ?? "",
       cacheTime: Math.floor(Date.now() / 1000),
     };
   }
@@ -377,10 +358,16 @@ export class MapResources {
     y: number,
     signal?: AbortSignal,
     exporting = false,
+    crs: "wgs84" | "gcj02" = "wgs84",
   ): Promise<{ data: Buffer; mime: string }> {
     checkCancelled(signal);
     this.checkTile(source, z, x, y);
     const preset = this.presets[source];
+    if (crs === "gcj02") {
+      if (preset?.crs !== "gcj02" || preset.format === "vector")
+        throw new AppError("USER_INPUT", "GCJ-02 画布不支持该图层");
+      return this.tile(source, z, x, y, signal, exporting);
+    }
     if (preset?.crs !== "gcj02" || preset.format === "vector")
       return this.tile(source, z, x, y, signal, exporting);
     const key = hash(pythonJson([rasterReprojectionVersion, preset, z, x, y]));
@@ -416,7 +403,7 @@ export class MapResources {
   private checkTile(source: string, z: number, x: number, y: number) {
     const preset = this.presets[source];
     if (
-      (!["vector", "satellite"].includes(source) && !preset) ||
+      (source !== "vector" && !preset) ||
       ![z, x, y].every(Number.isInteger) ||
       z < 0 ||
       z > 18 ||
@@ -440,8 +427,7 @@ export class MapResources {
     checkCancelled(signal);
     this.checkTile(source, z, x, y);
     const preset = this.presets[source];
-    const template =
-      source === "vector" ? this.vector?.tiles[0] : this.satellite;
+    const template = source === "vector" ? this.vector?.tiles[0] : undefined;
     const url = preset
       ? tileUrl(preset, z, x, y)
       : template
@@ -455,10 +441,7 @@ export class MapResources {
         source,
         url,
         preset?.tile_size ?? 256,
-        preset ??
-          (source === "vector"
-            ? this.vector
-            : (this.env.TRACKTOOL_MAP_SATELLITE_VERSION ?? "")),
+        preset ?? (source === "vector" ? this.vector : ""),
       ]),
     );
     const cached = async () => {
@@ -471,7 +454,7 @@ export class MapResources {
           this.tiles.delete(key);
         }
       }
-      const oldKey = `legacy:${hash((this.env.TRACKTOOL_MAP_SATELLITE_VERSION ?? "") + url)}`,
+      const oldKey = `legacy:${hash(url)}`,
         old = this.tiles.get(oldKey);
       if (old !== undefined) {
         try {
@@ -491,11 +474,7 @@ export class MapResources {
       hit ??
       (await this.downloads.load(
         key,
-        preset
-          ? source.split("-")[0]!
-          : source === "vector"
-            ? "vector"
-            : "custom",
+        preset ? source.split("-")[0]! : "vector",
         async () => {
           const hit = await cached();
           if (hit !== undefined) return hit;

@@ -62,13 +62,11 @@ export interface MapPreset {
 export interface MapConfig {
   versions: Record<string, unknown>;
   vectorMaxZoom: number;
-  satellite: boolean;
   basemaps: MapPreset[];
   overlays: MapPreset[];
   vectorLayers: Record<string, Record<string, string>>;
   attribution: string;
   customVectorAttribution: string;
-  satelliteAttribution: string;
   cacheTime: number;
 }
 export const SelectionRequest = z
