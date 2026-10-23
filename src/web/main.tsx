@@ -10,6 +10,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StartupScreen } from "./components/startup-screen.js";
 import { Toaster } from "./components/ui/sonner.js";
+import { initializeTheme, ThemeProvider } from "./theme.js";
 import "./style.css";
 const MapPage = lazy(() => import("./map-page.js"));
 const client = new QueryClient({
@@ -28,9 +29,10 @@ function LegacyPanel({ panel }: { panel: string }) {
   params.set("panel", panel);
   return <Navigate to={"/map?" + params.toString()} replace />;
 }
+initializeTheme();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <>
+    <ThemeProvider>
       <Toaster
         position="top-center"
         visibleToasts={1}
@@ -58,6 +60,6 @@ createRoot(document.getElementById("root")!).render(
           </Routes>
         </BrowserRouter>
       </QueryClientProvider>
-    </>
+    </ThemeProvider>
   </StrictMode>,
 );

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Spin } from "./components/controls.js";
 import { api } from "./api.js";
@@ -7,6 +7,7 @@ import type { Viewport } from "./map-viewport.js";
 import type { Project } from "../shared/project.js";
 import type { MapConfig, SelectedTrack } from "../shared/map.js";
 import "./map.css";
+import { useTheme } from "./theme.js";
 export default function WorkMap({ id }: { id: string }) {
   const bootstrap = useQuery({
       queryKey: ["work-map-bootstrap"],
@@ -42,6 +43,7 @@ function Preview(props: {
   config: MapConfig;
   tracks: SelectedTrack[];
 }) {
+  const { appearance } = useTheme();
   const [state, setState] = useState(() => ({
       ...props.state,
       title: "",
@@ -49,6 +51,10 @@ function Preview(props: {
     })),
     [error, setError] = useState("");
   const viewport = useRef<Viewport>(null);
+  const themedState = useMemo(
+    () => ({ ...state, style: { ...state.style, appearance } }),
+    [state, appearance],
+  );
   useEffect(() => {
     let active = true;
     void viewport.current
@@ -70,7 +76,7 @@ function Preview(props: {
       <div className="work-map">
         <MapViewport
           ref={viewport}
-          state={state}
+          state={themedState}
           config={props.config}
           tracks={props.tracks}
           preview={false}

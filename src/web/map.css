@@ -110,7 +110,7 @@
   pointer-events: none;
 }
 .map-error {
-  color: #ad2626;
+  color: var(--destructive);
 }
 .map-stage-toolbar {
   position: absolute;
@@ -126,7 +126,7 @@
 .render-page {
   margin: 0;
   overflow: hidden;
-  background: #fff;
+  background: var(--background);
 }
 .render-page .map-frame {
   box-shadow: none;
@@ -135,8 +135,8 @@
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: #e8efed;
-  color: #233142;
+  background: var(--workspace);
+  color: var(--foreground);
   position: relative;
   overflow: hidden;
 }
@@ -155,14 +155,14 @@
 .map-brand .brand {
   font-size: 11px;
   letter-spacing: 0.1em;
-  color: #357060;
+  color: var(--primary);
 }
 .map-header h1 {
   font-size: 16px;
   margin: 0;
 }
 .save-state {
-  color: #73837a;
+  color: var(--muted-foreground);
   font-size: 12px;
 }
 .workspace-tools {
@@ -182,7 +182,7 @@
 }
 .map-controls section > h2 {
   font-size: 13px;
-  color: #718176;
+  color: var(--muted-foreground);
 }
 .library-intro {
   display: flex;
@@ -192,7 +192,7 @@
   margin-bottom: 16px;
 }
 .library-intro p {
-  color: #6b7b71;
+  color: var(--muted-foreground);
   font-size: 12px;
   margin: 0;
 }
@@ -208,21 +208,20 @@
   gap: 12px;
   padding: 12px 16px;
   border-radius: 12px;
-  background: #fff;
+  background: var(--background);
   box-shadow: 0 5px 30px #19332a30;
   max-width: calc(100% - 56px);
   width: max-content;
 }
 .inspection-banner span {
   font-size: 12px;
-  color: #6b7b71;
+  color: var(--muted-foreground);
 }
 .map-controls .work-main {
   margin: 0;
   padding: 0;
 }
-.map-controls .work-main > .ui-typography:first-child,
-.settings-panel > header {
+.map-controls .work-main > .ui-typography:first-child {
   display: none;
 }
 .map-controls .work-grid {
@@ -258,8 +257,8 @@
   right: 0;
   max-width: 100%;
   z-index: 3;
-  background: #fffd;
-  color: #172b3d;
+  background: color-mix(in oklch, var(--background) 85%, transparent);
+  color: var(--foreground);
   font:
     10px/1.4 system-ui,
     sans-serif;
@@ -274,19 +273,19 @@
   text-decoration: none;
 }
 .overview-hint {
-  color: #69796f;
+  color: var(--muted-foreground);
   font-size: 12px;
   line-height: 1.5;
 }
 .settings-error {
   margin: 4px 0 0;
-  color: #ad2626;
+  color: var(--destructive);
   font-size: 12px;
   line-height: 1.5;
 }
 .settings-reason {
   margin: 2px 0 0;
-  color: #69796f;
+  color: var(--muted-foreground);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -299,7 +298,7 @@
 .settings-group > legend {
   margin-bottom: 6px;
   padding: 0;
-  color: #40534a;
+  color: var(--foreground);
   font-size: 12px;
   font-weight: 600;
 }
@@ -310,7 +309,7 @@
 .settings-subgroup > legend {
   margin-bottom: 4px;
   padding: 0;
-  color: #69796f;
+  color: var(--muted-foreground);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -347,7 +346,7 @@
 .settings-field-label {
   display: block;
   margin-bottom: 6px;
-  color: #40534a;
+  color: var(--foreground);
   font-size: 12px;
   font-weight: 600;
 }
@@ -635,7 +634,7 @@ button.settings-layer-toggle:focus-visible {
   align-items: center;
 }
 .overview-row.selected {
-  background: #eaf3ff;
+  background: var(--accent);
 }
 .overview-detail {
   position: absolute;
@@ -647,7 +646,7 @@ button.settings-layer-toggle:focus-visible {
   box-sizing: border-box;
   padding: 16px;
   border-radius: 12px;
-  background: white;
+  background: var(--background);
   box-shadow: 0 5px 25px #19332a30;
   overflow-wrap: anywhere;
   max-height: 40vh;
@@ -655,7 +654,7 @@ button.settings-layer-toggle:focus-visible {
 }
 .overview-detail p {
   font-size: 12px;
-  color: #586d60;
+  color: var(--muted-foreground);
 }
 .detail-close {
   float: right;
@@ -676,8 +675,8 @@ button.settings-layer-toggle:focus-visible {
   gap: 6px;
   height: 50px;
   padding: 8px 12px;
-  background: #ffffffb8;
-  border-top: 1px solid #d7dfe8;
+  background: color-mix(in oklch, var(--background) 85%, transparent);
+  border-top: 1px solid var(--border);
   min-height: 0;
   position: absolute;
   /* Keep loading feedback below workspace panels (z-index: 5). */
@@ -688,7 +687,7 @@ button.settings-layer-toggle:focus-visible {
   max-width: min(620px, calc(100% - 94px));
   box-sizing: border-box;
   font-size: 12px;
-  border: 1px solid #dbe4df;
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 3px 14px #19332a12;
   overflow: auto;
@@ -706,8 +705,8 @@ button.settings-layer-toggle:focus-visible {
   max-width: min(450px, calc(100% - 32px));
   max-height: 30vh;
   overflow: auto;
-  background: #fff;
-  border: 1px solid #edc5bf;
+  background: var(--background);
+  border: 1px solid var(--destructive);
   border-radius: 8px;
   padding: 10px 12px;
   box-sizing: border-box;
@@ -723,14 +722,14 @@ button.settings-layer-toggle:focus-visible {
   display: flex;
   gap: 6px;
   align-items: center;
-  border-bottom: 1px solid #d7dfe8;
-  background: white;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
   flex-wrap: nowrap;
   position: absolute;
   z-index: 6;
   top: 16px;
   left: 16px;
-  border: 1px solid #dbe4df;
+  border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: 0 5px 24px #19332a15;
   max-width: calc(100% - 32px);
@@ -800,7 +799,7 @@ button.settings-layer-toggle:focus-visible {
 .track-properties {
   margin-top: 20px;
   padding-top: 16px;
-  border-top: 1px solid #edf1ee;
+  border-top: 1px solid var(--border);
 }
 .property-form label {
   display: grid;
@@ -822,10 +821,10 @@ button.settings-layer-toggle:focus-visible {
   transform: translateX(-50%);
   max-width: calc(100% - 32px);
   padding: 10px 14px;
-  border: 1px solid #e6d7b8;
+  border: 1px solid var(--warning-border);
   border-radius: 10px;
-  background: #fffaf0;
-  color: #73551a;
+  background: var(--warning-background);
+  color: var(--warning-foreground);
   box-shadow: 0 3px 14px #19332a12;
 }
 .overview-resource-error {
@@ -839,7 +838,7 @@ button.settings-layer-toggle:focus-visible {
   width: 380px;
   flex-shrink: 0;
   overflow: auto;
-  background: white;
+  background: var(--background);
   padding: 0 16px 20px;
   box-sizing: border-box;
   position: absolute;
@@ -850,7 +849,7 @@ button.settings-layer-toggle:focus-visible {
      cap keeps long panels scrolling inside the viewport. */
   max-width: calc(100% - 32px);
   max-height: calc(100% - 146px);
-  border: 1px solid #dbe4df;
+  border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: 0 8px 30px #19332a18;
   scroll-padding-top: 64px;
@@ -900,7 +899,7 @@ button.settings-layer-toggle:focus-visible {
 }
 .map-controls button:focus-visible,
 .map-controls summary:focus-visible {
-  outline: 2px solid #1677ff;
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 .track-row-name {
@@ -927,8 +926,8 @@ button.settings-layer-toggle:focus-visible {
   flex-shrink: 0;
   border-radius: 4px;
   padding: 2px 6px;
-  background: #eef2f0;
-  color: #65746d;
+  background: var(--muted);
+  color: var(--muted-foreground);
   font-size: 11px;
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
@@ -952,7 +951,7 @@ button.settings-layer-toggle:focus-visible {
   flex: 0 0 44px;
   width: 44px;
   padding: 0;
-  color: #65746d;
+  color: var(--muted-foreground);
 }
 .overview-row > .map-error {
   flex-basis: 100%;
@@ -980,12 +979,12 @@ button.settings-layer-toggle:focus-visible {
   }
 }
 .overview-row:hover:not(.selected) {
-  background: #edf4f0;
+  background: var(--accent);
 }
 .month-heading {
   margin: 8px 0;
   padding-inline: 4px;
-  color: #69796f;
+  color: var(--muted-foreground);
 }
 .batch-action-bar {
   display: flex;
@@ -996,8 +995,8 @@ button.settings-layer-toggle:focus-visible {
   position: sticky;
   bottom: 0;
   z-index: 4;
-  background: white;
-  border-top: 1px solid #dbe4df;
+  background: var(--background);
+  border-top: 1px solid var(--border);
   padding: 10px 0;
   flex-wrap: wrap;
 }
@@ -1018,7 +1017,7 @@ button.settings-layer-toggle:focus-visible {
   gap: 6px;
   padding: 6px 10px;
   border-radius: 12px;
-  background: white;
+  background: var(--background);
   box-shadow: 0 3px 14px #19332a22;
 }
 .project-bar strong {
@@ -1035,7 +1034,7 @@ button.settings-layer-toggle:focus-visible {
   position: sticky;
   top: 0;
   padding: 8px 0;
-  background: white;
+  background: var(--background);
   z-index: 3;
   gap: 4px;
 }
@@ -1044,24 +1043,24 @@ button.settings-layer-toggle:focus-visible {
   bottom: 78px;
   left: 33px;
   width: 346px;
-  background: white;
+  background: var(--background);
   padding: 8px 0;
   z-index: 5;
-  border-top: 1px solid #dbe4df;
+  border-top: 1px solid var(--border);
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 .project-export-actions small {
   font-size: 11px;
-  color: #65746d;
+  color: var(--muted-foreground);
 }
 .sheet-handle {
   display: none;
 }
 .upload-drop {
   padding: 12px;
-  border: 1px dashed #689985;
+  border: 1px dashed var(--ring);
   border-radius: 8px;
   margin: 12px 0;
 }
@@ -1075,7 +1074,7 @@ button.settings-layer-toggle:focus-visible {
 .property-preview {
   margin: 16px 0;
   padding: 10px;
-  background: #f6f9f7;
+  background: var(--muted);
   border-radius: 10px;
 }
 @media (max-width: 900px) and (min-width: 701px) {
@@ -1142,7 +1141,7 @@ button.settings-layer-toggle:focus-visible {
     align-items: center;
     justify-content: center;
     border: 0;
-    background: white;
+    background: var(--background);
     z-index: 12;
     touch-action: none;
     user-select: none;
@@ -1155,7 +1154,7 @@ button.settings-layer-toggle:focus-visible {
     width: 36px;
     height: 4px;
     border-radius: 999px;
-    background: #a6b5ad;
+    background: var(--ring);
   }
   .map-controls[data-dragging="true"] {
     transition: none;
@@ -1369,7 +1368,7 @@ button.settings-layer-toggle:focus-visible {
 }
 .list-location-filter .filter-result {
   flex: 1;
-  color: #68756d;
+  color: var(--muted-foreground);
   font-size: 13px;
 }
 .track-list-status,
@@ -1378,7 +1377,7 @@ button.settings-layer-toggle:focus-visible {
   place-items: center;
   height: 100%;
   min-height: 180px;
-  color: #68756d;
+  color: var(--muted-foreground);
 }
 
 .track-list-footer {
@@ -1387,7 +1386,7 @@ button.settings-layer-toggle:focus-visible {
   justify-content: space-between;
   gap: 8px;
   padding: 10px 0;
-  border-top: 1px solid #edf1ee;
+  border-top: 1px solid var(--border);
 }
 .track-list-footer > nav {
   margin: 0 0 0 auto;
@@ -1408,14 +1407,14 @@ button.settings-layer-toggle:focus-visible {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  color: #647469;
+  color: var(--muted-foreground);
   font-size: 13px;
 }
 .track-tag {
   padding: 3px 8px;
   border-radius: 6px;
-  background: #edf4ef;
-  color: #365b45;
+  background: var(--muted);
+  color: var(--foreground);
 }
 .track-stats {
   display: grid;
@@ -1431,7 +1430,7 @@ button.settings-layer-toggle:focus-visible {
 .track-stats dt,
 .track-file-info dt {
   font-size: 12px;
-  color: #647469;
+  color: var(--muted-foreground);
 }
 .track-stats .track-stat-duration {
   text-align: right;
@@ -1459,7 +1458,7 @@ button.settings-layer-toggle:focus-visible {
   padding: 0;
 }
 .track-detail-links {
-  border-block: 1px solid #e7ece8;
+  border-block: 1px solid var(--border);
   padding-block: 8px;
 }
 .map-controls .track-detail-link {
@@ -1481,11 +1480,11 @@ button.settings-layer-toggle:focus-visible {
   margin-top: 4px;
   font-size: 12px;
   font-weight: 400;
-  color: #647469;
+  color: var(--muted-foreground);
 }
 .track-file-info {
   font-size: 13px;
-  color: #647469;
+  color: var(--muted-foreground);
 }
 .track-file-info dl {
   display: grid;
@@ -1494,7 +1493,7 @@ button.settings-layer-toggle:focus-visible {
 }
 .track-file-info dd {
   margin: 0 0 8px;
-  color: #344b3d;
+  color: var(--foreground);
   overflow-wrap: anywhere;
 }
 
@@ -1525,7 +1524,7 @@ button.settings-layer-toggle:focus-visible {
   align-items: center;
   flex-shrink: 0;
   gap: 2px;
-  color: #8b9b91;
+  color: var(--muted-foreground);
 }
 .track-route-connector .track-tag {
   max-width: 100px;
@@ -1540,7 +1539,7 @@ button.settings-layer-toggle:focus-visible {
   flex: 0 1 auto;
 }
 .analysis-muted {
-  color: #647469;
+  color: var(--muted-foreground);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -1557,7 +1556,7 @@ button.settings-layer-toggle:focus-visible {
   gap: 16px;
 }
 .analysis-stat-list dt {
-  color: #647469;
+  color: var(--muted-foreground);
 }
 .analysis-stat-list dd {
   margin: 0;
@@ -1566,7 +1565,7 @@ button.settings-layer-toggle:focus-visible {
 }
 .track-analysis,
 .analysis-quality {
-  border-bottom: 1px solid #e7ece8;
+  border-bottom: 1px solid var(--border);
   padding-bottom: 20px;
 }
 .analysis-heading,
@@ -1589,12 +1588,12 @@ button.settings-layer-toggle:focus-visible {
   display: inline-flex;
   gap: 2px;
   padding: 2px;
-  background: #f6f8f6;
+  background: var(--muted);
   border-radius: 8px;
 }
 .analysis-chart-controls {
   margin-top: 16px;
-  color: #647469;
+  color: var(--muted-foreground);
   font-size: 11px;
 }
 .map-controls .analysis-switch [data-slot="button"] {
@@ -1604,20 +1603,20 @@ button.settings-layer-toggle:focus-visible {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #647469;
+  color: var(--muted-foreground);
   font-size: 13px;
   font-weight: 500;
   box-shadow: none;
   text-decoration: none;
 }
 .map-controls .analysis-switch [data-slot="button"]:hover:not(:disabled) {
-  background: #edf1ed;
-  color: #263d32;
+  background: var(--accent);
+  color: var(--foreground);
 }
 .map-controls .analysis-switch [aria-pressed="true"],
 .map-controls .analysis-switch [aria-pressed="true"]:hover:not(:disabled) {
-  background: #fff;
-  color: #263d32;
+  background: var(--background);
+  color: var(--foreground);
   box-shadow: 0 1px 3px #19332a1f;
 }
 .map-controls .analysis-switch [data-slot="button"]:disabled {
@@ -1633,10 +1632,10 @@ button.settings-layer-toggle:focus-visible {
   font:
     9px system-ui,
     sans-serif;
-  fill: #647469;
+  fill: var(--muted-foreground);
 }
 .analysis-chart:focus-visible {
-  outline: 2px solid #21634f;
+  outline: 2px solid var(--ring);
   border-radius: 4px;
 }
 .analysis-empty {
@@ -1644,15 +1643,15 @@ button.settings-layer-toggle:focus-visible {
   display: grid;
   place-items: center;
   font-size: 13px;
-  color: #647469;
-  background: #f7f9f7;
+  color: var(--muted-foreground);
+  background: var(--muted);
   margin-top: 8px;
   border-radius: 8px;
 }
 .analysis-hover {
   min-height: 60px;
   font-size: 12px;
-  color: #647469;
+  color: var(--muted-foreground);
   line-height: 1.6;
   padding-top: 8px;
 }
@@ -1661,7 +1660,7 @@ button.settings-layer-toggle:focus-visible {
   display: block;
 }
 .analysis-hover strong {
-  color: #234234;
+  color: var(--foreground);
 }
 .analysis-overlay-controls {
   font-size: 12px;
@@ -1674,7 +1673,7 @@ button.settings-layer-toggle:focus-visible {
   gap: 4px;
   margin-top: 12px;
   font-size: 11px;
-  color: #647469;
+  color: var(--muted-foreground);
 }
 .analysis-legend > div {
   flex-basis: 100%;
@@ -1698,7 +1697,7 @@ button.settings-layer-toggle:focus-visible {
 }
 .analysis-quality {
   font-size: 12px;
-  color: #647469;
+  color: var(--muted-foreground);
   line-height: 1.7;
 }
 .analysis-quality .analysis-stat-list {
@@ -1709,7 +1708,7 @@ button.settings-layer-toggle:focus-visible {
   margin: 0 0 16px;
   font-size: 14px;
   font-weight: 600;
-  color: #263d32;
+  color: var(--foreground);
 }
 
 .track-detail-loading,
@@ -1719,7 +1718,7 @@ button.settings-layer-toggle:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #647469;
+  color: var(--muted-foreground);
   font-size: 13px;
 }
 .track-detail-loading {
@@ -1740,7 +1739,7 @@ button.settings-layer-toggle:focus-visible {
   width: 88px;
   height: 1em;
   border-radius: 5px;
-  background: #edf1ed;
+  background: var(--accent);
   vertical-align: middle;
   animation: track-loading-pulse 1.6s ease-in-out infinite;
 }

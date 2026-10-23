@@ -1,12 +1,129 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { resetDisplay } from "./display-reset.js";
-import { pickBasemap, tool } from "./map-tools.js";
+import { pickAppearance, pickBasemap, tool } from "./map-tools.js";
 
 test.beforeEach(async ({ request }) => {
   await resetDisplay(request);
 });
 
-test("settings contain map controls only and server configuration writes require CLI", async ({
+async function expectAppearance(page: Page, appearance: "light" | "dark") {
+  await expect(page.locator("html")).toHaveClass(
+    appearance === "dark" ? "dark" : "",
+  );
+  await expect
+    .poll(() => page.evaluate(() => window.renderer?.state.style.appearance))
+    .toBe(appearance);
+  await expect(page.locator("html")).toHaveCSS("color-scheme", appearance);
+}
+
+for (const width of [1280, 390]) {
+  test(`global appearance follows the system and persists explicit choices at ${width}px`, async ({
+    page,
+  }, info) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/settings");
+    const choice = (name: string) =>
+      page.getByRole("button", { name, exact: true });
+    await expect(
+      page.getByRole("combobox", { name: "配色", exact: true }),
+    ).toHaveText("跟随系统");
+    await expectAppearance(page, "dark");
+    const panel = page.getByRole("complementary", { name: "地图控制面板" });
+    const darkBackground = await panel.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    );
+    await page.screenshot({ path: info.outputPath("settings-dark.png") });
+
+    await pickAppearance(page, "浅色");
+    await expectAppearance(page, "light");
+    await expect(panel).not.toHaveCSS("background-color", darkBackground);
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expectAppearance(page, "light");
+    await page.reload();
+    await expect(
+      page.getByRole("combobox", { name: "配色", exact: true }),
+    ).toHaveText("浅色");
+    await expectAppearance(page, "light");
+
+    await pickAppearance(page, "跟随系统");
+    await expectAppearance(page, "dark");
+    await page.emulateMedia({ colorScheme: "light" });
+    await expectAppearance(page, "light");
+    await page.reload();
+    await expect(
+      page.getByRole("combobox", { name: "配色", exact: true }),
+    ).toHaveText("跟随系统");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expectAppearance(page, "dark");
+
+    await pickAppearance(page, "深色");
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.reload();
+    await expect(
+      page.getByRole("combobox", { name: "配色", exact: true }),
+    ).toHaveText("深色");
+    await expectAppearance(page, "dark");
+    await choice("地图设置").click();
+    await expect(
+      page.getByRole("combobox", { name: "配色", exact: true }),
+    ).toHaveCount(0);
+    await pickBasemap(page, "osm-standard");
+    await expect
+      .poll(() => page.evaluate(() => window.renderer?.state.style.basemap))
+      .toBe("osm-standard");
+    await choice("返回设置").click();
+    await pickAppearance(page, "浅色");
+    await expectAppearance(page, "light");
+    await expect
+      .poll(() => page.evaluate(() => window.renderer?.state.style.basemap))
+      .toBe("osm-standard");
+    await choice("地图设置").click();
+    await pickBasemap(page, "vector");
+    await expect
+      .poll(() => page.evaluate(() => window.renderer?.state.style.basemap))
+      .toBe("vector");
+    await expectAppearance(page, "light");
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  });
+}
+
+test("global appearance survives project changes and synchronizes browser tabs", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/settings");
+  await pickAppearance(page, "深色");
+  await expectAppearance(page, "dark");
+  await tool(page, "新建出图工程");
+  await expectAppearance(page, "dark");
+  const second = await context.newPage();
+  await second.goto("/settings");
+  await expectAppearance(second, "dark");
+  await pickAppearance(second, "浅色");
+  await expectAppearance(page, "light");
+  await expectAppearance(second, "light");
+  await tool(page, "返回浏览");
+  await page
+    .getByRole("button", { name: "放弃修改并返回", exact: true })
+    .click();
+  await expect(page.getByRole("region", { name: "当前出图工程" })).toHaveCount(
+    0,
+  );
+  await expectAppearance(page, "light");
+  await tool(page, "设置");
+  await expect(
+    page.getByRole("combobox", { name: "配色", exact: true }),
+  ).toHaveText("浅色");
+  await second.close();
+});
+
+test("settings group map controls and server configuration writes require CLI", async ({
   page,
 }, info) => {
   const errors: string[] = [],
@@ -14,7 +131,22 @@ test("settings contain map controls only and server configuration writes require
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("request", (r) => requests.push(r.url()));
   await page.goto("/settings");
+  await page.getByRole("button", { name: "地图设置", exact: true }).click();
   await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "返回设置", exact: true }).click();
+  const mapSettings = page.getByRole("button", {
+    name: "地图设置",
+    exact: true,
+  });
+  await expect(mapSettings).toBeFocused();
+  await expect(page.locator(".settings-panel").getByRole("button")).toHaveCount(
+    1,
+  );
+  await expect(page.getByLabel("图源", { exact: true })).toHaveCount(0);
+  await mapSettings.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "地图设置", exact: true }),
+  ).toBeFocused();
   await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   for (const name of [
     "日志级别",
@@ -64,6 +196,11 @@ test("settings contain map controls only and server configuration writes require
   );
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "设置", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel("图源", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "地图设置", exact: true }).click();
   await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   const nav = page.getByRole("navigation", { name: "地图工具", exact: true });
   await expect(page.locator(".project-icon")).toBeVisible();
@@ -103,12 +240,14 @@ test("bootstrap errors remain actionable without exposing server settings", asyn
     }),
   );
   await page.goto("/settings");
+  await page.getByRole("button", { name: "地图设置", exact: true }).click();
   await expect(
     page.getByText("配置文件不是有效 JSON", { exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel("配置项", { exact: true })).toHaveCount(0);
   await page.unroute("**/api/bootstrap");
   await page.getByRole("button", { name: "重试", exact: true }).click();
+  await page.getByRole("button", { name: "地图设置", exact: true }).click();
   await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
 });
 
@@ -117,6 +256,7 @@ test("layers retain filters and opacity when disabled and reloaded", async ({
   request,
 }) => {
   await page.goto("/settings");
+  await page.getByRole("button", { name: "地图设置", exact: true }).click();
   const layer = page.getByRole("group", { name: "电力图层", exact: true });
   await expect(layer.getByRole("switch")).not.toBeChecked();
   await expect(layer.getByRole("spinbutton")).toHaveCount(0);
@@ -159,6 +299,7 @@ test("layers retain filters and opacity when disabled and reloaded", async ({
       power: { facilities: "none", min_voltage: 220 },
     });
   await page.reload();
+  await page.getByRole("button", { name: "地图设置", exact: true }).click();
   await expect(layer.getByRole("switch")).not.toBeChecked();
   await expect(layer).toContainText("仅线路 · ≥ 220 kV");
   await expect(layer).not.toContainText("已关闭");
@@ -179,6 +320,7 @@ test("railway modes share one layer and incompatible basemaps preserve its setti
 }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/settings");
+  await page.getByRole("button", { name: "地图设置", exact: true }).click();
   const layer = page.getByRole("group", { name: "铁路图层", exact: true });
   await layer.getByRole("switch").check();
   await layer.locator(".settings-layer-toggle").click();
@@ -246,6 +388,7 @@ test("map content hides inherited controls and lists every feature category", as
     await route.fulfill({ response, json: body });
   });
   await page.goto("/settings");
+  await page.getByRole("button", { name: "地图设置", exact: true }).click();
   await expect(
     page.getByRole("radiogroup", { name: "道路", exact: true }).first(),
   ).toBeVisible();

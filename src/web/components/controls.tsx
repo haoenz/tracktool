@@ -447,7 +447,8 @@ export function Alert({
       variant={type === "error" ? "destructive" : "default"}
       className={cn(
         "ui-alert",
-        type === "warning" && "border-amber-300 bg-amber-50 text-amber-950",
+        type === "warning" &&
+          "border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100",
         type === "info" && "bg-muted/40",
         closable && "pr-10",
       )}
@@ -503,9 +504,12 @@ export function Tag({
     <Badge
       variant="secondary"
       className={cn(
-        color === "green" && "bg-emerald-50 text-emerald-800",
-        color === "red" && "bg-red-50 text-red-800",
-        color === "blue" && "bg-blue-50 text-blue-800",
+        color === "green" &&
+          "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
+        color === "red" &&
+          "bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200",
+        color === "blue" &&
+          "bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200",
       )}
     >
       {children}

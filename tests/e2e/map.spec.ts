@@ -133,7 +133,7 @@ test("archive → selection → styling → save/reopen → JSON → independent
     ),
   ).toBe(true);
   await page.screenshot({ path: info.outputPath("map-mobile.png") });
-  await tool(page, "设置");
+  await tool(page, "地图样式");
   await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => !!window.renderer)).toBe(true);
   expect(errors).toEqual([]);
@@ -443,7 +443,7 @@ test("panels preserve the map, selection and unfinished edits on desktop and mob
   await page.getByLabel("标题", { exact: true }).fill("切换面板保留的草稿");
   const camera = await page.evaluate(() => window.renderer!.state.camera);
   const canvas = await page.locator(".maplibregl-canvas").elementHandle();
-  await tool(page, "设置");
+  await tool(page, "地图样式");
   await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   await tool(page, "轨迹库");
   await expect(

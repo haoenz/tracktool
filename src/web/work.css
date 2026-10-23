@@ -4,16 +4,16 @@
   align-items: center;
   flex-wrap: wrap;
   padding: 16px 24px;
-  background: #fff;
-  border-bottom: 1px solid #dce3ec;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
 }
 .work-nav strong {
-  color: #376291;
+  color: var(--primary);
   letter-spacing: 0.12em;
   margin-right: auto;
 }
 .work-nav a {
-  color: #345e86;
+  color: var(--primary);
   text-decoration: none;
 }
 .work-main {
@@ -66,7 +66,7 @@
   overflow-wrap: anywhere;
   max-height: 380px;
   overflow: auto;
-  background: #f5f7fa;
+  background: var(--muted);
   padding: 12px;
   font-size: 12px;
   border-radius: 6px;
@@ -75,7 +75,7 @@
   margin-top: 12px;
   max-height: 320px;
   overflow: auto;
-  border: 1px solid #dce3ec;
+  border: 1px solid var(--border);
   padding: 12px;
 }
 .file-browser > div {
@@ -87,7 +87,7 @@ details {
 }
 summary {
   cursor: pointer;
-  color: #345e86;
+  color: var(--primary);
 }
 input[type="file"] {
   max-width: 100%;
@@ -142,7 +142,7 @@ input[type="file"] {
   max-width: 100%;
 }
 .edit-segment {
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--border);
   padding: 10px 0;
   overflow-wrap: anywhere;
 }

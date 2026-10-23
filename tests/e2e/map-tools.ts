@@ -1,6 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 import type {} from "../../src/drawing/globals.js";
 const openVendors = ["OSM", "memomaps", "OpenTopoMap", "OpenFreeMap"];
+export async function pickAppearance(page: Page, name: string) {
+  await page.getByRole("combobox", { name: "配色", exact: true }).click();
+  await page.getByRole("option", { name, exact: true }).click();
+}
 /** Pick a basemap through the two-level vendor picker. */
 export async function pickBasemap(page: Page, id: string) {
   const { vendor, name } = await page.evaluate(
@@ -26,6 +30,13 @@ export async function tool(page: Page, name: string) {
     if ((await settings.getAttribute("aria-expanded")) !== "true")
       await settings.click();
     await expect(settings).toHaveAttribute("aria-expanded", "true");
+    if (name === "地图样式") {
+      const mapSettings = page.getByRole("button", {
+        name: "地图设置",
+        exact: true,
+      });
+      if (await mapSettings.isVisible()) await mapSettings.click();
+    }
     return;
   }
   if (name === "返回浏览") {

@@ -1,3 +1,4 @@
+import { pickAppearance } from "./map-tools.js";
 import { filterTracks, pickBasemap } from "./map-tools.js";
 import { tool } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
@@ -164,8 +165,8 @@ test("style reload restores the overview; export preview excludes it; mobile pan
   page,
 }) => {
   await loaded(page);
-  await tool(page, "地图样式");
-  await page.getByRole("button", { name: "深色", exact: true }).click();
+  await tool(page, "设置");
+  await pickAppearance(page, "深色");
   await expect.poll(() => overviewSource(page)).toBeTruthy();
   await expect
     .poll(() => page.evaluate(() => window.renderer!.state.style.appearance), {

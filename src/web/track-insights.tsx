@@ -530,7 +530,7 @@ function ProfileChart({
               x2={right}
               y1={y(value)}
               y2={y(value)}
-              stroke="#e7ece8"
+              stroke="var(--border)"
             />
             <text x={left - 5} y={y(value) + 3} textAnchor="end">
               {number(value, "", 0)}
@@ -596,7 +596,7 @@ function ProfileChart({
             x2={x(hover)}
             y1={top}
             y2={bottom}
-            stroke="#60756a"
+            stroke="var(--muted-foreground)"
             strokeDasharray="3 3"
           />
           {hover[metric] !== null && (
@@ -604,7 +604,7 @@ function ProfileChart({
               cx={x(hover)}
               cy={y(hover[metric]!)}
               r="4"
-              fill="#fff"
+              fill="var(--background)"
               stroke="#2c806b"
               strokeWidth="2"
             />

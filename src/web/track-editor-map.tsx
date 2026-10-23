@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Spin } from "./components/controls.js";
 import { useWorkspace } from "./workspace.js";
+import { useTheme } from "./theme.js";
 import { api } from "./api.js";
 import { MapViewport, type Viewport } from "./map-viewport.js";
 import type { EditGeometry } from "../shared/track-edit.js";
@@ -91,6 +92,11 @@ function EditorMap({
   const [state, setState] = useState({ ...initial, title: "" }),
     [error, setError] = useState(""),
     [ready, setReady] = useState(false);
+  const { appearance } = useTheme();
+  const themedState = useMemo(
+    () => ({ ...state, style: { ...state.style, appearance } }),
+    [state, appearance],
+  );
   const ref = useRef<Viewport>(null);
   const tracks = useMemo(() => editTracks(geometry), [geometry]);
   // Do not refit on each drawn point: users keep their working view.
@@ -126,7 +132,7 @@ function EditorMap({
       <div className="work-map">
         <MapViewport
           ref={ref}
-          state={state}
+          state={themedState}
           config={config}
           tracks={tracks}
           preview={false}

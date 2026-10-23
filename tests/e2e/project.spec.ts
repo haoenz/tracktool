@@ -1,3 +1,4 @@
+import { pickAppearance } from "./map-tools.js";
 import { filterTracks, expectTrackFilter } from "./map-tools.js";
 import { tool, selectProjectTrack, saveProject } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
@@ -48,7 +49,7 @@ test("project candidate browsing preserves composition, filters, visibility and 
   await selectProjectTrack(page, track);
   await title(page, "保留的工程修改");
   await tool(page, "设置");
-  await page.getByRole("button", { name: "深色", exact: true }).click();
+  await pickAppearance(page, "深色");
   await expect
     .poll(async () => (await state(page)).style.appearance)
     .toBe("dark");
@@ -84,7 +85,10 @@ test("project candidate browsing preserves composition, filters, visibility and 
     .click();
   await expect(page.locator(".save-state")).toHaveText("浏览地图");
   expect((await state(page)).camera).toEqual(before.camera);
-  expect((await state(page)).style).toEqual(before.style);
+  expect((await state(page)).style).toEqual({
+    ...before.style,
+    appearance: "dark",
+  });
   expect((await state(page)).tracks).toEqual(before.tracks);
   await expectTrackFilter(page, "Train");
   await expect(

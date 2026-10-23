@@ -88,6 +88,7 @@ const ArchiveAction = lazy(() =>
 );
 import { useSessionState } from "./session-state.js";
 import Settings from "./settings.js";
+import { useTheme } from "./theme.js";
 const panels: Record<Panel, string> = {
   library: "轨迹库",
   style: "地图样式",
@@ -243,6 +244,7 @@ export default function MapPage() {
   return <Editor initial={bootstrap.data} />;
 }
 function Editor({ initial }: { initial: Bootstrap }) {
+  const { appearance } = useTheme();
   const [libraryVisibility, setLibraryVisibility] =
     useSessionState<OverviewVisibility>(
       `tracktool:${initial.initialArchive}:visibility`,
@@ -253,6 +255,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
     );
   const [browseState, setBrowseState] = useState(() => ({
       ...initial.state,
+      style: { ...initial.state.style, appearance },
       camera: rememberedCamera(initial.initialArchive) ?? initial.state.camera,
     })),
     [projectState, setProjectState] = useState<Project>(),
@@ -336,6 +339,24 @@ function Editor({ initial }: { initial: Bootstrap }) {
   const [editMap, setEditMap] = useState<EditMap>();
   const inProject = projectState !== undefined;
   const state = projectState ?? browseState;
+  useLayoutEffect(() => {
+    // Persist concrete map palettes so saved projects and PNG exports remain portable.
+    if (browseState.style.appearance !== appearance)
+      setBrowseState((previous) => ({
+        ...previous,
+        style: { ...previous.style, appearance },
+      }));
+    if (projectState && projectState.style.appearance !== appearance)
+      setProjectState((previous) =>
+        previous
+          ? { ...previous, style: { ...previous.style, appearance } }
+          : previous,
+      );
+  }, [
+    appearance,
+    browseState.style.appearance,
+    projectState?.style.appearance,
+  ]);
   const browseVisibility = inProject ? projectVisibility : libraryVisibility;
   const setBrowseVisibility = inProject
     ? setProjectVisibility
@@ -2245,41 +2266,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
                       </div>
                     </div>
                   </div>
-                  {state.style.basemap === "vector" && (
-                    <div className="settings-appearance">
-                      <span
-                        className="settings-field-label"
-                        id="settings-appearance-label"
-                      >
-                        配色
-                      </span>
-                      <div
-                        className="settings-choice-group"
-                        role="group"
-                        aria-labelledby="settings-appearance-label"
-                      >
-                        {[
-                          { value: "light", label: "浅色" },
-                          { value: "dark", label: "深色" },
-                        ].map((item) => (
-                          <Button
-                            key={item.value}
-                            size="sm"
-                            variant="outline"
-                            aria-pressed={state.style.appearance === item.value}
-                            onClick={() =>
-                              change((next) => {
-                                next.style.appearance =
-                                  item.value === "dark" ? "dark" : "light";
-                              })
-                            }
-                          >
-                            {item.label}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                   {basemapError && (
                     <p
                       className="settings-error"

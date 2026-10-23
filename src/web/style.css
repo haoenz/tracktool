@@ -47,6 +47,34 @@
   --border: oklch(0.9 0 0);
   --input: oklch(0.88 0 0);
   --ring: oklch(0.556 0 0);
+  --workspace: #e8efed;
+  --warning-background: #fffaf0;
+  --warning-foreground: #73551a;
+  --warning-border: #e6d7b8;
+}
+:root.dark {
+  --background: oklch(0.19 0.008 160);
+  --foreground: oklch(0.94 0.005 160);
+  --card: oklch(0.23 0.008 160);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.23 0.008 160);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.9 0.02 160);
+  --primary-foreground: oklch(0.2 0.01 160);
+  --secondary: oklch(0.28 0.01 160);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.26 0.008 160);
+  --muted-foreground: oklch(0.72 0.01 160);
+  --accent: oklch(0.3 0.015 160);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.72 0.18 25);
+  --border: oklch(0.35 0.01 160);
+  --input: oklch(0.4 0.01 160);
+  --ring: oklch(0.72 0.04 160);
+  --workspace: oklch(0.15 0.008 160);
+  --warning-background: oklch(0.27 0.04 80);
+  --warning-foreground: oklch(0.86 0.1 80);
+  --warning-border: oklch(0.44 0.07 80);
 }
 @layer base {
   * {
@@ -116,8 +144,8 @@ h5.ui-typography {
 
 :root {
   font-family: system-ui, sans-serif;
-  color: #1d2838;
-  background: #f5f7fa;
+  color: var(--foreground);
+  background: var(--background);
 }
 body {
   margin: 0;
@@ -133,7 +161,7 @@ header {
 .brand {
   letter-spacing: 0.16em;
   font-weight: 700;
-  color: #376291;
+  color: var(--primary);
 }
 .ui-card {
   margin-bottom: 24px;
