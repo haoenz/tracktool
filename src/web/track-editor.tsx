@@ -23,7 +23,6 @@ import {
   Button,
   Input,
   Select,
-  Space,
   Spin,
   Modal,
 } from "./components/controls.js";
@@ -63,6 +62,27 @@ const groupColors = [
 // Draw mode colors the track before and after the insertion point differently.
 const drawBeforeColor = "#0891b2";
 const drawAfterColor = "#9333ea";
+const distanceMeters = (a: [number, number], b: [number, number]) => {
+  const rad = Math.PI / 180;
+  const h =
+    Math.sin(((b[1] - a[1]) * rad) / 2) ** 2 +
+    Math.cos(a[1] * rad) *
+      Math.cos(b[1] * rad) *
+      Math.sin(((b[0] - a[0]) * rad) / 2) ** 2;
+  return 6371008.8 * 2 * Math.asin(Math.sqrt(Math.min(1, h)));
+};
+const formatDistance = (meters: number) =>
+  meters < 1000
+    ? `${Math.round(meters)} m`
+    : `${(meters / 1000).toFixed(2)} 公里`;
+const formatInterval = (seconds: number) => {
+  const s = Math.round(seconds);
+  return s < 60
+    ? `${s} 秒`
+    : s < 3600
+      ? `${Math.floor(s / 60)} 分 ${s % 60} 秒`
+      : `${(s / 3600).toFixed(1)} 小时`;
+};
 const fileSize = (bytes: number) =>
   bytes < 1024 * 1024
     ? `${Math.max(1, Math.ceil(bytes / 1024))} KB`
@@ -133,6 +153,8 @@ function TrackEditor({
     longitude: number;
     latitude: number;
   }>();
+  const [locatedBreak, setLocatedBreak] = useState<number>();
+  const [automaticBreaks, setAutomaticBreaks] = useState<number[]>([]);
   const [assign, setAssign] = useState<Record<string, number>>({}),
     [journeys, setJourneys] = useState<
       {
@@ -266,6 +288,7 @@ function TrackEditor({
       }
       setPreview(undefined);
       setIndices("");
+      setAutomaticBreaks([]);
       setDrawing([]);
       setCandidates([]);
       if (view === "display") setMode("");
@@ -331,7 +354,8 @@ function TrackEditor({
   const breaks = indices
     .split(/[,，\s]+/)
     .filter(Boolean)
-    .map(Number);
+    .map(Number)
+    .sort((a, b) => a - b);
   const splitError = journeys.some(
     (j) =>
       !j.path
@@ -459,6 +483,7 @@ function TrackEditor({
   }
   function clearSelection() {
     setIndices("");
+    setAutomaticBreaks([]);
     setStart(0);
     setEnd(0);
     setCandidates([]);
@@ -561,6 +586,9 @@ function TrackEditor({
   useEffect(() => {
     setLocatedAltitude(undefined);
   }, [preview?.preview_id]);
+  useEffect(() => {
+    setLocatedBreak(undefined);
+  }, [entryId, segmentId, mode, indices, preview?.preview_id]);
   function locateAltitudePoint(point: {
     segment_id: string;
     longitude: number;
@@ -754,7 +782,7 @@ function TrackEditor({
     )?.coordinates;
     if (!coords?.length) return;
     const best = nearestPoint(coords, p);
-    if (mode === "split_segment" && best < coords.length - 1)
+    if (mode === "split_segment" && best < coords.length - 1) {
       setIndices((s) =>
         [
           ...(s
@@ -765,7 +793,8 @@ function TrackEditor({
             : [...s.split(/[,，\s]+/).filter(Boolean), String(best)]),
         ].join(","),
       );
-    else if (mode === "prune") {
+      setAutomaticBreaks((points) => points.filter((point) => point !== best));
+    } else if (mode === "prune") {
       if (rangeAnchor.current === undefined) {
         rangeAnchor.current = best;
         setStart(best);
@@ -781,7 +810,8 @@ function TrackEditor({
   }
   async function detect() {
     if (!d) return;
-    clearSelection();
+    if (mode === "prune") clearSelection();
+    else setNote("");
     const result = await api<{
       after_point_indices?: number[];
       ranges?: { start: number; end: number }[];
@@ -792,10 +822,16 @@ function TrackEditor({
       kind: mode === "prune" ? "drift" : "gaps",
       options: {},
     });
-    if (result.after_point_indices) {
-      setIndices(result.after_point_indices.join(","));
+    if (mode === "split_segment") {
+      const added = [...new Set(result.after_point_indices ?? [])].filter(
+        (point) => !breaks.includes(point),
+      );
+      setIndices([...breaks, ...added].sort((a, b) => a - b).join(","));
+      setAutomaticBreaks((points) => [...new Set([...points, ...added])]);
       setNote(
-        `检测到 ${result.after_point_indices.length} 个候选断点，请检查后保存修改。`,
+        added.length
+          ? `新增 ${added.length} 处自动断点，已保留原有选择，请检查后保存修改。`
+          : "未发现新的断点，已保留原有选择。",
       );
     } else if (result.ranges?.length) {
       setCandidates(result.ranges);
@@ -869,6 +905,23 @@ function TrackEditor({
   const coords =
     geometry.data?.segments.find((s) => s.segment_id === segmentId)
       ?.coordinates ?? [];
+  const segmentTimes = geometry.data?.segments.find(
+    (s) => s.segment_id === segmentId,
+  )?.time_us;
+  const breakRows = breaks.map((point) => {
+    const from = coords[point],
+      to = coords[point + 1],
+      start = segmentTimes?.[point],
+      end = segmentTimes?.[point + 1];
+    return {
+      point,
+      meters: from && to ? distanceMeters(from, to) : undefined,
+      seconds:
+        start === undefined || end === undefined
+          ? undefined
+          : (end - start) / 1e6,
+    };
+  });
   const marked =
     !preview && mode === "prune"
       ? (candidates.length ? candidates : [{ start, end }])
@@ -905,6 +958,18 @@ function TrackEditor({
         : []),
       ...(preview && !showBefore
         ? previewAnnotations(geometry.data, preview, mapData)
+        : []),
+      ...(mode === "split_segment" &&
+      !preview &&
+      locatedBreak !== undefined &&
+      breaks.includes(locatedBreak) &&
+      coords[locatedBreak]
+        ? [
+            {
+              segment_id: "ux-located",
+              coordinates: [coords[locatedBreak]!],
+            },
+          ]
         : []),
       ...(mode === "fill_altitude" && preview && locatedAltitude
         ? [
@@ -1162,7 +1227,16 @@ function TrackEditor({
                     disabled={busy || !!active || !!preview}
                     className="min-w-0 space-y-3"
                   >
-                    {["split_segment", "prune"].includes(mode) && (
+                    {mode === "split_segment" && segmentOptions.length > 1 && (
+                      <Select
+                        aria-label="选择编辑片段"
+                        value={segmentId}
+                        options={segmentOptions}
+                        onChange={chooseSegment}
+                        disabled={busy || !!active || !!preview}
+                      />
+                    )}
+                    {mode === "prune" && (
                       <div className="space-y-2" aria-label="选择编辑片段">
                         {segmentOptions.map((option) => (
                           <Button
@@ -1181,42 +1255,90 @@ function TrackEditor({
                     )}
                     {mode === "split_segment" && (
                       <>
-                        <p>
-                          点击地图上的断开位置，再点同一位置可取消。断开后仍是一条行程。
+                        <p className="text-xs text-muted-foreground">
+                          {breaks.length > 0
+                            ? `已选${breaks.length}处断点，各断点距与下一个点的间隔如下`
+                            : "点击地图选择断开位置，重复点击同一位置可取消。"}
                         </p>
-                        <p>
-                          已选 {breaks.length} 处断点，将形成{" "}
-                          {breaks.length + 1} 个片段。
-                        </p>
-                        <Space wrap>
-                          <Button onClick={() => void run(detect)}>
-                            查找可能的断点
-                          </Button>
-                          <Button
-                            disabled={!breaks.length}
-                            onClick={() => setIndices("")}
-                          >
-                            清除选择
-                          </Button>
-                        </Space>
-                        {breaks.map((point, i) => (
-                          <div key={point} className="flex items-center gap-2">
-                            <Button
-                              onClick={() => locateRange(point, point + 1)}
+                        {breakRows.length > 0 && (
+                          <div className="max-h-72 overflow-auto rounded-md border">
+                            <table
+                              className="w-full text-sm"
+                              aria-label="已选断点"
                             >
-                              查看断点 {i + 1}
-                            </Button>
-                            <Button
-                              onClick={() =>
-                                setIndices(
-                                  breaks.filter((p) => p !== point).join(","),
-                                )
-                              }
-                            >
-                              取消断点 {i + 1}
-                            </Button>
+                              <thead className="sticky top-0 bg-muted">
+                                <tr>
+                                  <th className="p-2 text-left">
+                                    <span className="sr-only">定位</span>
+                                  </th>
+                                  <th className="p-2 text-left">距离</th>
+                                  <th className="p-2 text-left">时间</th>
+                                  <th className="p-2 text-left">来源</th>
+                                  <th className="w-10 p-2">
+                                    <span className="sr-only">取消</span>
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {breakRows.map(
+                                  ({ point, meters, seconds }, i) => (
+                                    <tr key={point} className="border-t">
+                                      <td className="p-2">
+                                        <Button
+                                          variant="ghost"
+                                          className="h-7 w-7 p-0"
+                                          aria-label={`定位断点 ${i + 1}`}
+                                          title="定位"
+                                          onClick={() => {
+                                            setLocatedBreak(point);
+                                            locateRange(point, point + 1);
+                                          }}
+                                        >
+                                          <LocateFixed className="size-4" />
+                                        </Button>
+                                      </td>
+                                      <td className="p-2">
+                                        {meters === undefined
+                                          ? "—"
+                                          : formatDistance(meters)}
+                                      </td>
+                                      <td className="p-2">
+                                        {seconds === undefined
+                                          ? "—"
+                                          : formatInterval(seconds)}
+                                      </td>
+                                      <td className="p-2 text-xs text-muted-foreground">
+                                        {automaticBreaks.includes(point)
+                                          ? "自动"
+                                          : "手选"}
+                                      </td>
+                                      <td className="p-2">
+                                        <Button
+                                          variant="ghost"
+                                          className="h-7 w-7 p-0"
+                                          aria-label={`取消断点 ${i + 1}`}
+                                          title="取消断点"
+                                          onClick={() => {
+                                            setIndices(
+                                              breaks
+                                                .filter((p) => p !== point)
+                                                .join(","),
+                                            );
+                                            setAutomaticBreaks((points) =>
+                                              points.filter((p) => p !== point),
+                                            );
+                                          }}
+                                        >
+                                          <X className="size-4" />
+                                        </Button>
+                                      </td>
+                                    </tr>
+                                  ),
+                                )}
+                              </tbody>
+                            </table>
                           </div>
-                        ))}
+                        )}
                       </>
                     )}
                     {mode === "prune" && (
@@ -1658,17 +1780,19 @@ function TrackEditor({
                     )}
                   </fieldset>
                   <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-background py-3">
-                    {mode !== "fill_altitude" && mode !== "prune" && (
-                      <span className="mr-auto text-sm">
-                        {busy || active
-                          ? "正在处理…"
-                          : showDraftState
-                            ? draftDirty
-                              ? "未保存修改"
-                              : "尚未修改"
-                            : ""}
-                      </span>
-                    )}
+                    {mode !== "fill_altitude" &&
+                      mode !== "prune" &&
+                      mode !== "split_segment" && (
+                        <span className="mr-auto text-sm">
+                          {busy || active
+                            ? "正在处理…"
+                            : showDraftState
+                              ? draftDirty
+                                ? "未保存修改"
+                                : "尚未修改"
+                              : ""}
+                        </span>
+                      )}
                     {mode === "draw" && drawMethod === "map" && (
                       <Button
                         disabled={
@@ -1683,12 +1807,12 @@ function TrackEditor({
                         撤回
                       </Button>
                     )}
-                    {mode === "prune" && (
+                    {(mode === "prune" || mode === "split_segment") && (
                       <Button
-                        disabled={busy || !!active}
+                        disabled={busy || !!active || !!preview}
                         onClick={() => void run(detect)}
                       >
-                        查找漂移点
+                        {mode === "split_segment" ? "查找断点" : "查找漂移点"}
                       </Button>
                     )}
                     {mode !== "fill_altitude" && (

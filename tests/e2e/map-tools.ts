@@ -139,11 +139,29 @@ export async function pickEditorPoint(
   index: number,
   locate = true,
 ) {
-  if (locate)
-    await page
+  if (locate) {
+    const selectedButton = page
       .getByLabel("选择编辑片段", { exact: true })
-      .getByRole("button", { pressed: true })
-      .click();
+      .getByRole("button", { pressed: true });
+    const select = page.getByRole("combobox", {
+      name: "选择编辑片段",
+      exact: true,
+    });
+    if (await selectedButton.count()) await selectedButton.click();
+    else if (await select.count()) {
+      const selected = (await select.innerText()).trim();
+      // Selecting the same Radix option does not emit a change or refit the map.
+      await select.click();
+      await page
+        .getByRole("option")
+        .filter({ hasNotText: selected })
+        .first()
+        .click();
+      await select.click();
+      await page.getByRole("option", { name: selected, exact: true }).click();
+      await expect(select).toBeFocused();
+    }
+  }
   const handle = page.getByRole("button", { name: /调整面板高度/ });
   const sheet = await page.locator(".map-app").getAttribute("data-sheet");
   const mobile = await handle.isVisible();

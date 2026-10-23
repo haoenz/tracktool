@@ -301,6 +301,8 @@ export type EditGeometry = {
     coordinates: [number, number][];
     /** Points in this segment whose height is absent or zero. */
     missing_altitude_points?: number;
+    /** Microseconds since the Unix epoch; only returned for raw geometry. */
+    time_us?: number[];
   }[];
   connections: [number, number][][];
   /** Points whose height is absent or zero across the whole version. */

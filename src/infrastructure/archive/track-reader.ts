@@ -289,6 +289,9 @@ export async function inputGeometry(
           (lon, i) => [lon, s.latitude[i]!] as [number, number],
         ),
         missing_altitude_points: missingAltitudePoints([s]),
+        ...(raw && s.time_us
+          ? { time_us: Array.from(s.time_us, (t) => Number(t)) }
+          : {}),
       })),
       connections: display.connections.map((c) => c.coordinates),
       missing_altitude_points: missingAltitudePoints(segments),

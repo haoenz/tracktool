@@ -388,3 +388,95 @@ for (const width of [1280, 390])
       await call(page, "/api/test/edit-cleanup", { id: fixture.id });
     }
   });
+
+test("breakpoint detection preserves manual selections and tracks only newly added automatic points", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/map?panel=library");
+  const fixture = await call<{ id: string; path: string }>(
+    page,
+    "/api/test/edit-fixture",
+    {},
+  );
+  let detected: number[] | null = [1, 2, 2];
+  await page.route("**/api/tracks/detect", (route) =>
+    route.fulfill({
+      status: detected === null ? 503 : 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        detected === null
+          ? { error: { code: "TOOL", message: "查找失败测试", exitCode: 2 } }
+          : { after_point_indices: detected },
+      ),
+    }),
+  );
+  try {
+    await tool(page, "轨迹库");
+    await filterTracks(page, fixture.path.split("/").at(-1)!);
+    await page
+      .getByRole("button", { name: `查看 ${fixture.path}`, exact: true })
+      .click();
+    await page.getByRole("button", { name: "编辑轨迹", exact: true }).click();
+    await page.getByRole("button", { name: "断开轨迹", exact: true }).click();
+    await pickEditorPoint(page, 2);
+    const sources = page
+      .getByRole("table", { name: "已选断点" })
+      .locator("tbody tr td:nth-child(4)");
+    const detect = page.getByRole("button", { name: "查找断点", exact: true });
+    await expect(sources).toHaveText(["手选"]);
+    await detect.click();
+    await expect(sources).toHaveText(["自动", "手选"]);
+    await expect(
+      page.getByText("新增 1 处自动断点，已保留原有选择，请检查后保存修改。", {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await detect.click();
+    await expect(
+      page.getByText("未发现新的断点，已保留原有选择。", { exact: true }),
+    ).toBeVisible();
+    await expect(sources).toHaveText(["自动", "手选"]);
+    detected = [];
+    await detect.click();
+    await expect(detect).toBeEnabled();
+    await expect(sources).toHaveText(["自动", "手选"]);
+    detected = null;
+    await detect.click();
+    await expect(page.getByText("查找失败测试", { exact: true })).toBeVisible();
+    await expect(sources).toHaveText(["自动", "手选"]);
+
+    // Removing an automatic point and selecting it on the map changes its origin.
+    await page.getByRole("button", { name: "取消断点 1", exact: true }).click();
+    await page.evaluate(() => {
+      const renderer = window.renderer!;
+      const line = renderer.displayData!.features.find(
+        (feature) =>
+          feature.geometry.type === "MultiLineString" &&
+          feature.properties?.segment_id &&
+          !String(feature.properties.segment_id).startsWith("ux-"),
+      )!;
+      if (line.geometry.type !== "MultiLineString")
+        throw new Error("Expected line");
+      const point = line.geometry.coordinates[0]![1]!;
+      renderer.map.jumpTo({ center: [point[0]!, point[1]!] });
+    });
+    await pickEditorPoint(page, 1, false);
+    await expect(sources).toHaveText(["手选", "手选"]);
+    detected = [1, 2];
+    await detect.click();
+    await expect(
+      page.getByText("未发现新的断点，已保留原有选择。", { exact: true }),
+    ).toBeVisible();
+    await expect(sources).toHaveText(["手选", "手选"]);
+
+    await page.getByRole("button", { name: "取消", exact: true }).click();
+    await expect(sources).toHaveCount(0);
+    await detect.click();
+    await expect(sources).toHaveText(["自动", "自动"]);
+  } finally {
+    await call(page, "/api/test/edit-cleanup", { id: fixture.id });
+  }
+});
