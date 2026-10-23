@@ -9,7 +9,9 @@
     "tests/ts/**/*.ts",
     "tests/e2e/**/*.ts",
     "*.config.ts",
-    "scripts/build-maps.ts"
+    "scripts/build-maps.ts",
+    "scripts/build.ts",
+    "scripts/dev.ts"
   ],
   "exclude": []
 }

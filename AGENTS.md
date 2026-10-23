@@ -22,13 +22,14 @@ pnpm format         # 用 Prettier 格式化源码与配置
 pnpm test           # Vitest，仅 tests/ts
 pnpm test:e2e       # Playwright，仅 tests/e2e
 pnpm check          # build + typecheck + lint + format:check + test
-pnpm dev            # 先构建，再同时启动 Vite(8765) 和后台(8766)
+pnpm dev            # 独立开发构建，启动 Vite(8765) 和后台(8766)，监听源码
 pnpm start --archive /绝对路径/归档
 pnpm cli <命令>      # 运行 dist/node/cli/main.js，需先 build
 ```
 
 - 修改 `src/` 后若要用 `pnpm cli`、`pnpm start` 或 `pnpm test:e2e`，先 `pnpm build`；E2E 直接导入 `dist/node/...`。
 - `pnpm dev` 用于网页开发：浏览器访问 `http://127.0.0.1:8765`，后台在 8766。
+- 开发构建位于 `.dev/`，与 `dist/` 隔离；运行期间可执行 `pnpm check`。后台、共享代码和渲染资源完整构建成功后才替换后台，编译失败保留旧版本。开发验证使用临时配置、归档和状态目录。
 - 视频转封装需要系统 ffmpeg；Unix 下 ExifTool 需要 Perl；PNG 导出需要 `pnpm cli setup chromium`。
 - 仓库只允许 better-sqlite3 和 sharp 的安装构建脚本（见 `pnpm-workspace.yaml`），不要随意放开其他依赖的 build 脚本。
 
@@ -78,7 +79,7 @@ src/drawing         网页与服务端 PNG 渲染共用的绘制代码
 
 ## 数据与仓库卫生
 
-- `sandbox/`、`ai-notes/`、`dist/`、`node_modules/`、`test-results/`、`playwright-report/` 均被 Git 忽略，不要提交。
+- `sandbox/`、`ai-notes/`、`dist/`、`.dev/`、`node_modules/`、`test-results/`、`playwright-report/` 均被 Git 忽略，不要提交。
 - `docs/validation/**/*.png` 等验收截图也被忽略；文档中引用截图前先确认文件确实存在且被有意纳入。
 - 真实归档位置由 `archive_path` 配置（本仓库的 `data/` 只是开发沙箱，不存放真实归档）；配置在 `~/.config/tracktool`，界面状态与任务库在 `~/.local/state/tracktool`。不要为了调试修改或提交这些文件。
 - 用户文档面向使用者（`README.md`、`docs/*.md`），内部规划与实验结果放 `ai-notes/`（不纳入版本库）。不要把内部实现细节写进用户文档，也不要把用户文档改成内部笔记。

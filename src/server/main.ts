@@ -48,6 +48,11 @@ try {
         "host 必须是 IPv4，port 必须在 0–65535 之间",
       );
     const app = await createApp({
+      // A development session keeps its token across backend replacements.
+      token:
+        process.env.NODE_ENV === "development"
+          ? process.env.TRACKTOOL_DEV_TOKEN
+          : undefined,
       configStore: new FileConfigStore({ path: values.config }),
       maps: {
         initialArchive: values.archive,

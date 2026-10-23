@@ -1,17 +1,25 @@
 import { cp, mkdir, readFile, writeFile, readdir, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
-if (process.argv.includes("--clean"))
-  await rm("dist/node", { recursive: true, force: true });
+import { parseArgs } from "node:util";
+const { values } = parseArgs({
+  options: {
+    clean: { type: "boolean" },
+    "out-dir": { type: "string", default: "dist" },
+  },
+});
+const output = values["out-dir"];
+if (values.clean)
+  await rm(path.join(output, "node"), { recursive: true, force: true });
 else {
   const root = "resources/maps";
-  await mkdir("dist/maps/static", { recursive: true });
-  await mkdir("dist/web/static", { recursive: true });
-  await cp(`${root}/data`, "dist/maps/data", { recursive: true });
-  await cp(`${root}/static/vendor`, "dist/maps/static/vendor", {
+  await mkdir(path.join(output, "maps/static"), { recursive: true });
+  await mkdir(path.join(output, "web/static"), { recursive: true });
+  await cp(`${root}/data`, path.join(output, "maps/data"), { recursive: true });
+  await cp(`${root}/static/vendor`, path.join(output, "maps/static/vendor"), {
     recursive: true,
   });
-  await cp(`${root}/static/vendor`, "dist/web/static/vendor", {
+  await cp(`${root}/static/vendor`, path.join(output, "web/static/vendor"), {
     recursive: true,
   });
   const assets = JSON.parse(
@@ -24,7 +32,7 @@ else {
   hash.update(await readFile("src/web/map.css", "utf8"));
   assets.renderer_sha256 = hash.digest("hex");
   await writeFile(
-    "dist/maps/data/assets.json",
+    path.join(output, "maps/data/assets.json"),
     JSON.stringify(assets, null, 2) + "\n",
   );
 }
