@@ -2645,7 +2645,30 @@ function Editor({ initial }: { initial: Bootstrap }) {
                         <div className="track-detail-toolbar">
                           <Button
                             variant="default"
-                            className="track-edit-primary"
+                            className="track-locate-primary"
+                            onClick={() =>
+                              fitTracks(
+                                editMap
+                                  ? editMap.tracks
+                                  : [overview.selectedTrack!],
+                              )
+                            }
+                            disabled={
+                              editMap
+                                ? !editMap.tracks.some(
+                                    (track) => track.points > 0,
+                                  )
+                                : !overview.selectedTrack
+                            }
+                          >
+                            <LocateFixed aria-hidden="true" />
+                            定位轨迹
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label="编辑轨迹"
+                            title="编辑轨迹"
                             onClick={() => {
                               if (
                                 editorView !== "edit" &&
@@ -2661,29 +2684,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
                             }}
                           >
                             <Pencil aria-hidden="true" />
-                            编辑轨迹
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            aria-label="定位轨迹"
-                            title="定位轨迹"
-                            disabled={
-                              editMap
-                                ? !editMap.tracks.some(
-                                    (track) => track.points > 0,
-                                  )
-                                : !overview.selectedTrack
-                            }
-                            onClick={() =>
-                              fitTracks(
-                                editMap
-                                  ? editMap.tracks
-                                  : [overview.selectedTrack!],
-                              )
-                            }
-                          >
-                            <LocateFixed aria-hidden="true" />
                           </Button>
                           <Button
                             size="icon"

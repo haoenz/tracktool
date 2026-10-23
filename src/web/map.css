@@ -1449,7 +1449,7 @@ button.settings-layer-toggle:focus-visible {
   align-items: center;
   gap: 4px;
 }
-.track-edit-primary {
+.track-locate-primary {
   flex: 1;
   margin-right: 8px;
 }
