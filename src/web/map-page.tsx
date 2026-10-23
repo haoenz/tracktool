@@ -188,6 +188,23 @@ const download = (blob: Blob, name: string) => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
+function VisibilityIcon({ visible }: { visible: boolean }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+      {!visible && <path d="M3 3l18 18" />}
+    </svg>
+  );
+}
 export default function MapPage() {
   const [params] = useSearchParams();
   const bootstrap = useQuery({
@@ -544,6 +561,10 @@ function Editor({ initial }: { initial: Bootstrap }) {
     projectDates,
   );
   const overview = inProject ? projectOverview : browseOverview;
+  const selectedVisible =
+    !!overview.selected &&
+    browseVisibility.all !==
+      Object.hasOwn(browseVisibility.exceptions, overview.selected.id);
   const detailHistory = useQuery({
     queryKey: ["track-history", overview.id, "timeline", 0],
     queryFn: () =>
@@ -2036,25 +2057,15 @@ function Editor({ initial }: { initial: Bootstrap }) {
                                     )
                                   }
                                 >
-                                  <svg
-                                    width="20"
-                                    height="20"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.8"
-                                    aria-hidden="true"
-                                  >
-                                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
-                                    <circle cx="12" cy="12" r="3" />
-                                    {!(
+                                  <VisibilityIcon
+                                    visible={
                                       browseVisibility.all !==
                                       Object.hasOwn(
                                         browseVisibility.exceptions,
                                         e.id,
                                       )
-                                    ) && <path d="M3 3l18 18" />}
-                                  </svg>
+                                    }
+                                  />
                                 </Button>
                               )}
                               {e.error && (
@@ -2663,6 +2674,31 @@ function Editor({ initial }: { initial: Bootstrap }) {
                           >
                             <LocateFixed aria-hidden="true" />
                             定位轨迹
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label={
+                              selectedVisible
+                                ? "在地图上隐藏该轨迹"
+                                : "在地图上显示该轨迹"
+                            }
+                            title={
+                              selectedVisible
+                                ? "在地图上隐藏该轨迹"
+                                : "在地图上显示该轨迹"
+                            }
+                            aria-pressed={selectedVisible}
+                            disabled={!overview.selected}
+                            onClick={() =>
+                              toggleBrowse(
+                                overview.selected!.id,
+                                overview.selected!.entry,
+                                !selectedVisible,
+                              )
+                            }
+                          >
+                            <VisibilityIcon visible={selectedVisible} />
                           </Button>
                           <Button
                             size="icon"
