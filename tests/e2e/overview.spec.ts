@@ -793,6 +793,56 @@ test("multi-select separates selection scope from actions and preserves other pa
   }
 });
 
+for (const width of [1280, 390]) {
+  test(`selected export can return or clear its selection at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await loaded(page);
+    const panel = page.getByRole("complementary", { name: "地图控制面板" });
+    const batch = panel.getByRole("button", { name: "批量操作", exact: true });
+    const actions = panel.getByRole("region", { name: "所选轨迹操作" });
+    const requests: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && request.url().includes("/api/work/"))
+        requests.push(request.url());
+    });
+    await batch.click();
+    const choices = panel.getByRole("button", { name: /^选择 / });
+    for (let index = 0; index < 3; index++) await choices.nth(index).click();
+    await expect(actions).toContainText("已选 3 条");
+    await actions.getByRole("button", { name: "导出", exact: true }).click();
+    await expect(panel).toContainText("已选择 3 条轨迹用于导出");
+    const cancel = panel.getByRole("button", { name: "取消选择并返回列表" });
+    await expect(cancel).toBeInViewport({ ratio: 1 });
+    await panel.getByRole("button", { name: "返回轨迹列表" }).click();
+    await expect(actions).toContainText("已选 3 条");
+
+    await page.getByRole("button", { name: "导出轨迹", exact: true }).click();
+    await expect(panel).toContainText("轨迹库中的全部轨迹");
+    await expect(cancel).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "打开轨迹列表", exact: true })
+      .click();
+    await expect(actions).toContainText("已选 3 条");
+    await actions.getByRole("button", { name: "导出", exact: true }).click();
+    await panel
+      .getByRole("combobox", { name: "导出类型", exact: true })
+      .click();
+    await page.getByRole("option", { name: "ZIP", exact: true }).click();
+    await cancel.focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/panel=library/);
+    await expect(batch).toHaveAttribute("aria-pressed", "false");
+    await expect(actions).toBeHidden();
+    await batch.click();
+    await expect(panel.getByRole("checkbox", { checked: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "导出轨迹", exact: true }).click();
+    await expect(panel).toContainText("轨迹库中的全部轨迹");
+    expect(requests).toEqual([]);
+  });
+}
+
 test("selected export loads only selected tracks after choosing PNG", async ({
   page,
 }) => {

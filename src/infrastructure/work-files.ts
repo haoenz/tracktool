@@ -25,14 +25,45 @@ const inside = (root: string, file: string) => {
 };
 export class WorkFiles {
   readonly uploads: string;
+  readonly exports: string;
   constructor(
     readonly stateDir: string,
     readonly roots: string[],
   ) {
     this.uploads = path.join(stateDir, "uploads");
+    this.exports = path.join(stateDir, "exports");
   }
   async prepare() {
     await mkdir(this.uploads, { recursive: true });
+    await mkdir(this.exports, { recursive: true });
+  }
+  exportDirectory(output?: string): string | undefined {
+    if (!output || !path.isAbsolute(output)) return;
+    const parts = path.relative(this.exports, output).split(path.sep);
+    if (
+      parts.length !== 2 ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+        parts[0]!,
+      ) ||
+      !["Archive.zip", "collections"].includes(parts[1]!)
+    )
+      return;
+    return path.join(this.exports, parts[0]!);
+  }
+  async exportOutput(zip: boolean, output?: string): Promise<string> {
+    const name = zip ? "Archive.zip" : "collections";
+    if (!output) {
+      await this.prepare();
+      const directory = path.join(this.exports, randomUUID());
+      await mkdir(directory, { mode: 0o700 });
+      output = path.join(directory, name);
+    }
+    if (!this.exportDirectory(output) || path.basename(output) !== name)
+      throw new AppError(
+        "FORBIDDEN",
+        "网页导出只能使用受管临时目录，请重新导出",
+      );
+    return this.resolve(output, false);
   }
   async resolve(value: string, existing = true): Promise<string> {
     if (!value || !path.isAbsolute(value))
@@ -56,7 +87,7 @@ export class WorkFiles {
     }
     const canonical = path.join(await realpath(parent), ...tail);
     const roots = await Promise.all(
-      [...this.roots, this.uploads].map((root) =>
+      [...this.roots, this.uploads, this.exports].map((root) =>
         realpath(root).catch(() => path.resolve(root)),
       ),
     );
@@ -65,7 +96,11 @@ export class WorkFiles {
     // Nested links are visible via canonicalization; reject aliases even if they point within a root.
     if (canonical !== absolute)
       throw new AppError("USER_INPUT", "请使用真实路径，不能通过符号链接访问");
-    if (inside(this.stateDir, canonical) && !inside(this.uploads, canonical))
+    if (
+      inside(this.stateDir, canonical) &&
+      !inside(this.uploads, canonical) &&
+      !inside(this.exports, canonical)
+    )
       throw new AppError("FORBIDDEN", "任务数据库不属于可操作文件");
     return canonical;
   }

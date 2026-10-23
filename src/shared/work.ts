@@ -137,11 +137,14 @@ export interface ImportItem {
 }
 export interface WorkOutput {
   paths: string[];
+  temporary?: boolean;
   data?: unknown;
   committed?: boolean;
 }
 export interface WorkTask extends Task {
   uploadsCleaned?: boolean;
+  exportsCleaned?: boolean;
+  downloadedFiles?: number[];
   request: Omit<WorkRequest, "operation"> & { operation: string };
   previewId?: string;
   expiresAt?: string;

@@ -1,5 +1,6 @@
 import { PanelLoading } from "./components/panel-loading.js";
 import { ImportPanel } from "./import-panel.js";
+import { ExportOptions, ExportResult } from "./export-panel.js";
 import { Textarea } from "./components/controls.js";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -19,7 +20,12 @@ import {
   Table,
   Tag,
 } from "./components/controls.js";
-import { api, request, waitForWorkTask, downloadWorkFiles } from "./api.js";
+import {
+  api,
+  waitForWorkTask,
+  downloadWorkFiles,
+  downloadWorkFile,
+} from "./api.js";
 import {
   OPERATIONS,
   executableOperation,
@@ -64,8 +70,14 @@ export function TaskDetail({
   id,
   onSelect,
   automatic = false,
+  exporting = false,
+  processing = false,
+  onDownloaded,
 }: {
   automatic?: boolean;
+  exporting?: boolean;
+  processing?: boolean;
+  onDownloaded?: () => void;
   id: string;
   onSelect: (id: string) => void;
 }) {
@@ -127,18 +139,16 @@ export function TaskDetail({
     }
   }
   async function download(index: number, name: string) {
+    setBusy(true);
+    setError(undefined);
     try {
-      const response = await request(
-          `/api/work/tasks/${id}/download?index=${index}`,
-        ),
-        url = URL.createObjectURL(await response.blob()),
-        anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = name;
-      anchor.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      await downloadWorkFile(task!, index, name);
+      await query.refetch();
+      onDownloaded?.();
     } catch (e) {
       setError(e);
+    } finally {
+      setBusy(false);
     }
   }
   if (!task)
@@ -170,6 +180,19 @@ export function TaskDetail({
       task.mode === "plan" &&
       task.status === "succeeded" &&
       !READ_OPERATIONS.includes(task.request.operation);
+  if (exporting)
+    return (
+      <ExportResult
+        task={task}
+        busy={busy}
+        processing={processing}
+        onCancel={() => void act("cancel")}
+        onDownload={(index, name) => void download(index, name)}
+        onRefresh={() => void query.refetch()}
+      >
+        <ErrorBox error={query.error || error} />
+      </ExportResult>
+    );
   return (
     <Card
       title={operationLabel(task.request.operation)}
@@ -1001,7 +1024,12 @@ function FileOperation({
                 .map((p) => p.trim())
                 .filter(Boolean),
         archive: archivePath || undefined,
-        output: ["archive:download", "archive:delete"].includes(operation)
+        output: [
+          "archive:download",
+          "archive:delete",
+          "archive:backup",
+          "archive:rebuild",
+        ].includes(operation)
           ? undefined
           : output || undefined,
         options: { ...options, ...(entries ? { entries } : {}) },
@@ -1039,6 +1067,36 @@ function FileOperation({
     deletionStarted.current = entry;
     void preview();
   }, [operation, archivePath, entry]);
+  if (
+    fixedOperation === "archive:backup" ||
+    fixedOperation === "archive:rebuild"
+  )
+    return (
+      <>
+        <ExportOptions
+          zip={fixedOperation === "archive:backup"}
+          busy={busy}
+          disabled={!bootstrap.data || !archivePath}
+          onExport={() => void preview()}
+        >
+          <ErrorBox error={bootstrap.error || error} />
+          {bootstrap.isPending && (
+            <PanelLoading>正在读取轨迹库信息…</PanelLoading>
+          )}
+        </ExportOptions>
+        {id && (
+          <TaskDetail
+            key={id}
+            id={id}
+            onSelect={setTask}
+            automatic
+            exporting
+            processing={busy}
+            onDownloaded={() => setError(undefined)}
+          />
+        )}
+      </>
+    );
   return (
     <>
       <div className="work-main">
@@ -1082,6 +1140,8 @@ function FileOperation({
                   {![
                     "archive:download",
                     "archive:delete",
+                    "archive:backup",
+                    "archive:rebuild",
                     "archive:push",
                     "archive:status",
                     "archive:recover",
@@ -1177,6 +1237,11 @@ function FileOperation({
                     id={id}
                     onSelect={setTask}
                     automatic={operation !== "archive:delete"}
+                    exporting={["archive:backup", "archive:rebuild"].includes(
+                      operation,
+                    )}
+                    processing={busy}
+                    onDownloaded={() => setError(undefined)}
                   />
                 ) : (
                   <Card title="操作结果">

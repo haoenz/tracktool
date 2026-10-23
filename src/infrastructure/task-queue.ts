@@ -57,6 +57,8 @@ export class TaskQueue {
     }
     if (preview?.uploadsCleaned)
       throw new AppError("USER_INPUT", "暂存副本已清理，请重新上传");
+    if (preview?.exportsCleaned)
+      throw new AppError("USER_INPUT", "临时导出文件已清理，请重新导出");
     if (!preview || READ_OPERATIONS.includes(preview.request.operation))
       throw new AppError("USER_INPUT", "此任务不能提交执行");
     if (
@@ -91,6 +93,8 @@ export class TaskQueue {
     if (task.uploadsCleaned)
       throw new AppError("USER_INPUT", "暂存副本已清理，请重新上传");
     const request = WorkRequestSchema.parse(task.request);
+    if (["archive:backup", "archive:rebuild"].includes(request.operation))
+      delete request.output;
     if (request.options.trackPreview)
       request.options.trackPreview.id = randomUUID();
     return this.preview(request);

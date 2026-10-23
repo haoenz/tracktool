@@ -341,7 +341,11 @@ it("HTTP archive init, push, backup, download and delete call the shared service
     ).catalog.entries,
   ).toHaveLength(1);
   const backup = await run({ operation: "archive:backup", archive });
-  expect(backup.output?.paths[0]).toBe(path.join(archive, "Archive.zip"));
+  expect(backup.output?.temporary).toBe(true);
+  expect(backup.output?.paths[0]).toMatch(
+    /[/\\]state[/\\]exports[/\\][^/\\]+[/\\]Archive\.zip$/,
+  );
+  expect(existsSync(path.join(archive, "Archive.zip"))).toBe(false);
   const downloaded = await run({
     operation: "archive:download",
     archive,
@@ -364,6 +368,88 @@ it("HTTP archive init, push, backup, download and delete call the shared service
     await readFile(source),
   );
 });
+it.each(["archive:backup", "archive:rebuild"] as const)(
+  "HTTP %s uses isolated downloads, acknowledges completion and preserves archive export metadata",
+  async (operation) => {
+    const { dir, archive, address, call, settled } = await server();
+    const database = new Database(path.join(archive, "archive.sqlite3"), {
+      readonly: true,
+    });
+    cleanup.push(() => {
+      database.close();
+    });
+    const meta = () =>
+      database
+        .prepare(
+          "SELECT zip_revision,zip_target,views_revision FROM archive_meta",
+        )
+        .get();
+    const receipts = () =>
+      database.prepare("SELECT * FROM export_receipts ORDER BY target").all();
+    const before = { meta: meta(), receipts: receipts() };
+    const permanent = path.join(dir, "keep.zip");
+    await writeFile(permanent, "permanent file");
+    await expect(
+      call("/api/work/preview", { operation, output: permanent }),
+    ).rejects.toThrow("不接受服务端输出路径");
+    const first = await call<WorkTask>("/api/work/preview", { operation });
+    expect((await settled(first.id)).status).toBe("succeeded");
+    const second = await call<WorkTask>("/api/work/preview", { operation });
+    expect((await settled(second.id)).status).toBe("succeeded");
+    expect(first.request.output).not.toBe(second.request.output);
+    const applied = await call<WorkTask>(
+      `/api/work/tasks/${first.id}/apply`,
+      {},
+    );
+    const task = await settled(applied.id);
+    expect(task.status, JSON.stringify(task.error)).toBe("succeeded");
+    expect(task.output?.temporary).toBe(true);
+    const paths = task.output!.paths;
+    expect(paths).toHaveLength(operation === "archive:backup" ? 1 : 6);
+    const headers = { "X-Tracktool-Token": "work-test" };
+    const url = (index: number) =>
+      address + `/api/work/tasks/${task.id}/download?index=${index}`;
+    // A disconnected or non-acknowledging client must not consume the result.
+    const response = await fetch(url(0), { headers });
+    await response.body!.cancel();
+    expect(existsSync(paths[0]!)).toBe(true);
+    expect(
+      (await call<WorkTask>(`/api/work/tasks/${task.id}`)).downloadedFiles,
+    ).toBeUndefined();
+    for (const [index, file] of paths.entries()) {
+      const bytes = await readFile(file);
+      const download = await fetch(url(index), { headers });
+      expect(download.status).toBe(200);
+      expect(download.headers.get("cache-control")).toBe("no-store");
+      expect(Buffer.from(await download.arrayBuffer())).toEqual(bytes);
+      await call(`/api/work/tasks/${task.id}/download-complete`, { index });
+      await until(
+        () => existsSync(file),
+        (present) => !present,
+      );
+      await call(`/api/work/tasks/${task.id}/download-complete`, { index });
+      const gone = await fetch(url(index), { headers });
+      expect(gone.status).toBe(400);
+      expect(await gone.text()).toContain("重新导出");
+      expect(paths.slice(index + 1).every(existsSync)).toBe(true);
+    }
+    expect(
+      (await call<WorkTask>(`/api/work/tasks/${task.id}`)).exportsCleaned,
+    ).toBe(true);
+    expect(existsSync(path.dirname(task.request.output!))).toBe(false);
+    // Cleaning one export cannot invalidate an independently prepared export.
+    const other = await call<WorkTask>(
+      `/api/work/tasks/${second.id}/apply`,
+      {},
+    );
+    expect((await settled(other.id)).status).toBe("succeeded");
+    const retry = await call<WorkTask>(`/api/work/tasks/${task.id}/retry`, {});
+    expect(retry.request.output).not.toBe(task.request.output);
+    expect((await settled(retry.id)).status).toBe("succeeded");
+    expect({ meta: meta(), receipts: receipts() }).toEqual(before);
+    expect(await readFile(permanent, "utf8")).toBe("permanent file");
+  },
+);
 it("HTTP rejects stale file/config previews, unknown paths, symlink aliases and unauthenticated uploads", async () => {
   const { dir, config, address, call, settled } = await server(),
     source = path.join(dir, "a.jpg");

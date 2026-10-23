@@ -350,6 +350,120 @@
   font-size: 12px;
   font-weight: 600;
 }
+.export-scope {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: 4px 0 20px;
+}
+.export-scope .settings-field-label {
+  margin: 0;
+}
+.export-scope p {
+  margin: 0;
+  font-size: 13px;
+}
+.export-hint,
+.export-scope .export-hint {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.export-empty {
+  margin-top: 12px;
+}
+.export-scope .export-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.export-cancel-selection {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding-inline: 0;
+  font-size: 12px;
+}
+.export-format-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 16px 0;
+  padding: 14px 12px;
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+.export-format-note > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+}
+.map-controls .export-format-note h3,
+.map-controls .export-result h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.export-format-note p {
+  margin: 5px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.export-details {
+  margin: 16px 0;
+  font-size: 12px;
+}
+.export-details > summary {
+  width: fit-content;
+  padding: 6px 0;
+  color: var(--muted-foreground);
+}
+.export-details > summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+.export-details[open] > summary {
+  margin-bottom: 10px;
+}
+.export-actions {
+  margin: 16px 0 0;
+}
+.export-actions > button {
+  min-height: 40px;
+}
+.export-actions .export-hint {
+  text-align: center;
+}
+.export-result {
+  min-width: 0;
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.export-result-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.export-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.export-file > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.export-file > button {
+  flex-shrink: 0;
+}
 .settings-basemap-columns {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);

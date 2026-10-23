@@ -316,6 +316,31 @@ it.each(["export-published", "before-export-commit"] as FaultPoint[])(
     });
   },
 );
+it.each(["export-published", "before-export-commit"] as FaultPoint[])(
+  "failed temporary export at %s preserves permanent backup bytes and metadata",
+  async (point) => {
+    const { directory, writer, file } = await initialized();
+    transaction(file, true, (db) => addEntry(db, "a.kml", raw, "Train"));
+    const permanent = path.join(directory, "Archive.zip");
+    await writer.backup(file, permanent);
+    const before = readFileSync(permanent);
+    transaction(file, true, (db) => addEntry(db, "b.kml", raw, "Train"));
+    const output = path.join(directory, "temporary", "Archive.zip");
+    await expect(
+      new ArchiveWriter(undefined, (fault) => {
+        if (fault === point) throw new Error("injected");
+      }).execute({ kind: "backup", database: file, output, temporary: true }),
+    ).rejects.toThrow("injected");
+    expect(existsSync(output)).toBe(false);
+    expect(readFileSync(permanent)).toEqual(before);
+    expect(writer.status(file)).toMatchObject({
+      revision: 2,
+      zip_revision: 1,
+      zip_fresh: false,
+    });
+    expect(readdirSync(path.dirname(output))).toEqual([]);
+  },
+);
 it("older export cannot replace a newer receipt for the same target", async () => {
   const { directory: d, file, writer: w } = await initialized();
   transaction(file, true, (db) => addEntry(db, "a.kml", raw, "Train"));

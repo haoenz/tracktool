@@ -129,7 +129,12 @@ export class BusinessRunner implements WorkRunner {
       if (path.basename(value.archive) === "archive.sqlite3")
         value.archive = path.dirname(value.archive);
     } else delete value.archive;
-    if (value.output)
+    if (["archive:backup", "archive:rebuild"].includes(value.operation))
+      value.output = await this.files.exportOutput(
+        value.operation === "archive:backup",
+        value.output,
+      );
+    else if (value.output)
       value.output = await this.files.resolve(value.output, false);
     if (
       (value.operation.startsWith("kml:") ||
@@ -730,16 +735,23 @@ export class BusinessRunner implements WorkRunner {
               : { kind: "delete", database, request: o.deletion },
           );
         } else if (kind === "backup") {
-          const target = request.output || path.join(directory, "Archive.zip");
+          const target = request.output!;
+          if (!this.files.exportDirectory(target))
+            throw new AppError("USER_INPUT", "临时导出目录无效，请重新导出");
+          output.temporary = true;
           output.data = await kml.archiveOperation(ctx, {
             kind: "backup",
+            temporary: true,
             entries: o.entries,
             database,
             output: target,
           });
           paths.add(target);
         } else if (kind === "rebuild") {
-          const target = request.output || directory;
+          const target = request.output!;
+          if (!this.files.exportDirectory(target))
+            throw new AppError("USER_INPUT", "临时导出目录无效，请重新导出");
+          output.temporary = true;
           output.data = await kml.archiveOperation(ctx, {
             kind: "rebuild",
             entries: o.entries,

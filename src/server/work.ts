@@ -18,6 +18,7 @@ import type { ConfigStore } from "../services/ports.js";
 import { WorkRequestSchema } from "../shared/work.js";
 import { SqliteTasks } from "../infrastructure/task-store.js";
 import { UploadCleanup } from "../infrastructure/upload-cleanup.js";
+import { ExportCleanup } from "../infrastructure/export-cleanup.js";
 import { WorkFiles } from "../infrastructure/work-files.js";
 import { BusinessRunner } from "../infrastructure/work-runner.js";
 import { TaskQueue } from "../infrastructure/task-queue.js";
@@ -42,6 +43,7 @@ export function workRoutes(
         files: WorkFiles;
         edits: EditPreviews;
         runner: BusinessRunner;
+        exports: ExportCleanup;
       }>
     | undefined;
   const get = () =>
@@ -84,17 +86,23 @@ export function workRoutes(
       );
       queue.start();
       const cleanup = new UploadCleanup(store, files);
+      const exports = new ExportCleanup(store, files);
       const sweep = () => {
         try {
           cleanup.sweep();
         } catch (error) {
           app.log.warn({ err: error }, "Upload cleanup will retry");
         }
+        try {
+          exports.sweep();
+        } catch (error) {
+          app.log.warn({ err: error }, "Export cleanup will retry");
+        }
       };
       sweep();
       cleanupTimer = setInterval(sweep, 1000);
       cleanupTimer.unref();
-      return { queue, files, edits, runner };
+      return { queue, files, edits, runner, exports };
     })());
   if (options)
     app.addHook("onReady", async () => {
@@ -229,9 +237,18 @@ export function workRoutes(
     if (!task) throw new AppError("USER_INPUT", "任务不存在");
     return (await get()).queue.store.public(task);
   });
-  app.post("/api/work/preview", async (request) =>
-    (await get()).queue.preview(WorkRequestSchema.parse(request.body)),
-  );
+  app.post("/api/work/preview", async (request) => {
+    const input = WorkRequestSchema.parse(request.body);
+    if (
+      ["archive:backup", "archive:rebuild"].includes(input.operation) &&
+      input.output !== undefined
+    )
+      throw new AppError(
+        "USER_INPUT",
+        "网页导出使用临时文件，不接受服务端输出路径",
+      );
+    return (await get()).queue.preview(input);
+  });
   app.post("/api/work/tasks/:id/apply", async (request) =>
     (await get()).queue.apply(taskId(request.params)),
   );
@@ -251,7 +268,7 @@ export function workRoutes(
     const { index } = z
         .object({ index: z.coerce.number().int().nonnegative() })
         .parse(request.query),
-      { queue, files } = await get(),
+      { queue, files, exports } = await get(),
       task = queue.store.read(taskId(request.params));
     if (
       !task ||
@@ -260,6 +277,10 @@ export function workRoutes(
       !task.output?.paths[index]
     )
       throw new AppError("USER_INPUT", "结果尚不可下载");
+    if (task.exportsCleaned || task.downloadedFiles?.includes(index))
+      throw new AppError("USER_INPUT", "临时导出文件已清理，请重新导出");
+    const release = exports.hold(task);
+    reply.raw.once("close", release);
     const file = await files.resolve(task.output.paths[index]!);
     if (!(await lstat(file)).isFile())
       throw new AppError("USER_INPUT", "结果文件已移动或清理");
@@ -267,7 +288,17 @@ export function workRoutes(
       "Content-Disposition",
       `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(file)).replaceAll("'", "%27")}`,
     );
-    return reply.type("application/octet-stream").send(createReadStream(file));
+    const stream = createReadStream(file);
+    stream.once("error", release);
+    reply.header("Cache-Control", "no-store");
+    return reply.type("application/octet-stream").send(stream);
+  });
+  app.post("/api/work/tasks/:id/download-complete", async (request) => {
+    const { index } = z
+      .object({ index: z.number().int().nonnegative() })
+      .strict()
+      .parse(request.body);
+    return (await get()).exports.complete(taskId(request.params), index);
   });
   app.post("/api/work/tasks/:id/geometry", async (request, reply) => {
     const { queue, files } = await get(),

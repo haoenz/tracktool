@@ -65,14 +65,17 @@ Python 调用方只需用自己的 `subprocess.run([...], check=True, capture_ou
 | `GET /api/bootstrap` | 地图资源、公开配置与已保存的浏览地图样式 |
 | `POST /api/display` | 提交 `{style}`，保存浏览地图样式；文件位于状态目录（默认 `~/.local/state/tracktool/display.json`） |
 | `GET /api/work/bootstrap` | 文件范围/归档/公开配置 |
-| `POST /api/work/preview` | 提交 `{operation,inputs,archive?,output?,options}`，返回持久任务 |
+| `POST /api/work/preview` | 提交 `{operation,inputs,archive?,output?,options}`，返回持久任务；网页 ZIP／聚合 KML 导出拒绝 `output`，由后台分配临时目录 |
 | `GET /api/work/tasks/:id` | 状态、修订、进度、事件和结果 |
 | `POST /api/work/tasks/:id/apply` | 确认已完成且未过期预览 |
 | `POST /api/work/tasks/:id/cancel` | 请求体 `{revision}`，避免取消旧状态 |
 | `POST /api/work/tasks/:id/retry` | 普通任务建立新预览；版本编辑 apply 任务以原请求键重试，先回放已提交结果 |
-| `GET /api/work/tasks/:id/download?index=0` | 下载该任务登记的结果文件 |
+| `GET /api/work/tasks/:id/download?index=0` | 下载该任务登记的结果文件；临时导出已下载或已清理后需重新导出 |
+| `POST /api/work/tasks/:id/download-complete` | 浏览器完整接收临时导出后提交 `{index}`，幂等记录下载完成并删除该文件 |
 
 `archive:push` 支持 `options.importFiles: [{path, tag?, name?}]`：每个 `path` 必须唯一且属于本次 `inputs`，名称必须为不含路径分隔符的 KML 文件名，`tag` 必须是配置中已有的活动标签。逐文件标签会写入该文件的 `TrackTags`（网页上传场景即其暂存副本），并据此推导 `Default`、`Train` 或 `Flight` 分类；未指定时沿用文件原有标签。校验和实际导入使用同一设置。提交成功后，若 `auto_fill_locations` 未关闭且已配置 Google API key，会自动补全本批新入库轨迹的起终点行政区；该步骤不阻塞提交结果，失败只记录任务日志。导入结果的 `import_items` 包含 `entryId`，可直接打开轨迹详情。同一个入库预览重复调用 `apply` 会返回原提交任务，便于网络中断后查询结果。
+
+网页 ZIP／聚合 KML 导出的 `output.temporary` 为 `true`。客户端应在完整接收文件后调用 `download-complete`，不能在仅收到响应头时确认。任务的 `downloadedFiles` 记录已确认的文件索引，`exportsCleaned` 表示整批临时文件已清理；未确认的结果保留最多 24 小时，下载中的文件暂缓清理，服务重启后继续清理到期结果。该机制不处理 CLI 输出或旧任务登记的非临时文件。
 
 HTTP 契约面向本地单用户应用，不是公网身份认证方案。上传暂存、预览、重试及取消方式见[网页使用说明](web-usage.md)。
 

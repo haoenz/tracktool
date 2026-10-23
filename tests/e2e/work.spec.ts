@@ -2,6 +2,8 @@ import { filterTracks } from "./map-tools.js";
 import { tool } from "./map-tools.js";
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import type { WorkTask } from "../../src/shared/work.js";
 import type { Page } from "@playwright/test";
 async function upload(page: Page, name: string, buffer: Buffer) {
   const source = page.getByText("从当前设备上传", { exact: true });
@@ -24,14 +26,6 @@ async function confirmImport(page: Page, count = 1) {
   );
   await button.click();
 }
-async function confirm(page: Page) {
-  await expect(
-    page
-      .locator(".task-detail")
-      .getByRole("button", { name: "下载", exact: true })
-      .first(),
-  ).toBeVisible({ timeout: 20000 });
-}
 test("media links return to the map with no web media tools", async ({
   page,
 }) => {
@@ -46,7 +40,7 @@ test("media links return to the map with no web media tools", async ({
 });
 test("archive upload, backup, read-only download and real deletion use separate controls", async ({
   page,
-}) => {
+}, info) => {
   await page.goto("/archive");
   await expect(page.getByText("轨迹分类图例")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "管理轨迹库" })).toHaveCount(0);
@@ -69,17 +63,32 @@ test("archive upload, backup, read-only download and real deletion use separate 
   ).toHaveCount(0);
   await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
   await page.getByRole("option", { name: "ZIP", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "导出轨迹" })).toBeVisible();
+  await expect(page.getByText("轨迹库中的全部轨迹")).toBeVisible();
+  await expect(page.getByLabel("服务端输出文件（可选）")).toHaveCount(0);
+  await expect(page.getByText("高级选项", { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("export-zip-desktop.png") });
   const automaticDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出", exact: true }).click();
   expect((await automaticDownload).suggestedFilename()).toBe("Archive.zip");
-  await confirm(page);
+  const result = page.getByRole("region", { name: "导出结果" });
+  await expect(result.getByRole("heading", { name: "下载完成" })).toBeVisible();
+  await expect(result.getByText("Archive.zip", { exact: true })).toBeVisible();
+  await expect(
+    result.getByText("服务端输出位置", { exact: true }),
+  ).toBeHidden();
+  await expect(result.getByRole("button", { name: "刷新轨迹库" })).toHaveCount(
+    0,
+  );
+  await expect(result.getByText("已下载", { exact: true })).toBeVisible();
+  await expect(
+    result.getByRole("button", { name: "下载", exact: true }),
+  ).toHaveCount(0);
+  await expect(result).toContainText("临时文件已清理");
   const event = page.waitForEvent("download");
-  await page
-    .locator(".task-detail")
-    .getByRole("button", { name: "下载", exact: true })
-    .first()
-    .click();
+  await page.getByRole("button", { name: "导出", exact: true }).click();
   expect((await event).suggestedFilename()).toBe("Archive.zip");
+  await expect(result.getByRole("heading", { name: "下载完成" })).toBeVisible();
   await tool(page, "轨迹库");
   if (!(await page.getByLabel("筛选轨迹", { exact: true }).isVisible()))
     await tool(page, "轨迹库");
@@ -145,6 +154,76 @@ test("library offers no standalone editor or independent file tools", async ({
   await expect(page.getByLabel("操作", { exact: true })).toHaveCount(0);
 });
 
+test("export apply failure leaves a retryable result instead of a pending state", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=export");
+  await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
+  await page.getByRole("option", { name: "ZIP", exact: true }).click();
+  await page.route("**/api/work/tasks/*/apply", (route) =>
+    route.fulfill({ status: 503, body: "Unavailable" }),
+  );
+  await page.getByRole("button", { name: "导出", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("请求失败（503）");
+  await expect(page.getByRole("heading", { name: "导出失败" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "导出", exact: true }),
+  ).toBeEnabled();
+  await page.unroute("**/api/work/tasks/*/apply");
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出", exact: true }).click();
+  expect((await download).suggestedFilename()).toBe("Archive.zip");
+  await expect(page.getByRole("heading", { name: "下载完成" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("interrupted export downloads remain retryable and are removed after receipt", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=export");
+  await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
+  await page.getByRole("option", { name: "ZIP", exact: true }).click();
+  const acknowledgements: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/download-complete"))
+      acknowledgements.push(request.url());
+  });
+  await page.route("**/api/work/tasks/*/download?*", (route) =>
+    route.fulfill({ status: 503, body: "Unavailable" }),
+  );
+  const applied = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/apply") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "导出", exact: true }).click();
+  const task = (await (await applied).json()) as WorkTask;
+  await expect(page.getByRole("alert")).toContainText("请求失败（503）");
+  expect(acknowledgements).toEqual([]);
+  const readTask = async () =>
+    (
+      await page.request.get(`/api/work/tasks/${task.id}`, {
+        headers: { "X-Tracktool-Token": "e2e" },
+      })
+    ).json() as Promise<WorkTask>;
+  const result = await readTask();
+  const file = result.output!.paths[0]!;
+  expect(existsSync(file)).toBe(true);
+  const bytes = await readFile(file);
+  await page.unroute("**/api/work/tasks/*/download?*");
+  const downloaded = page.waitForEvent("download");
+  await page
+    .getByRole("region", { name: "导出结果" })
+    .getByRole("button", { name: "下载", exact: true })
+    .click();
+  expect(await readFile((await (await downloaded).path())!)).toEqual(bytes);
+  await expect(page.getByRole("heading", { name: "下载完成" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect.poll(() => existsSync(file)).toBe(false);
+  await expect.poll(async () => (await readTask()).exportsCleaned).toBe(true);
+  expect(acknowledgements).toHaveLength(1);
+});
+
 test("library entry points and favicon work on mobile", async ({
   page,
 }, info) => {
@@ -182,12 +261,33 @@ test("library entry points and favicon work on mobile", async ({
   await expect(
     page.getByRole("region", { name: "轨迹导出类型" }),
   ).toContainText("聚合导出");
+  await expect(page.getByLabel("服务端输出目录（可选）")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "导出", exact: true }),
+  ).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: info.outputPath("export-kml-mobile.png") });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveClass("dark");
+  await page.screenshot({
+    path: info.outputPath("export-kml-mobile-dark.png"),
+  });
   const kmlDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出", exact: true }).click();
   expect((await kmlDownload).suggestedFilename()).toMatch(/\.kml$/i);
   await expect(
     page.getByRole("button", { name: "导出", exact: true }),
   ).toBeEnabled();
+  const result = page.getByRole("region", { name: "导出结果" });
+  await expect(result.getByRole("heading", { name: "下载完成" })).toBeVisible();
+  expect(
+    await result.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth,
+    ),
+  ).toBe(true);
+  await result.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: info.outputPath("export-result-mobile-dark.png"),
+  });
   await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
   await page.getByRole("option", { name: "PNG图像", exact: true }).click();
   await expect(

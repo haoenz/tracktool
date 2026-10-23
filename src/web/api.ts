@@ -74,14 +74,27 @@ export async function downloadWorkFiles(
   task: import("../shared/work.js").WorkTask,
 ) {
   for (const [index, file] of (task.output?.paths ?? []).entries()) {
-    const response = await request(
-      `/api/work/tasks/${task.id}/download?index=${index}`,
-    );
-    const url = URL.createObjectURL(await response.blob());
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = file.split(/[\\/]/).at(-1)!;
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (!task.downloadedFiles?.includes(index))
+      await downloadWorkFile(task, index, file.split(/[\\/]/).at(-1)!);
   }
+}
+
+export async function downloadWorkFile(
+  task: import("../shared/work.js").WorkTask,
+  index: number,
+  name: string,
+) {
+  const response = await request(
+    `/api/work/tasks/${task.id}/download?index=${index}`,
+  );
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // A successful response header alone does not mean the browser received the entire file.
+  if (task.output?.temporary)
+    await api(`/api/work/tasks/${task.id}/download-complete`, { index });
 }

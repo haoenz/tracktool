@@ -144,7 +144,12 @@ export class ArchiveWriter {
           count: await this.recover(request.database),
         };
       case "backup":
-        return this.backup(request.database, request.output, request.entries);
+        return this.backup(
+          request.database,
+          request.output,
+          request.entries,
+          request.temporary,
+        );
       case "rebuild":
         return rebuild(
           request.database,
@@ -458,6 +463,7 @@ export class ArchiveWriter {
     file: string,
     output: string,
     selected?: string[],
+    transient = false,
   ): Promise<ArchiveResult> {
     if (!output.toLowerCase().endsWith(".zip") || output === file)
       throw new AppError("USER_INPUT", "Backup target must be a .zip file");
@@ -549,7 +555,7 @@ export class ArchiveWriter {
         published = true;
         syncDirectory(path.dirname(output));
         await this.fault("export-published");
-        if (!selected) {
+        if (!selected && !transient) {
           db.prepare(
             "UPDATE archive_meta SET zip_revision=?,zip_target=? WHERE singleton=1",
           ).run(revision, output);

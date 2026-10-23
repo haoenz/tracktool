@@ -69,6 +69,7 @@ export type ArchiveRequest =
       database: string;
       output: string;
       entries?: string[];
+      temporary?: boolean;
     }
   | { kind: "restore-backup"; backup: string; directory: string }
   | { kind: "rebuild"; database: string; output: string; entries?: string[] };

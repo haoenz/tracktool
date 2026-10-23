@@ -1248,6 +1248,15 @@ function Editor({ initial }: { initial: Bootstrap }) {
     setBatch({});
     if (exit) setBatchMode(false);
   }
+  function returnFromExport(cancelSelection = false) {
+    if (cancelSelection) clearBatch(true);
+    setExportEntries(undefined);
+    setExportKind(undefined);
+    setLibraryList(true);
+    setDetailOpen(false);
+    setArchiveAction(undefined);
+    openPanel("library");
+  }
   function toggleBatchEntry(entry: OverviewEntry) {
     setBatch((old) => {
       const next = { ...old };
@@ -1569,6 +1578,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                   return;
                 }
                 setExportKind(undefined);
+                setExportEntries(undefined);
                 setParams({ panel: "export" });
               }}
             >
@@ -1704,11 +1714,52 @@ function Editor({ initial }: { initial: Bootstrap }) {
                 />
               )}
             {exportPage && (
-              <section aria-label="轨迹导出类型">
-                {exportEntries && (
-                  <p>已选择 {exportEntries.length} 条轨迹用于导出。</p>
+              <section
+                aria-label="轨迹导出类型"
+                className={!exportPanel ? "export-panel" : undefined}
+              >
+                {!exportPanel && (
+                  <PanelHeader
+                    title="导出轨迹"
+                    backLabel={exportEntries ? "返回轨迹列表" : undefined}
+                    onBack={
+                      exportEntries ? () => returnFromExport() : undefined
+                    }
+                  />
                 )}
-                <label htmlFor="track-export-kind">导出类型</label>
+                {!exportPanel ? (
+                  <div className="export-scope">
+                    <span className="settings-field-label">导出范围</span>
+                    <p>
+                      {exportEntries
+                        ? `已选择 ${exportEntries.length} 条轨迹用于导出。`
+                        : "轨迹库中的全部轨迹"}
+                    </p>
+                    {exportEntries ? (
+                      <Button
+                        variant="link"
+                        className="export-cancel-selection"
+                        onClick={() => returnFromExport(true)}
+                      >
+                        取消选择并返回列表
+                      </Button>
+                    ) : (
+                      <p className="export-hint">
+                        如需导出部分轨迹，请先在轨迹列表中批量选择。
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  exportEntries && (
+                    <p>已选择 {exportEntries.length} 条轨迹用于导出。</p>
+                  )
+                )}
+                <label
+                  className={!exportPanel ? "settings-field-label" : undefined}
+                  htmlFor="track-export-kind"
+                >
+                  导出类型
+                </label>
                 <Select
                   id="track-export-kind"
                   aria-label="导出类型"
@@ -1739,6 +1790,11 @@ function Editor({ initial }: { initial: Bootstrap }) {
                     if (panel === "project") setParams({ panel: "export" });
                   }}
                 />
+                {!exportKind && panel !== "project" && (
+                  <p className="export-hint export-empty">
+                    ZIP 打包轨迹，KML 汇总轨迹，PNG 制作地图图片。
+                  </p>
+                )}
                 {(exportKind === "zip" || exportKind === "kml") &&
                   panel !== "project" && (
                     <Suspense
