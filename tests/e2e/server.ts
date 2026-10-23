@@ -77,10 +77,17 @@ app.post("/api/test/reset-display", async () => {
   return { ok: true };
 });
 let fault = "";
-app.post("/api/test/edit-fixture", async () => {
+app.post("/api/test/edit-fixture", async (request) => {
   const name = `Default/2026-10-14 编辑测试-${randomUUID()}.kml`;
+  const count =
+    (request.body as { segmentCount?: 1 | 2 | 3 })?.segmentCount ?? 2;
+  const segments = [
+    "120,30 120.01,30 120.02,30 120.03,30",
+    "120.04,30 120.05,30",
+    "120.06,30 120.07,30",
+  ].slice(0, count);
   const raw = Buffer.from(
-    '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><LineString><coordinates>120,30 120.01,30 120.02,30 120.03,30</coordinates></LineString></Placemark><Placemark><LineString><coordinates>120.04,30 120.05,30</coordinates></LineString></Placemark></Document></kml>',
+    `<kml xmlns="http://www.opengis.net/kml/2.2"><Document>${segments.map((coordinates) => `<Placemark><LineString><coordinates>${coordinates}</coordinates></LineString></Placemark>`).join("")}</Document></kml>`,
   );
   return transaction(archive, true, (db) => addEntry(db, name, raw, "Default"));
 });

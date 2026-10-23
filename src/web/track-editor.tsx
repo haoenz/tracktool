@@ -1,3 +1,9 @@
+import {
+  SplitJourneyEditor,
+  journeyColors,
+  journeyName,
+  type SplitJourney,
+} from "./split-journey-editor.js";
 import { DisplaySettings } from "./display-settings.js";
 import { samePresentation } from "../shared/presentation-equality.js";
 import { editTracks } from "./track-editor-map.js";
@@ -18,14 +24,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import {
-  Alert,
-  Button,
-  Input,
-  Select,
-  Spin,
-  Modal,
-} from "./components/controls.js";
+import { Alert, Button, Select, Spin, Modal } from "./components/controls.js";
 import { api, waitForWorkTask } from "./api.js";
 import { useWorkspace } from "./workspace.js";
 import { isRegisteredTag, TagPicker } from "./components/tag-picker.js";
@@ -51,14 +50,6 @@ const editActions: Record<string, string> = {
   set_tag: "修改标签",
   split_journey: "拆分行程",
 };
-const groupColors = [
-  "#2563eb",
-  "#dc2626",
-  "#16a34a",
-  "#9333ea",
-  "#d97706",
-  "#0891b2",
-];
 // Draw mode colors the track before and after the insertion point differently.
 const drawBeforeColor = "#0891b2";
 const drawAfterColor = "#9333ea";
@@ -155,14 +146,7 @@ function TrackEditor({
   }>();
   const [locatedBreak, setLocatedBreak] = useState<number>();
   const [automaticBreaks, setAutomaticBreaks] = useState<number[]>([]);
-  const [assign, setAssign] = useState<Record<string, number>>({}),
-    [journeys, setJourneys] = useState<
-      {
-        path: string;
-        category: "Default" | "Train" | "Flight" | null;
-        tag?: string;
-      }[]
-    >([]);
+  const [journeys, setJourneys] = useState<SplitJourney[]>([]);
   const [drawMethod, setDrawMethod] = useState("map");
   const [importKml, setImportKml] = useState("");
   const [importFile, setImportFile] = useState<{
@@ -241,17 +225,13 @@ function TrackEditor({
     setSettingsRef(`${d.entry.entry_id}:${d.entry.generation}`);
     setSegment(d.settings.order[0] ?? "");
     setAfter(d.settings.order[0] ?? null);
-    setAssign(
-      Object.fromEntries(
-        d.settings.order.map((id, i) => [id, i === 0 ? 0 : 1]),
-      ),
-    );
-    setJourneys(
-      [1, 2].map((n) => ({
-        path: d.entry.path.replace(/\.kml$/i, `-行程${n}.kml`),
+    setJourneys([
+      {
+        startSegmentId: d.settings.order[0] ?? "",
+        path: d.entry.path.replace(/\.kml$/i, "-行程1.kml"),
         category: d.entry.category,
-      })),
-    );
+      },
+    ]);
   }, [target.data]);
   useEffect(() => {
     const t = task.data;
@@ -340,43 +320,51 @@ function TrackEditor({
     workspace.draft?.(draftKey, draftDirty);
     return () => workspace.draft?.(draftKey, false);
   }, [workspace.draft, draftKey, draftDirty]);
-  const tagOptions = [
-    ...new Set(
-      ["Default", "Train", "Flight"].flatMap(
-        (category) =>
-          (config.data?.config[
-            ("track_tag." + category) as keyof PublicConfig
-          ] as string[] | undefined) ?? [],
-      ),
-    ),
-  ].map((value) => ({ value, label: value }));
   const currentTag = tagData.data?.tag;
   const breaks = indices
     .split(/[,，\s]+/)
     .filter(Boolean)
     .map(Number)
     .sort((a, b) => a - b);
-  const splitError = journeys.some(
-    (j) =>
-      !j.path
-        .split("/")
-        .at(-1)
-        ?.replace(/\.kml$/i, "")
-        .trim(),
-  )
-    ? "请为每条行程填写名称。"
-    : new Set(journeys.map((j) => j.path)).size !== journeys.length
-      ? "行程名称不能重复。"
-      : journeys.some((_, i) => !Object.values(assign).includes(i))
-        ? "请给每条行程分配至少一个片段。"
-        : journeys.some((j) => !j.tag)
-          ? "请为每条行程选择活动标签。"
-          : settings?.order.some(
-                (id) =>
-                  assign[id] === undefined || assign[id]! >= journeys.length,
-              )
-            ? "还有片段未分配。"
-            : "";
+  const journeySegments = journeys.map(
+    (journey, index) =>
+      settings?.order.slice(
+        settings.order.indexOf(journey.startSegmentId),
+        journeys[index + 1]
+          ? settings.order.indexOf(journeys[index + 1]!.startSegmentId)
+          : undefined,
+      ) ?? [],
+  );
+  const assign = Object.fromEntries(
+    journeySegments.flatMap((ids, index) => ids.map((id) => [id, index])),
+  );
+  const splitError =
+    (settings?.order.length ?? 0) < 2
+      ? "请先断开轨迹，再拆分行程。"
+      : journeys.length < 2
+        ? "请在相邻片段之间设置至少一处分界。"
+        : journeys.some(
+              (j) =>
+                !j.path
+                  .split("/")
+                  .at(-1)
+                  ?.replace(/\.kml$/i, "")
+                  .trim(),
+            )
+          ? "请为每条行程填写名称。"
+          : new Set(journeys.map((j) => j.path)).size !== journeys.length
+            ? "行程名称不能重复。"
+            : journeys.some((_, i) => !Object.values(assign).includes(i))
+              ? "请给每条行程分配至少一个片段。"
+              : journeys.some((j) => !j.tag)
+                ? "请为每条行程选择活动标签。"
+                : settings?.order.some(
+                      (id) =>
+                        assign[id] === undefined ||
+                        assign[id]! >= journeys.length,
+                    )
+                  ? "还有片段未分配。"
+                  : "";
   const missingAltitude =
     mode === "fill_altitude"
       ? geometry.data?.missing_altitude_points
@@ -462,7 +450,8 @@ function TrackEditor({
         })()
       : undefined;
   const importFailureInfo = importError(importFailure);
-  const showDraftState = mode !== "draw" && mode !== "set_tag";
+  const showDraftState =
+    mode !== "draw" && mode !== "set_tag" && mode !== "split_journey";
   function tagCategory(value: string): "Default" | "Train" | "Flight" {
     return (
       (["Default", "Train", "Flight"] as const).find((category) =>
@@ -507,23 +496,19 @@ function TrackEditor({
     setNote("");
     if (d) {
       setSettings(structuredClone(d.settings));
-      setAssign(
-        Object.fromEntries(
-          d.settings.order.map((id, i) => [id, i === 0 ? 0 : 1]),
-        ),
-      );
-      setJourneys(
-        [1, 2].map((n) => ({
+      setJourneys([
+        {
+          startSegmentId: d.settings.order[0] ?? "",
           path: journeyPath(
             `${d.entry.path
               .split("/")
               .at(-1)!
-              .replace(/\.kml$/i, "")}-行程${n}`,
+              .replace(/\.kml$/i, "")}-行程1`,
             d.entry.category,
           ),
           category: d.entry.category,
-        })),
-      );
+        },
+      ]);
     }
   }
   function clearImport() {
@@ -728,7 +713,8 @@ function TrackEditor({
       return make({
         kind: "split_journey",
         outputs: journeys.map((j, i) => ({
-          ...j,
+          category: j.category,
+          tag: j.tag,
           path: journeyPath(
             `${j.path
               .split("/")
@@ -1644,139 +1630,86 @@ function TrackEditor({
                         !tagData.error && !config.error && <Spin />
                       ))}
                     {mode === "split_journey" && (
-                      <div onClickCapture={() => setEditTouched(true)}>
-                        <p>
-                          把片段分到不同的行程中。需要从片段中间拆开时，请先使用“断开轨迹”。
-                        </p>
-                        {journeys.map((journey, i) => (
-                          <div
-                            key={i}
-                            className="rounded-md border p-3 space-y-2"
-                          >
-                            <strong
-                              style={{
-                                color: groupColors[i % groupColors.length],
-                              }}
-                            >
-                              行程 {i + 1}
-                            </strong>
-                            <label>
-                              名称
-                              <Input
-                                aria-label={`行程 ${i + 1} 名称`}
-                                value={journey.path
-                                  .split("/")
-                                  .at(-1)!
-                                  .replace(/\.kml$/i, "")}
-                                onChange={(e) =>
-                                  setJourneys(
-                                    journeys.map((j, k) =>
-                                      k === i
-                                        ? {
-                                            ...j,
-                                            path: journeyPath(
-                                              e.target.value,
-                                              j.category,
-                                            ),
-                                          }
-                                        : j,
-                                    ),
-                                  )
-                                }
-                              />
-                            </label>
-                            <Select
-                              aria-label={`行程 ${i + 1} 活动标签`}
-                              placeholder="选择活动标签"
-                              value={journey.tag}
-                              onChange={(value) => {
-                                const category = tagCategory(value);
-                                setJourneys(
-                                  journeys.map((j, k) =>
-                                    k === i
-                                      ? {
-                                          ...j,
-                                          tag: value,
-                                          category,
-                                          path: journeyPath(
-                                            j.path
-                                              .split("/")
-                                              .at(-1)!
-                                              .replace(/\.kml$/i, ""),
-                                            category,
-                                          ),
-                                        }
-                                      : j,
-                                  ),
-                                );
-                              }}
-                              options={tagOptions}
-                            />
-                            {segmentOptions
-                              .filter((o) => assign[o.value] === i)
-                              .map((o) => (
-                                <label key={o.value} className="block">
-                                  <Button
-                                    variant="ghost"
-                                    onClick={() => locateSegment(o.value)}
-                                  >
-                                    {o.label}
-                                  </Button>
-                                  <Select
-                                    aria-label={`${o.label} 分配到`}
-                                    value={assign[o.value]}
-                                    onChange={(value) =>
-                                      setAssign({ ...assign, [o.value]: value })
-                                    }
-                                    options={journeys.map((_, j) => ({
-                                      value: j,
-                                      label: `行程 ${j + 1}`,
-                                    }))}
-                                  />
-                                </label>
-                              ))}
-                            {!Object.values(assign).includes(i) && (
-                              <>
-                                <p>尚未分配片段</p>
-                                <Button
-                                  disabled={journeys.length <= 2}
-                                  onClick={() => {
-                                    setJourneys(
-                                      journeys.filter((_, j) => j !== i),
-                                    );
-                                    setAssign(
-                                      Object.fromEntries(
-                                        Object.entries(assign).map(
-                                          ([id, n]) => [id, n > i ? n - 1 : n],
-                                        ),
-                                      ),
-                                    );
-                                  }}
-                                >
-                                  删除空行程
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        ))}
-                        <Button
-                          onClick={() =>
-                            setJourneys([
-                              ...journeys,
-                              {
-                                path: journeyPath(
-                                  `新行程 ${journeys.length + 1}`,
-                                  d.entry.category,
-                                ),
-                                category: d.entry.category,
-                              },
-                            ])
-                          }
-                        >
-                          增加行程
-                        </Button>
-                        {splitError && <p role="status">{splitError}</p>}
-                      </div>
+                      <SplitJourneyEditor
+                        journeys={journeys}
+                        assignments={assign}
+                        segments={settings.order.flatMap((id) => {
+                          const segment = d.segments.find(
+                            (s) => s.segment_id === id,
+                          );
+                          return segment ? [segment] : [];
+                        })}
+                        selected={segmentId}
+                        config={config.data?.config}
+                        disabled={busy || !!active || !!preview}
+                        error={splitError}
+                        onName={(index, name) => {
+                          setEditTouched(true);
+                          setJourneys(
+                            journeys.map((j, i) =>
+                              i === index
+                                ? { ...j, path: journeyPath(name, j.category) }
+                                : j,
+                            ),
+                          );
+                        }}
+                        onTag={(index, value) => {
+                          setEditTouched(true);
+                          const category = tagCategory(value);
+                          setJourneys(
+                            journeys.map((j, i) =>
+                              i === index
+                                ? {
+                                    ...j,
+                                    tag: value,
+                                    category,
+                                    path: journeyPath(journeyName(j), category),
+                                  }
+                                : j,
+                            ),
+                          );
+                        }}
+                        onLocate={(id) => {
+                          setSegment(id);
+                          locateSegment(id);
+                        }}
+                        onSplit={(id) => {
+                          if (journeys.some((j) => j.startSegmentId === id))
+                            return;
+                          const group = assign[id];
+                          if (group === undefined) return;
+                          setEditTouched(true);
+                          let number = journeys.length + 1;
+                          const baseName = d.entry.path
+                            .split("/")
+                            .at(-1)!
+                            .replace(/\.kml$/i, "");
+                          while (
+                            journeys.some(
+                              (j) =>
+                                journeyName(j) === `${baseName}-行程${number}`,
+                            )
+                          )
+                            number++;
+                          setJourneys([
+                            ...journeys.slice(0, group + 1),
+                            {
+                              startSegmentId: id,
+                              path: journeyPath(
+                                `${baseName}-行程${number}`,
+                                d.entry.category,
+                              ),
+                              category: d.entry.category,
+                            },
+                            ...journeys.slice(group + 1),
+                          ]);
+                        }}
+                        onMerge={(index) => {
+                          if (index < 1) return;
+                          setEditTouched(true);
+                          setJourneys(journeys.filter((_, i) => i !== index));
+                        }}
+                      />
                     )}
                   </fieldset>
                   <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-background py-3">
@@ -1832,7 +1765,7 @@ function TrackEditor({
                       {mode === "fill_altitude"
                         ? "查询"
                         : mode === "split_journey"
-                          ? "确认拆分…"
+                          ? "确认"
                           : mode === "prune"
                             ? "删除"
                             : "保存"}
@@ -1867,7 +1800,7 @@ function TrackEditor({
                     loading={busy || !!active}
                     onClick={() => void run(() => applyPreview(preview))}
                   >
-                    确认拆分
+                    确认
                   </Button>
                 </>
               }
@@ -1875,10 +1808,41 @@ function TrackEditor({
               <p>
                 将生成以下 {preview.outputs.length} 条行程，原行程保留在历史中。
               </p>
-              <ul>
+              <ul
+                className="max-h-72 space-y-2 overflow-auto"
+                aria-label="拆分结果"
+              >
                 {preview.outputs.map((o, i) => (
-                  <li key={i}>
-                    {o.path.split("/").at(-1)} · {o.segments.length} 个片段
+                  <li
+                    key={i}
+                    className="flex min-w-0 items-start gap-2 rounded-md border p-3"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="mt-1.5 size-2.5 shrink-0 rounded-full"
+                      style={{
+                        backgroundColor:
+                          journeyColors[i % journeyColors.length],
+                      }}
+                    />
+                    <div className="min-w-0 text-sm">
+                      <p className="break-words font-medium">
+                        {journeys[i]
+                          ? journeyName(journeys[i]!)
+                          : o.path
+                              .split("/")
+                              .at(-1)
+                              ?.replace(/\.kml$/i, "")}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {journeys[i]?.tag} · {o.segments.length} 个片段 ·{" "}
+                        {o.segments.reduce(
+                          (sum, segment) => sum + segment.point_count,
+                          0,
+                        )}{" "}
+                        点
+                      </p>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -1900,7 +1864,7 @@ function TrackEditor({
                   ? Object.fromEntries(
                       Object.entries(assign).map(([id, group]) => [
                         id,
-                        groupColors[group % groupColors.length]!,
+                        journeyColors[group % journeyColors.length]!,
                       ]),
                     )
                   : drawSegmentColors
@@ -1911,7 +1875,9 @@ function TrackEditor({
                   ? segmentId
                   : mode === "draw" && drawing.length && !preview
                     ? "new-drawing"
-                    : mode === "split_segment" || mode === "prune"
+                    : mode === "split_segment" ||
+                        mode === "prune" ||
+                        (mode === "split_journey" && !preview)
                       ? segmentId
                       : undefined
               }

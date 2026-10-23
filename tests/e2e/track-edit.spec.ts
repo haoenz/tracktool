@@ -215,84 +215,290 @@ for (const width of [1280, 390])
     }
   });
 
-test("split into named, tagged journeys with a concise confirmation", async ({
-  page,
-}) => {
-  test.setTimeout(60000);
-  await page.goto("/map?panel=library");
-  const fixture = await call<{ id: string; path: string }>(
+for (const width of [1280, 390])
+  test(`split into named, tagged journeys with a concise confirmation at ${width}px`, async ({
     page,
-    "/api/test/edit-fixture",
-    {},
-  );
-  try {
-    await tool(page, "轨迹库");
-    await filterTracks(page, fixture.path.split("/").at(-1)!);
-    await page
-      .getByRole("button", { name: `查看 ${fixture.path}`, exact: true })
-      .click();
-    await page.getByRole("button", { name: "编辑轨迹", exact: true }).click();
-    await page.getByRole("button", { name: "拆分行程", exact: true }).click();
-    await expect(
-      page.getByRole("button", { name: "确认拆分…", exact: true }),
-    ).toBeDisabled();
-    for (const [i, tag] of [
-      [1, "徒步"],
-      [2, "火车"],
-    ] as const) {
+  }) => {
+    test.setTimeout(60000);
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/map?panel=library");
+    const fixture = await call<{ id: string; path: string }>(
+      page,
+      "/api/test/edit-fixture",
+      { segmentCount: 3 },
+    );
+    try {
+      await tool(page, "轨迹库");
+      await filterTracks(page, fixture.path.split("/").at(-1)!);
       await page
-        .getByRole("combobox", { name: `行程 ${i} 活动标签`, exact: true })
+        .getByRole("button", { name: `查看 ${fixture.path}`, exact: true })
         .click();
-      await page.getByRole("option", { name: tag, exact: true }).click();
-    }
-    await page.getByRole("button", { name: "确认拆分…", exact: true }).click();
-    const confirmation = page.getByRole("dialog", { name: "确认拆分行程" });
-    await expect(confirmation).toContainText("将生成以下 2 条行程");
-    await expect(confirmation).not.toContainText("有效期");
-    await confirmation
-      .getByRole("button", { name: "确认拆分", exact: true })
-      .click();
-    await expect(confirmation).toHaveCount(0);
-    await expect(
-      page.getByRole("button", { name: "编辑轨迹", exact: true }),
-    ).toBeVisible({ timeout: 20000 });
-    const list = await call<{ entries: { id: string; path: string }[] }>(
-      page,
-      `/api/tracks?search=${encodeURIComponent(
-        fixture.path
-          .split("/")
-          .at(-1)!
-          .replace(/\.kml$/, ""),
-      )}`,
-    );
-    expect(list.entries).toHaveLength(2);
-    for (const entry of list.entries) {
-      const d = await call<{ entry: { version_id: string } }>(
+      await page.getByRole("button", { name: "编辑轨迹", exact: true }).click();
+      await page.getByRole("button", { name: "拆分行程", exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: "确认", exact: true }),
+      ).toBeDisabled();
+      const cancel = page.getByRole("button", { name: "取消", exact: true });
+      await expect(cancel).toBeDisabled();
+      await page
+        .getByRole("button", { name: "定位片段 2", exact: true })
+        .click();
+      await expect(
+        page.getByRole("button", { name: "定位片段 2", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await expect(cancel).toBeDisabled();
+      await page
+        .getByRole("button", { name: "行程 1 活动标签", exact: true })
+        .click();
+      await page.keyboard.press("Escape");
+      await expect(cancel).toBeDisabled();
+      await expect(
+        page.getByRole("region", { name: "行程 2", exact: true }),
+      ).toHaveCount(0);
+      const boundary = page.getByRole("button", {
+        name: "在片段 2 与片段 3 之间拆分",
+        exact: true,
+      });
+      await boundary.focus();
+      await page.keyboard.press("Enter");
+      await expect(
+        page.getByRole("textbox", { name: "行程 2 名称", exact: true }),
+      ).toBeFocused();
+      await expect(
+        page
+          .getByRole("region", { name: "行程 1", exact: true })
+          .getByRole("button", { name: /^定位片段/ }),
+      ).toHaveCount(2);
+      await expect(
+        page
+          .getByRole("region", { name: "行程 2", exact: true })
+          .getByRole("button", { name: /^定位片段/ }),
+      ).toHaveCount(1);
+      for (const [i, tag] of [
+        [1, "徒步"],
+        [2, "火车"],
+      ] as const) {
+        await page
+          .getByRole("button", { name: `行程 ${i} 活动标签`, exact: true })
+          .click();
+        const picker = page.getByRole("group", {
+          name: `行程 ${i} 活动标签`,
+          exact: true,
+        });
+        if (i === 2)
+          await picker.getByRole("tab", { name: "轨道", exact: true }).click();
+        await picker.getByRole("button", { name: tag, exact: true }).click();
+      }
+      const firstName = page.getByRole("textbox", {
+        name: "行程 1 名称",
+        exact: true,
+      });
+      const secondName = page.getByRole("textbox", {
+        name: "行程 2 名称",
+        exact: true,
+      });
+      const originalName = await firstName.inputValue();
+      await firstName.fill("");
+      await expect(
+        page.getByText("请为每条行程填写名称。", { exact: true }),
+      ).toBeVisible();
+      await firstName.fill(originalName);
+      await secondName.fill(`${originalName}-返程`);
+      await page
+        .getByRole("region", { name: "行程分组", exact: true })
+        .screenshot({
+          path: test.info().outputPath(`split-journey-${width}.png`),
+        });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await page.getByRole("button", { name: "确认", exact: true }).click();
+      const confirmation = page.getByRole("dialog", { name: "确认拆分行程" });
+      await expect(confirmation).toContainText("将生成以下 2 条行程");
+      await expect(confirmation).not.toContainText("有效期");
+      await expect(
+        confirmation.getByRole("list", { name: "拆分结果" }),
+      ).toContainText("徒步 · 2 个片段 · 6 点");
+      await expect(
+        confirmation.getByRole("list", { name: "拆分结果" }),
+      ).toContainText("火车 · 1 个片段 · 2 点");
+      await confirmation
+        .getByRole("button", { name: "返回修改", exact: true })
+        .click();
+      await expect(secondName).toHaveValue(`${originalName}-返程`);
+      await page.getByRole("button", { name: "确认", exact: true }).click();
+      await expect(confirmation).toBeVisible();
+      await confirmation
+        .getByRole("button", { name: "确认", exact: true })
+        .click();
+      await expect(confirmation).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: "编辑轨迹", exact: true }),
+      ).toBeVisible({ timeout: 20000 });
+      const list = await call<{ entries: { id: string; path: string }[] }>(
         page,
-        `/api/tracks/${entry.id}`,
+        `/api/tracks?search=${encodeURIComponent(
+          fixture.path
+            .split("/")
+            .at(-1)!
+            .replace(/\.kml$/, ""),
+        )}`,
       );
-      const t = await call<{ tag: string }>(
+      expect(list.entries).toHaveLength(2);
+      for (const entry of list.entries) {
+        const d = await call<{
+          entry: { version_id: string };
+          segments: { point_count: number }[];
+        }>(page, `/api/tracks/${entry.id}`);
+        const t = await call<{ tag: string }>(
+          page,
+          `/api/tracks/${entry.id}/tag?version_id=${d.entry.version_id}`,
+        );
+        expect(["徒步", "火车"]).toContain(t.tag);
+        expect(d.segments.map((segment) => segment.point_count)).toEqual(
+          t.tag === "徒步" ? [4, 2] : [2],
+        );
+      }
+    } finally {
+      const remaining = await call<{ entries: { id: string }[] }>(
         page,
-        `/api/tracks/${entry.id}/tag?version_id=${d.entry.version_id}`,
+        `/api/tracks?search=${encodeURIComponent(
+          fixture.path
+            .split("/")
+            .at(-1)!
+            .replace(/\.kml$/, ""),
+        )}`,
       );
-      expect(["徒步", "火车"]).toContain(t.tag);
+      for (const entry of remaining.entries)
+        if (entry.id !== fixture.id)
+          await call(page, "/api/test/edit-cleanup", { id: entry.id });
+      await call(page, "/api/test/edit-cleanup", { id: fixture.id });
     }
-  } finally {
-    const remaining = await call<{ entries: { id: string }[] }>(
+  });
+
+for (const segmentCount of [1, 3] as const)
+  test(`split journey handles ${segmentCount} source segments`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto("/map?panel=library");
+    const fixture = await call<{ id: string; path: string }>(
       page,
-      `/api/tracks?search=${encodeURIComponent(
-        fixture.path
-          .split("/")
-          .at(-1)!
-          .replace(/\.kml$/, ""),
-      )}`,
+      "/api/test/edit-fixture",
+      { segmentCount },
     );
-    for (const entry of remaining.entries)
-      if (entry.id !== fixture.id)
-        await call(page, "/api/test/edit-cleanup", { id: entry.id });
-    await call(page, "/api/test/edit-cleanup", { id: fixture.id });
-  }
-});
+    try {
+      await tool(page, "轨迹库");
+      await filterTracks(page, fixture.path.split("/").at(-1)!);
+      await page
+        .getByRole("button", { name: `查看 ${fixture.path}`, exact: true })
+        .click();
+      await page.getByRole("button", { name: "编辑轨迹", exact: true }).click();
+      await page.getByRole("button", { name: "拆分行程", exact: true }).click();
+      if (segmentCount === 1) {
+        await expect(
+          page.getByRole("button", { name: "确认", exact: true }),
+        ).toBeDisabled();
+        await expect(
+          page.getByText("当前只有一个片段，需先断开轨迹才能拆分行程。", {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "去断开轨迹", exact: true }),
+        ).toHaveCount(0);
+        return;
+      }
+      const splitFirst = page.getByRole("button", {
+        name: "在片段 1 与片段 2 之间拆分",
+        exact: true,
+      });
+      const splitSecond = page.getByRole("button", {
+        name: "在片段 2 与片段 3 之间拆分",
+        exact: true,
+      });
+      await splitSecond.click();
+      const secondName = page.getByRole("textbox", {
+        name: "行程 2 名称",
+        exact: true,
+      });
+      await secondName.fill("返程");
+      await page
+        .getByRole("button", { name: "行程 2 活动标签", exact: true })
+        .click();
+      await page
+        .getByRole("group", { name: "行程 2 活动标签", exact: true })
+        .getByRole("button", { name: "徒步", exact: true })
+        .click();
+      await splitFirst.click();
+      await expect(
+        page.getByRole("textbox", { name: "行程 3 名称", exact: true }),
+      ).toHaveValue("返程");
+      await expect(
+        page.getByRole("button", { name: "行程 3 活动标签", exact: true }),
+      ).toContainText("徒步");
+      await expect(
+        page
+          .getByRole("region", { name: "行程分组", exact: true })
+          .getByRole("button", { name: /之间拆分$/ }),
+      ).toHaveCount(0);
+      for (const i of [1, 2, 3]) {
+        const group = page.getByRole("region", {
+          name: `行程 ${i}`,
+          exact: true,
+        });
+        await expect(
+          group.getByRole("button", { name: /^定位片段/ }),
+        ).toHaveCount(1);
+        await expect(
+          group.getByRole("button", { name: `定位片段 ${i}`, exact: true }),
+        ).toBeVisible();
+      }
+      await page
+        .getByRole("button", { name: "将行程 2 并入上一行程", exact: true })
+        .click();
+      await expect(
+        page.getByRole("textbox", { name: "行程 1 名称", exact: true }),
+      ).toBeFocused();
+      await expect(secondName).toHaveValue("返程");
+      await expect(
+        page.getByRole("button", { name: "行程 2 活动标签", exact: true }),
+      ).toContainText("徒步");
+      await expect(
+        page
+          .getByRole("region", { name: "行程 1", exact: true })
+          .getByRole("button", { name: /^定位片段/ }),
+      ).toHaveCount(2);
+      await page
+        .getByRole("button", { name: "将行程 2 并入上一行程", exact: true })
+        .click();
+      await expect(
+        page.getByRole("button", { name: "确认", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page
+          .getByRole("region", { name: "行程 1", exact: true })
+          .getByRole("button", { name: /^定位片段/ }),
+      ).toHaveCount(3);
+      await splitFirst.click();
+      await page.getByRole("button", { name: "取消", exact: true }).click();
+      await expect(
+        page.getByRole("region", { name: "行程 2", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        page
+          .getByRole("region", { name: "行程 1", exact: true })
+          .getByRole("button", { name: /^定位片段/ }),
+      ).toHaveCount(3);
+      await expect(
+        page.getByRole("button", { name: "取消", exact: true }),
+      ).toBeDisabled();
+    } finally {
+      await call(page, "/api/test/edit-cleanup", { id: fixture.id });
+    }
+  });
 
 for (const width of [1280, 390])
   test(`imports only one untimed local LineString at ${width}px`, async ({
