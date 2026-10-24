@@ -3,6 +3,11 @@ import { ChevronRight, Map } from "lucide-react";
 import { Button, Select } from "./components/controls.js";
 import { PanelHeader } from "./components/panel-header.js";
 import { useTheme } from "./theme.js";
+import {
+  readEntryVisibility,
+  saveEntryVisibility,
+  type EntryVisibility,
+} from "./visibility-preference.js";
 
 export default function Settings({
   children,
@@ -12,6 +17,8 @@ export default function Settings({
   inProject?: boolean;
 }) {
   const { theme, setTheme } = useTheme();
+  const [entryVisibility, setEntryVisibility] =
+    useState<EntryVisibility>(readEntryVisibility);
   const [section, setSection] = useState<"map">();
   const panel = useRef<HTMLDivElement>(null);
   const previousSection = useRef(section);
@@ -59,6 +66,27 @@ export default function Settings({
                 { value: "light", label: "浅色" },
                 { value: "dark", label: "深色" },
                 { value: "system", label: "跟随系统" },
+              ]}
+            />
+          </div>
+          <div className="settings-entry-visibility">
+            <label
+              className="settings-field-label"
+              htmlFor="settings-entry-visibility"
+            >
+              进入时轨迹
+            </label>
+            <Select
+              id="settings-entry-visibility"
+              aria-label="进入时轨迹"
+              value={entryVisibility}
+              onChange={(value: EntryVisibility) => {
+                setEntryVisibility(value);
+                saveEntryVisibility(value);
+              }}
+              options={[
+                { value: "all", label: "全部显示" },
+                { value: "none", label: "全部隐藏" },
               ]}
             />
           </div>

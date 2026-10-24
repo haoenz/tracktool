@@ -88,6 +88,7 @@ const ArchiveAction = lazy(() =>
 );
 import { useSessionState } from "./session-state.js";
 import Settings from "./settings.js";
+import { useEntryVisibility } from "./visibility-preference.js";
 import { useTheme } from "./theme.js";
 const panels: Record<Panel, string> = {
   library: "轨迹库",
@@ -245,14 +246,9 @@ export default function MapPage() {
 }
 function Editor({ initial }: { initial: Bootstrap }) {
   const { appearance } = useTheme();
-  const [libraryVisibility, setLibraryVisibility] =
-    useSessionState<OverviewVisibility>(
-      `tracktool:${initial.initialArchive}:visibility`,
-      {
-        all: true,
-        exceptions: {},
-      },
-    );
+  const [libraryVisibility, setLibraryVisibility] = useEntryVisibility(
+    `tracktool:${initial.initialArchive}:visibility`,
+  );
   const [browseState, setBrowseState] = useState(() => ({
       ...initial.state,
       style: { ...initial.state.style, appearance },

@@ -93,6 +93,40 @@ for (const width of [1280, 390]) {
   });
 }
 
+test("entry visibility preference applies on refresh and to new tabs", async ({
+  page,
+  context,
+}) => {
+  const visibility = (target: Page) =>
+    target
+      .getByRole("complementary", { name: "地图控制面板" })
+      .getByRole("button", { name: "切换当前列表可见性", exact: true });
+  await page.goto("/settings");
+  const choice = page.getByRole("combobox", {
+    name: "进入时轨迹",
+    exact: true,
+  });
+  await expect(choice).toHaveText("全部显示");
+  await choice.click();
+  await page.getByRole("option", { name: "全部隐藏", exact: true }).click();
+  await page.reload();
+  await expect(
+    page.getByRole("combobox", { name: "进入时轨迹", exact: true }),
+  ).toHaveText("全部隐藏");
+  // The stored tab snapshot predates the new preference and must not revive it.
+  await page.goto("/map?panel=library");
+  await expect(visibility(page)).toHaveAttribute("data-visibility", "none", {
+    timeout: 15_000,
+  });
+
+  const second = await context.newPage();
+  await second.goto("/map?panel=library");
+  await expect(visibility(second)).toHaveAttribute("data-visibility", "none", {
+    timeout: 15_000,
+  });
+  await second.close();
+});
+
 test("global appearance survives project changes and synchronizes browser tabs", async ({
   page,
   context,

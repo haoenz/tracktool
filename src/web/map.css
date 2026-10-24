@@ -562,7 +562,8 @@
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
-.settings-appearance {
+.settings-appearance,
+.settings-entry-visibility {
   margin-top: 12px;
 }
 .settings-choice-group {
