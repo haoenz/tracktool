@@ -57,6 +57,13 @@ export class ArchiveClient implements MapStore {
       };
       job.abort = () => {
         if (this.active === job) {
+          if (
+            job.request.op === "write" &&
+            job.request.request?.kind === "backup"
+          ) {
+            this.worker?.postMessage({ id: job.id, op: "cancel-export" });
+            return;
+          }
           const worker = this.worker;
           this.worker = undefined;
           this.finish(
@@ -109,7 +116,9 @@ export class ArchiveClient implements MapStore {
     }
     this.active = this.queue.shift()!;
     const current = this.active;
-    current.timer = setTimeout(() => current.abort(), 120_000);
+    // High-ratio exports can take minutes; cooperative cancellation also reaps XZ children.
+    if (current.request.request?.kind !== "backup")
+      current.timer = setTimeout(() => current.abort(), 120_000);
     this.worker.postMessage({ id: current.id, ...current.request });
   }
   private finish(error?: unknown, value?: unknown, drain = true) {
@@ -184,6 +193,22 @@ export class ArchiveClient implements MapStore {
   async close() {
     this.closed = true;
     for (const job of [...this.queue]) job.abort();
+    if (this.active?.request.request?.kind === "backup" && this.worker) {
+      const worker = this.worker;
+      const done = new Promise<void>((resolve) => {
+        const complete = () => {
+          worker.off("message", complete);
+          worker.off("error", complete);
+          worker.off("exit", complete);
+          resolve();
+        };
+        worker.once("message", complete);
+        worker.once("error", complete);
+        worker.once("exit", complete);
+      });
+      this.active.abort();
+      await done;
+    }
     this.finish(new AppError("CANCELLED", "归档服务已关闭"), undefined, false);
     const worker = this.worker;
     this.worker = undefined;

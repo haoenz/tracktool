@@ -1,3 +1,4 @@
+import { EXPORT_FORMATS, COMPRESSION_PRESETS } from "./export-format.js";
 import { z } from "zod";
 import { DeleteRequestSchema } from "./archive-actions.js";
 import { EditRequestSchema, EditApplySchema } from "./track-edit.js";
@@ -9,7 +10,7 @@ export const OPERATIONS = {
   "archive:push": "轨迹入库",
   "archive:download": "下载轨迹",
   "archive:delete": "删除轨迹及历史",
-  "archive:backup": "导出展示 ZIP",
+  "archive:backup": "导出展示压缩包",
   "archive:rebuild": "聚合导出",
   "archive:recover": "恢复中断操作",
   "archive:migrate": "升级数据库",
@@ -52,6 +53,8 @@ export const WorkRequestSchema = z
     output: text.optional(),
     options: z
       .object({
+        format: z.enum(EXPORT_FORMATS).optional(),
+        compression: z.enum(COMPRESSION_PRESETS).optional(),
         category: z.enum(["Default", "Train", "Flight"]).optional(),
         retainUploads: z.boolean().optional(),
         importFiles: z

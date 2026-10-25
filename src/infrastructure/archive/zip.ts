@@ -5,14 +5,60 @@ import {
   ZipWriter,
   Uint8ArrayReader,
   registerCodec,
+  configure,
+  type CompressionStreamOptions,
   type FileEntry,
   type DecompressionStreamOptions,
 } from "@zip.js/zip.js";
-import { createZstdDecompress } from "node:zlib";
+import {
+  createZstdDecompress,
+  createZstdCompress,
+  createGzip,
+  createDeflateRaw,
+  constants,
+} from "node:zlib";
+import {
+  exportEncoding,
+  type ExportOptions,
+} from "../../shared/export-format.js";
 import { Duplex } from "node:stream";
-import { AppError } from "../../domain/errors.js";
+import { AppError, checkCancelled } from "../../domain/errors.js";
 import { memberName } from "../../domain/archive.js";
 import { MAX_KML_BYTES } from "../../domain/trackdata.js";
+// Keep compression native even when a non-default Deflate level is requested.
+export class NativeDeflateStream {
+  readonly readable: ReadableStream<Uint8Array>;
+  readonly writable: WritableStream<Uint8Array>;
+  constructor(format: string, options: CompressionStreamOptions = {}) {
+    const stream =
+      format === "gzip"
+        ? createGzip({ level: options.level })
+        : createDeflateRaw({ level: options.level });
+    const pair = Duplex.toWeb(stream);
+    this.readable = pair.readable as unknown as ReadableStream<Uint8Array>;
+    this.writable = pair.writable;
+  }
+}
+configure({ CompressionStreamFallback: NativeDeflateStream });
+class ZstdCompressionStream {
+  readonly readable: ReadableStream<Uint8Array>;
+  readonly writable: WritableStream<Uint8Array>;
+  constructor(_format: string, options: CompressionStreamOptions = {}) {
+    const pair = Duplex.toWeb(
+      createZstdCompress({
+        // Known member sizes let Zstd size its tables for small KMLs even at level 22.
+        pledgedSrcSize: options.uncompressedSize,
+        params: {
+          // zip.js exposes levels 0..9; translate the extreme profile at the codec boundary.
+          [constants.ZSTD_c_compressionLevel]: options.level === 9 ? 22 : 3,
+          [constants.ZSTD_c_nbWorkers]: 0,
+        },
+      }),
+    );
+    this.readable = pair.readable as unknown as ReadableStream<Uint8Array>;
+    this.writable = pair.writable;
+  }
+}
 // Python 3.14 ZIP_ZSTANDARD archives use 93 (early archives used 20).
 class ZstdStream {
   readonly readable: ReadableStream<Uint8Array>;
@@ -28,6 +74,9 @@ for (const compressionMethod of [20, 93])
     compressionMethod,
     format: "zstd",
     DecompressionStream: ZstdStream,
+    ...(compressionMethod === 93
+      ? { CompressionStream: ZstdCompressionStream, versionNeeded: 63 }
+      : {}),
   });
 // Optional codecs are loaded only when a historical ZIP actually uses them.
 let bzip2: Promise<import("@foxglove/wasm-bz2")> | undefined;
@@ -88,6 +137,7 @@ registerCodec({
 export async function readZip(
   file: string,
   consume: (name: string, raw: Uint8Array) => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
   const reader = new ZipReader(new BlobReader(await openAsBlob(file)), {
     useWebWorkers: false,
@@ -97,6 +147,7 @@ export async function readZip(
   try {
     const names = new Set<string>();
     for await (const entry of reader.getEntriesGenerator()) {
+      checkCancelled(signal);
       const name = entry.filename;
       memberName(entry.directory ? name.replace(/\/$/, "") : name);
       if (
@@ -123,7 +174,7 @@ export async function readZip(
             chunks.push(chunk);
           },
         }),
-        { checkSignature: true },
+        { checkSignature: true, signal },
       );
       if (entry.directory) continue;
       if (!name.toLowerCase().endsWith(".kml"))
@@ -131,6 +182,7 @@ export async function readZip(
       await consume(name, Buffer.concat(chunks));
     }
   } catch (cause) {
+    checkCancelled(signal);
     if (cause instanceof AppError) throw cause;
     throw new AppError(
       "USER_INPUT",
@@ -144,7 +196,11 @@ export async function readZip(
 export async function writeZip(
   file: string,
   entries: Iterable<{ path: string; raw: Uint8Array }>,
+  options: ExportOptions = {},
+  signal?: AbortSignal,
 ): Promise<void> {
+  checkCancelled(signal);
+  const encoding = exportEncoding(options);
   const fd = openSync(file, "wx", 0o600);
   try {
     const writer = new ZipWriter(
@@ -154,12 +210,29 @@ export async function writeZip(
           while (offset < chunk.length) offset += writeSync(fd, chunk, offset);
         },
       }),
-      { useWebWorkers: false, level: 6 },
+      {
+        useWebWorkers: false,
+        useCompressionStream: false,
+        level:
+          encoding.codec === "store"
+            ? 0
+            : encoding.compression === "extreme"
+              ? 9
+              : 6,
+        compressionMethod:
+          encoding.codec === "store" ? 0 : encoding.codec === "zstd" ? 93 : 8,
+      },
     );
-    for (const entry of entries)
-      await writer.add(entry.path, new Uint8ArrayReader(entry.raw));
+    for (const entry of entries) {
+      checkCancelled(signal);
+      await writer.add(entry.path, new Uint8ArrayReader(entry.raw), { signal });
+    }
     await writer.close();
     fsyncSync(fd);
+  } catch (cause) {
+    checkCancelled(signal);
+    if (cause instanceof AppError) throw cause;
+    throw new AppError("TOOL", "ZIP 压缩包写入失败", { cause });
   } finally {
     closeSync(fd);
   }

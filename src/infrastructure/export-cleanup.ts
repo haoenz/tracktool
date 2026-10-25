@@ -1,3 +1,4 @@
+import { exportEncoding } from "../shared/export-format.js";
 import path from "node:path";
 import {
   lstatSync,
@@ -40,7 +41,8 @@ export class ExportCleanup {
       !task.output?.temporary ||
       !file ||
       (task.request.operation === "archive:backup"
-        ? file !== path.join(directory, "Archive.zip")
+        ? file !==
+          path.join(directory, exportEncoding(task.request.options).filename)
         : path.dirname(file) !== path.join(directory, "collections"))
     )
       throw new AppError("USER_INPUT", "此结果不是可清理的临时导出文件");

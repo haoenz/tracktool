@@ -1,3 +1,10 @@
+import {
+  EXPORT_FORMAT_OPTIONS,
+  COMPRESSION_OPTIONS,
+  exportEncoding,
+  type ExportOptions as EncodingOptions,
+  type CompressionPreset,
+} from "../shared/export-format.js";
 import type { ReactNode } from "react";
 import {
   Check,
@@ -7,7 +14,7 @@ import {
   FileCode,
   LoaderCircle,
 } from "lucide-react";
-import { Button, Progress } from "./components/controls.js";
+import { Button, Progress, Select, RadioGroup } from "./components/controls.js";
 import type { WorkTask } from "../shared/work.js";
 
 export function ExportOptions({
@@ -15,14 +22,19 @@ export function ExportOptions({
   busy,
   disabled,
   onExport,
+  options,
+  onOptionsChange,
   children,
 }: {
   zip: boolean;
   busy: boolean;
   disabled: boolean;
   onExport: () => void;
+  options: EncodingOptions;
+  onOptionsChange: (options: EncodingOptions) => void;
   children?: ReactNode;
 }) {
+  const encoding = exportEncoding(options);
   const Icon = zip ? FileArchive : FileCode;
   return (
     <div className="export-options">
@@ -32,12 +44,56 @@ export function ExportOptions({
           <h3>{zip ? "展示 KML 打包" : "聚合导出"}</h3>
           <p>
             {zip
-              ? "将轨迹分别保存为展示 KML，打包为一个 ZIP 文件。"
+              ? "将轨迹分别保存为展示 KML，打包为一个文件。"
               : "将轨迹汇总为集合 KML，生成桌面和手机版本。"}
           </p>
           <p>使用轨迹当前的展示设置，不包含历史版本。</p>
         </div>
       </div>
+      {zip && (
+        <fieldset disabled={busy} className="grid min-w-0 gap-3">
+          <legend className="sr-only">压缩包选项</legend>
+          <label className="grid gap-1 text-sm">
+            格式
+            <Select
+              aria-label="压缩包格式"
+              value={encoding.format}
+              options={EXPORT_FORMAT_OPTIONS}
+              onChange={(format) => onOptionsChange({ ...options, format })}
+            />
+          </label>
+          <div className="grid gap-1 text-sm">
+            <span>压缩程度</span>
+            <RadioGroup
+              aria-label="压缩程度"
+              variant="segmented"
+              value={encoding.compression}
+              options={COMPRESSION_OPTIONS}
+              onValueChange={(compression) =>
+                onOptionsChange({
+                  ...options,
+                  compression: compression as CompressionPreset,
+                })
+              }
+            />
+          </div>
+          <p className="export-hint" aria-live="polite">
+            {encoding.compression === "store"
+              ? encoding.format === "tar-xz"
+                ? "不压缩，输出 TAR 文件。"
+                : "不压缩文件内容，仅打包为 ZIP。"
+              : encoding.compression === "extreme"
+                ? "使用最高预设档位，耗时和内存占用较高。"
+                : "兼顾压缩速度和文件大小。"}
+          </p>
+          {encoding.codec === "zstd" && (
+            <p className="export-hint">需要支持 Zstd ZIP 的解压工具。</p>
+          )}
+          <p className="export-hint" aria-live="polite">
+            输出文件：{encoding.filename}
+          </p>
+        </fieldset>
+      )}
       {children}
       <div className="export-actions">
         <Button

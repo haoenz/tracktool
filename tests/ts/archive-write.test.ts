@@ -37,6 +37,12 @@ import { digest } from "../../dist/node/infrastructure/durable-files.js";
 import { withDocument } from "../../dist/node/infrastructure/xml/document.js";
 import { exportDisplay } from "../../dist/node/infrastructure/archive/display-export.js";
 import expected from "./fixtures/m4/python.json";
+import {
+  EXPORT_FORMATS,
+  COMPRESSION_PRESETS,
+  exportEncoding,
+} from "../../dist/node/shared/export-format.js";
+import { readPackedExport } from "../../dist/node/infrastructure/archive/packed-export.js";
 const fixture = (n: string) =>
   fileURLToPath(new URL(`./fixtures/m4/${n}`, import.meta.url));
 const raw = readFileSync(fixture("2026-10-01 轨迹.kml"));
@@ -76,6 +82,66 @@ async function zipBytes(names: [string, Uint8Array, number?][]) {
     });
   return writer.close();
 }
+it.each(
+  EXPORT_FORMATS.flatMap((format) =>
+    COMPRESSION_PRESETS.map((compression) => ({ format, compression })),
+  ),
+)(
+  "publishes a verified $format / $compression snapshot and rolls back failed replacement",
+  async (exportOptions) => {
+    const { directory, writer, file } = await initialized(2);
+    transaction(file, true, (db) =>
+      addEntry(db, "Default/原件.kml", raw, "Default"),
+    );
+    const output = path.join(directory, exportEncoding(exportOptions).filename);
+    await writer.execute({
+      kind: "backup",
+      database: file,
+      output,
+      exportOptions,
+    });
+    expect(writer.status(file)).toMatchObject({
+      zip_target: output,
+      zip_fresh: true,
+    });
+    const names: string[] = [];
+    await readPackedExport(
+      output,
+      (name, bytes) => {
+        names.push(name);
+        expect(Buffer.from(bytes)).toEqual(raw);
+      },
+      exportOptions,
+    );
+    expect(names).toEqual(["Default/原件.kml"]);
+    const before = readFileSync(output);
+    const status = writer.status(file);
+    const failed = new ArchiveWriter(undefined, (point) => {
+      if (point === "before-export-commit")
+        throw new Error("injected publication failure");
+    });
+    await expect(
+      failed.execute({ kind: "backup", database: file, output, exportOptions }),
+    ).rejects.toThrow("injected");
+    expect(readFileSync(output)).toEqual(before);
+    expect(writer.status(file)).toEqual(status);
+    expect(
+      readdirSync(directory).filter((name) => name.endsWith(".tmp")),
+    ).toEqual([]);
+    const selected = path.join(
+      directory,
+      `selected${exportEncoding(exportOptions).extension}`,
+    );
+    await writer.execute({
+      kind: "backup",
+      database: file,
+      output: selected,
+      exportOptions,
+      entries: ["Default/原件.kml"],
+    });
+    expect(writer.status(file)).toEqual(status);
+  },
+);
 it.each(["stored", "deflate", "bzip2", "lzma", "zstd"])(
   "imports Python %s ZIP, preserves all raw bytes and exports a verified roundtrip",
   async (codec) => {

@@ -13,7 +13,7 @@ import {
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { deflateSync } from "node:zlib";
-import { AppError } from "../../domain/errors.js";
+import { AppError, checkCancelled } from "../../domain/errors.js";
 import { CATEGORIES, memberName } from "../../domain/archive.js";
 import type {
   ArchiveRequest,
@@ -52,7 +52,10 @@ import {
   syncFile,
   temporary,
 } from "../durable-files.js";
-import { readZip, writeZip } from "./zip.js";
+import { readZip } from "./zip.js";
+import { readPackedExport, writePackedExport } from "./packed-export.js";
+import { validateExport } from "../../domain/export-format.js";
+import type { ExportOptions } from "../../shared/export-format.js";
 import { readManifest } from "../xml/manifest.js";
 import { XmlWorkers } from "../xml/client.js";
 import type { XmlPort } from "../../services/ports.js";
@@ -116,7 +119,10 @@ export class ArchiveWriter {
     private readonly xml: XmlPort = new XmlWorkers(1, 0),
     private readonly fault: FaultHook = () => {},
   ) {}
-  async execute(request: ArchiveRequest): Promise<ArchiveResult> {
+  async execute(
+    request: ArchiveRequest,
+    signal?: AbortSignal,
+  ): Promise<ArchiveResult> {
     switch (request.kind) {
       case "init":
         return this.init(request.directory, request.zip);
@@ -149,6 +155,8 @@ export class ArchiveWriter {
           request.output,
           request.entries,
           request.temporary,
+          request.exportOptions,
+          signal,
         );
       case "rebuild":
         return rebuild(
@@ -464,9 +472,12 @@ export class ArchiveWriter {
     output: string,
     selected?: string[],
     transient = false,
+    options: ExportOptions = {},
+    signal?: AbortSignal,
   ): Promise<ArchiveResult> {
-    if (!output.toLowerCase().endsWith(".zip") || output === file)
-      throw new AppError("USER_INPUT", "Backup target must be a .zip file");
+    validateExport(output, options);
+    checkCancelled(signal);
+    if (output === file) throw new AppError("USER_INPUT", "不能覆盖轨迹库文件");
     mkdirSync(path.dirname(output), { recursive: true });
     const stage = temporary(output);
     const previous = temporary(output);
@@ -506,7 +517,7 @@ export class ArchiveWriter {
               unavailable && unavailable.manifest_status !== "ready";
             if (fallback)
               warnings.push(
-                `${e.path}: 段清单不可用，ZIP 中保留原字节，未应用展示设置`,
+                `${e.path}: 段清单不可用，压缩包中保留原字节，未应用展示设置`,
               );
             const raw = fallback
               ? rawObject(db, e.sha256)
@@ -515,22 +526,29 @@ export class ArchiveWriter {
             yield { path: e.path, raw };
           }
         }
-        await writeZip(stage, originals());
+        await writePackedExport(stage, originals(), options, signal);
         let index = 0;
-        await readZip(stage, (name, raw) => {
-          const expected = entries[index++];
-          if (
-            !expected ||
-            expected.path !== name ||
-            expectedHashes[index - 1] !== digest(raw)
-          )
-            throw new AppError("USER_INPUT", "ZIP verification failed");
-        });
+        await readPackedExport(
+          stage,
+          (name, raw) => {
+            const expected = entries[index++];
+            if (
+              !expected ||
+              expected.path !== name ||
+              expectedHashes[index - 1] !== digest(raw)
+            )
+              throw new AppError("USER_INPUT", "压缩包内容校验失败");
+          },
+          options,
+          signal,
+        );
         if (index !== entries.length)
-          throw new AppError("USER_INPUT", "ZIP verification failed");
+          throw new AppError("USER_INPUT", "压缩包内容校验失败");
         return rev;
       });
+      checkCancelled(signal);
       await this.fault("before-export-publish");
+      checkCancelled(signal);
       const db = connect(file, true);
       try {
         const newer = db
@@ -588,7 +606,7 @@ export class ArchiveWriter {
         db.close();
       }
       return {
-        message: "Display ZIP export complete",
+        message: "展示 KML 压缩包导出完成",
         paths: [output],
         warnings,
       };

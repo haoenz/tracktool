@@ -1,3 +1,9 @@
+import {
+  EXPORT_FORMATS,
+  COMPRESSION_PRESETS,
+  exportEncoding,
+  type ExportOptions,
+} from "../shared/export-format.js";
 import { randomUUID } from "node:crypto";
 import { Args, Command, Flags } from "@oclif/core";
 import path from "node:path";
@@ -161,19 +167,33 @@ function archiveCommand(
   return class extends BusinessCommand {
     static description = {
       status: "查看归档修订、导出与待恢复状态",
-      backup: "从一致快照导出当前展示 KML ZIP（不含隐藏段和历史）",
+      backup: "从一致快照导出当前展示 KML 压缩包（不含隐藏段和历史）",
       "full-backup": "完整备份 SQLite：原件、版本、展示设置、来源及项目",
       recover: "恢复中断的文件操作",
       migrate: "完整备份后显式升级数据库到 schema 6",
       rebuild: "重新生成桌面与手机集合 KML",
     }[kind];
     static flags = {
+      ...(kind === "backup"
+        ? {
+            format: Flags.string({
+              options: [...EXPORT_FORMATS],
+              default: "zip-deflate",
+              description: "压缩包格式",
+            }),
+            compression: Flags.string({
+              options: [...COMPRESSION_PRESETS],
+              default: "extreme",
+              description: "压缩程度：store 仅打包、normal 正常、extreme 极致",
+            }),
+          }
+        : {}),
       zip,
       ...(kind === "backup" || kind === "full-backup"
         ? {
             output: Flags.string({
               description:
-                kind === "backup" ? "输出 ZIP 路径" : "新的 .sqlite3 备份路径",
+                kind === "backup" ? "输出压缩包路径" : "新的 .sqlite3 备份路径",
               required: kind === "full-backup",
             }),
           }
@@ -183,14 +203,27 @@ function archiveCommand(
       const { flags } = await this.parse(this.ctor);
       await this.using(flags as unknown as CommonFlags, async (ctx, s) => {
         const w = workspace(ctx.config, flags.zip as string | undefined);
+        const exportOptions: ExportOptions =
+          kind === "backup"
+            ? {
+                format: flags.format as ExportOptions["format"],
+                compression: flags.compression as ExportOptions["compression"],
+              }
+            : {};
         const request: ArchiveRequest =
           kind === "backup" || kind === "full-backup"
             ? {
                 kind,
+                ...(kind === "backup" ? { exportOptions } : {}),
                 database: w.database,
                 output: flags.output
                   ? resolvePath(flags.output as string)
-                  : w.zip,
+                  : exportOptions.format === "tar-xz"
+                    ? path.join(
+                        w.directory,
+                        exportEncoding(exportOptions).filename,
+                      )
+                    : w.zip,
               }
             : kind === "rebuild"
               ? { kind, database: w.database, output: w.directory }

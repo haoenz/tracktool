@@ -1,3 +1,8 @@
+import {
+  EXPORT_FILENAMES,
+  exportEncoding,
+  type ExportOptions,
+} from "../shared/export-format.js";
 import path from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { createWriteStream, createReadStream } from "node:fs";
@@ -45,13 +50,17 @@ export class WorkFiles {
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
         parts[0]!,
       ) ||
-      !["Archive.zip", "collections"].includes(parts[1]!)
+      ![...EXPORT_FILENAMES, "collections"].includes(parts[1]!)
     )
       return;
     return path.join(this.exports, parts[0]!);
   }
-  async exportOutput(zip: boolean, output?: string): Promise<string> {
-    const name = zip ? "Archive.zip" : "collections";
+  async exportOutput(
+    zip: boolean,
+    output?: string,
+    options: ExportOptions = {},
+  ): Promise<string> {
+    const name = zip ? exportEncoding(options).filename : "collections";
     if (!output) {
       await this.prepare();
       const directory = path.join(this.exports, randomUUID());

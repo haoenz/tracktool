@@ -1,3 +1,4 @@
+import { exportEncoding } from "../../dist/node/shared/export-format.js";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   mkdtemp,
@@ -368,9 +369,24 @@ it("HTTP archive init, push, backup, download and delete call the shared service
     await readFile(source),
   );
 });
-it.each(["archive:backup", "archive:rebuild"] as const)(
-  "HTTP %s uses isolated downloads, acknowledges completion and preserves archive export metadata",
-  async (operation) => {
+it.each([
+  { operation: "archive:backup", options: {} },
+  {
+    operation: "archive:backup",
+    options: { format: "zip-zstd", compression: "extreme" },
+  },
+  {
+    operation: "archive:backup",
+    options: { format: "tar-xz", compression: "normal" },
+  },
+  {
+    operation: "archive:backup",
+    options: { format: "tar-xz", compression: "store" },
+  },
+  { operation: "archive:rebuild", options: {} },
+] as const)(
+  "HTTP $operation $options uses isolated downloads, acknowledges completion and preserves archive export metadata",
+  async ({ operation, options }) => {
     const { dir, archive, address, call, settled } = await server();
     const database = new Database(path.join(archive, "archive.sqlite3"), {
       readonly: true,
@@ -390,11 +406,17 @@ it.each(["archive:backup", "archive:rebuild"] as const)(
     const permanent = path.join(dir, "keep.zip");
     await writeFile(permanent, "permanent file");
     await expect(
-      call("/api/work/preview", { operation, output: permanent }),
+      call("/api/work/preview", { operation, options, output: permanent }),
     ).rejects.toThrow("不接受服务端输出路径");
-    const first = await call<WorkTask>("/api/work/preview", { operation });
+    const first = await call<WorkTask>("/api/work/preview", {
+      operation,
+      options,
+    });
     expect((await settled(first.id)).status).toBe("succeeded");
-    const second = await call<WorkTask>("/api/work/preview", { operation });
+    const second = await call<WorkTask>("/api/work/preview", {
+      operation,
+      options,
+    });
     expect((await settled(second.id)).status).toBe("succeeded");
     expect(first.request.output).not.toBe(second.request.output);
     const applied = await call<WorkTask>(
@@ -405,6 +427,10 @@ it.each(["archive:backup", "archive:rebuild"] as const)(
     expect(task.status, JSON.stringify(task.error)).toBe("succeeded");
     expect(task.output?.temporary).toBe(true);
     const paths = task.output!.paths;
+    if (operation === "archive:backup") {
+      expect(path.basename(paths[0]!)).toBe(exportEncoding(options).filename);
+      expect(task.request.options).toMatchObject(options);
+    }
     expect(paths).toHaveLength(operation === "archive:backup" ? 1 : 6);
     const headers = { "X-Tracktool-Token": "work-test" };
     const url = (index: number) =>

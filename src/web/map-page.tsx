@@ -1763,7 +1763,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                   disabled={busy}
                   value={panel === "project" ? "png" : exportKind}
                   options={[
-                    { value: "zip", label: "ZIP" },
+                    { value: "zip", label: "压缩包" },
                     { value: "kml", label: "聚合KML" },
                     { value: "png", label: "PNG图像" },
                   ]}
@@ -1771,7 +1771,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                     if (value === "png" && exportEntries) {
                       if (exportEntries.length > 200) {
                         setError(
-                          "PNG 出图最多支持 200 条轨迹，请缩小选择范围，或选择 ZIP / 聚合 KML。",
+                          "PNG 出图最多支持 200 条轨迹，请缩小选择范围，或选择压缩包 / 聚合 KML。",
                         );
                         return;
                       }
@@ -1788,7 +1788,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                 />
                 {!exportKind && panel !== "project" && (
                   <p className="export-hint export-empty">
-                    ZIP 打包轨迹，KML 汇总轨迹，PNG 制作地图图片。
+                    压缩包保存独立轨迹，KML 汇总轨迹，PNG 制作地图图片。
                   </p>
                 )}
                 {(exportKind === "zip" || exportKind === "kml") &&

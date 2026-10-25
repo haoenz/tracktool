@@ -777,7 +777,7 @@ test("multi-select separates selection scope from actions and preserves other pa
   await expect(page).toHaveURL(/panel=export/);
   await expect(panel).toContainText("已选择 51 条轨迹用于导出");
   await page.route("**/api/work/preview", (route) => route.abort());
-  for (const kind of ["ZIP", "聚合KML"]) {
+  for (const kind of ["压缩包", "聚合KML"]) {
     await panel
       .getByRole("combobox", { name: "导出类型", exact: true })
       .click();
@@ -788,7 +788,7 @@ test("multi-select separates selection scope from actions and preserves other pa
     expect(request.postDataJSON().options.entries).toHaveLength(51);
     expect(request.postDataJSON().options.entries).toContain("batch/50.kml");
     expect(request.postDataJSON().operation).toBe(
-      kind === "ZIP" ? "archive:backup" : "archive:rebuild",
+      kind === "压缩包" ? "archive:backup" : "archive:rebuild",
     );
   }
 });
@@ -829,7 +829,7 @@ for (const width of [1280, 390]) {
     await panel
       .getByRole("combobox", { name: "导出类型", exact: true })
       .click();
-    await page.getByRole("option", { name: "ZIP", exact: true }).click();
+    await page.getByRole("option", { name: "压缩包", exact: true }).click();
     await cancel.focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/panel=library/);

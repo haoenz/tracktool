@@ -21,6 +21,8 @@ tracktool-map --no-browser
 
 `tracktool setup chromium` 调用本包 Playwright 对应版本的安装器；`--dry-run` 可检查下载位置。Linux 缺浏览器系统库时用 `--with-deps`，这一步可能要求系统管理员权限。浏览器放在 Playwright 的用户缓存中，不内嵌在 tgz；可通过 `PLAYWRIGHT_BROWSERS_PATH` 固定位置。仅 CLI 或不导出 PNG 的网页流程不依赖 Chromium。
 
+TAR.XZ 导出需要安装 XZ Utils（`xz` 命令）并加入 PATH；ZIP 导出和仅打包的 TAR 不需要它。
+
 ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL` 可覆盖。ffmpeg 单独安装并加入 PATH，或指定 `TRACKTOOL_FFMPEG`。本轮不安装或修改用户机器上的外部工具。原生 SQLite/Sharp/LZMA 必须有匹配操作系统/CPU 的预编译包；如果安装器退回源码编译，可能需要平台编译工具或 Python/node-gyp。Linux x86_64 的预编译安装和运行已验证无需 Python；不能把这一结果外推到未测平台。
 
 ## 从 Python 切换

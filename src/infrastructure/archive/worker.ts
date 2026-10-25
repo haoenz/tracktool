@@ -8,6 +8,7 @@ import type { Project } from "../../shared/project.js";
 import type { ProjectTrack } from "../../shared/project-track.js";
 const store = new ArchiveStore();
 const writer = new ArchiveWriter();
+const exportsInProgress = new Map<number, AbortController>();
 parentPort!.on(
   "message",
   async (m: {
@@ -24,6 +25,15 @@ parentPort!.on(
     name?: string;
     state?: Project;
   }) => {
+    if (m.op === "cancel-export") {
+      exportsInProgress.get(m.id)?.abort();
+      return;
+    }
+    const controller =
+      m.op === "write" && m.request?.kind === "backup"
+        ? new AbortController()
+        : undefined;
+    if (controller) exportsInProgress.set(m.id, controller);
     try {
       let result: unknown;
       switch (m.op) {
@@ -40,7 +50,7 @@ parentPort!.on(
           result = await store.readTrackData(m.path, m.name!);
           break;
         case "write":
-          result = await writer.execute(m.request!);
+          result = await writer.execute(m.request!, controller?.signal);
           break;
         case "nearest":
           result = await store.nearest(
@@ -79,6 +89,8 @@ parentPort!.on(
       parentPort!.postMessage({ id: m.id, result });
     } catch (error) {
       parentPort!.postMessage({ id: m.id, error: errorInfo(error) });
+    } finally {
+      exportsInProgress.delete(m.id);
     }
   },
 );

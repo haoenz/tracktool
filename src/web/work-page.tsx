@@ -864,7 +864,7 @@ function CatalogPanel({
           <p className="ui-typography ">
             {catalog.data.status.entries} 条轨迹 · 修订{" "}
             {catalog.data.status.revision} · 待恢复{" "}
-            {catalog.data.status.pending} · 备份
+            {catalog.data.status.pending} · 展示导出
             {catalog.data.status.zip_fresh ? "已同步" : "需更新"}
           </p>
           <Space wrap>
@@ -968,9 +968,12 @@ function FileOperation({
     ),
     [inputs, setInputs] = useState(""),
     [output, setOutput] = useState(""),
-    [options, setOptions] = useState<Record<string, unknown>>(
-      entry ? { name: entry } : {},
-    ),
+    [options, setOptions] = useState<Record<string, unknown>>({
+      ...(entry ? { name: entry } : {}),
+      ...(fixedOperation === "archive:backup" || !fixedOperation
+        ? { format: "zip-deflate", compression: "extreme" }
+        : {}),
+    }),
     [error, setError] = useState<unknown>(),
     [busy, setBusy] = useState(false),
     [params, setParams] = useSearchParams();
@@ -1004,7 +1007,11 @@ function FileOperation({
   const choose = (next: Operation) => {
     setOperation(next);
     setOutput("");
-    setOptions({});
+    setOptions(
+      next === "archive:backup"
+        ? { format: "zip-deflate", compression: "extreme" }
+        : {},
+    );
   };
   function update(key: string, value: unknown) {
     setOptions((old) => ({ ...old, [key]: value }));
@@ -1074,6 +1081,10 @@ function FileOperation({
     return (
       <>
         <ExportOptions
+          options={options}
+          onOptionsChange={(value) =>
+            setOptions((old) => ({ ...old, ...value }))
+          }
           zip={fixedOperation === "archive:backup"}
           busy={busy}
           disabled={!bootstrap.data || !archivePath}

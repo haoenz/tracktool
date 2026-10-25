@@ -133,6 +133,7 @@ export class BusinessRunner implements WorkRunner {
       value.output = await this.files.exportOutput(
         value.operation === "archive:backup",
         value.output,
+        value.options,
       );
     else if (value.output)
       value.output = await this.files.resolve(value.output, false);
@@ -741,6 +742,7 @@ export class BusinessRunner implements WorkRunner {
           output.temporary = true;
           output.data = await kml.archiveOperation(ctx, {
             kind: "backup",
+            exportOptions: { format: o.format, compression: o.compression },
             temporary: true,
             entries: o.entries,
             database,

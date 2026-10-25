@@ -1,3 +1,4 @@
+import type { ExportOptions } from "../shared/export-format.js";
 import type {
   DeleteRequest,
   DeletePreview,
@@ -65,12 +66,14 @@ export type ArchiveRequest =
     }
   | { kind: "delete"; database: string; request: DeleteRequest }
   | {
-      kind: "backup" | "full-backup";
+      kind: "backup";
+      exportOptions?: ExportOptions;
       database: string;
       output: string;
       entries?: string[];
       temporary?: boolean;
     }
+  | { kind: "full-backup"; database: string; output: string }
   | { kind: "restore-backup"; backup: string; directory: string }
   | { kind: "rebuild"; database: string; output: string; entries?: string[] };
 export type ArchiveStatus = {

@@ -274,7 +274,25 @@ tracktool track export ENTRY_ID --version VERSION_ID --presentation PRESENTATION
 
 导出可见段、补绘及启用的连接线，保留实测时间、高程、样式和扩展字段。目标是文件，不覆盖已有目标；`--dry-run` 校验并计算输出但不创建文件。历史版本省略 `--presentation` 时使用该版本第一份展示快照；当前版本默认使用当前快照。原字节请用 `kml download`，完整历史用 `archive full-backup`。网页出图项目的“导出展示 KML”包含该项目的独立覆盖。
 
-`archive backup` 保留原命令名，用于当前库默认展示 ZIP；`archive rebuild` 生成桌面和手机集合。两者不套用任何项目私有覆盖。导出的 Tracktool 元数据记录来源种类、段顺序和显式连线；再次导入时连接线不会成为实测采样，也不会重复补线。
+### 压缩包格式与压缩程度
+
+`archive backup` 支持 `--format zip-deflate|zip-zstd|tar-xz` 和 `--compression store|normal|extreme`。新建导出默认 ZIP · Deflate、极致压缩；`--output` 可指定目标文件，扩展名必须与选项一致。
+
+| 格式        | 仅打包（store）   | 正常（normal）    | 极致（extreme）   |
+| ----------- | ----------------- | ----------------- | ----------------- |
+| zip-deflate | ZIP Store，`.zip` | Deflate 6，`.zip` | Deflate 9，`.zip` |
+| zip-zstd    | ZIP Store，`.zip` | Zstd 3，`.zip`    | Zstd 22，`.zip`   |
+| tar-xz      | 不压缩的 `.tar`   | XZ -6，`.tar.xz`  | XZ -9e，`.tar.xz` |
+
+```sh
+tracktool archive backup --format zip-zstd --compression extreme --output ./tracks.zip
+tracktool archive backup --format tar-xz --compression normal --output ./tracks.tar.xz
+tracktool archive backup --format tar-xz --compression store --output ./tracks.tar
+```
+
+两种 ZIP 在仅打包时使用相同的 ZIP Store 格式。Zstd ZIP 需要支持该方法的解压工具，可用 `archive import-zip` 导入；TAR/TAR.XZ 请先解包，再导入 KML。TAR.XZ 需要系统安装 `xz` 并加入 PATH；仅生成 TAR 不需要 XZ。极致使用最高预设，耗时和内存占用较高，不保证每份数据都比正常档更小；资源不足时会失败，不自动降低档位。XZ 极致压缩单线程约需 674 MiB 内存。导出期间可以取消，未完成的临时包会清理，已有目标保留。
+
+`archive backup` 保留原命令名，用于当前库默认展示压缩包；`archive rebuild` 生成桌面和手机集合。两者不套用任何项目私有覆盖。导出的 Tracktool 元数据记录来源种类、段顺序和显式连线；再次导入时连接线不会成为实测采样，也不会重复补线。
 
 旧成果重组也通过 `track preview REQUEST.json` / `track apply`，请求 operation.kind 为 `legacy_regroup`，具体字段见 [API](api.md)。候选需明确完整成员、段顺序、新路径、相同分类和依据；不会按名称自动归组。使用同一持久预览和组级撤销；希望重做时可撤销上一次组级撤销操作，复用原输出，不必创建同名新条目。
 

@@ -5,6 +5,53 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import type { WorkTask } from "../../src/shared/work.js";
 import type { Page } from "@playwright/test";
+import {
+  EXPORT_FORMAT_OPTIONS,
+  COMPRESSION_OPTIONS,
+  exportEncoding,
+} from "../../src/shared/export-format.js";
+
+for (const format of EXPORT_FORMAT_OPTIONS) {
+  test(`exports all compression profiles for ${format.label}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/map?panel=export");
+    await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
+    await page.getByRole("option", { name: "压缩包", exact: true }).click();
+    await expect(
+      page.getByRole("radio", { name: "极致压缩", exact: true }),
+    ).toBeChecked();
+    await page
+      .getByRole("combobox", { name: "压缩包格式", exact: true })
+      .click();
+    await page.getByRole("option", { name: format.label, exact: true }).click();
+    for (const compression of COMPRESSION_OPTIONS) {
+      await page
+        .getByRole("radio", { name: compression.label, exact: true })
+        .click();
+      const options = { format: format.value, compression: compression.value };
+      const encoding = exportEncoding(options);
+      await expect(
+        page.getByText(`输出文件：${encoding.filename}`, { exact: true }),
+      ).toBeVisible();
+      const request = page.waitForRequest("**/api/work/preview");
+      const downloading = page.waitForEvent("download");
+      await page.getByRole("button", { name: "导出", exact: true }).click();
+      expect((await request).postDataJSON().options).toMatchObject(options);
+      const download = await downloading;
+      expect(download.suggestedFilename()).toBe(encoding.filename);
+      const bytes = await readFile((await download.path())!);
+      expect(bytes.length).toBeGreaterThan(0);
+      await expect(
+        page.getByRole("heading", { name: "下载完成" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "导出", exact: true }),
+      ).toBeEnabled();
+    }
+  });
+}
 async function upload(page: Page, name: string, buffer: Buffer) {
   const source = page.getByText("从当前设备上传", { exact: true });
   if (await source.isVisible()) await source.click();
@@ -62,7 +109,7 @@ test("archive upload, backup, read-only download and real deletion use separate 
     page.getByRole("button", { name: "导出", exact: true }),
   ).toHaveCount(0);
   await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
-  await page.getByRole("option", { name: "ZIP", exact: true }).click();
+  await page.getByRole("option", { name: "压缩包", exact: true }).click();
   await expect(page.getByRole("heading", { name: "导出轨迹" })).toBeVisible();
   await expect(page.getByText("轨迹库中的全部轨迹")).toBeVisible();
   await expect(page.getByLabel("服务端输出文件（可选）")).toHaveCount(0);
@@ -159,7 +206,7 @@ test("export apply failure leaves a retryable result instead of a pending state"
 }) => {
   await page.goto("/map?panel=export");
   await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
-  await page.getByRole("option", { name: "ZIP", exact: true }).click();
+  await page.getByRole("option", { name: "压缩包", exact: true }).click();
   await page.route("**/api/work/tasks/*/apply", (route) =>
     route.fulfill({ status: 503, body: "Unavailable" }),
   );
@@ -182,7 +229,7 @@ test("interrupted export downloads remain retryable and are removed after receip
 }) => {
   await page.goto("/map?panel=export");
   await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
-  await page.getByRole("option", { name: "ZIP", exact: true }).click();
+  await page.getByRole("option", { name: "压缩包", exact: true }).click();
   const acknowledgements: string[] = [];
   page.on("request", (request) => {
     if (request.url().endsWith("/download-complete"))

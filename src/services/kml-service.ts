@@ -1,3 +1,4 @@
+import { validateExport } from "../domain/export-format.js";
 import { AppError, checkCancelled, errorInfo } from "../domain/errors.js";
 import { entryName, filenameDate } from "../domain/archive.js";
 import type {
@@ -63,6 +64,8 @@ export class KmlService {
     request: ArchiveRequest,
   ): Promise<ArchiveResult> {
     checkCancelled(ctx.signal);
+    if (request.kind === "backup")
+      validateExport(request.output, request.exportOptions);
     if (
       ctx.mode === "plan" &&
       !["status", "delete-preview"].includes(request.kind)

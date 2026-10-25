@@ -1,3 +1,4 @@
+import { exportEncoding } from "../shared/export-format.js";
 import { XmlWorkers } from "../infrastructure/xml/client.js";
 import { LocalKmlFiles } from "../infrastructure/kml-files.js";
 import { geojson } from "../domain/geometry.js";
@@ -291,7 +292,13 @@ export function workRoutes(
     const stream = createReadStream(file);
     stream.once("error", release);
     reply.header("Cache-Control", "no-store");
-    return reply.type("application/octet-stream").send(stream);
+    return reply
+      .type(
+        task.request.operation === "archive:backup"
+          ? exportEncoding(task.request.options).contentType
+          : "application/octet-stream",
+      )
+      .send(stream);
   });
   app.post("/api/work/tasks/:id/download-complete", async (request) => {
     const { index } = z
