@@ -1,5 +1,6 @@
 // Application-level compositions of the local shadcn/ui primitives.
 import {
+  useEffect,
   useId,
   useRef,
   useState,
@@ -7,6 +8,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { validateNumberDraft } from "../number-input.js";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -171,6 +173,12 @@ export function InputNumber({
   max,
   precision,
   className,
+  required = true,
+  onValidityChange,
+  draftValue,
+  onDraftValueChange,
+  onBlur,
+  onKeyDown,
   ...props
 }: Omit<ComponentProps<typeof Input>, "value" | "onChange" | "min" | "max"> & {
   value?: number | null;
@@ -178,29 +186,98 @@ export function InputNumber({
   min?: number;
   max?: number;
   precision?: number;
+  onValidityChange?: (valid: boolean) => void;
+  draftValue?: string;
+  onDraftValueChange?: (draft: string | undefined) => void;
 }) {
+  const errorId = useId();
+  const [draft, setDraft] = useState(draftValue ?? value?.toString() ?? "");
+  const [touched, setTouched] = useState(false);
+  const validityCallback = useRef(onValidityChange);
+  validityCallback.current = onValidityChange;
+  const validation = validateNumberDraft(draft, {
+    min,
+    max,
+    precision,
+    required,
+  });
+  const error = touched && !validation.valid ? validation.error : "";
+  useEffect(() => {
+    setDraft(draftValue ?? value?.toString() ?? "");
+    setTouched(false);
+  }, [value, draftValue]);
+  useEffect(() => {
+    validityCallback.current?.(validation.valid);
+  }, [validation.valid]);
+  useEffect(() => () => validityCallback.current?.(true), []);
+  const commit = (text: string) => {
+    setTouched(true);
+    const result = validateNumberDraft(text, { min, max, precision, required });
+    validityCallback.current?.(result.valid);
+    if (!result.valid) return;
+    setDraft(result.value?.toString() ?? "");
+    if (result.value !== (value ?? null)) onChange?.(result.value);
+    onDraftValueChange?.(undefined);
+  };
   return (
-    <Input
-      {...props}
-      className={cn("ui-number", className)}
-      type="number"
-      min={min}
-      max={max}
-      step={props.step ?? "any"}
-      value={value ?? ""}
-      onChange={(e) => {
-        if (!e.target.value) {
-          onChange?.(null);
-          return;
+    <>
+      <Input
+        {...props}
+        className={cn("ui-number", className)}
+        type="number"
+        min={min}
+        max={max}
+        required={required}
+        step={props.step ?? "any"}
+        value={draft}
+        aria-invalid={error ? true : props["aria-invalid"]}
+        aria-describedby={
+          [props["aria-describedby"], error ? errorId : ""]
+            .filter(Boolean)
+            .join(" ") || undefined
         }
-        let next = e.target.valueAsNumber;
-        if (!Number.isFinite(next)) return;
-        if (min !== undefined) next = Math.max(min, next);
-        if (max !== undefined) next = Math.min(max, next);
-        if (precision !== undefined) next = Number(next.toFixed(precision));
-        onChange?.(next);
-      }}
-    />
+        onChange={(e) => {
+          const text = e.target.value;
+          setDraft(text);
+          onDraftValueChange?.(text);
+          validityCallback.current?.(
+            validateNumberDraft(text, { min, max, precision, required }).valid,
+          );
+        }}
+        onBlur={(e) => {
+          commit(e.currentTarget.value);
+          onBlur?.(e);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit(e.currentTarget.value);
+          } else if (e.key === "Escape") {
+            setDraft(value?.toString() ?? "");
+            onDraftValueChange?.(undefined);
+            setTouched(false);
+            validityCallback.current?.(
+              validateNumberDraft(value?.toString() ?? "", {
+                min,
+                max,
+                precision,
+                required,
+              }).valid,
+            );
+          }
+          onKeyDown?.(e);
+        }}
+      />
+      {error && (
+        <span
+          id={errorId}
+          role="alert"
+          className="ui-number-error block text-xs text-destructive"
+        >
+          {error}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -605,6 +682,7 @@ export function Modal({
   children,
   closable = true,
   maskClosable = true,
+  focusAfterClose,
 }: {
   title: string;
   open: boolean;
@@ -616,6 +694,7 @@ export function Modal({
   children?: ReactNode;
   closable?: boolean;
   maskClosable?: boolean;
+  focusAfterClose?: () => HTMLElement | null;
 }) {
   const returnFocus = useRef<HTMLElement | null>(null);
   return (
@@ -634,7 +713,7 @@ export function Modal({
         }}
         onCloseAutoFocus={(e) => {
           e.preventDefault();
-          returnFocus.current?.focus();
+          (focusAfterClose?.() ?? returnFocus.current)?.focus();
         }}
         onPointerDownOutside={(e) => {
           if (!maskClosable) e.preventDefault();

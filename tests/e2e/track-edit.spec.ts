@@ -92,13 +92,14 @@ for (const width of [1280, 390])
       });
       await map.scrollIntoViewIfNeeded();
       const canvas = page.locator(".maplibregl-canvas");
-      await canvas.click({
+      // Click the visible viewport; the shared map canvas extends beyond it
+      // to support the print frame without recreating the map.
+      const viewport = page.locator(".map-stage");
+      await viewport.click({
         position: { x: width > 700 ? 700 : 120, y: 220 },
-        force: true,
       });
-      await canvas.click({
+      await viewport.click({
         position: { x: width > 700 ? 750 : 160, y: 240 },
-        force: true,
       });
       await expect(page.getByText(/已画 2 点/)).toBeVisible();
       await canvas.screenshot({ path: test.info().outputPath("drawing.png") });

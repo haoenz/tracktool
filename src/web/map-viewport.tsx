@@ -1,5 +1,6 @@
 import { AnalysisLayer } from "./analysis-layer.js";
 import type { AnalysisOverlay } from "./track-insights.js";
+import type { PaddingOptions } from "maplibre-gl";
 import {
   forwardRef,
   memo,
@@ -15,31 +16,25 @@ import {
 } from "./overview-layer.js";
 import type { OverviewStatus } from "../shared/overview.js";
 import { MapCanvas } from "../drawing/core.js";
-import type { Project } from "../shared/project.js";
+import { trackColor } from "../drawing/track-style.js";
+import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, SelectedTrack } from "../shared/map.js";
 import { displayCoordinate } from "../shared/coordinates.js";
-type Transition = {
-  tracks: SelectedTrack[];
-  preview: boolean;
-  hideOverview: boolean;
-};
 export interface Viewport {
   fit(tracks?: SelectedTrack[]): void;
-  stage(
-    state: Project,
-    overview?: OverviewStatus,
-    transition?: Transition,
-  ): Promise<boolean>;
+  stage(state: MapState, overview?: OverviewStatus): Promise<boolean>;
   fitOverview(bounds: [number, number, number, number]): void;
   retryOverview(): void;
   cancel(): void;
   ready(): Promise<unknown>;
 }
 type Props = {
-  state: Project;
+  state: MapState;
   config: MapConfig;
   tracks: SelectedTrack[];
-  preview: boolean;
+  print?: boolean;
+  cameraLocked?: boolean;
+  guides?: boolean;
   overview?: OverviewStatus;
   overviewSelected?: string;
   overviewVisibility?: OverviewVisibility;
@@ -48,11 +43,12 @@ type Props = {
   onOverviewLoading?: (loading: boolean) => void;
   onOverviewVersion?: (version: string) => void;
   onOverviewError?: (message: string) => void;
-  onCamera: (camera: Project["camera"]) => void;
+  onCamera: (camera: MapState["camera"]) => void;
   onError: (message: string) => void;
   onPointPick?: (position: [number, number]) => void;
   exposeRenderer?: boolean;
   highlightSegment?: string;
+  highlightEntry?: string;
   analysisOverlay?: AnalysisOverlay;
 };
 export const MapViewport = memo(
@@ -65,12 +61,12 @@ export const MapViewport = memo(
       serial = useRef(0),
       latest = useRef(props);
     const [resourceError, setResourceError] = useState("");
-    const transition = useRef<Transition | undefined>(undefined);
     const layers = useRef(new Map<MapCanvas, OverviewLayer>());
     const analysisLayers = useRef(new Map<MapCanvas, AnalysisLayer>());
     latest.current = props;
     const highlight = (map: MapCanvas) => {
       const selected = latest.current.highlightSegment;
+      const entry = latest.current.highlightEntry;
       for (const [layer, property] of [
         ["track-lines", "line-color"],
         ["track-points", "circle-color"],
@@ -90,11 +86,22 @@ export const MapViewport = memo(
             ["get", "edit_color"],
           ];
           if (selected !== undefined)
-            color.push(["==", ["get", "segment_id"], selected], "#1677ff");
+            color.push(
+              entry === undefined
+                ? ["==", ["get", "segment_id"], selected]
+                : [
+                    "all",
+                    ["==", ["get", "segment_id"], selected],
+                    ["==", ["get", "project_entry"], entry],
+                  ],
+              "#1677ff",
+            );
+          else if (entry !== undefined)
+            color.push(["==", ["get", "project_entry"], entry], "#1677ff");
           color.push(
-            selected !== undefined
+            selected !== undefined || entry !== undefined
               ? "#64748b"
-              : latest.current.state.style.color,
+              : trackColor(latest.current.state.style),
           );
           map.map.setPaintProperty(layer!, property!, color);
         }
@@ -110,7 +117,7 @@ export const MapViewport = memo(
           "case",
           ["==", ["get", "segment_id"], "ux-located"],
           2,
-          1,
+          latest.current.state.style.outline === false ? 0 : 1,
         ]);
       }
     };
@@ -120,11 +127,7 @@ export const MapViewport = memo(
         ?.update(
           status,
           latest.current.overviewSelected ?? "",
-          (map === candidate.current
-            ? transition.current?.hideOverview
-            : undefined) ??
-            latest.current.hideOverview ??
-            true,
+          latest.current.hideOverview ?? true,
           latest.current.overviewVisibility,
           !!latest.current.analysisOverlay &&
             latest.current.analysisOverlay.metric !== "original",
@@ -139,22 +142,39 @@ export const MapViewport = memo(
     };
     const layout = () => {
       if (!stage.current || !holder.current) return;
-      const { width, height } = stage.current.getBoundingClientRect();
+      const bounds = stage.current.getBoundingClientRect();
+      const { width, height } = bounds;
+      const mobile = width <= 700;
+      const panel = document.getElementById("map-panel");
+      const rect =
+        latest.current.print && panel?.offsetParent !== null
+          ? panel?.getBoundingClientRect()
+          : undefined;
+      // Reserve the same space in browse mode, so entering print or changing
+      // aspect ratio never scales the underlying map. All ratios fit a square.
+      const left = mobile ? 0 : Math.min(width - 40, 396);
+      const top = mobile ? 80 : 0;
+      const bottom = mobile ? height * 0.48 + 24 : 0;
+      const scale = Math.max(
+        0.05,
+        Math.min(
+          (width - left - 40) / 960,
+          (height - top - bottom - 40) / 960,
+          1,
+        ),
+      );
+      const shiftX =
+        latest.current.print && !mobile
+          ? ((rect?.right ?? left) - bounds.left) / 2
+          : 0;
+      const shiftY =
+        latest.current.print && mobile
+          ? (top + (rect ? rect.top - bounds.top : height - bottom) - height) /
+            2
+          : 0;
       for (const map of [current.current, candidate.current]) {
         if (!map) continue;
-        const preview =
-          (map === candidate.current
-            ? transition.current?.preview
-            : undefined) ?? latest.current.preview;
-        const { frame } = map.state,
-          scale = Math.max(
-            0.1,
-            Math.min(
-              (width - 40) / frame.width,
-              (height - 70) / frame.height,
-              1,
-            ),
-          );
+        const { frame } = map.state;
         map.frame.style.transform = `scale(${scale})`;
         layers.current.get(map)?.setScale(scale);
         analysisLayers.current.get(map)?.setScale(scale);
@@ -162,16 +182,37 @@ export const MapViewport = memo(
           holder.current.style.width = `${frame.width * scale}px`;
           holder.current.style.height = `${frame.height * scale}px`;
         }
-        if (map === current.current && credit.current) {
-          const parent = preview ? map.frame : credit.current;
-          if (map.credit.parentElement !== parent) parent.append(map.credit);
+        if (map === current.current) {
+          // The export keeps the credit inside the frame; the composition
+          // preview shows the same strip so the frame matches the output.
+          const parent = latest.current.print ? map.frame : credit.current;
+          if (parent && map.credit.parentElement !== parent)
+            parent.append(map.credit);
         }
-        map.setExportPreview(preview);
+        map.setPrintPreview(!!latest.current.print);
+        map.setExportPreview(false);
+        // The map stays full screen, so the surroundings grow to cover the
+        // shift and the camera keeps pointing at the frame center.
+        if (map === current.current && holder.current)
+          holder.current.style.transform = `translate(${shiftX}px, ${shiftY}px)`;
         map.setSurround(
-          preview ? frame.width : width / scale,
-          preview ? frame.height : height / scale,
+          (width + left + 2) / scale,
+          (height + (mobile ? bottom : 0) + 2) / scale,
           scale,
         );
+        const locked = !!latest.current.cameraLocked;
+        for (const handler of [
+          map.map.dragPan,
+          map.map.scrollZoom,
+          map.map.boxZoom,
+          map.map.doubleClickZoom,
+          map.map.keyboard,
+          map.map.touchZoomRotate,
+        ]) {
+          if (locked) handler.disable();
+          else handler.enable();
+        }
+        map.map.touchZoomRotate.disableRotation();
       }
     };
     const cancel = () => {
@@ -179,10 +220,9 @@ export const MapViewport = memo(
       destroy(candidate.current);
       candidate.current?.frame.remove();
       candidate.current = undefined;
-      transition.current = undefined;
     };
     const create = (
-      state: Project,
+      state: MapState,
       staging = false,
       overview?: OverviewStatus,
     ) => {
@@ -196,7 +236,7 @@ export const MapViewport = memo(
         latest.current.config,
         (camera) => {
           if (current.current === map) {
-            if (!transition.current) candidate.current?.setCamera(camera);
+            candidate.current?.setCamera(camera);
             latest.current.onCamera(camera);
           }
         },
@@ -276,6 +316,8 @@ export const MapViewport = memo(
       window.addEventListener("online", online);
       const observer = new ResizeObserver(layout);
       observer.observe(stage.current!);
+      const panel = document.getElementById("map-panel");
+      if (panel) observer.observe(panel);
       return () => {
         window.removeEventListener("online", online);
         observer.disconnect();
@@ -290,21 +332,22 @@ export const MapViewport = memo(
     useEffect(() => {
       current.current?.apply(structuredClone(props.state));
       current.current?.setCamera(props.state.camera);
-      if (candidate.current && !transition.current) {
+      if (candidate.current) {
         const next = structuredClone(props.state);
         next.style = candidate.current.state.style;
         candidate.current.apply(next);
         candidate.current.setCamera(props.state.camera);
       }
       layout();
-    }, [props.state, props.preview]);
+    }, [props.state]);
+    useEffect(layout, [props.cameraLocked, props.print]);
     useEffect(() => {
       if (current.current) highlight(current.current);
-    }, [props.state, props.highlightSegment]);
+    }, [props.state, props.highlightSegment, props.highlightEntry]);
     useEffect(() => {
       current.current?.setTracks(props.tracks);
       if (current.current) highlight(current.current);
-      if (!transition.current) candidate.current?.setTracks(props.tracks);
+      candidate.current?.setTracks(props.tracks);
     }, [props.tracks]);
     useEffect(() => {
       if (current.current) updateOverview(current.current);
@@ -324,17 +367,40 @@ export const MapViewport = memo(
       retryOverview: () => {
         if (current.current) layers.current.get(current.current)?.retry();
       },
-      fitOverview: ([west, south, east, north]) =>
-        current.current?.map.fitBounds(
+      fitOverview: ([west, south, east, north]) => {
+        const map = current.current;
+        if (!map) return;
+        let padding: number | PaddingOptions = 65;
+        if (latest.current.print) {
+          // The frame, not the whole canvas, is the exported area.
+          const element = map.mapElement.getBoundingClientRect();
+          const scale = element.width / map.mapElement.clientWidth || 1;
+          const frame = map.state.frame;
+          padding = {
+            top: Math.max(0, (element.height - frame.height * scale) / 2) + 55,
+            bottom:
+              Math.max(0, (element.height - frame.height * scale) / 2) + 55,
+            left: Math.max(0, (element.width - frame.width * scale) / 2) + 55,
+            right: Math.max(0, (element.width - frame.width * scale) / 2) + 55,
+          };
+        }
+        map.map.fitBounds(
           [
             [west, south],
             [east, north],
           ],
-          { padding: 65, maxZoom: 15, duration: 0 },
-        ),
+          { padding, maxZoom: 15, duration: 0 },
+        );
+      },
       fit: (tracks) => {
         const map = current.current;
         if (!map) return;
+        // Print mode fits the final output frame even while its surroundings
+        // are visible. Library locating fits the free viewport instead.
+        if (latest.current.print) {
+          map.fit(tracks);
+          return;
+        }
         const bounds = stage.current?.getBoundingClientRect();
         const canvas = map.mapElement.getBoundingClientRect();
         const scale = canvas.width / map.mapElement.clientWidth;
@@ -359,13 +425,11 @@ export const MapViewport = memo(
         if (map?.errors.length) map.retryResources();
         return map?.ready();
       },
-      stage: async (state, overview, options) => {
+      stage: async (state, overview) => {
         cancel();
-        transition.current = options;
         const sequence = serial.current;
         const next = create(state, true, overview);
         candidate.current = next;
-        if (options) next.setTracks(options.tracks);
         updateOverview(next, overview);
         layout();
         try {
@@ -376,7 +440,6 @@ export const MapViewport = memo(
           const old = current.current;
           current.current = next;
           candidate.current = undefined;
-          transition.current = undefined;
           next.frame.classList.remove("staging");
           setResourceError("");
           destroy(old);
@@ -391,18 +454,22 @@ export const MapViewport = memo(
           destroy(next);
           next.frame.remove();
           candidate.current = undefined;
-          transition.current = undefined;
           throw error;
         }
       },
     }));
     return (
       <div
-        className={`map-stage${props.preview ? " export-preview" : " browsing"}`}
+        className={`map-stage${props.print ? " print" : ""}`}
         ref={stage}
+        data-locked={props.cameraLocked || undefined}
         aria-label="地图预览"
       >
-        <div className="frame-holder" ref={holder} />
+        <div
+          className="frame-holder"
+          data-guides={props.guides || undefined}
+          ref={holder}
+        />
         <div className="viewport-credit" ref={credit} />
         {resourceError && (
           <div className="map-resource-error" role="alert">

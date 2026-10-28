@@ -2,11 +2,11 @@ import type Database from "better-sqlite3";
 import { rawObject, schemaVersion } from "./database.js";
 import { resolveTrack, readPresentation } from "./presentation.js";
 import { displayKml } from "../xml/display.js";
-import type { ProjectTrack } from "../../shared/project-track.js";
+import type { TrackReference } from "../../shared/track-reference.js";
 export function exportDisplay(
   db: Database.Database,
   entry: string,
-  ref?: ProjectTrack,
+  ref?: TrackReference,
 ): Uint8Array {
   if (schemaVersion(db) < 3) {
     const row = db

@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { tool, pickEditorPoint } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 
-test("visibility has no processing or project-selection side effects", async ({
+test("visibility has no processing or export side effects", async ({
   page,
 }) => {
   const selectionRequests: string[] = [];
@@ -35,31 +35,14 @@ test("visibility has no processing or project-selection side effects", async ({
   await expect(page.getByRole("button", { name: /处理已选轨迹/ })).toHaveCount(
     0,
   );
-  await tool(page, "新建出图工程");
-  await expect
-    .poll(() => page.evaluate(() => window.renderer?.state.tracks.length))
-    .toBe(0);
-  await page.getByRole("combobox", { name: "出图轨迹", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "搜索出图轨迹", exact: true })
-    .fill("Train/same.kml");
-  await page
-    .getByRole("option", { name: "Train/same.kml", exact: true })
-    .click();
-  await page.keyboard.press("Escape");
-  await expect
-    .poll(() => page.evaluate(() => window.renderer?.state.tracks.length))
-    .toBe(1);
-  const count = selectionRequests.length;
+  await tool(page, "出图");
+  await expect(page.getByRole("region", { name: "出图设置" })).toBeVisible();
   await tool(page, "轨迹库");
   await page
     .getByRole("button", { name: "切换当前列表可见性", exact: true })
     .click();
   await tool(page, "出图");
-  await expect
-    .poll(() => page.evaluate(() => window.renderer?.state.tracks.length))
-    .toBe(1);
-  expect(selectionRequests).toHaveLength(count);
+  expect(selectionRequests).toEqual([]);
 });
 
 test("single-track panel previews and saves tag, split and cleanup with history", async ({

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronRightIcon } from "lucide-react";
-import type { Project } from "../shared/project.js";
+import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, MapPreset } from "../shared/map.js";
 import {
   featureControls,
@@ -30,9 +30,9 @@ function FeatureGroup({
 }: {
   label: string;
   keys: string[];
-  state: Project;
+  state: MapState;
   config: MapConfig;
-  change: (edit: (next: Project) => void) => void;
+  change: (edit: (next: MapState) => void) => void;
 }) {
   const items = keys
     .filter((key) => !featureReason(state, config, key))
@@ -73,9 +73,9 @@ export function MapContentSettings({
   change,
   notify,
 }: {
-  state: Project;
+  state: MapState;
   config: MapConfig;
-  change: (edit: (next: Project) => void) => void;
+  change: (edit: (next: MapState) => void) => void;
   notify: (message: string) => void;
 }) {
   const [expanded, setExpanded] = useState<string[]>([]);

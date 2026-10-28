@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import project from "./fixtures/project.json";
-import { ProjectSchema, upgradeProject } from "../../src/shared/project.js";
+import { defaultMapState, MapStateSchema } from "../../src/shared/map-state.js";
+import { PrintDocumentSchema, printDocument } from "../../src/shared/print.js";
 import {
   BatchResultSchema,
   MicrosecondsSchema,
@@ -21,41 +21,32 @@ import { createContext } from "../../src/services/context.js";
 import { getPublicConfig } from "../../src/services/config.js";
 
 describe("shared contracts", () => {
-  it("upgrades schema 1 while preserving camera, tracks and extension fields", () => {
-    const { features, overlays, power, ...style } = project.style;
-    void features;
-    void overlays;
-    void power;
-    const old = { ...project, schema: 1, style, extension: "retained" };
-    const upgraded = ProjectSchema.parse(upgradeProject(old));
-    expect(upgraded.schema).toBe(2);
-    expect(upgraded.camera).toEqual(project.camera);
-    expect(upgraded.tracks).toEqual(project.tracks);
-    expect(upgraded.extension).toBe("retained");
-    expect(upgraded.style.features).toBeDefined();
-    expect(old.schema).toBe(1);
-  });
-  it("accepts the existing Python project and preserves extension fields", () => {
+  const state = defaultMapState();
+  const document = printDocument(state, "archive.sqlite3", [
+    { entry: "Train/a.kml", sha256: "a".repeat(64) },
+  ]);
+  it("accepts a print document and preserves extension fields", () => {
     expect(
-      ProjectSchema.parse({ ...project, extension: { future: true } })
+      PrintDocumentSchema.parse({ ...document, extension: { future: true } })
         .extension,
     ).toEqual({ future: true });
+    expect(MapStateSchema.parse(state).camera).toEqual(state.camera);
   });
   it.each([
-    { ...project, schema: 4 },
-    { ...project, title: "a\nb" },
-    { ...project, title: "字".repeat(61) },
-    { ...project, output: { width: 1920, height: 1000 } },
-    { ...project, camera: { ...project.camera, center: [181, 30] } },
+    { ...document, version: 2 },
+    { ...document, title: "a\nb" },
+    { ...document, title: "字".repeat(61) },
+    { ...document, output: { width: 1920, height: 1000 } },
+    { ...document, camera: { ...document.camera, center: [181, 30] } },
     {
-      ...project,
+      ...document,
       tracks: [
         { entry: "a", sha256: "a".repeat(64) },
         { entry: "a", sha256: "b".repeat(64) },
       ],
     },
-  ])("rejects invalid project values", (value) => {
-    expect(ProjectSchema.safeParse(value).success).toBe(false);
+  ])("rejects invalid print values", (value) => {
+    expect(PrintDocumentSchema.safeParse(value).success).toBe(false);
   });
   it("keeps int64 timestamps exact and rejects malformed and overflowing values", () => {
     for (const value of [

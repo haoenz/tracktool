@@ -127,36 +127,6 @@ test("entry visibility preference applies on refresh and to new tabs", async ({
   await second.close();
 });
 
-test("global appearance survives project changes and synchronizes browser tabs", async ({
-  page,
-  context,
-}) => {
-  await page.goto("/settings");
-  await pickAppearance(page, "深色");
-  await expectAppearance(page, "dark");
-  await tool(page, "新建出图工程");
-  await expectAppearance(page, "dark");
-  const second = await context.newPage();
-  await second.goto("/settings");
-  await expectAppearance(second, "dark");
-  await pickAppearance(second, "浅色");
-  await expectAppearance(page, "light");
-  await expectAppearance(second, "light");
-  await tool(page, "返回浏览");
-  await page
-    .getByRole("button", { name: "放弃修改并返回", exact: true })
-    .click();
-  await expect(page.getByRole("region", { name: "当前出图工程" })).toHaveCount(
-    0,
-  );
-  await expectAppearance(page, "light");
-  await tool(page, "设置");
-  await expect(
-    page.getByRole("combobox", { name: "配色", exact: true }),
-  ).toHaveText("浅色");
-  await second.close();
-});
-
 test("settings group map controls and server configuration writes require CLI", async ({
   page,
 }, info) => {
@@ -237,7 +207,7 @@ test("settings group map controls and server configuration writes require CLI", 
   await page.getByRole("button", { name: "地图设置", exact: true }).click();
   await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   const nav = page.getByRole("navigation", { name: "地图工具", exact: true });
-  await expect(page.locator(".project-icon")).toBeVisible();
+  await expect(page.locator(".app-icon")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "设置", exact: true }),
   ).toHaveAttribute("aria-expanded", "true");
@@ -304,6 +274,7 @@ test("layers retain filters and opacity when disabled and reloaded", async ({
   const opacity = layer.getByRole("spinbutton", { name: "电力不透明度" });
   await expect(opacity).toHaveValue("100");
   await opacity.fill("20");
+  await opacity.blur();
   await expect(opacity).toHaveValue("20");
   await layer.locator(".settings-layer-toggle").click();
   await layer.getByRole("combobox", { name: "电力设施", exact: true }).click();
@@ -360,6 +331,7 @@ test("railway modes share one layer and incompatible basemaps preserve its setti
   await layer.locator(".settings-layer-toggle").click();
   const opacity = layer.getByRole("spinbutton", { name: "铁路不透明度" });
   await opacity.fill("90");
+  await opacity.blur();
   await layer.getByRole("combobox", { name: "铁路显示内容" }).click();
   await page.getByRole("option", { name: "铁路限速", exact: true }).click();
   await expect(layer).toHaveCount(1);

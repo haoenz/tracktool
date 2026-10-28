@@ -6,7 +6,7 @@ import { useTheme } from "./theme.js";
 import { api } from "./api.js";
 import { MapViewport, type Viewport } from "./map-viewport.js";
 import type { EditGeometry } from "../shared/track-edit.js";
-import type { Project } from "../shared/project.js";
+import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, SelectedTrack, Feature } from "../shared/map.js";
 export function TrackEditorMap({
   geometry,
@@ -58,7 +58,7 @@ function StandaloneEditorMap({
   const bootstrap = useQuery({
     queryKey: ["work-map-bootstrap"],
     queryFn: ({ signal }) =>
-      api<{ state: Project; config: MapConfig }>(
+      api<{ state: MapState; config: MapConfig }>(
         "/api/bootstrap",
         undefined,
         signal,
@@ -83,7 +83,7 @@ function EditorMap({
   onPick,
   selectedSegment,
 }: {
-  state: Project;
+  state: MapState;
   config: MapConfig;
   geometry: EditGeometry;
   onPick?: (p: [number, number]) => void;
@@ -135,7 +135,6 @@ function EditorMap({
           state={themedState}
           config={config}
           tracks={tracks}
-          preview={false}
           onCamera={(camera) => setState((s) => ({ ...s, camera }))}
           onError={setError}
           onPointPick={ready ? onPick : undefined}

@@ -1,5 +1,5 @@
 import maplibregl, { type GeoJSONSource } from "maplibre-gl";
-import type { Project } from "../shared/project.js";
+import { frames, type MapState } from "../shared/map-state.js";
 import type {
   MapConfig,
   MapPreset,
@@ -9,28 +9,28 @@ import type {
 } from "../shared/map.js";
 import { ResourceHealth, type ResourceEvent } from "./resource-health.js";
 export interface RenderReport {
-  camera: Project["camera"];
+  camera: MapState["camera"];
 }
 import { mapStyle, basemapPreset } from "./styles.js";
 import { displayCoordinate, displayGeometry } from "./coordinates.js";
 import { activeOverlays, canvasCrs, effectiveFeatures } from "./layers.js";
+import { compositionPadding, trackBounds } from "./viewport.js";
+import {
+  projectTrackColor,
+  trackColor,
+  trackEndpoints,
+  trackSegmentFeatures,
+} from "./track-style.js";
 /* Shared deterministic map renderer: fixed CSS-pixel frame, output DPR only. */
-export const frames = {
-  "4:3": [960, 720],
-  "3:2": [960, 640],
-  "16:9": [960, 540],
-  "1:1": [960, 960],
-  "3:4": [720, 960],
-  "2:3": [640, 960],
-};
+export { frames };
 const empty: TrackGeoJSON = { type: "FeatureCollection", features: [] };
 export class MapCanvas {
   frame: HTMLElement;
-  state: Project;
+  state: MapState;
   config: MapConfig;
   preset: MapPreset | undefined;
   crs: string;
-  onCamera?: (camera: Project["camera"]) => void;
+  onCamera?: (camera: MapState["camera"]) => void;
   onError?: (message: string) => void;
   readonly resources: ResourceHealth;
   get errors() {
@@ -40,6 +40,7 @@ export class MapCanvas {
   displayData?: TrackGeoJSON;
   loadedFont: boolean;
   exportPreview: boolean;
+  printPreview: boolean;
   surround: { x: number; y: number };
   surroundSize?: [number, number, number];
   resizing: boolean;
@@ -51,12 +52,15 @@ export class MapCanvas {
   fontReady: Promise<void>;
   private fontLoading = false;
   private textWidths = new Map<string, number>();
+  private tracks: SelectedTrack[] = [];
+  private endpoints: { start: Position; end: Position }[] = [];
+  private displaySource: TrackGeoJSON = empty;
 
   constructor(
     frame: HTMLElement,
-    state: Project,
+    state: MapState,
     config: MapConfig,
-    onCamera?: (camera: Project["camera"]) => void,
+    onCamera?: (camera: MapState["camera"]) => void,
     onError?: (message: string) => void,
     handleResourceError?: (event: {
       error: Error;
@@ -76,6 +80,7 @@ export class MapCanvas {
     // Export always starts in fixed-frame mode. The editor can explicitly
     // switch to viewport-wide browsing without modifying the saved state.
     this.exportPreview = true;
+    this.printPreview = false;
     this.surround = { x: 0, y: 0 };
     this.resizing = false;
     frame.style.width = `${state.frame.width}px`;
@@ -231,22 +236,8 @@ export class MapCanvas {
   // space preserves the frame's center and logical-pixel scale. Export uses 0.
   setSurround(width: number, height: number, scale = 1) {
     this.surroundSize = [width, height, scale];
-    const x = Math.max(0, Math.ceil((width - this.state.frame.width) / 2));
-    // Never let the editor's extra space invoke MapLibre's pole constraints
-    // and change the camera on resize. Beyond Mercator's poles is background.
-    const world = 512 * 2 ** this.map.getZoom();
-    const latitude = maplibregl.MercatorCoordinate.fromLngLat(
-      this.map.getCenter(),
-    ).y;
-    const available = Math.floor(
-      world * Math.min(latitude, 1 - latitude) -
-        this.state.frame.height / 2 -
-        1e-6,
-    );
-    const y = Math.max(
-      0,
-      Math.min(available, Math.ceil((height - this.state.frame.height) / 2)),
-    );
+    const x = Math.max(0, (width - this.state.frame.width) / 2);
+    const y = Math.max(0, (height - this.state.frame.height) / 2);
     this.surround = { x, y };
     Object.assign(this.mapElement.style, {
       left: `${-x}px`,
@@ -256,10 +247,36 @@ export class MapCanvas {
     });
     this.resizing = true;
     try {
+      // The CSS transform already scales the preview. Render at its displayed
+      // density instead of allocating a several-thousand-pixel mobile canvas.
+      const pixelRatio = devicePixelRatio * scale;
+      if (this.map.getPixelRatio() !== pixelRatio)
+        this.map.setPixelRatio(pixelRatio);
       this.map.resize();
+      const center = displayCoordinate(this.state.camera.center, this.crs);
+      this.map.jumpTo({ center, zoom: this.state.camera.zoom });
+      const actual = this.map.getCenter();
+      if (
+        Math.abs(actual.lat - center[1]) > 1e-8 ||
+        Math.abs(actual.lng - center[0]) > 1e-8 ||
+        Math.abs(this.map.getZoom() - this.state.camera.zoom) > 1e-8
+      ) {
+        // Keep the document synchronized with MapLibre's world constraints.
+        this.state.camera = {
+          center: displayCoordinate([actual.lng, actual.lat], this.crs, true),
+          zoom: this.map.getZoom(),
+        };
+        this.onCamera?.(this.state.camera);
+      }
     } finally {
       this.resizing = false;
     }
+    this.draw();
+  }
+  /** Draw the frame decorations (title, credit) inside the export frame. */
+  setPrintPreview(show: boolean) {
+    this.printPreview = show;
+    if (show && this.state.title) void this.ensureFont().catch(() => {});
     this.draw();
   }
   setExportPreview(show: boolean) {
@@ -267,7 +284,7 @@ export class MapCanvas {
     if (show) void this.ensureFont().catch(() => {});
     this.draw();
   }
-  setCamera(camera: Project["camera"]) {
+  setCamera(camera: MapState["camera"]) {
     this.resizing = true;
     try {
       this.state.camera = structuredClone(camera);
@@ -328,11 +345,35 @@ export class MapCanvas {
       );
   }
   setTracks(tracks: SelectedTrack[]) {
+    this.tracks = tracks;
+    this.endpoints = tracks.flatMap((track) => trackEndpoints(track) ?? []);
     this.data = {
       type: "FeatureCollection",
-      features: tracks.flatMap((t) => t.geojson.features),
+      features: tracks.flatMap((track) =>
+        track.geojson.features.map((feature) => ({
+          ...feature,
+          properties: {
+            ...feature.properties,
+            project_entry: track.entry,
+            project_color: projectTrackColor(track.entry, this.state.style),
+          },
+        })),
+      ),
     };
-    this.displayData = displayGeometry(this.data, this.crs);
+    this.displaySource = {
+      type: "FeatureCollection",
+      features: tracks.flatMap((track) =>
+        trackSegmentFeatures(track).map((feature) => ({
+          ...feature,
+          properties: {
+            ...feature.properties,
+            project_entry: track.entry,
+            project_color: projectTrackColor(track.entry, this.state.style),
+          },
+        })),
+      ),
+    };
+    this.displayData = displayGeometry(this.displaySource, this.crs);
     const apply = () =>
       (this.map.getSource("tracks") as GeoJSONSource | undefined)?.setData(
         this.displayData!,
@@ -342,9 +383,14 @@ export class MapCanvas {
     if (this.map.getSource("tracks")) apply();
     else this.map.once("styledata", apply);
   }
-  apply(state: Project) {
+  apply(state: MapState) {
     const old = this.state;
     this.state = state;
+    if (
+      old.style.color_mode !== state.style.color_mode ||
+      old.style.color !== state.style.color
+    )
+      this.setTracks(this.tracks);
     if (
       old.style.basemap !== state.style.basemap ||
       old.style.appearance !== state.style.appearance ||
@@ -361,7 +407,7 @@ export class MapCanvas {
     ) {
       this.preset = basemapPreset(state, this.config);
       this.crs = canvasCrs(state, this.config);
-      this.displayData = displayGeometry(this.data, this.crs);
+      this.displayData = displayGeometry(this.displaySource, this.crs);
       this.resources.clear();
       this.map.setStyle(mapStyle(state, this.config, this.displayData));
       this.resizing = true;
@@ -374,7 +420,11 @@ export class MapCanvas {
         this.resizing = false;
       }
     } else if (this.map.getLayer("track-lines")) {
-      this.map.setPaintProperty("track-lines", "line-color", state.style.color);
+      this.map.setPaintProperty(
+        "track-lines",
+        "line-color",
+        trackColor(state.style),
+      );
       this.map.setPaintProperty("track-lines", "line-width", state.style.width);
       this.map.setPaintProperty(
         "track-halo",
@@ -382,14 +432,24 @@ export class MapCanvas {
         state.style.width + 2,
       );
       this.map.setPaintProperty(
+        "track-halo",
+        "line-opacity",
+        state.style.outline === false ? 0 : 0.8,
+      );
+      this.map.setPaintProperty(
         "track-points",
         "circle-color",
-        state.style.color,
+        trackColor(state.style),
       );
       this.map.setPaintProperty(
         "track-points",
         "circle-radius",
         state.style.width / 2,
+      );
+      this.map.setPaintProperty(
+        "track-points",
+        "circle-stroke-width",
+        state.style.outline === false ? 0 : 1,
       );
     }
     if (
@@ -398,7 +458,7 @@ export class MapCanvas {
     ) {
       this.frame.style.width = `${state.frame.width}px`;
       this.frame.style.height = `${state.frame.height}px`;
-      this.map.resize();
+      if (!this.surroundSize) this.map.resize();
     }
     this.updateCredit();
     this.draw();
@@ -423,53 +483,20 @@ export class MapCanvas {
           for (const p of segment) coordinates.push(p);
       else for (const p of f.geometry.coordinates) coordinates.push(p);
     }
-    if (!coordinates.length) throw new Error("请先选择至少一条有效轨迹");
-    // Choose the minimal longitude arc, including trips across the date line.
-    const lons = coordinates
-      .map((p) => ((p[0] % 360) + 360) % 360)
-      .sort((a, b) => a - b);
-    let gap = -1,
-      start = lons[0]!;
-    for (let i = 0; i < lons.length; i++) {
-      const next =
-        lons[(i + 1) % lons.length]! + (i === lons.length - 1 ? 360 : 0);
-      if (next - lons[i]! > gap) {
-        gap = next - lons[i]!;
-        start = next % 360;
-      }
-    }
-    let west = Infinity,
-      east = -Infinity,
-      south = 90,
-      north = -90;
-    for (const [lon, lat] of coordinates) {
-      let x = ((lon % 360) + 360) % 360;
-      if (x < start - 1e-8) x += 360;
-      west = Math.min(west, x);
-      east = Math.max(east, x);
-      south = Math.min(south, lat);
-      north = Math.max(north, lat);
-    }
-    if (west > 180) {
-      west -= 360;
-      east -= 360;
-    }
-    this.map.fitBounds(
-      [
-        [west, south],
-        [east, north],
-      ],
-      {
-        padding: padding ?? {
-          top: this.surround.y + (this.state.title ? 90 : 55),
-          bottom: this.surround.y + 55,
-          left: this.surround.x + 55,
-          right: this.surround.x + 55,
-        },
-        maxZoom: 15,
-        duration: 0,
-      },
-    );
+    const bounds = trackBounds(coordinates);
+    if (!bounds)
+      throw new Error("当前没有可显示的轨迹，请先显示至少一个片段。");
+    this.map.fitBounds(bounds, {
+      padding:
+        padding ??
+        compositionPadding(
+          this.surround,
+          !!this.state.title,
+          this.credit.offsetHeight,
+        ),
+      maxZoom: 15,
+      duration: 0,
+    });
   }
   draw() {
     if (this.exportPreview && !this.loadedFont) return;
@@ -503,17 +530,52 @@ export class MapCanvas {
     ctx.strokeStyle = dark ? "#202c33" : "#faf8f2";
     ctx.lineJoin = "round";
     ctx.lineWidth = 3 * unit;
+    if (this.state.style.endpoints) {
+      ctx.font = `${12 * unit}px ${this.fontFamily()}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      for (const endpoints of this.endpoints) {
+        for (const kind of ["start", "end"] as const) {
+          const coordinate = displayCoordinate(endpoints[kind], this.crs);
+          // Match the world copy closest to the camera at the date line.
+          coordinate[0] +=
+            360 * Math.round((this.map.getCenter().lng - coordinate[0]) / 360);
+          const point = this.map.project(coordinate);
+          const x = point.x - this.surround.x + offsetX;
+          const y = point.y - this.surround.y + offsetY;
+          if (x < 0 || y < 0 || x > w || y > h) continue;
+          ctx.save();
+          ctx.fillStyle = kind === "start" ? "#15803d" : "#c2410c";
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 2 * unit;
+          ctx.beginPath();
+          if (kind === "start") ctx.arc(x, y, 6 * unit, 0, 2 * Math.PI);
+          else ctx.rect(x - 5 * unit, y - 5 * unit, 10 * unit, 10 * unit);
+          ctx.fill();
+          ctx.stroke();
+          const label = kind === "start" ? "起" : "终";
+          ctx.lineWidth = 3 * unit;
+          ctx.strokeText(label, x, y - 9 * unit);
+          ctx.fillText(label, x, y - 9 * unit);
+          ctx.restore();
+        }
+      }
+    }
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    if (this.exportPreview && this.state.title) {
+    if ((this.exportPreview || this.printPreview) && this.state.title) {
+      ctx.lineWidth = 3;
+      const frameWidth = this.state.frame.width;
       let size = 30;
       let width = this.measureText(ctx, this.state.title, size);
-      while (width > w - 64 && size > 10) {
+      while (width > frameWidth - 64 && size > 10) {
         size--;
         width = this.measureText(ctx, this.state.title, size);
       }
-      ctx.strokeText(this.state.title, w / 2, 38);
-      ctx.fillText(this.state.title, w / 2, 38);
+      // The title belongs to the exported frame, so it sits at the frame's top
+      // in both the standalone export and the on-screen composition preview.
+      ctx.strokeText(this.state.title, offsetX + frameWidth / 2, offsetY + 38);
+      ctx.fillText(this.state.title, offsetX + frameWidth / 2, offsetY + 38);
     }
   }
   async ready(

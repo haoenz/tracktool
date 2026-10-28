@@ -4,7 +4,7 @@ import { Alert, Button, Spin } from "./components/controls.js";
 import { api } from "./api.js";
 import { MapViewport } from "./map-viewport.js";
 import type { Viewport } from "./map-viewport.js";
-import type { Project } from "../shared/project.js";
+import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, SelectedTrack } from "../shared/map.js";
 import "./map.css";
 import { useTheme } from "./theme.js";
@@ -12,7 +12,7 @@ export default function WorkMap({ id }: { id: string }) {
   const bootstrap = useQuery({
       queryKey: ["work-map-bootstrap"],
       queryFn: ({ signal }) =>
-        api<{ state: Project; config: MapConfig }>(
+        api<{ state: MapState; config: MapConfig }>(
           "/api/bootstrap",
           undefined,
           signal,
@@ -39,7 +39,7 @@ export default function WorkMap({ id }: { id: string }) {
   );
 }
 function Preview(props: {
-  state: Project;
+  state: MapState;
   config: MapConfig;
   tracks: SelectedTrack[];
 }) {
@@ -47,7 +47,6 @@ function Preview(props: {
   const [state, setState] = useState(() => ({
       ...props.state,
       title: "",
-      tracks: props.tracks.map((t) => ({ entry: t.entry, sha256: t.sha256 })),
     })),
     [error, setError] = useState("");
   const viewport = useRef<Viewport>(null);
@@ -79,7 +78,6 @@ function Preview(props: {
           state={themedState}
           config={props.config}
           tracks={props.tracks}
-          preview={false}
           onCamera={(camera) => setState((old) => ({ ...old, camera }))}
           onError={setError}
         />

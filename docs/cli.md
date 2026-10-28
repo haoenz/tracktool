@@ -65,7 +65,7 @@ tracktool archive recover
 
 ## 网页地图
 
-运行 `tracktool-map`，地图编辑、项目、PNG 及其他页面的启动和操作见[网页使用说明](web-usage.md)。
+运行 `tracktool-map`，地图编辑、出图、PNG 及其他页面的启动和操作见[网页使用说明](web-usage.md)。
 
 ## 库内行程编辑
 
@@ -217,7 +217,7 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 
 命令名、选项拼写错误、缺必填参数都退 1；2 表示外部依赖失败。
 
-表里的「KML 格式错误」只对单文件命令成立：批量命令（`kml push`、`kml set-tag`）把读不出来的那个文件当作它自己的失败，其余照常处理，命令整体退 3。1 保留给「整批还没开始」的情形——路径不存在、通配符无匹配、`--type` 或 `--tag` 取值非法（类别名不在 Default/Train/Flight 里，活动名不在词表里）。`archive undo` 同理：前提缺失、`archive_history` 关着，或归档已被未记账的改动推走时退 1、一个字节没动，`--force` 跳过项目或自校验不符时退 3。
+表里的「KML 格式错误」只对单文件命令成立：批量命令（`kml push`、`kml set-tag`）把读不出来的那个文件当作它自己的失败，其余照常处理，命令整体退 3。1 保留给「整批还没开始」的情形——路径不存在、通配符无匹配、`--type` 或 `--tag` 取值非法（类别名不在 Default/Train/Flight 里，活动名不在词表里）。`archive undo` 同理：前提缺失、`archive_history` 关着，或归档已被未记账的改动推走时退 1、一个字节没动，`--force` 跳过自校验不符时退 3。
 
 批量命令遇到单个坏文件不会中止整批：该文件计入失败清单，其余文件照常处理，命令以 3 退出，日志里给出 `N file(s) failed` 汇总。指定 `--failed-folder` 后，会在处理前检查失败目录及同名目标。真实执行会提前创建目录，并创建、删除一个空临时文件检查写入能力，因此没有失败时也可能留下空目录；预演只做只读检查。任一失败目录不可用时，停用本批次的自动整理并提示，主任务继续；同名目标只影响对应文件的整理，保留双方。执行中移动失败会同时记录处理原因和整理错误，并继续后续文件；只在实际移动成功后报告移动位置。修复编排不会把留在原处的失败文件归入成功目录。
 
@@ -254,25 +254,25 @@ tracktool archive status
 tracktool archive backup              # 当前活动 KML → Archive.zip（不含历史）
 tracktool archive full-backup --output /backup/tracks.sqlite3
 tracktool archive restore-backup /backup/tracks.sqlite3 /fresh/tracks
-tracktool archive migrate             # 完整备份后显式升级 schema 6
+tracktool archive migrate             # 完整备份后显式升级 schema 7
 tracktool archive rebuild             # SQLite → 聚合 KML
 tracktool archive recover             # 完成中断文件操作
 ```
 
-当前版本、默认展示或状态变化使日常导出过期；历史来源和项目变化通过 storage_revision 使完整备份过期，解析缓存不影响修订。push/delete 不改 ZIP/集合。`--zip` 保留为所在目录的定位方式，ZIP 本身可以不存在；不作为另一个可修改的真源。
+当前版本、默认展示或状态变化使日常导出过期；历史来源变化通过 storage_revision 使完整备份过期，解析缓存不影响修订。push/delete 不改 ZIP/集合。`--zip` 保留为所在目录的定位方式，ZIP 本身可以不存在；不作为另一个可修改的真源。
 
-`archive undo` 已退休，会明确报错并提示替代操作：download 下载当前原字节，recover 完成中断，或把旧备份 ZIP 导入另一个新目录。`archive log` 仅查看保留的旧 history.jsonl。schema 3/4 的 ZIP 包含当前可见段及连接线，导入只恢复这份展示结果；无法解析的旧成员以原字节保留并警告。恢复原件、隐藏段、项目、版本和内部 ID 请使用 full-backup / restore-backup。两种方式都不包含瓦片或配置。
+`archive undo` 已退休，会明确报错并提示替代操作：download 下载当前原字节，recover 完成中断，或把旧备份 ZIP 导入另一个新目录。`archive log` 仅查看保留的旧 history.jsonl。schema 3/4 的 ZIP 包含当前可见段及连接线，导入只恢复这份展示结果；无法解析的旧成员以原字节保留并警告。恢复原件、隐藏段、版本和内部 ID 请使用 full-backup / restore-backup。两种方式都不包含瓦片或配置。
 
-`kml download` 不修改归档，默认下载当前版本完整原字节；`--entry-id` 可定位非活动来源条目，`--version` 指定该条目的历史版本，`--output` 为目录且不覆盖已有文件。`kml delete` 需要 schema 4；预览和执行都检查项目、来源与待恢复操作依赖，删除只清理无引用对象。没有 pop 命令或兼容别名。已有下载和备份保留，已删除历史只能从之前的完整备份恢复。
+`kml download` 不修改归档，默认下载当前版本完整原字节；`--entry-id` 可定位非活动来源条目，`--version` 指定该条目的历史版本，`--output` 为目录且不覆盖已有文件。`kml delete` 需要 schema 4；预览和执行都检查来源与待恢复操作依赖，删除只清理无引用对象。没有 pop 命令或兼容别名。已有下载和备份保留，已删除历史只能从之前的完整备份恢复。
 
 ### 按展示导出 KML
 
 ```sh
-tracktool track export ENTRY_ID --archive /tracks --output /exports/trip.kml
+tracktool track export-display ENTRY_ID --archive /tracks --output /exports/trip.kml
 tracktool track export ENTRY_ID --version VERSION_ID --presentation PRESENTATION_ID --output /exports/history.kml
 ```
 
-导出可见段、补绘及启用的连接线，保留实测时间、高程、样式和扩展字段。目标是文件，不覆盖已有目标；`--dry-run` 校验并计算输出但不创建文件。历史版本省略 `--presentation` 时使用该版本第一份展示快照；当前版本默认使用当前快照。原字节请用 `kml download`，完整历史用 `archive full-backup`。网页出图项目的“导出展示 KML”包含该项目的独立覆盖。
+导出可见段、补绘及启用的连接线，保留实测时间、高程、样式和扩展字段。目标是文件，不覆盖已有目标；`--dry-run` 校验并计算输出但不创建文件。历史版本省略 `--presentation` 时使用该版本第一份展示快照；当前版本默认使用当前快照。原字节请用 `kml download`，完整历史用 `archive full-backup`。网页不再提供独立的展示 KML 入口；聚合导出和 CLI 单条导出都使用库中展示设置。
 
 ### 压缩包格式与压缩程度
 
@@ -292,7 +292,7 @@ tracktool archive backup --format tar-xz --compression store --output ./tracks.t
 
 两种 ZIP 在仅打包时使用相同的 ZIP Store 格式。Zstd ZIP 需要支持该方法的解压工具，可用 `archive import-zip` 导入；TAR/TAR.XZ 请先解包，再导入 KML。TAR.XZ 需要系统安装 `xz` 并加入 PATH；仅生成 TAR 不需要 XZ。极致使用最高预设，耗时和内存占用较高，不保证每份数据都比正常档更小；资源不足时会失败，不自动降低档位。XZ 极致压缩单线程约需 674 MiB 内存。导出期间可以取消，未完成的临时包会清理，已有目标保留。
 
-`archive backup` 保留原命令名，用于当前库默认展示压缩包；`archive rebuild` 生成桌面和手机集合。两者不套用任何项目私有覆盖。导出的 Tracktool 元数据记录来源种类、段顺序和显式连线；再次导入时连接线不会成为实测采样，也不会重复补线。
+`archive backup` 保留原命令名，用于当前库默认展示压缩包；`archive rebuild` 生成桌面和手机集合。两者不套用任何出图私有覆盖。导出的 Tracktool 元数据记录来源种类、段顺序和显式连线；再次导入时连接线不会成为实测采样，也不会重复补线。
 
 旧成果重组也通过 `track preview REQUEST.json` / `track apply`，请求 operation.kind 为 `legacy_regroup`，具体字段见 [API](api.md)。候选需明确完整成员、段顺序、新路径、相同分类和依据；不会按名称自动归组。使用同一持久预览和组级撤销；希望重做时可撤销上一次组级撤销操作，复用原输出，不必创建同名新条目。
 

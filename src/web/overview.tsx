@@ -7,7 +7,7 @@ import type {
   OverviewStatus,
 } from "../shared/overview.js";
 import type { TrackGeoJSON, SelectedTrack } from "../shared/map.js";
-import type { Project } from "../shared/project.js";
+import type { MapState } from "../shared/map-state.js";
 import { api } from "./api.js";
 
 export interface OverviewEntries {
@@ -23,11 +23,11 @@ export interface OverviewDetail {
 }
 export function rememberedCamera(
   archive: string,
-): Project["camera"] | undefined {
+): MapState["camera"] | undefined {
   try {
     const v = JSON.parse(
       sessionStorage.getItem(`tracktool-browse:${archive}`) ?? "null",
-    ) as Project["camera"] | null;
+    ) as MapState["camera"] | null;
     if (
       v &&
       Array.isArray(v.center) &&
@@ -43,7 +43,7 @@ export function rememberedCamera(
     /* Storage may be disabled. */
   }
 }
-export function rememberCamera(archive: string, camera: Project["camera"]) {
+export function rememberCamera(archive: string, camera: MapState["camera"]) {
   try {
     sessionStorage.setItem(
       `tracktool-browse:${archive}`,

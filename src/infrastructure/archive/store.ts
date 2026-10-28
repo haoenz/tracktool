@@ -18,12 +18,7 @@ import {
 import type { TrackData } from "../../domain/trackdata.js";
 import { geojson } from "../../domain/geometry.js";
 import type { Catalog, Selection } from "../../shared/map.js";
-import type { Project } from "../../shared/project.js";
-import type { ProjectTrack } from "../../shared/project-track.js";
 import { resolveTrack, readPresentation, displayed } from "./presentation.js";
-import { exportDisplay } from "./display-export.js";
-import { withDocument } from "../xml/document.js";
-import { kmlRoot } from "../../domain/kml-edit.js";
 import { XmlWorkers } from "../xml/client.js";
 
 import { deserialize, serialize, PARSER_VERSION } from "../track-index.js";
@@ -80,11 +75,18 @@ export class ArchiveStore {
       entries: (
         db
           .prepare(
-            `SELECT path,category FROM ${activeEntries(db)} ORDER BY path`,
+            `SELECT id,path,sha256,category FROM ${activeEntries(db)} ORDER BY path`,
           )
-          .all() as { path: string; category: string | null }[]
+          .all() as {
+          id: string;
+          path: string;
+          sha256: string;
+          category: string | null;
+        }[]
       ).map((e) => ({
+        id: e.id,
         entry: e.path,
+        sha256: e.sha256,
         name: path.posix.basename(e.path),
         kind: e.category ?? "Unknown",
         date: /\d{4}-\d{2}-\d{2}/.exec(path.posix.basename(e.path))?.[0] ?? "",
@@ -175,12 +177,7 @@ export class ArchiveStore {
     if (error || !data) throw new AppError("USER_INPUT", `${source}: ${error}`);
     return data;
   }
-  async selection(
-    input: string,
-    entries: string[],
-    expected: Record<string, string> = {},
-    references?: ProjectTrack[],
-  ): Promise<Selection> {
+  async selection(input: string, entries: string[]): Promise<Selection> {
     if (entries.length > 200 || new Set(entries).size !== entries.length)
       throw new AppError("USER_INPUT", "每次最多选择 200 条不同的完整归档路径");
     const archive = databasePath(input);
@@ -190,12 +187,7 @@ export class ArchiveStore {
       for (const entry of entries)
         try {
           const ref =
-            schemaVersion(db) >= 3
-              ? resolveTrack(
-                  db,
-                  references?.find((t) => t.entry === entry) ?? { entry },
-                )
-              : undefined;
+            schemaVersion(db) >= 3 ? resolveTrack(db, { entry }) : undefined;
           const row = ref
             ? (db
                 .prepare(
@@ -253,11 +245,6 @@ export class ArchiveStore {
               "USER_INPUT",
               "本次选择超过 200 万点，请减少所选轨迹",
             );
-          if (expected[entry] && expected[entry] !== row.sha256)
-            throw new AppError(
-              "USER_INPUT",
-              "源内容已变化；请重新选择该轨迹并保存为新项目",
-            );
           result.tracks.push({
             entry,
             sha256: row.sha256,
@@ -279,7 +266,6 @@ export class ArchiveStore {
               return {
                 geojson: display.geojson(),
                 points: pointCount(display.data),
-                reference: ref,
                 presentation: {
                   settings: presentation.settings,
                   segments: presentation.segments,
@@ -358,92 +344,6 @@ export class ArchiveStore {
         }
       }
       return best;
-    });
-  }
-  projects(input: string): string[] {
-    return transaction(databasePath(input), false, (db) =>
-      (
-        db.prepare("SELECT name FROM map_projects ORDER BY name").all() as {
-          name: string;
-        }[]
-      ).map((r) => r.name),
-    );
-  }
-  displayKml(input: string, references: ProjectTrack[]): Uint8Array {
-    if (references.length > 200)
-      throw new AppError("USER_INPUT", "每次最多导出 200 条轨迹");
-    return transaction(databasePath(input), false, (db) => {
-      let bytes = 0;
-      const values = references.map((ref) => {
-        const raw = exportDisplay(db, ref.entry, ref);
-        bytes += raw.length;
-        if (bytes > MAX_KML_BYTES)
-          throw new AppError("USER_INPUT", "展示导出总量超过 128 MiB");
-        return raw;
-      });
-      if (values.length === 1) return values[0]!;
-      const output = Buffer.from(
-        kmlRoot(
-          `<Document>${values
-            .map((raw) =>
-              withDocument(raw, (doc) =>
-                doc.root
-                  .find("./*")
-                  .map((n) => n.canonicalizeToString({ withComments: true }))
-                  .join(""),
-              ),
-            )
-            .join("")}</Document>`,
-        ),
-      );
-      if (output.length > MAX_KML_BYTES)
-        throw new AppError("USER_INPUT", "展示导出总量超过 128 MiB");
-      return output;
-    });
-  }
-  currentReference(input: string, entryId: string): ProjectTrack {
-    return transaction(databasePath(input), false, (db) => {
-      const row = db
-        .prepare(
-          "SELECT path FROM archive_entries WHERE id=? AND state='active'",
-        )
-        .get(entryId) as { path: string } | undefined;
-      if (!row)
-        throw new AppError(
-          "USER_INPUT",
-          "原行程已被替代或删除，请明确选择新的行程",
-        );
-      return resolveTrack(db, { entry: row.path });
-    });
-  }
-  load(input: string, name: string): unknown {
-    return transaction(databasePath(input), false, (db) => {
-      const row = db
-        .prepare("SELECT state FROM map_projects WHERE name=?")
-        .get(name) as { state: string } | undefined;
-      if (!row) throw new AppError("USER_INPUT", `项目不存在：${name}`);
-      return JSON.parse(row.state);
-    });
-  }
-  save(input: string, name: string, state: Project): void {
-    if (!name.trim() || [...name].length > 120)
-      throw new AppError("USER_INPUT", "项目名称需为 1–120 字");
-    transaction(databasePath(input), true, (db) => {
-      // Revalidate content inside the write reservation; no check/save race with another CLI.
-      for (const t of state.tracks) {
-        if (schemaVersion(db) >= 3 && t.entry_id) {
-          readPresentation(db, resolveTrack(db, t));
-          continue;
-        }
-        const row = db
-          .prepare(`SELECT sha256 FROM ${activeEntries(db)} WHERE path=?`)
-          .get(t.entry) as { sha256: string } | undefined;
-        if (row?.sha256 !== t.sha256)
-          throw new AppError("USER_INPUT", "源轨迹缺失或变化，不能保存项目");
-      }
-      db.prepare(
-        `INSERT INTO map_projects(name,state,updated_at) VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(name) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at${schemaVersion(db) >= 3 ? ",generation=map_projects.generation+1" : ""}`,
-      ).run(name, JSON.stringify(state));
     });
   }
 }

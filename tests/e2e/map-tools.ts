@@ -22,9 +22,14 @@ export async function pickBasemap(page: Page, id: string) {
   await page.getByRole("button", { name: vendor, exact: true }).click();
   await page.getByRole("button", { name, exact: true }).click();
 }
+async function openMenu(page: Page) {
+  const icon = page.locator(".app-icon");
+  if ((await icon.getAttribute("aria-expanded")) !== "true") await icon.click();
+  await expect(icon).toHaveAttribute("aria-expanded", "true");
+}
 /** Navigate only through visible workspace controls. */
 export async function tool(page: Page, name: string) {
-  await expect(page.locator(".project-icon")).toBeVisible();
+  await expect(page.locator(".app-icon")).toBeVisible();
   if (["地图样式", "设置"].includes(name)) {
     const settings = page.getByRole("button", { name: "设置", exact: true });
     if ((await settings.getAttribute("aria-expanded")) !== "true")
@@ -35,18 +40,23 @@ export async function tool(page: Page, name: string) {
         name: "地图设置",
         exact: true,
       });
-      if (await mapSettings.isVisible()) await mapSettings.click();
+      if (!(await page.getByLabel("图源", { exact: true }).isVisible()))
+        await mapSettings.click();
     }
     return;
   }
   if (name === "返回浏览") {
-    await page.getByRole("button", { name: "退出工程", exact: true }).click();
+    const exit = page.getByRole("button", { name: "退出出图", exact: true });
+    if (await exit.isVisible()) {
+      await exit.click();
+      return;
+    }
+    const icon = page.locator(".app-icon");
+    if ((await icon.getAttribute("aria-expanded")) === "true")
+      await icon.click();
     return;
   }
-  const tracks = page.locator(".project-icon");
-  if ((await tracks.getAttribute("aria-expanded")) !== "true")
-    await tracks.click();
-  await expect(tracks).toHaveAttribute("aria-expanded", "true");
+  await openMenu(page);
   if (name === "轨迹库") {
     const list = page.getByRole("button", {
       name: "打开轨迹列表",
@@ -57,85 +67,49 @@ export async function tool(page: Page, name: string) {
     await expect(list).toHaveAttribute("aria-expanded", "true");
     return;
   }
-  const currentPanel = new URL(page.url()).searchParams.get("panel");
-  const inProject = await page
-    .getByRole("region", { name: "当前出图工程" })
-    .isVisible();
-  if (inProject && !["export", "project"].includes(currentPanel ?? "")) {
-    await page.getByRole("button", { name: "导出轨迹", exact: true }).click();
-    await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
-    await page.getByRole("option", { name: "PNG图像", exact: true }).click();
-    await expect(page.getByRole("group", { name: "出图设置" })).toBeVisible();
-  } else if (
-    !inProject &&
-    !["export", "project"].includes(currentPanel ?? "")
-  ) {
-    const home = page.getByRole("button", { name: "返回轨迹库", exact: true });
-    if (await home.isVisible()) await home.click();
-    await page.getByRole("button", { name: "导出轨迹", exact: true }).click();
-    await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
-    await page.getByRole("option", { name: "PNG图像", exact: true }).click();
+  if (name === "出图") {
+    const bar = page.getByRole("region", { name: "出图设置" });
+    if (!(await bar.isVisible()))
+      await page.getByRole("button", { name: "出图", exact: true }).click();
+    await expect(bar).toBeVisible();
+    return;
   }
-  if (["新建出图工程", "打开已有工程"].includes(name)) {
-    await page.getByRole("button", { name, exact: true }).click();
-    if (name === "新建出图工程")
-      await expect(
-        page.getByRole("button", { name: "退出工程", exact: true }),
-      ).toBeEnabled();
+  if (name === "导出轨迹") {
+    await page.getByRole("button", { name: "导出轨迹", exact: true }).click();
+    return;
   }
-  const tab =
-    name === "工程样式"
-      ? "样式"
-      : name === "项目"
-        ? "更多"
-        : name === "出图"
-          ? "画框与输出"
-          : undefined;
-  if (tab)
-    await page
-      .getByRole("group", { name: "出图设置" })
-      .getByRole("button", { name: tab, exact: true })
-      .click();
+  await page.getByRole("button", { name, exact: true }).click();
 }
-export async function selectProjectTrack(page: Page, entry: string) {
-  await tool(page, "出图");
-  await page
-    .getByRole("group", { name: "出图设置" })
-    .getByRole("button", { name: "内容", exact: true })
-    .click();
-  await page.getByRole("combobox", { name: "出图轨迹", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "搜索出图轨迹", exact: true })
-    .fill(entry);
-  await page.getByRole("option", { name: entry, exact: true }).click();
-  await page.keyboard.press("Escape");
+export async function setTrackVisible(
+  page: Page,
+  entry: string,
+  visible = true,
+) {
+  await tool(page, "轨迹库");
+  const back = page.getByRole("button", { name: "返回列表", exact: true });
+  if (await back.isVisible()) await back.click();
+  await page.getByLabel("筛选轨迹", { exact: true }).fill(entry);
+  const row = page.locator(".track-row").filter({ hasText: entry }).first();
+  await expect(row).toBeVisible();
+  const toggle = row.getByRole("button", {
+    name: visible ? /^显示 / : /^隐藏 /,
+  });
+  if (await toggle.count()) await toggle.click();
+  await expect
+    .poll(async () => (await row.innerText()).includes(entry))
+    .toBe(true);
 }
 export async function batchTrack(page: Page, entry: string) {
   await tool(page, "轨迹库");
   const back = page.getByRole("button", { name: "返回列表", exact: true });
   if (await back.isVisible()) await back.click();
-  if (
-    !(await page
-      .getByRole("region", { name: "批量操作", exact: true })
-      .isVisible())
-  )
-    await page.getByRole("button", { name: "批量操作", exact: true }).click();
-  const row = page
-    .getByRole("button", { name: `查看 ${entry}`, exact: true })
-    .locator("..");
-  await row.getByRole("checkbox").check();
-}
-export async function saveProject(page: Page, name: string) {
+  const batch = page.getByRole("button", { name: "批量操作", exact: true });
+  if ((await batch.getAttribute("aria-pressed")) !== "true")
+    await batch.click();
   await page
-    .getByRole("region", { name: "当前出图工程" })
-    .getByRole("button", { name: "保存", exact: true })
+    .getByRole("button", { name: `选择 ${entry}`, exact: true })
     .click();
-  const modal = page.getByRole("dialog", { name: "另存工程" });
-  await modal.getByLabel("另存为名称").fill(name);
-  await modal.getByRole("button", { name: "确定", exact: true }).click();
-  await expect(page.locator(".save-state")).toHaveText("已保存");
 }
-
 export async function filterTracks(page: Page, search: string) {
   await page.getByLabel("筛选轨迹", { exact: true }).fill(search);
 }

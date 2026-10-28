@@ -113,11 +113,6 @@ app.post("/api/test/analysis-fixture", async (request) => {
   return transaction(archive, true, (db) => addEntry(db, name, raw, "Default"));
 });
 app.post("/api/test/edit-cleanup", async (request) => {
-  const project = (request.body as { project?: string }).project;
-  if (project)
-    transaction(archive, true, (db) =>
-      db.prepare("DELETE FROM map_projects WHERE name=?").run(project),
-    );
   const plan = previewDeletion(archive, {
     entry_id: (request.body as { id: string }).id,
   });

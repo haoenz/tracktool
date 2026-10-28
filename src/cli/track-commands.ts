@@ -348,4 +348,5 @@ export const TRACK_COMMANDS = {
   "track:preview": TrackPreview,
   "track:apply": TrackApply,
   "track:export": TrackExport,
+  "track:export-display": TrackExport,
 };

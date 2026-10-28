@@ -19,7 +19,7 @@ export const DeleteRequestSchema = z
   .strict();
 export type DeleteRequest = z.infer<typeof DeleteRequestSchema>;
 export type DeleteDependency = {
-  kind: "trajectory" | "project" | "pending";
+  kind: "trajectory" | "pending";
   id: string;
   detail: string;
 };

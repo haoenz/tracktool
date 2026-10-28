@@ -1,4 +1,4 @@
-import type { Project } from "../shared/project.js";
+import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, MapPreset } from "../shared/map.js";
 // Composition policy shared by editor and export; tiles arrive on a WGS84 grid.
 export const featureControls: Record<
@@ -120,20 +120,20 @@ const imageProvided = new Set([
   "park",
   "aeroway",
 ]);
-export const presetFor = (state: Project, config: MapConfig) =>
+export const presetFor = (state: MapState, config: MapConfig) =>
   config.basemaps?.find((s) => s.id === state.style.basemap);
 // The basemap covers the viewport, so its CRS decides the render canvas. Vector
 // tiles and the default basemap are WGS84.
 export type CanvasCrs = "wgs84" | "gcj02";
-export const canvasCrs = (state: Project, config: MapConfig): CanvasCrs =>
+export const canvasCrs = (state: MapState, config: MapConfig): CanvasCrs =>
   presetFor(state, config)?.crs === "gcj02" ? "gcj02" : "wgs84";
-export function activeOverlays(state: Project, config: MapConfig) {
+export function activeOverlays(state: MapState, config: MapConfig) {
   return (state.style.overlays || [])
     .filter((o) => o.enabled)
     .map((o) => ({ ...config.overlays.find((s) => s.id === o.id)!, ...o }));
 }
 export function overlayReason(
-  state: Project,
+  state: MapState,
   config: MapConfig,
   source: MapPreset,
   peers = true,
@@ -153,7 +153,7 @@ export function overlayReason(
     return "已启用同类叠加层；请先关闭它";
   return "";
 }
-export function featureReason(state: Project, config: MapConfig, key: string) {
+export function featureReason(state: MapState, config: MapConfig, key: string) {
   const base = presetFor(state, config);
   if (canvasCrs(state, config) === "gcj02")
     return "GCJ-02 画布不加载 WGS 矢量要素";
@@ -171,7 +171,7 @@ export function featureReason(state: Project, config: MapConfig, key: string) {
     return "当前数据源不支持";
   return "";
 }
-export function effectiveFeatures(state: Project, config: MapConfig) {
+export function effectiveFeatures(state: MapState, config: MapConfig) {
   return Object.fromEntries(
     Object.keys(defaults).map((key) => [
       key,
@@ -181,7 +181,7 @@ export function effectiveFeatures(state: Project, config: MapConfig) {
     ]),
   );
 }
-export function reconcileOverlays(state: Project, config: MapConfig) {
+export function reconcileOverlays(state: MapState, config: MapConfig) {
   const notes = [];
   const active: MapPreset[] = [];
   for (const o of state.style.overlays) {

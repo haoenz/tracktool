@@ -1,28 +1,27 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { readdir } from "node:fs/promises";
-import { isDeepStrictEqual } from "node:util";
 import path from "node:path";
 import os from "node:os";
 import { z } from "zod";
 import { AppError } from "../domain/errors.js";
+import { OVERVIEW_TILING } from "../domain/overview.js";
 import { MapService } from "../services/map-service.js";
 import { ArchiveClient } from "../infrastructure/archive/client.js";
 import { MapResources } from "../infrastructure/maps/resources.js";
-import { Exports } from "../infrastructure/maps/export.js";
+import { Exports, type VisibleTrack } from "../infrastructure/maps/export.js";
 import { DisplayStore } from "../infrastructure/display-store.js";
 import { resolvePath } from "../infrastructure/paths.js";
 import {
-  defaultProject,
-  ProjectSchema,
-  ProjectStyleSchema,
-  upgradeProject,
-} from "../shared/project.js";
-import type { Project, ProjectStyle } from "../shared/project.js";
-import { PresentationSchema } from "../shared/track-edit.js";
-import { presentationDigest } from "../infrastructure/archive/identity.js";
-import { SelectionRequest } from "../shared/map.js";
-import type { MapConfig } from "../shared/map.js";
-import { reconcileOverlays } from "../drawing/layers.js";
+  defaultMapState,
+  MapStyleSchema,
+  MapTitleSchema,
+  type MapState,
+  type MapStyle,
+} from "../shared/map-state.js";
+import { PrintDocumentSchema, resolvePrintTracks } from "../shared/print.js";
+import { SelectionRequest, type MapConfig } from "../shared/map.js";
+import type { OverviewCrs, OverviewStatus } from "../shared/overview.js";
+import { canvasCrs, reconcileOverlays } from "../drawing/layers.js";
 export interface MapOptions {
   archiveDefault?: () => Promise<string>;
   cache?: string;
@@ -30,14 +29,14 @@ export interface MapOptions {
   initialArchive?: string;
   resources?: () => MapResources;
   refresh?: boolean;
+  overview?: (crs: OverviewCrs) => Promise<OverviewStatus>;
 }
 const location = z.object({ path: z.string().min(1).max(4096) }),
   archive = z.object({ archive: z.string().min(1).max(4096) }),
-  named = archive.extend({ name: z.string().min(1).max(240) }),
   tileCrs = z
     .object({ crs: z.enum(["wgs84", "gcj02"]).default("wgs84") })
     .strict();
-function restoreStyle(state: Project, saved: ProjectStyle, config: MapConfig) {
+function restoreStyle(state: MapState, saved: MapStyle, config: MapConfig) {
   const basemap =
     saved.basemap === "vector" ||
     config.basemaps.some((preset) => preset.id === saved.basemap)
@@ -57,6 +56,15 @@ function restoreStyle(state: Project, saved: ProjectStyle, config: MapConfig) {
   };
   // Drop overlays that no longer work with the selected basemap/config.
   reconcileOverlays(state, config);
+}
+function unconfigured(crs: OverviewCrs): OverviewStatus {
+  return {
+    state: "unconfigured",
+    crs,
+    version: null,
+    updating: false,
+    maxZoom: OVERVIEW_TILING.maxZoom,
+  };
 }
 export function mapRoutes(
   app: FastifyInstance,
@@ -93,7 +101,7 @@ export function mapRoutes(
   app.get("/api/bootstrap", async () => {
     const r = await getResources();
     const config = r.publicConfig();
-    const state = defaultProject(r.versions());
+    const state = defaultMapState();
     const saved = await options.display?.load();
     if (saved) restoreStyle(state, saved, config);
     return {
@@ -108,11 +116,11 @@ export function mapRoutes(
     if (!options.display)
       throw new AppError("USER_INPUT", "当前服务没有可用的地图设置存储");
     const body = z
-      .object({ style: ProjectStyleSchema })
+      .object({ style: MapStyleSchema })
       .strict()
       .parse(request.body);
     const r = await getResources();
-    const state = defaultProject(r.versions());
+    const state = defaultMapState();
     restoreStyle(state, body.style, r.publicConfig());
     await options.display.save(state.style);
     return { style: state.style };
@@ -155,127 +163,61 @@ export function mapRoutes(
       cancellation(request, reply),
     );
   });
-  app.post("/api/projects", async (request) => ({
-    names: await service.projects(archive.parse(request.body).archive),
-  }));
-  app.post("/api/projects/save", async (request) => {
-    const b = z
-        .object({ name: z.string(), state: z.unknown() })
-        .parse(request.body),
-      r = await getResources(),
-      result = await service.project(b.state);
-    if (!isDeepStrictEqual(result.state.versions, r.versions()))
-      throw new AppError(
-        "USER_INPUT",
-        "项目资源版本不同，请先确认使用当前资源",
-      );
-    await service.save(b.name, result.state);
-    return { ok: true };
+  app.post("/api/print/check-title", async (request) => {
+    const { title } = z
+      .object({ title: z.string().max(1000) })
+      .parse(request.body);
+    const parsed = MapTitleSchema.safeParse(title);
+    if (!parsed.success)
+      return { valid: false, error: parsed.error.issues[0]!.message };
+    try {
+      (await getResources()).checkText(title);
+      return { valid: true };
+    } catch (error) {
+      if (error instanceof AppError && error.code === "USER_INPUT")
+        return { valid: false, error: error.message };
+      throw error;
+    }
   });
-  app.post("/api/projects/load", async (request) => {
-    const b = named.parse(request.body),
-      result = await service.load(b.archive, b.name);
-    return {
-      ...result,
-      versionsChanged: !isDeepStrictEqual(
-        result.state.versions,
-        (await getResources()).versions(),
-      ),
-    };
-  });
-  app.post("/api/project", async (request) => {
-    const result = await service.project(request.body);
-    return {
-      ...result,
-      versionsChanged: !isDeepStrictEqual(
-        result.state.versions,
-        (await getResources()).versions(),
-      ),
-    };
-  });
-  app.post("/api/project/presentation", async (request) => {
-    const body = z
-      .object({
-        state: z.unknown(),
-        entry_id: z.string(),
-        settings: PresentationSchema.nullable(),
-      })
+  app.post("/api/print", { bodyLimit: 64 * 1024 * 1024 }, async (request) => {
+    const { document } = z
+      .object({ document: PrintDocumentSchema })
       .strict()
       .parse(request.body);
-    const state = ProjectSchema.parse(upgradeProject(body.state));
-    const track = state.tracks.find((t) => t.entry_id === body.entry_id);
-    if (!track) throw new AppError("USER_INPUT", "项目中没有该行程");
-    if (body.settings)
-      track.override = {
-        settings: body.settings,
-        sha256: presentationDigest(body.settings),
-      };
-    else delete track.override;
-    return service.project(state);
-  });
-  app.post("/api/project/update-track", async (request) => {
-    const body = z
-      .object({ state: z.unknown(), entry_id: z.string() })
-      .strict()
-      .parse(request.body);
-    const state = ProjectSchema.parse(upgradeProject(body.state));
-    const i = state.tracks.findIndex((t) => t.entry_id === body.entry_id);
-    if (i < 0) throw new AppError("USER_INPUT", "项目中没有该行程");
-    state.tracks[i] = await client.currentReference(
-      state.archive,
-      body.entry_id,
-    );
-    return service.project(state);
-  });
-  app.post("/api/export-kml", async (request) => {
-    const result = await service.project(request.body);
-    if (result.errors.length)
-      throw new AppError("USER_INPUT", "源轨迹缺失或无法关联，不能导出");
-    return {
-      job: jobs.submitKml(
-        result.state,
-        await client.displayKml(result.archive, result.state.tracks),
-      ),
+    const r = await getResources();
+    r.checkText(document.title);
+    const activeArchive =
+      options.initialArchive ?? (await options.archiveDefault?.());
+    if (!activeArchive) throw new AppError("USER_INPUT", "请先配置轨迹库");
+    const catalog = await service.catalog(activeArchive);
+    const { tracks, warnings } = resolvePrintTracks(document, catalog);
+    const visible: VisibleTrack[] = tracks.map(({ id, entry }) => ({
+      id,
+      entry,
+    }));
+    const resolved = {
+      ...document,
+      archive: catalog.archive,
+      tracks: tracks.map(({ entry, sha256 }) => ({ entry, sha256 })),
     };
+    const config = r.publicConfig();
+    const crs = canvasCrs(document, config);
+    const overview = options.overview
+      ? await options.overview(crs)
+      : unconfigured(crs);
+    if (visible.length && !overview.version)
+      throw new AppError("USER_INPUT", "轨迹概览尚未准备好，请稍后重试");
+    return { job: jobs.submit(resolved, visible, overview), warnings };
   });
-  app.get<{ Params: { id: string } }>(
-    "/api/jobs/:id/kml",
-    async (request, reply) => {
-      const j = jobs.get(request.params.id);
-      if (!j.kml) throw new AppError("USER_INPUT", "展示 KML 不存在或已过期");
-      return reply
-        .type("application/vnd.google-earth.kml+xml")
-        .header(
-          "Content-Disposition",
-          'attachment; filename="tracktool-display.kml"',
-        )
-        .send(j.kml);
-    },
-  );
-  app.post("/api/basemap-check", async (request) => {
-    const { id } = z.object({ id: z.string() }).parse(request.body),
-      r = await getResources();
-    if (!r.presets[id]) throw new AppError("USER_INPUT", "未知内置地图源");
-    await r.displayTile(id, 2, 3, 1);
-    return { id, ok: true };
-  });
-  app.post("/api/export", async (request) => {
-    const result = await service.project(request.body),
-      r = await getResources();
-    if (result.errors.length)
-      throw new AppError("USER_INPUT", "源轨迹缺失或变化，不能导出");
-    if (!isDeepStrictEqual(result.state.versions, r.versions()))
-      throw new AppError(
-        "USER_INPUT",
-        "项目资源版本不同，请确认使用当前资源并另存项目",
-      );
-    r.checkText(result.state.title);
-    return { job: jobs.submit(result.state, result.tracks) };
+  app.get("/api/exports", async (request) => {
+    const query = archive.parse(request.query);
+    return { exports: jobs.list(query.archive) };
   });
   app.get<{ Params: { id: string } }>("/api/jobs/:id", async (request) => {
-    const j = jobs.get(request.params.id);
-    return { status: j.status, error: j.error, report: j.report };
+    return jobs.summary(request.params.id);
   });
+  const disposition = (fileName: string, fallback: string) =>
+    `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(fileName).replace(/['()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}`;
   app.get<{ Params: { id: string } }>(
     "/api/jobs/:id/png",
     async (request, reply) => {
@@ -285,19 +227,26 @@ export function mapRoutes(
         .type("image/png")
         .header(
           "Content-Disposition",
-          'attachment; filename="tracktool-map.png"',
+          disposition(j.fileName, "tracktool-map.png"),
         )
         .send(j.png);
     },
   );
+  app.post("/api/basemap-check", async (request) => {
+    const { id } = z.object({ id: z.string() }).parse(request.body),
+      r = await getResources();
+    if (!r.presets[id]) throw new AppError("USER_INPUT", "未知内置地图源");
+    await r.displayTile(id, 2, 3, 1);
+    return { id, ok: true };
+  });
   app.get<{ Params: { id: string } }>("/api/render/:id", async (request) => {
     if (request.headers["x-tracktool-render"] !== token)
       throw new AppError("FORBIDDEN", "独立出图会话无效");
     const j = jobs.get(request.params.id);
-    if (!j.tracks) throw new AppError("USER_INPUT", "出图数据已释放");
     return {
-      state: j.state,
-      tracks: j.tracks,
+      document: j.document,
+      visible: j.visible,
+      overview: j.overview,
       config: (await getResources()).publicConfig(),
     };
   });

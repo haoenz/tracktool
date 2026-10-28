@@ -141,15 +141,13 @@ for (const width of [1280, 390])
           return data?.type === "FeatureCollection" ? data.features.length : 0;
         });
       await expect.poll(overlayCount).toBe(78);
-      // Restoring the style must reinstall the temporary coloring, without changing project tracks.
+      // Restoring the style must reinstall the temporary coloring without
+      // loading full-detail tracks into the browsing map.
       await page.evaluate(() => {
         const map = window.renderer!.map;
         map.setStyle(map.getStyle(), { diff: false });
       });
       await expect.poll(overlayCount).toBe(78);
-      expect(await page.evaluate(() => window.renderer!.state.tracks)).toEqual(
-        [],
-      );
       await coloring.getByRole("button", { name: "海拔", exact: true }).click();
       await expect(analysis.getByLabel("地图着色色标")).toContainText("m");
       await analysis

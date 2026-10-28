@@ -46,59 +46,6 @@ function dependencies(
       id: item.id,
       detail: "Run archive recover before deleting this track",
     });
-  const versions = db
-    .prepare("SELECT id,path,sha256 FROM track_versions WHERE entry_id=?")
-    .all(entryId) as { id: string; path: string; sha256: string }[];
-  const versionIds = new Set(versions.map((v) => v.id));
-  const presentations = new Set(
-    (
-      db
-        .prepare(
-          "SELECT p.id FROM track_presentations p JOIN track_versions v ON v.id=p.version_id WHERE v.entry_id=?",
-        )
-        .all(entryId) as { id: string }[]
-    ).map((p) => p.id),
-  );
-  function references(value: unknown): boolean {
-    if (!value || typeof value !== "object") return false;
-    if (Array.isArray(value)) return value.some(references);
-    const obj = value as Record<string, unknown>;
-    if (
-      obj.entry_id === entryId ||
-      (typeof obj.version_id === "string" && versionIds.has(obj.version_id)) ||
-      (typeof obj.presentation_id === "string" &&
-        presentations.has(obj.presentation_id))
-    )
-      return true;
-    if (
-      typeof obj.entry === "string" &&
-      versions.some(
-        (v) =>
-          obj.entry === v.path &&
-          (obj.sha256 === undefined || obj.sha256 === v.sha256),
-      )
-    )
-      return true;
-    return Object.values(obj).some(references);
-  }
-  for (const project of db
-    .prepare("SELECT name,state FROM map_projects ORDER BY name")
-    .all() as { name: string; state: string }[]) {
-    try {
-      if (references(JSON.parse(project.state)))
-        result.push({
-          kind: "project",
-          id: project.name,
-          detail: "Project references this track or a historical version",
-        });
-    } catch {
-      result.push({
-        kind: "project",
-        id: project.name,
-        detail: "Project cannot be parsed; dependencies must be resolved first",
-      });
-    }
-  }
   return result;
 }
 function previewIn(db: Database.Database, entryId: string): DeletePreview {

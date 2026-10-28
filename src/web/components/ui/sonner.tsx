@@ -33,6 +33,27 @@ const Toaster = ({ ...props }: ToasterProps) => {
         } as React.CSSProperties
       }
       {...props}
+      offset={props.offset ?? { top: 84, right: 16, bottom: 24, left: 16 }}
+      mobileOffset={
+        props.mobileOffset ?? { top: 132, right: 16, bottom: 24, left: 16 }
+      }
+      toastOptions={{
+        ...props.toastOptions,
+        // Status messages must not intercept map navigation or pause on hover.
+        style: { ...props.toastOptions?.style, pointerEvents: "none" },
+        actionButtonStyle: {
+          ...props.toastOptions?.actionButtonStyle,
+          pointerEvents: "auto",
+        },
+        cancelButtonStyle: {
+          ...props.toastOptions?.cancelButtonStyle,
+          pointerEvents: "auto",
+        },
+        classNames: {
+          ...props.toastOptions?.classNames,
+          closeButton: `pointer-events-auto ${props.toastOptions?.classNames?.closeButton ?? ""}`,
+        },
+      }}
     />
   );
 };

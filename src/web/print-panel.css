@@ -1,0 +1,51 @@
+.print-panel {
+  display: block;
+}
+.print-panel-note {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.print-panel-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.print-panel-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--destructive);
+}
+.print-panel-toggles {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+.print-drafts {
+  display: grid;
+  gap: 8px;
+}
+.print-draft {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.print-draft:last-child {
+  border-bottom: 0;
+}
+.print-draft strong,
+.print-draft small {
+  display: block;
+}
+.print-draft small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.print-draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

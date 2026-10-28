@@ -1,6 +1,4 @@
 import { z } from "zod";
-import { ProjectSchema } from "./project.js";
-import type { ProjectTrack } from "./project-track.js";
 import type { Presentation, SegmentManifest } from "./track-edit.js";
 export type Position = [number, number];
 export type Geometry =
@@ -20,7 +18,6 @@ export interface SelectedTrack {
   sha256: string;
   points: number;
   geojson: TrackGeoJSON;
-  reference?: ProjectTrack;
   presentation?: {
     settings: Presentation;
     segments: SegmentManifest[];
@@ -34,7 +31,14 @@ export interface Selection {
 }
 export interface Catalog {
   archive: string;
-  entries: { entry: string; name: string; kind: string; date: string }[];
+  entries: {
+    id: string;
+    entry: string;
+    sha256: string;
+    name: string;
+    kind: string;
+    date: string;
+  }[];
 }
 export interface MapPreset {
   id: string;
@@ -78,13 +82,3 @@ export const SelectionRequest = z
     (v) => new Set(v.entries).size === v.entries.length,
     "选择中有重复归档路径",
   );
-export const ProjectSaveRequest = z.object({
-  name: z
-    .string()
-    .min(1)
-    .refine(
-      (s) => s.trim().length > 0 && [...s].length <= 120,
-      "项目名称需为 1–120 字",
-    ),
-  state: ProjectSchema,
-});

@@ -3,7 +3,7 @@ import type {
   MapMouseEvent,
   ExpressionSpecification,
 } from "maplibre-gl";
-import type { OverviewStatus } from "../shared/overview.js";
+import type { OverviewStatus, OverviewVisibility } from "../shared/overview.js";
 
 import { TRACK_STYLES } from "../shared/track-style.js";
 
@@ -20,11 +20,8 @@ const categoryPaint = (key: "color" | "opacity"): ExpressionSpecification => [
 ];
 
 export type OverviewHit = { id: string; segment: string };
-export type OverviewVisibility = {
-  all: boolean;
-  exceptions: Record<string, string>;
-};
-/** Browser-only layers; the independent export renderer never installs these. */
+export type { OverviewVisibility };
+/** Shared overview tile layers for the interactive map and PNG renderer. */
 export class OverviewLayer {
   private status?: OverviewStatus;
   private current?: string;
@@ -237,8 +234,8 @@ export class OverviewLayer {
     this.map.setPaintProperty(`${id}-line`, "line-width", [
       "case",
       selected,
-      5 / this.scale,
-      2.5 / this.scale,
+      5,
+      2.5,
     ]);
     this.map.setPaintProperty(
       `${id}-line`,
@@ -255,8 +252,8 @@ export class OverviewLayer {
     this.map.setPaintProperty(`${id}-point`, "circle-radius", [
       "case",
       selected,
-      6 / this.scale,
-      3 / this.scale,
+      6,
+      3,
     ]);
     this.map.setPaintProperty(
       `${id}-point`,

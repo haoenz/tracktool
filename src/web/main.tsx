@@ -34,7 +34,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider>
       <Toaster
-        position="top-center"
+        position="top-right"
         visibleToasts={1}
         containerAriaLabel="通知"
       />

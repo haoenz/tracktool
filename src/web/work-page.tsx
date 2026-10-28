@@ -322,12 +322,8 @@ export function TaskDetail({
               {deletion.dependencies.map((d) => (
                 <p key={d.kind + d.id}>
                   阻塞依赖：
-                  {d.kind === "project"
-                    ? "项目"
-                    : d.kind === "trajectory"
-                      ? "轨迹"
-                      : "待恢复操作"}{" "}
-                  {d.detail}（{d.id}）
+                  {d.kind === "trajectory" ? "轨迹" : "待恢复操作"} {d.detail}（
+                  {d.id}）
                 </p>
               ))}
             </>

@@ -156,7 +156,7 @@ it("dry-run does not query or migrate; migration backs up and rolls back safely"
     readTransaction(f.file, (db) =>
       db.pragma("user_version", { simple: true }),
     ),
-  ).toBe(6);
+  ).toBe(7);
   expect(await migrateArchive(f.file)).toBeUndefined();
 });
 it("persists, resumes, deduplicates exact coordinates and survives full backup and controlled deletion", async () => {

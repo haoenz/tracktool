@@ -12,6 +12,7 @@ import {
   compareOverviewEntries,
   OverviewCrs,
   OverviewVersion,
+  type OverviewStatus,
 } from "../shared/overview.js";
 
 export function overviewRoutes(
@@ -184,4 +185,16 @@ export function overviewRoutes(
     await gate;
     await current?.service.close();
   });
+  return async (crs: OverviewCrs): Promise<OverviewStatus> => {
+    const service = await get();
+    return (
+      service?.status(crs) ?? {
+        state: "unconfigured",
+        crs,
+        version: null,
+        updating: false,
+        maxZoom: OVERVIEW_TILING.maxZoom,
+      }
+    );
+  };
 }

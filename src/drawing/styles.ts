@@ -1,5 +1,6 @@
-import type { Project } from "../shared/project.js";
+import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, MapPreset, TrackGeoJSON } from "../shared/map.js";
+import { trackColor } from "./track-style.js";
 import type {
   StyleSpecification,
   SourceSpecification,
@@ -67,7 +68,7 @@ const roadClasses = [
   ],
 ];
 export function mapStyle(
-  state: Project,
+  state: MapState,
   config: MapConfig,
   data?: TrackGeoJSON,
 ): StyleSpecification {
@@ -425,7 +426,7 @@ export function mapStyle(
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": p.halo,
-          "line-opacity": 0.8,
+          "line-opacity": state.style.outline === false ? 0 : 0.8,
           "line-width": state.style.width + 2,
         },
       },
@@ -436,7 +437,7 @@ export function mapStyle(
         filter: ["==", ["geometry-type"], "LineString"],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": state.style.color,
+          "line-color": trackColor(state.style),
           "line-width": state.style.width,
         },
       },
@@ -446,17 +447,17 @@ export function mapStyle(
         source: "tracks",
         filter: ["==", ["geometry-type"], "Point"],
         paint: {
-          "circle-color": state.style.color,
+          "circle-color": trackColor(state.style),
           "circle-radius": state.style.width / 2,
           "circle-stroke-color": p.halo,
-          "circle-stroke-width": 1,
+          "circle-stroke-width": state.style.outline === false ? 0 : 1,
         },
       },
     ],
   } as unknown as StyleSpecification;
 }
 function powerLayers(
-  state: Project,
+  state: MapState,
   o: MapPreset & { opacity: number },
 ): Layer[] {
   const v = ["to-number", ["get", "voltage"], 0];

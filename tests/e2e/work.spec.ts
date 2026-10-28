@@ -78,9 +78,7 @@ test("media links return to the map with no web media tools", async ({
 }) => {
   await page.goto("/media");
   await expect(page).toHaveURL(/\/map$/);
-  await expect(
-    page.getByRole("button", { name: "展开项目菜单" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "展开菜单" })).toBeVisible();
   await expect(
     page.getByRole("link", { name: "媒体", exact: true }),
   ).toHaveCount(0);
@@ -337,12 +335,10 @@ test("library entry points and favicon work on mobile", async ({
   });
   await page.getByRole("combobox", { name: "导出类型", exact: true }).click();
   await page.getByRole("option", { name: "PNG图像", exact: true }).click();
+  await expect(page.getByRole("region", { name: "出图设置" })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "新建出图工程", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "导出", exact: true }),
-  ).toHaveCount(0);
+    page.getByRole("combobox", { name: "导出类型", exact: true }),
+  ).toBeHidden();
   await expect(page.getByLabel("操作", { exact: true })).toHaveCount(0);
 });
 

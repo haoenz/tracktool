@@ -1,16 +1,11 @@
-import {
-  pickBasemap,
-  tool,
-  selectProjectTrack,
-  saveProject,
-} from "./map-tools.js";
+import { pickBasemap, tool } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 import { test, expect } from "@playwright/test";
 import { resetDisplay } from "./display-reset.js";
 import sharp from "sharp";
-import type { Project } from "../../src/shared/project.js";
+import type { MapState } from "../../src/shared/map-state.js";
+import { printDocument } from "../../src/shared/print.js";
 import type { Page } from "@playwright/test";
-import type { GeoJSONSource } from "maplibre-gl";
 async function call<T>(
   page: Page,
   url: string,
@@ -39,173 +34,28 @@ test.beforeEach(async ({ request }) => {
   await resetDisplay(request);
 });
 
-test("archive → selection → styling → save/reopen → JSON → independent PNG", async ({
-  page,
-}, info) => {
-  test.setTimeout(120_000);
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/map");
-  await tool(page, "新建出图工程");
-  await tool(page, "出图");
-  await expect(
-    page.getByRole("button", { name: "收起项目菜单" }),
-  ).toBeVisible();
-  await selectProjectTrack(page, "Default/2026-10-01 中文.kml");
-  await expect(page.locator("[data-sonner-toaster]")).toContainText(
-    "已选择 1 条轨迹",
-  );
-  await page.getByRole("button", { name: "适合出图轨迹", exact: true }).click();
-  await tool(page, "工程样式");
-  await page.getByLabel("标题", { exact: true }).fill("中文轨迹 · M3");
-  await page.getByRole("spinbutton", { name: "线宽", exact: true }).fill("5");
-  await tool(page, "项目");
-  await saveProject(page, "验收项目");
-  await expect(page.locator("[data-sonner-toaster]")).toContainText(
-    "已保存到当前轨迹库",
-  );
-  await tool(page, "工程样式");
-  await page.getByLabel("标题", { exact: true }).fill("未保存的修改");
-  await tool(page, "项目");
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByLabel("已保存项目", { exact: true }).click();
-  await page.getByRole("option", { name: "验收项目", exact: true }).click();
-  await page.getByRole("button", { name: "载入项目", exact: true }).click();
-  await expect(page.locator("[data-sonner-toaster]")).toContainText(
-    "项目已载入",
-    {
-      timeout: 20000,
-    },
-  );
-  await tool(page, "工程样式");
-  await expect(page.getByLabel("标题", { exact: true })).toHaveValue(
-    "中文轨迹 · M3",
-  );
-  await tool(page, "项目");
-  const jsonDownload = page.waitForEvent("download");
-  await page.getByRole("button", { name: "导出 JSON", exact: true }).click();
-  const json = await jsonDownload;
-  await json.saveAs(info.outputPath("project.json"));
-  await page
-    .locator("input[type=file]")
-    .setInputFiles(info.outputPath("project.json"));
-  await expect(page.locator("[data-sonner-toaster]")).toContainText(
-    "项目已载入",
-    {
-      timeout: 20000,
-    },
-  );
-  await page.waitForFunction(
-    () => !!window.renderer?.loadedFont && window.renderer.map.loaded(),
-  );
-  await tool(page, "出图");
-  const previewReport = await page.evaluate(async () =>
-    window.renderer!.ready(),
-  );
-  let exportedReport: unknown;
-  page.on("response", async (response) => {
-    if (/\/api\/jobs\/[a-f0-9]+$/.test(response.url())) {
-      const result = (await response.json()) as {
-        status: string;
-        report: unknown;
-      };
-      if (result.status === "done") exportedReport = result.report;
-    }
-  });
-  await page.screenshot({ path: info.outputPath("map-desktop.png") });
-  const pngDownload = page.waitForEvent("download", { timeout: 90_000 });
-  await page.getByRole("button", { name: "导出 PNG", exact: true }).click();
-  const png = await pngDownload;
-  await png.saveAs(info.outputPath("map.png"));
-  const metadata = await sharp(info.outputPath("map.png")).metadata();
-  expect([metadata.width, metadata.height]).toEqual([1920, 1440]);
-  await expect
-    .poll(() => exportedReport)
-    .toMatchObject({
-      camera: previewReport!.camera,
-    });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "收起项目菜单" }).click();
-  await expect(page.getByLabel("地图预览")).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await page.screenshot({ path: info.outputPath("map-mobile.png") });
-  await tool(page, "地图样式");
-  await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => !!window.renderer)).toBe(true);
-  expect(errors).toEqual([]);
-});
-test("selection updates the GeoJSON source while camera tiles are still pending", async ({
-  page,
-}) => {
-  await page.goto("/map");
-  await tool(page, "新建出图工程");
-  await tool(page, "出图");
-  await page.waitForFunction(() => window.renderer?.map.loaded());
-  let release!: () => void, started!: () => void;
-  const waiting = new Promise<void>((r) => {
-      release = r;
-    }),
-    begun = new Promise<void>((r) => {
-      started = r;
-    });
-  await page.route("**/tiles/**", async (route) => {
-    started();
-    await waiting;
-    await route.continue();
-  });
-  try {
-    await page.evaluate(() => window.renderer!.map.jumpTo({ zoom: 8 }));
-    await begun;
-    await selectProjectTrack(page, "Train/same.kml");
-    await expect(page.locator("[data-sonner-toaster]")).toContainText(
-      "已选择 1 条轨迹",
-    );
-    const data = await page.evaluate(async () =>
-      (window.renderer!.map.getSource("tracks") as GeoJSONSource).getData(),
-    );
-    expect(data).toMatchObject({
-      type: "FeatureCollection",
-      features: [
-        {
-          geometry: {
-            type: "MultiLineString",
-            coordinates: [
-              [
-                [100, 26],
-                [101, 27],
-                [102, 28],
-              ],
-              [
-                [103, 29],
-                [104, 30],
-              ],
-            ],
-          },
-        },
-        { geometry: { type: "MultiPoint", coordinates: [[105, 31]] } },
-      ],
-    });
-  } finally {
-    release();
-  }
-});
-test("missing tiles, missing fonts and unsupported title glyphs block independent export", async ({
+test("missing tiles, missing fonts and unsupported title glyphs block print export", async ({
   page,
 }) => {
   test.setTimeout(120_000);
   await page.goto("/map");
   await tool(page, "地图样式");
   await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
-  const bootstrap = await call<{ state: Project }>(page, "/api/bootstrap");
-  const state = bootstrap.body.state;
+  const bootstrap = await call<{ state: MapState; initialArchive: string }>(
+    page,
+    "/api/bootstrap",
+  );
+  const document = printDocument(
+    bootstrap.body.state,
+    bootstrap.body.initialArchive,
+    [],
+  );
   for (const mode of ["tiles", "font"]) {
     await call(page, "/api/test/fault", { mode });
     try {
-      const submitted = await call<{ job: string }>(page, "/api/export", state);
+      const submitted = await call<{ job: string }>(page, "/api/print", {
+        document,
+      });
       expect(submitted.status).toBe(200);
       await expect
         .poll(
@@ -227,65 +77,12 @@ test("missing tiles, missing fonts and unsupported title glyphs block independen
     }
   }
   expect(
-    (await call(page, "/api/export", { ...state, title: "无法出图 🦄" }))
-      .status,
+    (
+      await call(page, "/api/print", {
+        document: { ...document, title: "无法出图 🦄" },
+      })
+    ).status,
   ).toBe(400);
-});
-test("outdated resource versions and fingerprints are surfaced before save/export", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
-  await page.goto("/map");
-  await tool(page, "轨迹库");
-  await expect(
-    page.getByRole("button", {
-      name: "查看 Default/2026-10-01 中文.kml",
-      exact: true,
-    }),
-  ).toBeVisible();
-  const { body: bootstrap } = await call<{
-    state: Project;
-    initialArchive: string;
-  }>(page, "/api/bootstrap");
-  await tool(page, "打开已有工程");
-  const outdated = { ...bootstrap.state, versions: { old: true } };
-  await page.locator("input[type=file]").setInputFiles({
-    name: "old.json",
-    mimeType: "application/json",
-    buffer: Buffer.from(JSON.stringify(outdated)),
-  });
-  await expect(
-    page.getByText("项目资源版本已变化；请确认后另存为新项目"),
-  ).toBeVisible();
-  await tool(page, "出图");
-  await expect(
-    page.getByRole("button", { name: "导出 PNG", exact: true }),
-  ).toBeDisabled();
-  page.once("dialog", (d) => d.accept());
-  await page.getByRole("button", { name: "使用当前资源" }).click();
-  await expect(
-    page.getByRole("button", { name: "导出 PNG", exact: true }),
-  ).toBeEnabled();
-  await tool(page, "项目");
-  const changed = {
-    ...bootstrap.state,
-    schema: 2,
-    archive: bootstrap.initialArchive,
-    tracks: [{ entry: "Default/2026-10-01 中文.kml", sha256: "0".repeat(64) }],
-  };
-  page.once("dialog", (d) => d.accept());
-  await page.locator("input[type=file]").setInputFiles({
-    name: "changed.json",
-    mimeType: "application/json",
-    buffer: Buffer.from(JSON.stringify(changed)),
-  });
-  await expect(page.locator(".map-errors [role=alert]")).toContainText(
-    "无法唯一关联原始基线",
-  );
-  await tool(page, "出图");
-  await expect(
-    page.getByRole("button", { name: "导出 PNG", exact: true }),
-  ).toBeDisabled();
 });
 test("rapid source changes only commit the latest choice", async ({ page }) => {
   test.setTimeout(60_000);
@@ -430,106 +227,11 @@ test("failed source retains the current map; a later source wins and camera/styl
   await expect(page.getByLabel("标题", { exact: true })).not.toBeVisible();
   expect(selections).toBe(0);
 });
-test("panels preserve the map, selection and unfinished edits on desktop and mobile", async ({
-  page,
-}) => {
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/map");
-  await tool(page, "新建出图工程");
-  await selectProjectTrack(page, "Train/same.kml");
-  await page.getByRole("button", { name: "适合出图轨迹", exact: true }).click();
-  await tool(page, "工程样式");
-  await page.getByLabel("标题", { exact: true }).fill("切换面板保留的草稿");
-  const camera = await page.evaluate(() => window.renderer!.state.camera);
-  const canvas = await page.locator(".maplibregl-canvas").elementHandle();
-  await tool(page, "地图样式");
-  await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
-  await tool(page, "轨迹库");
-  await expect(
-    page.getByRole("button", { name: "隐藏 索引未命中", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await tool(page, "工程样式");
-  await expect(page.getByLabel("标题", { exact: true })).toHaveValue(
-    "切换面板保留的草稿",
-  );
-  expect(await canvas!.evaluate((el) => el.isConnected)).toBe(true);
-  expect(await page.evaluate(() => window.renderer!.state.camera)).toEqual(
-    camera,
-  );
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "收起项目菜单", exact: true }).click();
-  await expect(
-    page.getByRole("complementary", { name: "地图控制面板" }),
-  ).toHaveCount(0);
-  await expect(page.locator(".map-stage.export-preview")).toHaveCSS(
-    "height",
-    "844px",
-  );
-  await tool(page, "轨迹库");
-  await expect(
-    page.getByRole("button", { name: "隐藏 索引未命中", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  expect(errors).toEqual([]);
-});
-test("the configured library stays fixed when importing a project from another machine", async ({
-  page,
-}) => {
-  await page.goto("/map");
-  await tool(page, "轨迹库");
-  const track = page.getByRole("button", {
-    name: "隐藏 索引未命中",
-    exact: true,
-  });
-  await expect(track).toHaveAttribute("aria-pressed", "true");
-  await expect(
-    page.getByRole("button", { name: "浏览目录", exact: true }),
-  ).toHaveCount(0);
-  await expect(page.getByLabel("服务端归档路径", { exact: true })).toHaveCount(
-    0,
-  );
-  const state = await page.evaluate(() => window.renderer!.state);
-  await tool(page, "打开已有工程");
-  await page.locator("input[type=file]").setInputFiles({
-    name: "another-machine.json",
-    mimeType: "application/json",
-    buffer: Buffer.from(
-      JSON.stringify({ ...state, archive: "/another-machine/archive.sqlite3" }),
-    ),
-  });
-  await expect(page.locator("[data-sonner-toaster]")).toContainText(
-    "项目已载入",
-    {
-      timeout: 20000,
-    },
-  );
-  expect(await page.evaluate(() => window.renderer!.state.archive)).toBe(
-    state.archive,
-  );
-  await tool(page, "轨迹库");
-  await expect(track).toHaveAttribute("aria-pressed", "true");
-  await expect(
-    page.getByRole("button", { name: "归档状态", exact: true }),
-  ).toHaveCount(0);
-  await expect(page.getByLabel("归档目录", { exact: true })).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "建立归档", exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "上传轨迹", exact: true }),
-  ).toBeVisible();
-});
-
 test("map icons directly toggle panels on desktop and mobile", async ({
   page,
 }) => {
   await page.goto("/map");
-  const tracks = page.locator(".project-icon");
+  const tracks = page.locator(".app-icon");
   const settings = page.getByRole("button", { name: "设置", exact: true });
   const panel = page.getByLabel("地图控制面板", { exact: true });
   const nav = page.getByRole("navigation", { name: "地图工具", exact: true });
@@ -539,7 +241,7 @@ test("map icons directly toggle panels on desktop and mobile", async ({
     await expect(nav).toBeHidden();
     await tracks.click();
     await expect(panel).toBeHidden();
-    await expect(nav.getByRole("button")).toHaveCount(3);
+    await expect(nav.getByRole("button")).toHaveCount(4);
     await expect(page.locator(".map-header")).not.toContainText(
       /轨迹|设置|浏览地图/,
     );
@@ -636,8 +338,9 @@ for (const [basemap, overlay] of [
       .poll(
         async () =>
           (
-            await call<{ state: Project }>(page, "/api/bootstrap")
+            await call<{ state: MapState }>(page, "/api/bootstrap")
           ).body.state.style.overlays.find((o) => o.id === overlay)?.enabled,
+        { timeout: 15_000 },
       )
       .toBe(true);
     await page.reload();
@@ -650,7 +353,12 @@ for (const [basemap, overlay] of [
     );
     state.camera = { center: [116.404, 39.915], zoom: 12 };
     state.output = { width: 960, height: 720 };
-    const submitted = await call<{ job: string }>(page, "/api/export", state);
+    const initialArchive = (
+      await call<{ initialArchive: string }>(page, "/api/bootstrap")
+    ).body.initialArchive;
+    const submitted = await call<{ job: string }>(page, "/api/print", {
+      document: printDocument(state, initialArchive, []),
+    });
     expect(submitted.status).toBe(200);
     let result: { status: string; error?: string } | undefined;
     await expect

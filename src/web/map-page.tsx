@@ -25,6 +25,7 @@ import {
   SlidersHorizontal,
   History,
   ChevronRight,
+  Map as MapIcon,
 } from "lucide-react";
 import {
   Popover,
@@ -52,40 +53,51 @@ import {
   Button,
   Checkbox,
   Input,
-  InputNumber,
   Select,
   Spin,
   Modal,
   Pagination,
   RadioGroup,
-  Switch,
 } from "./components/controls.js";
 import { Link, useSearchParams } from "react-router-dom";
 import { WorkspaceContext, type Panel, type EditMap } from "./workspace.js";
 import { operationLabel, type Operation } from "../shared/work.js";
-import type {
-  Catalog,
-  MapConfig,
-  Selection,
-  SelectedTrack,
-} from "../shared/map.js";
+import type { Catalog, MapConfig, SelectedTrack } from "../shared/map.js";
 import { useOverview, rememberedCamera, rememberCamera } from "./overview.js";
 import type { OverviewHit, OverviewVisibility } from "./overview-layer.js";
 import type { OverviewEntry, OverviewStatus } from "../shared/overview.js";
-import type { Project } from "../shared/project.js";
-import { frames } from "../drawing/core.js";
+import type { MapState } from "../shared/map-state.js";
+import { frames, mapTitleError } from "../shared/map-state.js";
+import type { MapExport, PrintDocument, PrintTrack } from "../shared/print.js";
+import {
+  PrintDocumentSchema,
+  printDocument,
+  resolvePrintTracks,
+} from "../shared/print.js";
 import { canvasCrs, reconcileOverlays } from "../drawing/layers.js";
 import { api, request } from "./api.js";
 import { MapViewport, type Viewport } from "./map-viewport.js";
-import { ProjectPresentation } from "./project-presentation.js";
-import type { HistoryEvent, Presentation } from "../shared/track-edit.js";
+import { PrintPanel } from "./print-panel.js";
+import {
+  deletePrint,
+  listPrints,
+  savePrint,
+  type StoredPrint,
+} from "./print-store.js";
+import type { HistoryEvent } from "../shared/track-edit.js";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map.css";
-import projectIcon from "./project-icon.svg";
+import appIcon from "./app-icon.svg";
 const TrackEditor = lazy(() => import("./track-editor.js"));
 const ArchiveAction = lazy(() =>
   import("./work-page.js").then((m) => ({ default: m.ArchiveWorkPage })),
 );
+import {
+  rememberedPrintFrame,
+  rememberPrintFrame,
+  rememberedPrintDraft,
+  rememberPrintDraft,
+} from "./print-session.js";
 import { useSessionState } from "./session-state.js";
 import Settings from "./settings.js";
 import { useEntryVisibility } from "./visibility-preference.js";
@@ -93,19 +105,18 @@ import { useTheme } from "./theme.js";
 const panels: Record<Panel, string> = {
   library: "轨迹库",
   style: "地图样式",
-  export: "出图",
-  project: "项目",
+  export: "导出",
+  print: "出图",
   archive: "轨迹库管理",
   settings: "设置",
 };
 const emptyTracks: SelectedTrack[] = [];
 type Bootstrap = {
   config: MapConfig;
-  state: Project;
+  state: MapState;
   initialArchive: string;
   directory: string;
 };
-type Loaded = { state: Project; versionsChanged: boolean } & Selection;
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 // Open-map vendors share one heading so the list reads by licensing, not by
 // whoever happens to host the tiles.
@@ -249,66 +260,69 @@ function Editor({ initial }: { initial: Bootstrap }) {
   const [libraryVisibility, setLibraryVisibility] = useEntryVisibility(
     `tracktool:${initial.initialArchive}:visibility`,
   );
-  const [browseState, setBrowseState] = useState(() => ({
-      ...initial.state,
-      style: { ...initial.state.style, appearance },
-      camera: rememberedCamera(initial.initialArchive) ?? initial.state.camera,
-    })),
-    [projectState, setProjectState] = useState<Project>(),
-    [projectTracks, setProjectTracks] = useState<SelectedTrack[]>([]),
-    [baseline, setBaseline] = useState(""),
-    [leaving, setLeaving] = useState(false),
-    [catalog, setCatalog] = useState<Catalog>(),
-    [browseFilter, setBrowseFilter] = useSessionState(
-      `tracktool:${initial.initialArchive}:search`,
-      "",
-    ),
-    [savedBrowseKind, setBrowseKind] = useSessionState<string | string[]>(
-      `tracktool:${initial.initialArchive}:kind`,
-      [],
-    ),
-    [projectFilter, setProjectFilter] = useState(""),
-    [projectKind, setProjectKind] = useState<string[]>([]),
-    [names, setNames] = useState<string[]>([]),
-    [name, setName] = useState(""),
-    [currentName, setCurrentName] = useState(""),
-    [openName, setOpenName] = useState<string>(),
-    [saveAs, setSaveAs] = useState(false),
-    [batchMode, setBatchMode] = useState(false),
-    [batch, setBatch] = useSessionState<Record<string, string>>(
-      `tracktool:${initial.initialArchive}:batch`,
-      {},
-    ),
-    [candidateCamera, setCandidateCamera] = useState<Project["camera"]>(),
-    [sheet, setSheet] = useState("half"),
-    [editing, setEditing] = useState(false),
-    [editorHeader, setEditorHeader] = useState<{
-      title: string;
-      backLabel: string;
-      onBack: () => void;
-    }>(),
-    [detailOpen, setDetailOpen] = useState(true),
-    [projectTab, setProjectTab] = useState("content"),
-    [projectSearch, setProjectSearch] = useState(""),
-    [error, setError] = useState(""),
-    [catalogError, setCatalogError] = useState(""),
-    [notice, setNotice] = useState(""),
-    [busy, setBusy] = useState(false),
-    [exporting, setExporting] = useState(false),
-    [switching, setSwitching] = useState(""),
-    [pickerVendor, setPickerVendor] = useState(""),
-    [basemapError, setBasemapError] = useState(""),
-    [displaySaveState, setDisplaySaveState] = useState<
-      "" | "saving" | "saved" | "error"
-    >(""),
-    [baseRetry, setBaseRetry] = useState<{
-      id: string;
-      style?: Project["style"];
-    }>(),
-    [displayRetry, setDisplayRetry] = useState(0),
-    [preview, setPreview] = useState(false),
-    [sourceErrors, setSourceErrors] = useState<Selection["errors"]>([]),
-    [versionChanged, setVersionChanged] = useState(false);
+  const [mapState, setMapState] = useState<MapState>(() => ({
+    ...initial.state,
+    ...rememberedPrintFrame(initial.initialArchive),
+    style: { ...initial.state.style, appearance },
+    camera: rememberedCamera(initial.initialArchive) ?? initial.state.camera,
+  }));
+  const initialPrintView = useRef(
+    JSON.stringify([mapState, libraryVisibility]),
+  );
+  const [printError, setPrintError] = useState("");
+  const printSession = useRef<{ id?: string; saved: string; sealed?: boolean }>(
+    {
+      id: rememberedPrintDraft(initial.initialArchive),
+      saved: "",
+    },
+  );
+  const printWrites = useRef(Promise.resolve());
+  const draftWarning = () =>
+    toast.error("浏览器无法保存出图草稿，请及时导出 JSON。", {
+      id: "print-draft-error",
+      duration: 8000,
+    });
+  const [printDrafts, setPrintDrafts] = useState<StoredPrint[]>([]);
+  const [catalog, setCatalog] = useState<Catalog>();
+  const [browseFilter, setBrowseFilter] = useSessionState(
+    `tracktool:${initial.initialArchive}:search`,
+    "",
+  );
+  const [savedBrowseKind, setBrowseKind] = useSessionState<string | string[]>(
+    `tracktool:${initial.initialArchive}:kind`,
+    [],
+  );
+  const [batchMode, setBatchMode] = useState(false);
+  const [browseBatch, setBrowseBatch] = useSessionState<Record<string, string>>(
+    `tracktool:${initial.initialArchive}:batch`,
+    {},
+  );
+  const [sheet, setSheet] = useState("half");
+  const [editing, setEditing] = useState(false);
+  const [editorHeader, setEditorHeader] = useState<{
+    title: string;
+    backLabel: string;
+    onBack: () => void;
+  }>();
+  const [detailOpen, setDetailOpen] = useState(true);
+  const [error, setError] = useState("");
+  const [catalogError, setCatalogError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [switching, setSwitching] = useState("");
+  const [pickerVendor, setPickerVendor] = useState("");
+  const [basemapError, setBasemapError] = useState("");
+  const [displaySaveState, setDisplaySaveState] = useState<
+    "" | "saving" | "saved" | "error"
+  >("");
+  const [baseRetry, setBaseRetry] = useState<{
+    id: string;
+    style?: MapState["style"];
+  }>();
+  const [displayRetry, setDisplayRetry] = useState(0);
+  const [cameraLocked, setCameraLocked] = useState(false);
+  const [guides, setGuides] = useState(false);
   const [browseDates, setBrowseDates] = useSessionState(
     `tracktool:${initial.initialArchive}:dates`,
     {
@@ -317,14 +331,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
       sort: "date-desc",
     },
   );
-  const [projectDates, setProjectDates] = useState({
-    from: "",
-    to: "",
-    sort: "date-desc",
-  });
-  const [projectVisibility, setProjectVisibility] =
-    useState<OverviewVisibility>({ all: true, exceptions: {} });
-  const [activity, setActivity] = useState("正在读取轨迹…");
+  const activity = "正在读取轨迹…";
   const [drafts, setDrafts] = useState<Record<string, boolean>>({});
   const reportDraft = useCallback(
     (key: string, dirty: boolean) =>
@@ -333,32 +340,22 @@ function Editor({ initial }: { initial: Bootstrap }) {
   );
   const hasDraft = Object.values(drafts).some(Boolean);
   const [editMap, setEditMap] = useState<EditMap>();
-  const inProject = projectState !== undefined;
-  const state = projectState ?? browseState;
-  useLayoutEffect(() => {
-    // Persist concrete map palettes so saved projects and PNG exports remain portable.
-    if (browseState.style.appearance !== appearance)
-      setBrowseState((previous) => ({
-        ...previous,
-        style: { ...previous.style, appearance },
-      }));
-    if (projectState && projectState.style.appearance !== appearance)
-      setProjectState((previous) =>
-        previous
-          ? { ...previous, style: { ...previous.style, appearance } }
-          : previous,
-      );
-  }, [
-    appearance,
-    browseState.style.appearance,
-    projectState?.style.appearance,
-  ]);
-  const browseVisibility = inProject ? projectVisibility : libraryVisibility;
-  const setBrowseVisibility = inProject
-    ? setProjectVisibility
-    : setLibraryVisibility;
-  const filter = inProject ? projectFilter : browseFilter;
-  const setFilter = inProject ? setProjectFilter : setBrowseFilter;
+  const batch = browseBatch;
+  const setBatch = setBrowseBatch;
+  const state = mapState;
+  const previousAppearance = useRef(appearance);
+  useEffect(() => {
+    if (previousAppearance.current === appearance) return;
+    previousAppearance.current = appearance;
+    setMapState((previous) => ({
+      ...previous,
+      style: { ...previous.style, appearance },
+    }));
+  }, [appearance]);
+  const browseVisibility = libraryVisibility;
+  const setBrowseVisibility = setLibraryVisibility;
+  const filter = browseFilter;
+  const setFilter = setBrowseFilter;
   const browseKind = useMemo(
     () =>
       Array.isArray(savedBrowseKind)
@@ -368,14 +365,13 @@ function Editor({ initial }: { initial: Bootstrap }) {
           : [savedBrowseKind],
     [savedBrowseKind],
   );
-  const kind = inProject ? projectKind : browseKind;
-  const setKind = inProject ? setProjectKind : setBrowseKind;
-  const savedDates = inProject ? projectDates : browseDates;
+  const kind = browseKind;
+  const setKind = setBrowseKind;
   const dates =
-    savedDates.sort === "name"
-      ? { ...savedDates, sort: "date-desc" }
-      : savedDates;
-  const setDates = inProject ? setProjectDates : setBrowseDates;
+    browseDates.sort === "name"
+      ? { ...browseDates, sort: "date-desc" as const }
+      : browseDates;
+  const setDates = setBrowseDates;
   const [importedScope, setImportedScope] = useState<string[]>();
   const [filterDraft, setFilterDraft] = useState<{
     kind: string[];
@@ -397,21 +393,12 @@ function Editor({ initial }: { initial: Bootstrap }) {
     overview.setOffset(0);
     setFilterDraft(undefined);
   }
-  const tracks = projectTracks;
-  const dirty = useMemo(
-    () =>
-      inProject && (!currentName || JSON.stringify(projectState) !== baseline),
-    [inProject, currentName, projectState, baseline],
-  );
-  const setState = (update: Project | ((prev: Project) => Project)) => {
-    if (inProject)
-      setProjectState((prev) =>
-        typeof update === "function" ? update(prev!) : update,
-      );
-    else setBrowseState(update);
+  const setState = (update: MapState | ((prev: MapState) => MapState)) => {
+    const next =
+      typeof update === "function" ? update(stateRef.current) : update;
+    stateRef.current = next;
+    setMapState(next);
   };
-  const setTracks = setProjectTracks;
-  const browsePanel = useRef("library");
   const [params, setParams] = useSearchParams();
   const rawPanel = params.get("panel") ?? "none";
   const panel = Object.hasOwn(panels, rawPanel)
@@ -421,6 +408,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
         ? "settings"
         : (rawPanel as Panel)
     : undefined;
+  // The composition mask belongs to the print panel, so a reload restores the
+  // same view instead of a full screen map without a frame.
+  const printMode = panel === "print";
   const [archiveAction, setArchiveAction] = useState<Operation>();
   const [downloadingTrack, setDownloadingTrack] = useState(false);
   const [libraryList, setLibraryList] = useSessionState(
@@ -452,21 +442,14 @@ function Editor({ initial }: { initial: Bootstrap }) {
   }, [panel]);
   const [exportEntries, setExportEntries] = useState<string[]>();
   const [exportKind, setExportKind] = useState<"zip" | "kml" | "png">();
-  const exportPage = panel === "export" || panel === "project";
-  const exportPanel =
-    exportPage && (exportKind === "png" || panel === "project");
   const [inspection, setInspection] = useState<{
     id: string;
     tracks: SelectedTrack[];
-    camera: Project["camera"];
+    camera: MapState["camera"];
   }>();
   const inspectionSequence = useRef(0);
   const openPanel = (next: Panel, task?: string) => {
-    if (next === "export" || next === "project") setExportKind("png");
-    if (inProject && next === "library" && panel !== "library")
-      setCandidateCamera(structuredClone(stateRef.current.camera));
-    if (next === "library" && (inProject || task === "imported"))
-      setLibraryList(true);
+    if (next === "library" && task === "imported") setLibraryList(true);
     if (task === "imported") {
       setArchiveAction(undefined);
       setFilter("");
@@ -475,8 +458,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
       setDetailOpen(false);
     }
     setDetailAction(undefined);
-    if (!inProject && !exportPanel && (next === "export" || next === "project"))
-      browsePanel.current = rawPanel;
     setParams(task ? { panel: next, task: task } : { panel: next });
   };
   const refreshCatalog = async (
@@ -519,18 +500,15 @@ function Editor({ initial }: { initial: Bootstrap }) {
     if (inspection) viewport.current?.fit(inspection.tracks);
   }, [inspection?.id]);
   const viewport = useRef<Viewport>(null),
-    selection = useRef<AbortController | undefined>(undefined),
     operations = useRef(0),
     sourceSequence = useRef(0),
     stateRef = useRef(state),
     savedDisplayStyle = useRef(JSON.stringify(initial.state.style)),
     displaySaveSequence = useRef(0),
-    displaySaveQueue = useRef<Promise<unknown>>(Promise.resolve()),
-    file = useRef<HTMLInputElement>(null);
+    displaySaveQueue = useRef<Promise<unknown>>(Promise.resolve());
   stateRef.current = state;
   useEffect(() => {
-    if (inProject) return;
-    const serialized = JSON.stringify(browseState.style);
+    const serialized = JSON.stringify(mapState.style);
     if (serialized === savedDisplayStyle.current) {
       setDisplaySaveState("");
       return;
@@ -541,7 +519,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
       // Serialize requests so a slow older save cannot land after a newer one.
       displaySaveQueue.current = displaySaveQueue.current
         .catch(() => {})
-        .then(() => api("/api/display", { style: browseState.style }))
+        .then(() => api("/api/display", { style: mapState.style }))
         .then(() => {
           if (sequence !== displaySaveSequence.current) return;
           savedDisplayStyle.current = serialized;
@@ -553,12 +531,12 @@ function Editor({ initial }: { initial: Bootstrap }) {
         });
     }, 400);
     return () => clearTimeout(timer);
-  }, [browseState.style, inProject, displayRetry]);
+  }, [mapState.style, displayRetry]);
   useEffect(() => {
     setBasemapError("");
     setBaseRetry(undefined);
     cancelPendingBase();
-  }, [panel, inProject, currentName]);
+  }, [panel]);
   const config = initial.config;
   // The basemap covers the viewport, so its CRS decides the render canvas.
   const crs = canvasCrs(state, config);
@@ -570,14 +548,15 @@ function Editor({ initial }: { initial: Bootstrap }) {
     true,
     browseDates,
   );
-  const projectOverview = useOverview(
-    crs,
-    projectFilter,
-    projectKind,
-    inProject,
-    projectDates,
-  );
-  const overview = inProject ? projectOverview : browseOverview;
+  const overview = browseOverview;
+  const retryOverview = async () => {
+    try {
+      await overview.retry();
+      viewport.current?.retryOverview();
+    } catch (e) {
+      overview.setTileError(message(e));
+    }
+  };
   const selectedVisible =
     !!overview.selected &&
     browseVisibility.all !==
@@ -616,7 +595,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
   );
   const listVisible =
     panel === "library" && !(overview.id && detailOpen) && !archiveAction;
-  const scrollKey = `${inProject}:${panel}:${panel === "library" && detailOpen && overview.id ? overview.id : "list"}:${panel === "library" ? (archiveAction ?? (libraryList ? "list" : "home")) : ""}:${exportPanel ? projectTab : ""}:${panel === "library" && editing}`;
+  const scrollKey = `${panel}:${panel === "library" && detailOpen && overview.id ? overview.id : "list"}:${panel === "library" ? (archiveAction ?? (libraryList ? "list" : "home")) : ""}:${panel === "library" && editing}`;
   useLayoutEffect(() => {
     const el = controls.current;
     if (el) el.scrollTop = scrollPositions.current.get(scrollKey) ?? 0;
@@ -635,44 +614,16 @@ function Editor({ initial }: { initial: Bootstrap }) {
     previousDetail.current = detailOpen;
   }, [detailOpen, panel]);
   const fitted = useRef(!!rememberedCamera(initial.initialArchive));
-  const browsing = (!inProject || panel === "library") && !inspection;
-  useEffect(() => {
-    if (
-      !fitted.current &&
-      overview.query.data?.bounds &&
-      overview.query.data.version &&
-      browsing
-    ) {
-      fitted.current = true;
-      viewport.current?.fitOverview(overview.query.data.bounds);
-    }
-  }, [overview.query.data?.version, browsing]);
-  const retryOverview = async () => {
-    try {
-      await overview.retry();
-      viewport.current?.retryOverview();
-    } catch (e) {
-      overview.setTileError(message(e));
-    }
-  };
-  const confirmDiscard = () =>
-    !dirty || window.confirm("有尚未保存的修改，是否放弃？");
-  const change = (edit: (next: Project) => void) => {
+  const browsing = !inspection;
+  const change = (edit: (next: MapState) => void) => {
     setState((prev) => {
       const next = structuredClone(prev);
       edit(next);
       return next;
     });
   };
-  const refreshNames = async (path: string) =>
-    setNames(
-      (await api<{ names: string[] }>("/api/projects", { archive: path }))
-        .names,
-    );
-  const openArchive = async (path = initial.initialArchive, force = false) => {
-    if (!force && !confirmDiscard()) return;
+  const openArchive = async (path = initial.initialArchive) => {
     const sequence = ++operations.current;
-    selection.current?.abort();
     setBusy(true);
     setError("");
     setCatalogError("");
@@ -680,12 +631,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
       const data = await api<Catalog>("/api/archive", { path });
       if (sequence !== operations.current) return;
       setCatalog(data);
-      setTracks([]);
-      setSourceErrors([]);
-      setName("");
-      setState((prev) => ({ ...prev, archive: data.archive, tracks: [] }));
-      setBaseline("");
-      await refreshNames(data.archive);
     } catch (e) {
       const text = message(e);
       setError(text);
@@ -695,91 +640,22 @@ function Editor({ initial }: { initial: Bootstrap }) {
     }
   };
   useEffect(() => {
-    if (initial.initialArchive) void openArchive(initial.initialArchive, true);
+    if (initial.initialArchive) void openArchive(initial.initialArchive);
     return () => {
       operations.current++;
       sourceSequence.current++;
-      selection.current?.abort();
     };
   }, []);
   useEffect(() => {
     const prevent = (e: BeforeUnloadEvent) => {
-      if (dirty || hasDraft) {
+      if (hasDraft) {
         e.preventDefault();
         e.returnValue = "";
       }
     };
     window.addEventListener("beforeunload", prevent);
     return () => window.removeEventListener("beforeunload", prevent);
-  }, [dirty, hasDraft]);
-  const select = async (entries: string[]) => {
-    setActivity("正在读取完整轨迹…");
-    if (!catalog) return;
-    if (entries.length > 200) {
-      setError("出图工程最多 200 条轨迹，请缩小选择范围；未添加任何轨迹。");
-      return;
-    }
-    selection.current?.abort();
-    const controller = new AbortController();
-    selection.current = controller;
-    const sequence = ++operations.current;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api<Selection>(
-        "/api/selection",
-        {
-          archive: catalog.archive,
-          entries: inProject
-            ? entries.filter(
-                (entry) => !state.tracks.some((t) => t.entry === entry),
-              )
-            : entries,
-        },
-        controller.signal,
-      );
-      if (sequence !== operations.current) return;
-      if (inProject) {
-        result.tracks = entries.flatMap(
-          (entry) =>
-            projectTracks.find((t) => t.entry === entry) ??
-            result.tracks.find((t) => t.entry === entry) ??
-            [],
-        );
-        result.errors = [
-          ...sourceErrors.filter(
-            (e) =>
-              entries.includes(e.entry) &&
-              state.tracks.some((t) => t.entry === e.entry),
-          ),
-          ...result.errors,
-        ];
-      }
-      setTracks(result.tracks);
-      setSourceErrors(result.errors);
-      change((s) => {
-        s.archive = result.archive;
-        const previous = new Map(s.tracks.map((t) => [t.entry, t]));
-        s.tracks = entries.flatMap((entry) => {
-          const old = inProject ? previous.get(entry) : undefined;
-          const track = result.tracks.find((t) => t.entry === entry);
-          return (
-            old ??
-            (track ? (track.reference ?? { entry, sha256: track.sha256 }) : [])
-          );
-        });
-        s.schema = s.tracks.every((t) => t.entry_id) ? 3 : 2;
-      });
-      setNotice(
-        `已选择 ${result.tracks.length} 条轨迹，共 ${result.tracks.reduce((n, t) => n + t.points, 0).toLocaleString()} 个点`,
-      );
-      return true;
-    } catch (e) {
-      if (!controller.signal.aborted) setError(message(e));
-    } finally {
-      if (sequence === operations.current) setBusy(false);
-    }
-  };
+  }, [hasDraft]);
   const chooseBrowse = (next: OverviewVisibility) => {
     setBrowseVisibility(next);
     setNotice("已更新地图显示");
@@ -790,61 +666,12 @@ function Editor({ initial }: { initial: Bootstrap }) {
     else exceptions[id] = entry;
     chooseBrowse({ ...browseVisibility, exceptions });
   };
-  const projectPresentation = async (
-    entry_id: string,
-    settings: Presentation | null | undefined,
-  ) => {
-    setActivity("正在更新工程展示…");
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api<Loaded>(
-        settings === undefined
-          ? "/api/project/update-track"
-          : "/api/project/presentation",
-        {
-          state: stateRef.current,
-          entry_id,
-          ...(settings === undefined ? {} : { settings }),
-        },
-      );
-      if (result.errors.length)
-        throw new Error(result.errors.map((e) => e.error).join("；"));
-      setProjectState(result.state);
-      setProjectTracks(result.tracks);
-      setSourceErrors([]);
-      setNotice("当前项目已更新，保存项目后保留；库默认展示未改动。");
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const exportKml = async () => {
-    setActivity("正在导出展示 KML…");
-    setBusy(true);
-    setError("");
-    try {
-      const { job } = await api<{ job: string }>(
-        "/api/export-kml",
-        stateRef.current,
-      );
-      download(
-        await (await request(`/api/jobs/${job}/kml`)).blob(),
-        "tracktool-display.kml",
-      );
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  };
   const cancelPendingBase = () => {
     ++sourceSequence.current;
     viewport.current?.cancel();
     setSwitching("");
   };
-  const switchBase = async (id: string, restore?: Project["style"]) => {
+  const switchBase = async (id: string, restore?: MapState["style"]) => {
     if (!restore && id === stateRef.current.style.basemap) {
       if (switching) {
         cancelPendingBase();
@@ -916,221 +743,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
       if (sequence === sourceSequence.current) setSwitching("");
     }
   };
-  const load = async (value?: unknown) => {
-    setActivity("正在读取工程…");
-    if (!confirmDiscard()) return;
-    if (
-      hasDraft &&
-      !window.confirm("载入工程会离开当前轨迹编辑，是否放弃未提交的草稿？")
-    )
-      return;
-    setBusy(true);
-    setError("");
-    selection.current?.abort();
-    const sequence = ++operations.current;
-    ++sourceSequence.current;
-    viewport.current?.cancel();
-    try {
-      const result =
-        value === undefined
-          ? await api<Loaded>("/api/projects/load", {
-              archive: state.archive,
-              name: openName,
-            })
-          : await api<Loaded>(
-              "/api/project",
-              value && typeof value === "object" && !Array.isArray(value)
-                ? {
-                    ...value,
-                    archive: catalog?.archive ?? initial.initialArchive,
-                  }
-                : value,
-            );
-      const data = result.state.archive
-        ? await api<Catalog>("/api/archive", { path: result.state.archive })
-        : undefined;
-      if (sequence !== operations.current) return;
-      if (
-        !(await viewport.current?.stage(result.state, undefined, {
-          tracks: result.tracks,
-          preview: true,
-          hideOverview: true,
-        }))
-      )
-        return;
-      if (!inProject && !exportPanel) browsePanel.current = rawPanel;
-      fitted.current = true;
-      setProjectFilter("");
-      setProjectKind([]);
-      projectOverview.setId("");
-      projectOverview.setOffset(0);
-      setProjectState(result.state);
-      setProjectTracks(result.tracks);
-      setPreview(true);
-      setCurrentName(value === undefined ? openName! : "");
-      setName(value === undefined ? openName! : "");
-      openPanel("export");
-      setSourceErrors(result.errors);
-      setCatalog(data);
-      setVersionChanged(result.versionsChanged);
-      setBaseline(JSON.stringify(result.state));
-      setNotice(
-        typeof result.state.migration === "string"
-          ? result.state.migration
-          : "项目已载入",
-      );
-      if (result.state.archive) await refreshNames(result.state.archive);
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      if (sequence === operations.current) setBusy(false);
-    }
-  };
-  const save = async (asNew = false) => {
-    setActivity("正在保存工程…");
-    const targetName = (asNew || !currentName ? name : currentName).trim();
-    if (!targetName) {
-      setSaveAs(true);
-      return false;
-    }
-    if (
-      (asNew || !currentName) &&
-      names.includes(targetName) &&
-      !window.confirm(`覆盖项目「${targetName}」？`)
-    )
-      return false;
-    setBusy(true);
-    setError("");
-    const snapshot = structuredClone(state);
-    try {
-      await api("/api/projects/save", { name: targetName, state: snapshot });
-      setCurrentName(targetName);
-      setName(targetName);
-      setSaveAs(false);
-      setBaseline(JSON.stringify(snapshot));
-      await refreshNames(state.archive);
-      setNotice(`工程「${targetName}」已保存到当前轨迹库`);
-      return JSON.stringify(stateRef.current) === JSON.stringify(snapshot);
-    } catch (e) {
-      setError(message(e));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-  const newProject = async (entries: string[] = []) => {
-    setActivity("正在建立出图工程…");
-    if (busy || switching || inspection) return;
-    if (
-      hasDraft &&
-      !window.confirm("进入工程会离开当前轨迹编辑，是否放弃未提交的草稿？")
-    )
-      return;
-    setBusy(true);
-    setError("");
-    try {
-      const next = structuredClone(initial.state);
-      next.archive = catalog?.archive ?? initial.initialArchive;
-      next.camera = structuredClone(browseState.camera);
-      next.style = structuredClone(browseState.style);
-      if (entries.length > 200)
-        throw new Error("出图工程最多 200 条轨迹，请缩小选择范围。");
-      const chosen = entries.length
-        ? await api<Selection>("/api/selection", {
-            archive: next.archive,
-            entries,
-          })
-        : undefined;
-      if (chosen?.errors.length)
-        throw new Error(chosen.errors.map((e) => e.error).join("；"));
-      next.tracks =
-        chosen?.tracks.map(
-          (t) => t.reference ?? { entry: t.entry, sha256: t.sha256 },
-        ) ?? [];
-      next.schema = next.tracks.every((t) => t.entry_id) ? 3 : 2;
-      if (!exportPanel) browsePanel.current = rawPanel;
-      fitted.current = true;
-      setProjectFilter("");
-      setProjectKind([]);
-      projectOverview.setId("");
-      projectOverview.setOffset(0);
-      setProjectState(next);
-      setProjectTracks(chosen?.tracks ?? []);
-      setCurrentName("");
-      setBaseline(JSON.stringify(next));
-      setName("");
-      setSourceErrors([]);
-      setVersionChanged(false);
-      setPreview(true);
-      setNotice("已新建出图工程；在「内容」中添加轨迹。");
-      openPanel("export");
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const returnToBrowse = async () => {
-    setActivity("正在恢复浏览地图…");
-    setBusy(true);
-    setError("");
-    try {
-      if (
-        !(await viewport.current?.stage(
-          browseState,
-          browseOverview.query.data,
-          {
-            tracks: [],
-            preview: false,
-            hideOverview: false,
-          },
-        ))
-      )
-        return;
-      setProjectState(undefined);
-      setProjectTracks([]);
-      setSourceErrors([]);
-      setVersionChanged(false);
-      setPreview(false);
-      setLeaving(false);
-      setNotice("");
-      setParams({ panel: browsePanel.current });
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const exportPng = async () => {
-    setExporting(true);
-    setError("");
-    try {
-      await viewport.current?.ready();
-      const { job } = await api<{ job: string }>("/api/export", state);
-      let done = false;
-      for (let i = 0; i < 240; i++) {
-        const result = await api<{ status: string; error: string }>(
-          `/api/jobs/${job}`,
-        );
-        if (result.status === "failed") throw new Error(result.error);
-        if (result.status === "done") {
-          download(
-            await (await request(`/api/jobs/${job}/png`)).blob(),
-            "tracktool-map.png",
-          );
-          done = true;
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 500));
-      }
-      if (!done) throw new Error("导出等待超时");
-      setNotice("PNG 已导出到浏览器下载目录");
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setExporting(false);
-    }
-  };
   useEffect(() => {
     if (!notice) return;
     toast.success(notice, { id: "workspace-notice", duration: 4000 });
@@ -1191,7 +803,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
   }
   const [visibilityBusy, setVisibilityBusy] = useState(false);
   const visibilityScope = JSON.stringify([
-    inProject,
     overview.version,
     filter,
     kind,
@@ -1234,7 +845,11 @@ function Editor({ initial }: { initial: Bootstrap }) {
     }
   }
   const fitTracks = (selected: SelectedTrack[]) => {
-    viewport.current?.fit(selected);
+    try {
+      viewport.current?.fit(selected);
+    } catch (error) {
+      setError(message(error));
+    }
   };
   const [batchSelecting, setBatchSelecting] = useState(false);
   const batchRequest = useRef(0);
@@ -1354,12 +969,11 @@ function Editor({ initial }: { initial: Bootstrap }) {
     Object.hasOwn(batch, e.id),
   ).length;
   const pageSelected = visible.length > 0 && selectedOnPage === visible.length;
-  const invalid = sourceErrors.length > 0 || versionChanged;
   // Map events fire after this render. Keep stable wrappers so MapViewport can
   // bail out of panel-driven re-renders while still seeing the latest state.
   const viewportHandlers = useRef<{
     pick: (hits: OverviewHit[]) => void;
-    camera: (camera: Project["camera"]) => void;
+    camera: (camera: MapState["camera"]) => void;
     error: (error: string) => void;
   }>({
     pick: () => {},
@@ -1392,18 +1006,10 @@ function Editor({ initial }: { initial: Bootstrap }) {
       setInspection((old) => (old ? { ...old, camera } : old));
       return;
     }
-    if (inProject && browsing) {
-      setCandidateCamera(camera);
-      return;
-    }
     if (JSON.stringify(stateRef.current.camera) !== JSON.stringify(camera)) {
       fitted.current = true;
-      if (browsing) rememberCamera(initial.initialArchive, camera);
-      if (inProject)
-        change((s) => {
-          s.camera = camera;
-        });
-      else setState((prev) => ({ ...prev, camera }));
+      rememberCamera(initial.initialArchive, camera);
+      setState((prev) => ({ ...prev, camera }));
     }
   };
   viewportHandlers.current.error = (error) => {
@@ -1415,7 +1021,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
     [],
   );
   const handleCamera = useCallback(
-    (camera: Project["camera"]) => viewportHandlers.current.camera(camera),
+    (camera: MapState["camera"]) => viewportHandlers.current.camera(camera),
     [],
   );
   const handleOverviewError = useCallback(
@@ -1424,12 +1030,8 @@ function Editor({ initial }: { initial: Bootstrap }) {
   );
   const viewportState = useMemo(
     () =>
-      inspection
-        ? { ...state, camera: inspection.camera, title: "" }
-        : inProject && browsing
-          ? { ...state, camera: candidateCamera ?? state.camera }
-          : state,
-    [inspection, state, inProject, browsing, candidateCamera],
+      inspection ? { ...state, camera: inspection.camera, title: "" } : state,
+    [inspection, state],
   );
   const basemapList = useRef<HTMLDivElement | null>(null);
   // Badges only mark sources whose CRS differs from the render canvas.
@@ -1470,6 +1072,292 @@ function Editor({ initial }: { initial: Bootstrap }) {
       ?.querySelector('[aria-pressed="true"]')
       ?.scrollIntoView({ block: "nearest" });
   }, [shownVendor, state.style.basemap]);
+  const titleError = mapTitleError(state.title);
+  const visibleTracks = useMemo<PrintTrack[]>(() => {
+    if (!catalog) return [];
+    return catalog.entries
+      .filter((entry) =>
+        browseVisibility.all
+          ? !Object.hasOwn(browseVisibility.exceptions, entry.id)
+          : Object.hasOwn(browseVisibility.exceptions, entry.id),
+      )
+      .map((entry) => ({ entry: entry.entry, sha256: entry.sha256 }));
+  }, [catalog, browseVisibility]);
+  const printValue = useMemo(
+    () =>
+      catalog
+        ? printDocument(state, catalog.archive, visibleTracks)
+        : undefined,
+    [catalog, state, visibleTracks],
+  );
+  const currentPrint = useRef(printValue);
+  currentPrint.current = printValue;
+  const initialPrintSave = useRef(true);
+  const [draftsLoaded, setDraftsLoaded] = useState(false);
+  const applyPrint = useCallback(
+    (value: PrintDocument, saveNew = false) => {
+      if (!catalog) return;
+      const { tracks, warnings } = resolvePrintTracks(value, catalog);
+      const exceptions = Object.fromEntries(
+        tracks.map((track) => [track.id, track.entry]),
+      );
+      const style = { ...value.style };
+      if (
+        style.basemap !== "vector" &&
+        !config.basemaps.some((basemap) => basemap.id === style.basemap)
+      )
+        style.basemap = stateRef.current.style.basemap;
+      const next: MapState = {
+        style,
+        camera: value.camera,
+        frame: value.frame,
+        output: value.output,
+        title: value.title,
+      };
+      reconcileOverlays(next, config);
+      stateRef.current = next;
+      setMapState(next);
+      setPrintError("");
+      setLibraryVisibility({ all: false, exceptions });
+      rememberPrintDraft(initial.initialArchive);
+      printSession.current = {
+        saved: saveNew
+          ? ""
+          : JSON.stringify(
+              printDocument(
+                next,
+                catalog.archive,
+                tracks.map(({ entry, sha256 }) => ({ entry, sha256 })),
+              ),
+            ),
+      };
+      setNotice(warnings.join("；") || "已载入出图文档");
+    },
+    [catalog, config, setLibraryVisibility],
+  );
+  useEffect(() => {
+    if (!catalog || draftsLoaded) return;
+    let active = true;
+    void listPrints()
+      .then((saved) => {
+        if (!active) return;
+        setPrintDrafts(saved);
+        if (
+          printSession.current.id &&
+          !saved.some((row) => row.id === printSession.current.id)
+        ) {
+          printSession.current.id = undefined;
+          rememberPrintDraft(initial.initialArchive);
+        }
+        setDraftsLoaded(true);
+      })
+      .catch(() => {
+        if (active) {
+          setDraftsLoaded(true);
+          draftWarning();
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [catalog, draftsLoaded, applyPrint]);
+  useEffect(() => {
+    rememberPrintFrame(initial.initialArchive, state);
+    rememberCamera(initial.initialArchive, state.camera);
+  }, [
+    initial.initialArchive,
+    state.frame,
+    state.output,
+    state.title,
+    state.camera,
+  ]);
+  const persistPrint = (
+    value: PrintDocument,
+    session = printSession.current,
+    force = false,
+  ) => {
+    const serialized = JSON.stringify(value);
+    // Serial writes prevent rapid edits/export from creating competing drafts.
+    printWrites.current = printWrites.current
+      .then(async () => {
+        if (session.sealed && !force) return;
+        if (session.saved === serialized && (session.id || !force)) return;
+        session.id = await savePrint(value, session.id);
+        session.saved = serialized;
+        if (printSession.current === session)
+          rememberPrintDraft(initial.initialArchive, session.id);
+        setPrintDrafts(await listPrints());
+      })
+      .catch(draftWarning)
+      .then(() => {});
+  };
+  const finishPrint = (
+    value: PrintDocument,
+    session = printSession.current,
+  ) => {
+    // A completed export seals its snapshot, including delayed autosaves that
+    // were queued before completion. Edits made during rendering continue anew.
+    session.sealed = true;
+    persistPrint(value, session, true);
+    if (printSession.current === session) {
+      printSession.current = { saved: JSON.stringify(value) };
+      rememberPrintDraft(initial.initialArchive);
+      if (
+        currentPrint.current &&
+        JSON.stringify(currentPrint.current) !== JSON.stringify(value)
+      )
+        persistPrint(currentPrint.current);
+    }
+  };
+  useEffect(() => {
+    if (!printValue || !draftsLoaded) return;
+    if (initialPrintSave.current) {
+      initialPrintSave.current = false;
+      // Catalog/IDB may finish loading after the user has already edited.
+      // Only the untouched initial view can be skipped as a baseline.
+      if (
+        JSON.stringify([state, browseVisibility]) === initialPrintView.current
+      ) {
+        printSession.current.saved = JSON.stringify(printValue);
+        return;
+      }
+    }
+    const session = printSession.current;
+    const timer = setTimeout(() => persistPrint(printValue, session), 500);
+    return () => clearTimeout(timer);
+  }, [printValue, draftsLoaded]);
+  useEffect(() => {
+    if (!printMode) return;
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (
+        event.defaultPrevented ||
+        document.querySelector('[role="dialog"], [role="listbox"]')
+      )
+        return;
+      if (panel === "print") setParams({ panel: "none" });
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, [printMode, panel]);
+  const refreshPrintDrafts = useCallback(async () => {
+    if (!catalog) return;
+    try {
+      setPrintDrafts(await listPrints());
+    } catch {
+      /* A blocked IndexedDB must not block printing. */
+    }
+  }, [catalog]);
+  const exportPrint = async () => {
+    if (!printValue || !catalog || titleError || exporting) return;
+    setExporting(true);
+    setPrintError("");
+    const session = printSession.current;
+    try {
+      persistPrint(printValue, session, true);
+      const { job, warnings } = await api<{ job: string; warnings: string[] }>(
+        "/api/print",
+        {
+          document: printValue,
+        },
+      );
+      if (warnings.length) toast.warning(warnings.join("；"));
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        const status = await api<MapExport>(`/api/jobs/${job}`);
+        if (status.status === "done") {
+          download(
+            await (await request(`/api/jobs/${job}/png`)).blob(),
+            status.fileName,
+          );
+          setNotice(`已生成 ${status.fileName}`);
+          finishPrint(printValue, session);
+          void refreshPrintDrafts();
+          break;
+        }
+        if (status.status === "failed")
+          throw new Error(status.error || "图片生成失败，请重试");
+      }
+    } catch (e) {
+      setPrintError(message(e));
+    } finally {
+      setExporting(false);
+    }
+  };
+  const importPrint = async (file: File) => {
+    setPrintError("");
+    try {
+      const parsed = PrintDocumentSchema.safeParse(
+        JSON.parse(await file.text()),
+      );
+      if (!parsed.success)
+        throw new Error(parsed.error.issues[0]?.message || "出图文档格式无效");
+      applyPrint(parsed.data, true);
+      openPanel("print");
+    } catch (e) {
+      setPrintError(`出图文档无法读取：${message(e)}`);
+    }
+  };
+  const exportPrintJson = () => {
+    if (!printValue) return;
+    setPrintError("");
+    try {
+      download(
+        new Blob([JSON.stringify(printValue, null, 2)], {
+          type: "application/json",
+        }),
+        `${(printValue.title || "tracktool-print").replace(/[/\\:*?"<>|]/g, "-")}.json`,
+      );
+      finishPrint(printValue);
+    } catch (error) {
+      setPrintError(`出图文档导出失败：${message(error)}`);
+    }
+  };
+  const restorePrint = (draft: StoredPrint) => {
+    const parsed = PrintDocumentSchema.safeParse(draft.document);
+    if (!parsed.success) {
+      setPrintError("出图草稿格式无效，请删除或导入有效 JSON");
+      return;
+    }
+    applyPrint(parsed.data, true);
+    openPanel("print");
+  };
+  const removePrint = async (id: string) => {
+    try {
+      await printWrites.current;
+      await deletePrint(id);
+    } catch {
+      /* A blocked IndexedDB leaves the draft in place. */
+    }
+    if (id === printSession.current.id) {
+      printSession.current.sealed = true;
+      printSession.current = { saved: "" };
+      rememberPrintDraft(initial.initialArchive);
+    }
+    await refreshPrintDrafts();
+  };
+  const setPrintRatio = (ratio: MapState["frame"]["ratio"]) => {
+    change((next) => {
+      const [width, height] = frames[ratio];
+      next.frame = { ratio, width, height };
+      const outputWidth = Math.max(
+        Math.ceil((256 * width) / height),
+        Math.min(next.output.width, Math.floor((4096 * width) / height), 4096),
+      );
+      next.output = {
+        width: outputWidth,
+        height: Math.round((outputWidth * height) / width),
+      };
+    });
+  };
+  const setPrintWidth = (width: number) => {
+    change((next) => {
+      next.output = {
+        width,
+        height: Math.round((width * next.frame.height) / next.frame.width),
+      };
+    });
+  };
   return (
     <WorkspaceContext.Provider
       value={{
@@ -1497,15 +1385,12 @@ function Editor({ initial }: { initial: Bootstrap }) {
         refresh: refreshCatalog,
       }}
     >
-      <div
-        className={`map-app${inProject ? " in-project" : ""}`}
-        data-sheet={sheet}
-      >
+      <div className="map-app" data-sheet={sheet}>
         <header className="map-header">
           <button
-            className="project-icon"
+            className="app-icon"
             type="button"
-            aria-label={menuExpanded ? "收起项目菜单" : "展开项目菜单"}
+            aria-label={menuExpanded ? "收起菜单" : "展开菜单"}
             aria-expanded={menuExpanded}
             aria-controls="map-tools"
             onClick={() => {
@@ -1513,7 +1398,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
               if (menuExpanded) setParams({ panel: "none" });
             }}
           >
-            <img src={projectIcon} alt="" width="40" height="40" />
+            <img src={appIcon} alt="" width="40" height="40" />
           </button>
           <nav id="map-tools" aria-label="地图工具" hidden={!menuExpanded}>
             <Button
@@ -1563,13 +1448,13 @@ function Editor({ initial }: { initial: Bootstrap }) {
               <Upload size={22} aria-hidden="true" />
             </Button>
             <Button
-              variant={exportPage ? "default" : "ghost"}
+              variant={panel === "export" ? "default" : "ghost"}
               aria-label="导出轨迹"
-              aria-expanded={exportPage}
+              aria-expanded={panel === "export"}
               aria-controls="map-panel"
               title="导出轨迹"
               onClick={() => {
-                if (exportPage) {
+                if (panel === "export") {
                   setParams({ panel: "none" });
                   return;
                 }
@@ -1579,6 +1464,19 @@ function Editor({ initial }: { initial: Bootstrap }) {
               }}
             >
               <FileOutput size={22} aria-hidden="true" />
+            </Button>
+            <Button
+              variant={panel === "print" ? "default" : "ghost"}
+              aria-label={panel === "print" ? "退出出图" : "出图"}
+              aria-expanded={panel === "print"}
+              title={panel === "print" ? "退出出图" : "出图"}
+              onClick={() => {
+                setMenuExpanded(false);
+                if (panel === "print") setParams({ panel: "none" });
+                else openPanel("print");
+              }}
+            >
+              <MapIcon size={22} aria-hidden="true" />
             </Button>
           </nav>
         </header>
@@ -1597,45 +1495,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
         >
           <SettingsIcon size={22} aria-hidden="true" />
         </Button>
-        {inProject && (
-          <div className="project-bar" role="region" aria-label="当前出图工程">
-            <strong>{currentName || "未命名工程"}</strong>
-            <span className="save-state" role="status">
-              {dirty ? "未保存" : "已保存"}
-            </span>
-            <Button
-              disabled={busy || invalid || !!switching}
-              onClick={() => void save()}
-            >
-              保存
-            </Button>
-            <Button
-              disabled={busy}
-              onClick={() => {
-                setName(`${currentName || "新工程"}-副本`);
-                setSaveAs(true);
-              }}
-            >
-              另存为
-            </Button>
-            <Button
-              disabled={busy || exporting || !!switching}
-              onClick={() => {
-                if (
-                  hasDraft &&
-                  !window.confirm(
-                    "退出工程会离开当前轨迹编辑，是否放弃未提交的编辑草稿？",
-                  )
-                )
-                  return;
-                if (dirty) setLeaving(true);
-                else void returnToBrowse();
-              }}
-            >
-              退出工程
-            </Button>
-          </div>
-        )}
         <div className="map-content">
           <aside
             id="map-panel"
@@ -1649,7 +1508,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
           >
             <SheetHandle panel={controls} value={sheet} onChange={setSheet} />
             {!listVisible &&
-              !exportPage &&
+              panel !== "export" &&
               panel !== "settings" &&
               archiveAction !== "archive:push" && (
                 <PanelHeader
@@ -1662,11 +1521,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
                           : (overview.selected?.name ?? "正在读取轨迹…")
                         : panel === "library" && libraryList
                           ? "轨迹列表"
-                          : exportPage
-                            ? "导出轨迹"
-                            : panel
-                              ? panels[panel]
-                              : ""
+                          : panel
+                            ? panels[panel]
+                            : ""
                   }
                   headingClassName={
                     panel === "library" && overview.id && detailOpen
@@ -1680,8 +1537,8 @@ function Editor({ initial }: { initial: Bootstrap }) {
                         ? editing
                           ? (editorHeader?.backLabel ?? "返回详情")
                           : "返回列表"
-                        : inProject && !exportPage
-                          ? "回到工程"
+                        : panel === "print"
+                          ? "退出出图"
                           : "返回轨迹库"
                   }
                   onBack={
@@ -1701,57 +1558,44 @@ function Editor({ initial }: { initial: Bootstrap }) {
                             setLibraryList(true);
                             setDetailAction(undefined);
                           }
-                        : panel === "library" && libraryList && !inProject
+                        : panel === "library" && libraryList
                           ? () => setLibraryList(false)
-                          : inProject
-                            ? () => openPanel("export")
+                          : panel === "print"
+                            ? () => setParams({ panel: "none" })
                             : undefined
                   }
                 />
               )}
-            {exportPage && (
-              <section
-                aria-label="轨迹导出类型"
-                className={!exportPanel ? "export-panel" : undefined}
-              >
-                {!exportPanel && (
-                  <PanelHeader
-                    title="导出轨迹"
-                    backLabel={exportEntries ? "返回轨迹列表" : undefined}
-                    onBack={
-                      exportEntries ? () => returnFromExport() : undefined
-                    }
-                  />
-                )}
-                {!exportPanel ? (
-                  <div className="export-scope">
-                    <span className="settings-field-label">导出范围</span>
-                    <p>
-                      {exportEntries
-                        ? `已选择 ${exportEntries.length} 条轨迹用于导出。`
-                        : "轨迹库中的全部轨迹"}
+            {panel === "export" && (
+              <section aria-label="轨迹导出类型" className="export-panel">
+                <PanelHeader
+                  title="导出轨迹"
+                  backLabel={exportEntries ? "返回轨迹列表" : undefined}
+                  onBack={exportEntries ? () => returnFromExport() : undefined}
+                />
+                <div className="export-scope">
+                  <span className="settings-field-label">导出范围</span>
+                  <p>
+                    {exportEntries
+                      ? `已选择 ${exportEntries.length} 条轨迹用于导出。`
+                      : "轨迹库中的全部轨迹"}
+                  </p>
+                  {exportEntries ? (
+                    <Button
+                      variant="link"
+                      className="export-cancel-selection"
+                      onClick={() => returnFromExport(true)}
+                    >
+                      取消选择并返回列表
+                    </Button>
+                  ) : (
+                    <p className="export-hint">
+                      如需导出部分轨迹，请先在轨迹列表中批量选择。
                     </p>
-                    {exportEntries ? (
-                      <Button
-                        variant="link"
-                        className="export-cancel-selection"
-                        onClick={() => returnFromExport(true)}
-                      >
-                        取消选择并返回列表
-                      </Button>
-                    ) : (
-                      <p className="export-hint">
-                        如需导出部分轨迹，请先在轨迹列表中批量选择。
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  exportEntries && (
-                    <p>已选择 {exportEntries.length} 条轨迹用于导出。</p>
-                  )
-                )}
+                  )}
+                </div>
                 <label
-                  className={!exportPanel ? "settings-field-label" : undefined}
+                  className="settings-field-label"
                   htmlFor="track-export-kind"
                 >
                   导出类型
@@ -1761,82 +1605,42 @@ function Editor({ initial }: { initial: Bootstrap }) {
                   aria-label="导出类型"
                   placeholder="请选择导出类型"
                   disabled={busy}
-                  value={panel === "project" ? "png" : exportKind}
+                  value={exportKind}
                   options={[
                     { value: "zip", label: "压缩包" },
                     { value: "kml", label: "聚合KML" },
                     { value: "png", label: "PNG图像" },
                   ]}
                   onChange={(value) => {
-                    if (value === "png" && exportEntries) {
-                      if (exportEntries.length > 200) {
-                        setError(
-                          "PNG 出图最多支持 200 条轨迹，请缩小选择范围，或选择压缩包 / 聚合 KML。",
-                        );
-                        return;
-                      }
-                      if (inProject)
-                        void select(exportEntries).then((ok) => {
-                          if (ok) setExportKind("png");
-                        });
-                      else void newProject(exportEntries);
+                    if (value === "png") {
+                      setExportKind(undefined);
+                      setMenuExpanded(false);
+                      openPanel("print");
                       return;
                     }
-                    setExportKind(value as "zip" | "kml" | "png");
-                    if (panel === "project") setParams({ panel: "export" });
+                    setExportKind(value as "zip" | "kml");
                   }}
                 />
-                {!exportKind && panel !== "project" && (
+                {!exportKind && (
                   <p className="export-hint export-empty">
-                    压缩包保存独立轨迹，KML 汇总轨迹，PNG 制作地图图片。
+                    压缩包保存独立轨迹，KML 汇总轨迹；PNG 在当前地图上取景出图。
                   </p>
                 )}
-                {(exportKind === "zip" || exportKind === "kml") &&
-                  panel !== "project" && (
-                    <Suspense
-                      fallback={<PanelLoading>正在加载导出面板…</PanelLoading>}
-                    >
-                      <ArchiveAction
-                        key={`${exportKind}:${JSON.stringify(exportEntries)}`}
-                        entries={exportEntries}
-                        fixedOperation={
-                          exportKind === "zip"
-                            ? "archive:backup"
-                            : "archive:rebuild"
-                        }
-                      />
-                    </Suspense>
-                  )}
-              </section>
-            )}
-            {exportPanel && inProject && (
-              <div className="library-actions">
-                <Button onClick={() => openPanel("library")}>
-                  从轨迹库添加
-                </Button>
-              </div>
-            )}
-
-            {exportPanel && (
-              <section className="project-entry" hidden={inProject}>
-                <>
-                  <p className="overview-hint">
-                    新建工程后单独选择出图轨迹，地图上的显示开关不影响出图范围。
-                  </p>
-                  <Button
-                    variant="default"
-                    disabled={busy || !!switching || !!inspection || !catalog}
-                    onClick={() => void newProject(exportEntries)}
+                {(exportKind === "zip" || exportKind === "kml") && (
+                  <Suspense
+                    fallback={<PanelLoading>正在加载导出面板…</PanelLoading>}
                   >
-                    新建出图工程
-                  </Button>
-                  <Button
-                    disabled={busy || !!switching || !!inspection || !catalog}
-                    onClick={() => openPanel("project")}
-                  >
-                    打开已有工程
-                  </Button>
-                </>
+                    <ArchiveAction
+                      key={`${exportKind}:${JSON.stringify(exportEntries)}`}
+                      entries={exportEntries}
+                      fixedOperation={
+                        exportKind === "zip"
+                          ? "archive:backup"
+                          : "archive:rebuild"
+                      }
+                    />
+                  </Suspense>
+                )}
               </section>
             )}
             <section
@@ -2230,15 +2034,8 @@ function Editor({ initial }: { initial: Bootstrap }) {
             </section>
             {panel === "settings" && (
               <section>
-                <Settings inProject={inProject}>
-                  {inProject && (
-                    <p className="settings-reason" role="status">
-                      {dirty
-                        ? "有未保存的修改，请保存工程以保留"
-                        : "工程无未保存的修改"}
-                    </p>
-                  )}
-                  {!inProject && displaySaveState === "error" && (
+                <Settings>
+                  {displaySaveState === "error" && (
                     <p className="settings-error" role="alert">
                       地图样式保存失败
                       <Button
@@ -2347,306 +2144,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
                 </Settings>
               </section>
             )}
-            {exportPanel && inProject && (
-              <div className="project-tabs" role="group" aria-label="出图设置">
-                <Button onClick={() => setProjectTab("content")}>内容</Button>
-                <Button onClick={() => setProjectTab("style")}>样式</Button>
-                <Button onClick={() => setProjectTab("output")}>
-                  画框与输出
-                </Button>
-                <Button onClick={() => setProjectTab("more")}>更多</Button>
-              </div>
-            )}
-            <section hidden={!exportPanel || !inProject}>
-              <div hidden={projectTab !== "content"}>
-                <label htmlFor="export-tracks">出图轨迹（最多 200 条）</label>
-                <Select
-                  id="export-tracks"
-                  aria-label="出图轨迹"
-                  multiple
-                  searchable
-
-                  maxCount={200}
-
-                  style={{ width: "100%" }}
-                  value={state.tracks.map((t) => t.entry)}
-                  disabled={busy}
-                  onChange={(entries: string[]) => void select(entries)}
-                  options={catalog?.entries.map((e) => ({
-                    value: e.entry,
-                    label: e.entry,
-                  }))}
-                />
-                <p className="overview-hint">
-                  出图范围独立保存，不受轨迹库显示勾选影响。
-                </p>
-                <Button
-                  disabled={!tracks.length}
-                  onClick={() => fitTracks(tracks)}
-                >
-                  适合出图轨迹
-                </Button>
-                <div className="map-actions">
-                  <Button onClick={() => openPanel("settings")}>
-                    调整底图
-                  </Button>
-                </div>
-              </div>
-              <div hidden={projectTab !== "style"}>
-                <h3>工程样式</h3>
-                <div hidden={!inProject}>
-                  <label htmlFor="title">标题</label>
-                  <Input
-                    id="title"
-                    value={state.title}
-                    onChange={(e) =>
-                      change((s) => {
-                        s.title = e.target.value;
-                      })
-                    }
-                  />
-                  <label htmlFor="track-color">轨迹颜色</label>
-                  <input
-                    id="track-color"
-                    type="color"
-                    value={state.style.color}
-                    onChange={(e) =>
-                      change((s) => {
-                        s.style.color = e.target.value;
-                      })
-                    }
-                  />
-                  <label>线宽</label>
-                  <InputNumber
-                    aria-label="线宽"
-                    min={0.5}
-                    max={12}
-                    step={0.5}
-                    value={state.style.width}
-                    onChange={(v) =>
-                      change((s) => {
-                        s.style.width = v ?? 3;
-                      })
-                    }
-                  />
-                </div>
-              </div>
-              <div hidden={projectTab !== "output"}>
-                <h2>画框与输出</h2>
-                <label>画框比例</label>
-                <Select
-                  aria-label="画框比例"
-                  value={state.frame.ratio}
-                  options={Object.keys(frames).map((value) => ({
-                    value,
-                    label: value,
-                  }))}
-                  onChange={(ratio: Project["frame"]["ratio"]) =>
-                    change((s) => {
-                      const [width, height] = frames[ratio] as [number, number];
-                      s.frame = { ratio, width, height };
-                      const outputWidth = Math.max(
-                        256,
-                        Math.min(
-                          4096,
-                          Math.round(s.output.width),
-                          Math.floor((4096 * width) / height),
-                        ),
-                      );
-                      s.output = {
-                        width: outputWidth,
-                        height: Math.round((outputWidth * height) / width),
-                      };
-                    })
-                  }
-                />
-                <label>输出宽度（像素）</label>
-                <InputNumber
-                  aria-label="输出宽度"
-                  min={Math.max(
-                    256,
-                    Math.ceil((256 * state.frame.width) / state.frame.height),
-                  )}
-                  max={Math.min(
-                    4096,
-                    Math.floor((4096 * state.frame.width) / state.frame.height),
-                  )}
-                  step={1}
-                  precision={0}
-                  value={state.output.width}
-                  onChange={(v) =>
-                    change((s) => {
-                      s.output = {
-                        width: v ?? 1920,
-                        height: Math.round(
-                          ((v ?? 1920) * s.frame.height) / s.frame.width,
-                        ),
-                      };
-                    })
-                  }
-                />
-                <p>
-                  {state.output.width} × {state.output.height} px
-                </p>
-                <Switch
-                  checked={preview}
-                  onCheckedChange={setPreview}
-                  aria-label="出图预览"
-                />{" "}
-                出图预览
-              </div>
-              <div className="project-export-actions">
-                <Button
-                  variant="default"
-                  block
-                  onClick={() => void exportPng()}
-                  loading={exporting}
-                  disabled={busy || !!switching || invalid || !!inspection}
-                >
-                  导出 PNG
-                </Button>
-                <Button
-                  onClick={() => void exportKml()}
-                  disabled={busy || invalid || !!inspection}
-                >
-                  导出展示 KML
-                </Button>
-                <small>
-                  PNG 是地图图片；展示 KML 包含连接／忽略设置；原始 KML
-                  在轨迹库下载。
-                </small>
-              </div>
-            </section>
-            <section
-              hidden={
-                !exportPanel ||
-                (inProject
-                  ? projectTab !== "content" && projectTab !== "more"
-                  : panel !== "project")
-              }
-            >
-              <h2>{inProject ? "项目" : "打开已有工程"}</h2>
-              <div hidden={!inProject}>
-                <div hidden={projectTab !== "content"}>
-                  <Input
-                    aria-label="搜索工程轨迹"
-                    value={projectSearch}
-                    onChange={(e) => setProjectSearch(e.target.value)}
-                    placeholder="搜索工程轨迹"
-                  />
-                  <p>
-                    已加入 {projectTracks.length}/200 条{" "}
-                    <Button onClick={() => openPanel("library")}>
-                      添加轨迹
-                    </Button>
-                    <Button onClick={() => void select([])}>移除全部</Button>
-                    {projectSearch && (
-                      <Button
-                        onClick={() =>
-                          void select(
-                            state.tracks
-                              .filter((t) => !t.entry.includes(projectSearch))
-                              .map((t) => t.entry),
-                          )
-                        }
-                      >
-                        移除搜索结果（
-                        {
-                          projectTracks.filter((t) =>
-                            t.entry.includes(projectSearch),
-                          ).length
-                        }
-                        ）
-                      </Button>
-                    )}
-                  </p>
-                  {projectTracks
-                    .filter((t) => t.entry.includes(projectSearch))
-                    .map((track) => (
-                      <div key={track.entry}>
-                        <Button
-                          onClick={() =>
-                            void select(
-                              state.tracks
-                                .filter((t) => t.entry !== track.entry)
-                                .map((t) => t.entry),
-                            )
-                          }
-                        >
-                          移除 {track.entry.split("/").at(-1)}
-                        </Button>
-                        <ProjectPresentation
-                          track={track}
-                          busy={busy}
-                          onApply={(settings) =>
-                            void projectPresentation(
-                              track.reference!.entry_id!,
-                              settings,
-                            )
-                          }
-                          onUpdate={() =>
-                            void projectPresentation(
-                              track.reference!.entry_id!,
-                              undefined,
-                            )
-                          }
-                        />
-                      </div>
-                    ))}
-                </div>
-              </div>
-              <div hidden={inProject && projectTab !== "more"}>
-                <Select
-                  aria-label="已保存项目"
-                  placeholder="选择项目"
-                  value={openName}
-                  options={names.map((value) => ({ value, label: value }))}
-                  onChange={setOpenName}
-                />
-                <div className="map-actions">
-                  <Button
-                    onClick={() => void load()}
-                    disabled={!openName || busy}
-                  >
-                    载入项目
-                  </Button>
-                  <Button onClick={() => file.current?.click()}>
-                    导入 JSON
-                  </Button>
-                  <Button
-                    hidden={!inProject}
-                    onClick={() =>
-                      download(
-                        new Blob([JSON.stringify(state, null, 2)], {
-                          type: "application/json",
-                        }),
-                        "tracktool-project.json",
-                      )
-                    }
-                  >
-                    导出 JSON
-                  </Button>
-                </div>
-                <input
-                  ref={file}
-                  type="file"
-                  accept=".json,application/json"
-                  hidden
-                  onChange={async (e) => {
-                    const selected = e.target.files?.[0];
-                    e.target.value = "";
-                    if (selected)
-                      try {
-                        await load(
-                          JSON.parse(await selected.text()) as unknown,
-                        );
-                      } catch (e) {
-                        setError(message(e));
-                      }
-                  }}
-                />
-              </div>
-            </section>
             {overview.id && (
               <section
                 hidden={panel !== "library" || !detailOpen || !!archiveAction}
@@ -2906,11 +2403,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
                       key={detailAction.entry}
                       entry={detailAction.entry}
                       onClose={() => setDetailAction(undefined)}
-                      onViewProject={(name) => {
-                        setOpenName(name);
-                        setProjectTab("more");
-                        openPanel("project");
-                      }}
                       onDeleted={() => {
                         setDetailAction(undefined);
                         setDetailOpen(false);
@@ -2944,23 +2436,47 @@ function Editor({ initial }: { initial: Bootstrap }) {
                 </Suspense>
               )}
             </section>
+            {panel === "print" && (
+              <PrintPanel
+                state={state}
+                visibleCount={visibleTracks.length}
+                busy={busy}
+                exporting={exporting}
+                error={printError}
+                drafts={printDrafts}
+                guides={guides}
+                cameraLocked={cameraLocked}
+                onRatio={setPrintRatio}
+                onWidth={setPrintWidth}
+                onTitle={(title) =>
+                  change((next) => {
+                    next.title = title;
+                  })
+                }
+                onExport={() => void exportPrint()}
+                onExportJson={exportPrintJson}
+                onImportJson={(file) => void importPrint(file)}
+                onRestore={restorePrint}
+                onDelete={(id) => void removePrint(id)}
+                onOpenLibrary={() => openPanel("library")}
+                onGuides={setGuides}
+                onCameraLocked={setCameraLocked}
+                onFit={() => {
+                  if (overview.query.data?.bounds)
+                    viewport.current?.fitOverview(overview.query.data.bounds);
+                }}
+              />
+            )}
           </aside>
           <MapViewport
             ref={viewport}
             state={viewportState}
             config={config}
-            tracks={
-              editMap?.tracks ??
-              inspection?.tracks ??
-              (inProject && !browsing ? tracks : emptyTracks)
-            }
-            preview={
-              inProject && preview && !inspection && !browsing && !editMap
-            }
+            tracks={editMap?.tracks ?? inspection?.tracks ?? emptyTracks}
             overview={overview.query.data}
-            overviewSelected={overview.id}
+            overviewSelected={panel === "library" ? overview.id : ""}
             overviewVisibility={browseVisibility}
-            hideOverview={!browsing || !!editMap}
+            hideOverview={!!editMap || !!inspection}
             analysisOverlay={
               panel === "library" &&
               detailOpen &&
@@ -2976,9 +2492,12 @@ function Editor({ initial }: { initial: Bootstrap }) {
                 ? analysisOverlay
                 : undefined
             }
+            print={printMode}
+            cameraLocked={(printMode && cameraLocked) || busy}
+            guides={guides}
             highlightSegment={editMap?.segment}
             onPointPick={editMap?.pick}
-            onOverviewPick={handleOverviewPick}
+            onOverviewPick={printMode ? undefined : handleOverviewPick}
             onOverviewLoading={overview.setLoading}
             onOverviewVersion={overview.published}
             onOverviewError={handleOverviewError}
@@ -3106,81 +2625,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
             </div>
           )}
         </Modal>
-        <Modal
-          title="另存工程"
-          open={saveAs}
-          onCancel={() => setSaveAs(false)}
-          onOk={() => void save(true)}
-          confirmLoading={busy}
-          okButtonProps={{ disabled: !name.trim() || invalid }}
-        >
-          <label htmlFor="save-as-name">另存为名称</label>
-          <Input
-            id="save-as-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          {error && <p role="alert">{error}</p>}
-        </Modal>
-        <Modal
-          title="保存工程后返回浏览？"
-          open={leaving}
-          closable={!busy}
-          maskClosable={!busy}
-          onCancel={() => {
-            if (!busy) setLeaving(false);
-          }}
-          footer={[
-            <Button
-              key="cancel"
-              disabled={busy}
-              onClick={() => setLeaving(false)}
-            >
-              取消
-            </Button>,
-            <Button
-              key="discard"
-              disabled={busy}
-              onClick={() => void returnToBrowse()}
-            >
-              放弃修改并返回
-            </Button>,
-            <Button
-              key="save"
-              aria-label="保存并返回"
-              variant="default"
-              loading={busy}
-              disabled={
-                busy || (!currentName && !name.trim()) || invalid || !!switching
-              }
-              onClick={async () => {
-                if (await save()) await returnToBrowse();
-              }}
-            >
-              保存并返回
-            </Button>,
-          ]}
-        >
-          <p>
-            工程有未保存的修改。返回后会恢复进入工程前的浏览视野、筛选和显示。
-          </p>
-          {currentName ? (
-            <p>保存到当前工程「{currentName}」</p>
-          ) : (
-            <>
-              <label htmlFor="leave-project-name">新工程名称</label>
-              <Input
-                id="leave-project-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </>
-          )}
-          {invalid && (
-            <p role="alert">请先解决轨迹或资源版本问题，才能保存工程。</p>
-          )}
-          {error && <p role="alert">{error}</p>}
-        </Modal>
         {inspection && (
           <div
             className="inspection-banner"
@@ -3216,40 +2660,11 @@ function Editor({ initial }: { initial: Bootstrap }) {
           </div>
         )}
 
-        <div
-          className="map-errors"
-          hidden={!error && !sourceErrors.length && !versionChanged}
-        >
+        <div className="map-errors" hidden={!error}>
           {error && (
             <div role="alert" className="map-error">
               {error}
             </div>
-          )}
-          {sourceErrors.map((e) => (
-            <div key={e.entry} role="alert" className="map-error">
-              {e.entry}：{e.error}
-            </div>
-          ))}
-          {versionChanged && (
-            <Alert
-              type="warning"
-              title="项目资源版本已变化；请确认后另存为新项目"
-              action={
-                <Button
-                  onClick={() => {
-                    if (window.confirm("确认使用当前地图、字体与渲染版本？")) {
-                      change((s) => {
-                        s.versions = config.versions;
-                      });
-                      setName(`${name || "项目"}-新版本`);
-                      setVersionChanged(false);
-                    }
-                  }}
-                >
-                  使用当前资源
-                </Button>
-              }
-            />
           )}
         </div>
       </div>

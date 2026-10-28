@@ -421,34 +421,6 @@ it("blocks incoming segment provenance independently of operation inputs", async
   deleteEntry(file, request(file, id, "source"));
   readTransaction(file, verifyArchive);
 });
-it.each(["entry", "version", "presentation", "legacy"])(
-  "rechecks a newly saved %s project dependency before deleting",
-  async (kind) => {
-    const { file, id, store, archive } = await fixture(),
-      original = entry(file, id);
-    store.publish(edit(archive, original));
-    const req = request(file, id);
-    const reference = {
-      entry: { entry_id: id },
-      version: { version_id: original.version_id },
-      presentation: { presentation_id: original.presentation_id },
-      legacy: { entry: original.path, sha256: original.sha256 },
-    }[kind]!;
-    transaction(file, true, (db) =>
-      db
-        .prepare(
-          "INSERT INTO map_projects(name,state,updated_at) VALUES ('my-trip',?,'now')",
-        )
-        .run(JSON.stringify({ tracks: [reference] })),
-    );
-    const before = snapshot(file);
-    expect(previewDeletion(file, { entry_id: id }).dependencies).toMatchObject([
-      { kind: "project", id: "my-trip" },
-    ]);
-    expect(() => deleteEntry(file, req)).toThrow("my-trip");
-    expect(snapshot(file)).toEqual(before);
-  },
-);
 it("rejects stale references, changed archives, pending file intents and reused edit keys", async () => {
   const { file, id, archive, store } = await fixture(),
     req = request(file, id);
@@ -556,10 +528,11 @@ it("explicitly migrates schema 3 preserving history and can roll back its new DD
   const backup = await migrateArchive(file);
   expect(snapshot(backup!)).toEqual(before);
   const after = snapshot(file);
-  expect(after.schema).toBe(6);
+  expect(after.schema).toBe(7);
   for (const [table, contents] of Object.entries(before.tables))
-    if (table !== "archive_meta")
+    if (table !== "archive_meta" && table !== "map_projects")
       expect(after.tables[table], table).toEqual(contents);
+  expect(after.tables.map_projects).toBeUndefined();
   expect(after.tables.track_deletions).toEqual([]);
   deleteEntry(file, request(file, id));
 });

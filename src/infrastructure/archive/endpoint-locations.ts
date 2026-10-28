@@ -12,7 +12,7 @@ import type {
   GeocodeResponse,
 } from "../../shared/endpoint-location.js";
 import type { XmlPort } from "../../services/ports.js";
-import type { ProjectTrack } from "../../shared/project-track.js";
+import type { TrackReference } from "../../shared/track-reference.js";
 import {
   readTransaction,
   transaction,
@@ -176,7 +176,7 @@ export async function fillEndpointLocations(
   >();
   async function processEntry(entry: { id: string; path: string }) {
     checkCancelled(signal);
-    let ref: ProjectTrack;
+    let ref: TrackReference;
     let counted = false;
     try {
       const input = readTransaction(file, (db) => {

@@ -18,12 +18,10 @@ export function DeleteTrackDialog({
   entry,
   onClose,
   onDeleted,
-  onViewProject,
 }: {
   entry: string;
   onClose: () => void;
   onDeleted: () => void;
-  onViewProject: (name: string) => void;
 }) {
   const workspace = useWorkspace();
   const cache = useQueryClient();
@@ -133,29 +131,11 @@ export function DeleteTrackDialog({
               <div>
                 {deletion.dependencies.map((dependency) => (
                   <p key={dependency.kind + dependency.id}>
-                    {dependency.kind === "project"
-                      ? "项目"
-                      : dependency.kind === "trajectory"
-                        ? "轨迹"
-                        : "待恢复操作"}
-                    ：
-                    {dependency.kind === "project"
-                      ? dependency.id
-                      : dependency.kind === "trajectory"
-                        ? dependency.detail
-                        : dependency.id}
-                    。
+                    {dependency.kind === "trajectory" ? "轨迹" : "待恢复操作"}：
+                    {dependency.detail}。
                     {dependency.kind === "pending"
                       ? "请先完成轨迹库恢复。"
                       : "请先解除关联。"}
-                    {dependency.kind === "project" && (
-                      <Button
-                        variant="link"
-                        onClick={() => onViewProject(dependency.id)}
-                      >
-                        查看项目
-                      </Button>
-                    )}
                     {dependency.kind === "trajectory" &&
                       workspace.showTrack && (
                         <Button

@@ -4,8 +4,6 @@ import type { ArchiveRequest } from "../../domain/archive.js";
 import { parentPort } from "node:worker_threads";
 import { ArchiveStore } from "./store.js";
 import { errorInfo } from "../../domain/errors.js";
-import type { Project } from "../../shared/project.js";
-import type { ProjectTrack } from "../../shared/project-track.js";
 const store = new ArchiveStore();
 const writer = new ArchiveWriter();
 const exportsInProgress = new Map<number, AbortController>();
@@ -20,10 +18,7 @@ parentPort!.on(
     request?: ArchiveRequest;
     path: string;
     entries?: string[];
-    expected?: Record<string, string>;
-    references?: ProjectTrack[];
     name?: string;
-    state?: Project;
   }) => {
     if (m.op === "cancel-export") {
       exportsInProgress.get(m.id)?.abort();
@@ -37,12 +32,6 @@ parentPort!.on(
     try {
       let result: unknown;
       switch (m.op) {
-        case "display-kml":
-          result = store.displayKml(m.path, m.references!);
-          break;
-        case "current-reference":
-          result = store.currentReference(m.path, m.name!);
-          break;
         case "bytes":
           result = store.readBytes(m.path, m.name!);
           break;
@@ -64,21 +53,7 @@ parentPort!.on(
           result = store.catalog(m.path);
           break;
         case "selection":
-          result = await store.selection(
-            m.path,
-            m.entries!,
-            m.expected,
-            m.references,
-          );
-          break;
-        case "projects":
-          result = store.projects(m.path);
-          break;
-        case "load":
-          result = store.load(m.path, m.name!);
-          break;
-        case "save":
-          result = store.save(m.path, m.name!, m.state!);
+          result = await store.selection(m.path, m.entries!);
           break;
         case "stats":
           result = store.stats;

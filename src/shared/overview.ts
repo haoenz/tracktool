@@ -42,6 +42,11 @@ export interface OverviewProgress {
   total: number;
   phase: "reading" | "indexing";
 }
+/** Per-entry visibility shared by the browsing layer and the print renderer. */
+export type OverviewVisibility = {
+  all: boolean;
+  exceptions: Record<string, string>;
+};
 export interface OverviewStatus {
   state: "unconfigured" | "building" | "ready" | "error";
   crs: OverviewCrs;

@@ -7,21 +7,21 @@ import {
 } from "../../domain/presentation.js";
 import { geojson } from "../../domain/geometry.js";
 import type { TrackData, TrackSegment } from "../../domain/trackdata.js";
-import type { ProjectTrack } from "../../shared/project-track.js";
+import type { TrackReference } from "../../shared/track-reference.js";
 import type { Presentation, SegmentManifest } from "../../shared/track-edit.js";
 import { presentationDigest, hashJson } from "./identity.js";
 
 export const DISPLAY_VERSION = 1;
 export function resolveTrack(
   db: Database.Database,
-  track: { entry: string; sha256?: string } | ProjectTrack,
-): ProjectTrack {
+  track: { entry: string; sha256?: string } | TrackReference,
+): TrackReference {
   const archive = (
     db.prepare("SELECT archive_id FROM archive_meta").get() as {
       archive_id: string;
     }
   ).archive_id;
-  const explicit = track as ProjectTrack;
+  const explicit = track as TrackReference;
   if (explicit.entry_id) {
     if (explicit.archive_id !== archive)
       throw new AppError("USER_INPUT", "项目引用的轨迹库身份不同，需重新关联");
@@ -82,7 +82,7 @@ export function resolveTrack(
     .get(row.version_id) as { sha256: string };
   return { entry: track.entry, archive_id: archive, ...row, sha256 };
 }
-export function readPresentation(db: Database.Database, ref: ProjectTrack) {
+export function readPresentation(db: Database.Database, ref: TrackReference) {
   const row = db
     .prepare(
       "SELECT v.manifest_status,v.manifest_error,p.settings_json,p.settings_sha256 FROM track_versions v JOIN track_presentations p ON p.version_id=v.id WHERE v.id=? AND v.entry_id=? AND v.sha256=? AND p.id=?",
@@ -110,10 +110,10 @@ export function readPresentation(db: Database.Database, ref: ProjectTrack) {
     locator: JSON.parse(locator_json) as number[],
   }));
   const settings = validatePresentation(
-    ref.override?.settings ?? JSON.parse(row.settings_json),
+    JSON.parse(row.settings_json),
     segments.map((s) => s.segment_id),
   );
-  const sha = ref.override?.sha256 ?? row.settings_sha256;
+  const sha = row.settings_sha256;
   if (presentationDigest(settings) !== sha)
     throw new AppError("USER_INPUT", "展示设置校验失败");
   const current = !!db

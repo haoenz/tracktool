@@ -14,8 +14,6 @@ import {
   PARSER_VERSION,
 } from "../../dist/node/infrastructure/track-index.js";
 import { timestamp } from "../../dist/node/domain/trackdata.js";
-import { MapService } from "../../dist/node/services/map-service.js";
-import { defaultProject } from "../../dist/node/shared/project.js";
 import { ArchiveStore } from "../../dist/node/infrastructure/archive/store.js";
 import type { XmlResult } from "../../dist/node/services/ports.js";
 const first = "Default/2026-10-01 中文.kml";
@@ -204,29 +202,6 @@ it("rebuilds corrupt disposable indices without altering originals, rejects bad/
   ).toEqual(original);
   after.close();
 });
-it("saves/reopens projects, blocks changed content, and rechecks inside the write transaction", async () => {
-  const service = new MapService(client),
-    selected = await client.selection(archive, [first]),
-    state = defaultProject();
-  state.archive = archive;
-  state.schema = 2;
-  state.tracks = selected.tracks.map((t) => ({
-    entry: t.entry,
-    sha256: t.sha256,
-  }));
-  await service.save("中文项目", state);
-  expect(await service.projects(archive)).toEqual(["中文项目"]);
-  expect((await service.load(archive, "中文项目")).state).toEqual(state);
-  const db = new Database(archive);
-  db.prepare(
-    "UPDATE archive_entries SET sha256=(SELECT sha256 FROM archive_entries WHERE path=?) WHERE path=?",
-  ).run("Train/same.kml", first);
-  db.close();
-  expect((await service.project(state)).errors[0]!.error).toContain("变化");
-  await expect(service.save("changed", state)).rejects.toThrow("变化");
-  await expect(client.save(archive, "raced", state)).rejects.toThrow("变化");
-  expect(await client.projects(archive)).toEqual(["中文项目"]);
-});
 it("rejects unknown schemas without upgrading or creating missing files", async () => {
   const db = new Database(archive);
   db.pragma("user_version=99");
@@ -241,12 +216,7 @@ it("rejects unknown schemas without upgrading or creating missing files", async 
 });
 it("cancellation releases the worker and queued requests resume", async () => {
   const controller = new AbortController();
-  const cancelled = client.selection(
-    archive,
-    [first],
-    undefined,
-    controller.signal,
-  );
+  const cancelled = client.selection(archive, [first], controller.signal);
   controller.abort();
   await expect(cancelled).rejects.toThrow("取消");
   expect((await client.catalog(archive)).entries).toHaveLength(5);

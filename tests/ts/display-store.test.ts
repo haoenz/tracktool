@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { DisplayStore } from "../../src/infrastructure/display-store.js";
-import { defaultProject } from "../../src/shared/project.js";
+import { defaultMapState } from "../../src/shared/map-state.js";
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -19,7 +19,7 @@ async function store() {
 
 test("display style round-trips and serializes queued writes", async () => {
   const display = await store();
-  const first = defaultProject().style;
+  const first = defaultMapState().style;
   const second = {
     ...first,
     features: { ...first.features, places: "all" },
@@ -47,7 +47,7 @@ test("corrupt, unknown-schema and invalid style files fall back to defaults", as
 
 test("clear removes the persisted style", async () => {
   const display = await store();
-  await display.save(defaultProject().style);
+  await display.save(defaultMapState().style);
   await display.clear();
   expect(await display.load()).toBeUndefined();
 });

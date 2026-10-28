@@ -70,8 +70,6 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
       (u) => u.endsWith("/api/selection") || u.includes("/geometry?"),
     ),
   ).toBe(false);
-  expect(await page.evaluate(() => window.renderer!.state.tracks)).toEqual([]);
-  await expect(page.getByRole("region", { name: "当前出图工程" })).toBeHidden();
   await expect(
     page.getByRole("button", { name: "隐藏 索引未命中", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
@@ -85,8 +83,6 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
   );
   await expect(page.getByRole("button", { name: "定位轨迹" })).toBeEnabled();
   await page.getByRole("button", { name: "定位轨迹" }).click();
-  await expect(page.getByRole("region", { name: "当前出图工程" })).toBeHidden();
-  expect(await page.evaluate(() => window.renderer!.state.tracks)).toEqual([]);
   const source = await overviewSource(page);
   const selected = await page.evaluate(
     (source) =>
@@ -113,7 +109,6 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
   await expect
     .poll(() => page.evaluate(() => window.renderer!.state.camera))
     .toEqual(camera);
-  await expect(page.getByRole("region", { name: "当前出图工程" })).toBeHidden();
   expect(errors).toEqual([]);
 });
 test("new versions keep visible old tiles until the replacement is ready and retry failed tiles", async ({
@@ -186,15 +181,13 @@ test("style reload restores the overview; export preview excludes it; mobile pan
           ),
       ),
   );
-  await tool(page, "新建出图工程");
-  await expect.poll(() => overviewSource(page)).toBeUndefined();
+  await tool(page, "出图");
+  await expect.poll(() => overviewSource(page)).toBeTruthy();
   await tool(page, "返回浏览");
-  await page
-    .getByRole("button", { name: "放弃修改并返回", exact: true })
-    .click();
   await expect.poll(() => overviewSource(page)).toBeTruthy();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "收起项目菜单" }).click();
+  const collapse = page.getByRole("button", { name: "收起菜单" });
+  if (await collapse.isVisible()) await collapse.click();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -248,16 +241,17 @@ test("cold build, empty library and failures offer usable status and import/retr
       .isVisible()
   )
     await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("3/10");
+  await expect(page.locator(".map-status")).toContainText("3/10");
   state = "error";
   await expect(
     page.getByRole("button", { name: "重试概览", exact: true }),
   ).toBeVisible();
   state = "empty";
+  await page.getByRole("button", { name: "重试概览", exact: true }).click();
   await expect(page.getByText(/轨迹库为空/)).toBeVisible();
   await page.getByRole("button", { name: "导入 KML", exact: true }).click();
   await expect(
-    page.getByText("1 · 选择或拖入 KML", { exact: true }),
+    page.getByRole("button", { name: "选择文件", exact: true }),
   ).toBeVisible();
 });
 
@@ -271,7 +265,7 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
   await page.getByRole("button", { name: "应用", exact: true }).click();
   await expect(page.getByText("无匹配", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "收起项目菜单" }).click();
+  await page.getByRole("button", { name: "收起菜单" }).click();
   await page.evaluate(() =>
     window.renderer!.map.jumpTo({ center: [101, 27], zoom: 8 }),
   );
@@ -441,7 +435,7 @@ test("category colors and alpha match original KML while selection preserves cat
     ),
   ).toEqual(paint.color);
   await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
-  await page.getByRole("button", { name: "收起项目菜单", exact: true }).click();
+  await page.getByRole("button", { name: "收起菜单", exact: true }).click();
   await page.waitForFunction(() => window.renderer!.map.areTilesLoaded());
   await expect(page.locator(".map-status")).toHaveCount(0, { timeout: 10000 });
   await page.screenshot({
@@ -473,10 +467,14 @@ test("only pending work shows a translucent loading status and success notificat
     await expect(page.locator(".map-status")).toContainText(/正在/, {
       timeout: 15000,
     });
-    const background = await page
-      .locator(".map-status")
-      .evaluate((el) => getComputedStyle(el).backgroundColor);
-    expect(background).toMatch(/^rgba\(/);
+    const alpha = await page.locator(".map-status").evaluate((el) => {
+      const context = document.createElement("canvas").getContext("2d")!;
+      context.fillStyle = getComputedStyle(el).backgroundColor;
+      context.fillRect(0, 0, 1, 1);
+      return context.getImageData(0, 0, 1, 1).data[3]!;
+    });
+    expect(alpha).toBeGreaterThan(0);
+    expect(alpha).toBeLessThan(255);
   } finally {
     release();
   }
@@ -642,9 +640,7 @@ test("list toolbar and page jump keep pagination at the desktop panel bottom", a
     panel.getByRole("button", { name: "下一页", exact: true }),
   ).toBeDisabled();
   const panelBounds = await panel.boundingBox();
-  const footerBounds = await panel
-    .getByRole("navigation", { name: "分页" })
-    .boundingBox();
+  const footerBounds = await panel.locator(".track-list-footer").boundingBox();
   expect(panelBounds).not.toBeNull();
   expect(footerBounds).not.toBeNull();
   expect(
@@ -843,7 +839,7 @@ for (const width of [1280, 390]) {
   });
 }
 
-test("selected export loads only selected tracks after choosing PNG", async ({
+test("choosing PNG enters print mode without loading a separate selection", async ({
   page,
 }) => {
   await loaded(page);
@@ -858,19 +854,12 @@ test("selected export loads only selected tracks after choosing PNG", async ({
     .getByRole("button", { name: "导出", exact: true })
     .click();
   await expect(panel).toContainText("已选择 1 条轨迹用于导出");
-  await expect(page.getByRole("region", { name: "当前出图工程" })).toBeHidden();
   await panel.getByRole("combobox", { name: "导出类型", exact: true }).click();
   await page.getByRole("option", { name: "PNG图像", exact: true }).click();
+  await expect(page.getByRole("region", { name: "出图设置" })).toBeVisible();
   await expect(
-    page.getByRole("region", { name: "当前出图工程" }),
-  ).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        window.renderer!.state.tracks.map((track) => track.entry),
-      ),
-    )
-    .toEqual([entry]);
+    page.getByRole("combobox", { name: "导出类型", exact: true }),
+  ).toBeHidden();
 });
 
 test("category filters support multiple choices and clearing", async ({

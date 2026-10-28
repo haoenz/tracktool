@@ -52,19 +52,19 @@ for (const width of [1280, 390]) {
       if (task.output?.data?.deletion_preview) {
         task.output.data.deletion_preview.dependencies = [
           {
-            kind: "project",
-            id: "周末出行",
-            detail: "Project references this track",
+            kind: "trajectory",
+            id: "dependent-entry",
+            detail: "另一条轨迹",
           },
         ];
       }
       await route.fulfill({ response, json: task });
     });
     await open();
-    await expect(dialog).toContainText("周末出行");
+    await expect(dialog).toContainText("另一条轨迹");
     await expect(remove).toBeDisabled();
     await expect(
-      dialog.getByRole("button", { name: "查看项目" }),
+      dialog.getByRole("button", { name: "查看轨迹" }),
     ).toBeVisible();
     await dialog.getByRole("button", { name: "取消" }).click();
     await page.unroute("**/api/work/tasks/*");

@@ -24,7 +24,7 @@ export function databasePath(input: string): string {
 export function connect(
   file: string,
   write = false,
-  allowedSchemas = [2, 3, 4, 5, 6],
+  allowedSchemas = [2, 3, 4, 5, 6, 7],
 ): Database.Database {
   let db: Database.Database;
   try {
@@ -44,7 +44,7 @@ export function connect(
     if (!allowedSchemas.includes(version as number))
       throw new AppError(
         "USER_INPUT",
-        `不支持的数据库 schema ${String(version)}；需要 2、3、4、5 或 6；请先执行 archive migrate`,
+        `不支持的数据库 schema ${String(version)}；需要 2、3、4、5、6 或 7；请先执行 archive migrate`,
       );
     // Concurrent first opens of an older DELETE-mode database can fail journal-mode
     // conversion immediately, before SQLite's normal BEGIN busy timeout applies.
@@ -147,7 +147,7 @@ export function readTransaction<T>(
     timeout: 30000,
   });
   try {
-    if (![2, 3, 4, 5, 6].includes(schemaVersion(db)))
+    if (![2, 3, 4, 5, 6, 7].includes(schemaVersion(db)))
       throw new AppError(
         "USER_INPUT",
         "不支持的轨迹库 schema；请先执行 archive migrate",

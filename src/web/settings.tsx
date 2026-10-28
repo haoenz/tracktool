@@ -9,13 +9,7 @@ import {
   type EntryVisibility,
 } from "./visibility-preference.js";
 
-export default function Settings({
-  children,
-  inProject = false,
-}: {
-  children?: ReactNode;
-  inProject?: boolean;
-}) {
+export default function Settings({ children }: { children?: ReactNode }) {
   const { theme, setTheme } = useTheme();
   const [entryVisibility, setEntryVisibility] =
     useState<EntryVisibility>(readEntryVisibility);
@@ -40,14 +34,7 @@ export default function Settings({
         onBack={section ? () => setSection(undefined) : undefined}
       />
       {section === "map" ? (
-        <>
-          <p className="settings-scope">
-            {inProject
-              ? "当前出图工程 · 保存工程后保留"
-              : "浏览地图 · 自动保存"}
-          </p>
-          {children ?? <p>地图资源就绪后可调整地图设置。</p>}
-        </>
+        <>{children ?? <p>地图资源就绪后可调整地图设置。</p>}</>
       ) : (
         <>
           <div className="settings-appearance">

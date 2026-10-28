@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MAP_CATALOG } from "../../src/shared/map-catalog.js";
-import { defaultProject, type Project } from "../../src/shared/project.js";
+import { defaultMapState, type MapState } from "../../src/shared/map-state.js";
 import type { MapConfig, MapPreset } from "../../src/shared/map.js";
 import {
   canvasCrs,
@@ -76,10 +76,10 @@ const config = (basemaps: MapPreset[] = []): MapConfig => ({
   cacheTime: 0,
 });
 const styleWith = (
-  edit: (state: Project) => void,
+  edit: (state: MapState) => void,
   basemaps: MapPreset[] = [],
 ) => {
-  const state = defaultProject();
+  const state = defaultMapState();
   edit(state);
   return mapStyle(state, config(basemaps)).layers.map((layer) => layer.id);
 };
@@ -135,14 +135,14 @@ describe("map content controls", () => {
       (
         mapStyle(
           {
-            ...defaultProject(),
-            style: { ...defaultProject().style, appearance },
+            ...defaultMapState(),
+            style: { ...defaultMapState().style, appearance },
           },
           config(),
         ).layers[0]!.paint as { "background-color": string }
       )["background-color"];
     expect(background("light")).not.toBe(background("dark"));
-    const state = defaultProject();
+    const state = defaultMapState();
     state.style.appearance = "dark";
     expect(effectiveFeatures(state, config()).water).toBe("all");
   });
@@ -151,7 +151,7 @@ describe("map content controls", () => {
     const gcj = preset("gcj-base", ["roads"]);
     gcj.crs = "gcj02";
     const cfg = config([gcj]);
-    const state = defaultProject();
+    const state = defaultMapState();
     expect(canvasCrs(state, cfg)).toBe("wgs84");
     state.style.basemap = "gcj-base";
     expect(canvasCrs(state, cfg)).toBe("gcj02");
@@ -170,7 +170,7 @@ describe("map content controls", () => {
   });
 
   it("treats image surfaces as part of the picture but keeps lines and labels", () => {
-    const state = defaultProject();
+    const state = defaultMapState();
     state.style.basemap = "raster";
     const cfg = config([preset("raster", ["roads"])]);
     expect(featureReason(state, cfg, "water")).toContain("图片底图");

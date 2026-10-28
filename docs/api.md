@@ -106,18 +106,19 @@ EditRequest 为 `{schema:1,archive_id,target,sources:[],operation}`；target 含
 
 EditApply 只含 `{schema:1,archive_id,preview_id,preview_sha256,request_key}`，路由 ID 必须一致，不接受客户端输出 KML。预览 24 小时有效；提交后的幂等结果不随预览过期。任务错误可带 SOURCE_CHANGED、PREVIEW_EXPIRED、PREVIEW_CHANGED、IDEMPOTENCY_CONFLICT、RESTORE_DEPENDENCY_CHANGED。同步预览读取的过期为 410、冲突为 409，异步应用失败则在任务 error 中报告。复用旧任务下载不表示允许执行已退役操作。
 
-## 项目展示与导出
+## 出图与导出
 
-项目 schema 3 的每条 track 含 `entry/sha256/archive_id/entry_id/version_id/presentation_id`，可加 `override:{settings,sha256}`。`settings` 使用同一 PresentationSchema；服务端验证规范化设置哈希、内容 SHA、库身份及版本所属。schema 1/2 的 path + sha256 仅解析唯一基线，并使用不自动连接的兼容覆盖；无法关联时返回逐条错误，不静默采用当前版本。
+`POST /api/print` 接收 `{document}`。document 为 `tracktool-print` schema 1：`archive`、`title`、`camera`、`frame`、`output`、`style` 和 `tracks:[{entry,sha256}]`。服务端按当前轨迹库解析 tracks（仅按 entry 路径匹配），缺失轨迹跳过；然后用概览矢量瓦片渲染 PNG，不再读取完整工程或完整轨迹。返回 `{job,warnings}`；轨迹缺失、更新或 archive 路径不同时返回提示，始终使用服务当前配置的轨迹库。
 
 | 请求 | 作用 |
 | --- | --- |
-| `POST /api/project/presentation` | `{state,entry_id,settings}` 返回重新求值后的项目；settings 为 null 时恢复固定展示快照，仅改变返回的项目，不写库默认设置 |
-| `POST /api/project/update-track` | `{state,entry_id}` 显式采用该活动行程当前版本/展示，并清除该条项目覆盖 |
-| `POST /api/export-kml` | 项目 state，返回 `{job}`；按固定引用及项目覆盖导出 |
-| `GET /api/jobs/:id/kml` | 下载登记的展示 KML，不接受任意服务器输出路径 |
+| `POST /api/print/check-title` | 校验标题长度、控制字符和字体字形 |
+| `POST /api/print` | 提交出图文档，返回 `{job,warnings}` |
+| `GET /api/jobs/:id` | 查询导出进度和结果摘要 |
+| `GET /api/jobs/:id/png` | 下载 PNG |
+| `GET /api/exports?archive=...` | 列出当前进程内最近的导出结果 |
 
-导出任务为进程内结果，至多保留 5 个，后续提交会清理超过 15 分钟的已完成任务；重启失效。项目 KML 单次最多 200 条、128 MiB。PNG 使用同一份固定项目几何。原字节读取及媒体匹配不应用展示覆盖；生成连接线没有采样时间，不参与媒体匹配。
+导出任务为进程内结果，至多保留 5 个，已完成任务 15 分钟后清理；重启失效。出图直接使用当前地图样式和轨迹库可见性，服务器不保存工程或草稿。展示 KML 仍由轨迹库聚合导出和 CLI 单条导出提供。
 
 旧成果整组整理使用 `EditRequest` 的独立分支：`{schema:1,archive_id,operation:{kind:"legacy_regroup",expected:[完整活动引用],path,category,segments:[{version_id,segment_id}],evidence}}`。最多 100 个成员；必须同分类、全段且不重复、保留各原成员内部顺序，输出使用新 KML 路径。保留忽略及内部连接，文件之间默认断开；不推断来源种类。预览和应用仍走同一组 edit-previews 端点，输出与原成员 superseded 原子提交，恢复使用 restore_group。独立规划和不同交通方式应留在组外。
 

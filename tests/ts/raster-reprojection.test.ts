@@ -5,7 +5,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { reprojectGcjTile } from "../../src/infrastructure/maps/raster-reprojection.js";
 import { MapResources } from "../../src/infrastructure/maps/resources.js";
-import { defaultProject, ProjectSchema } from "../../src/shared/project.js";
+import { defaultMapState, MapStateSchema } from "../../src/shared/map-state.js";
 import {
   canvasCrs,
   effectiveFeatures,
@@ -197,7 +197,7 @@ it("derives the canvas CRS from the basemap and keeps WGS overlays off it", asyn
   const r = await resources(async () => Buffer.alloc(0));
   const config = r.publicConfig();
   config.vectorLayers = { transportation: { class: "String" }, building: {} };
-  const project = defaultProject();
+  const project = defaultMapState();
   expect(canvasCrs(project, config)).toBe("wgs84");
   project.style.basemap = "amap-satellite";
   expect(canvasCrs(project, config)).toBe("gcj02");
@@ -205,7 +205,7 @@ it("derives the canvas CRS from the basemap and keeps WGS overlays off it", asyn
     "openrailwaymap-standard",
     "openinframap-power",
   ].map((id) => ({ id, enabled: true, opacity: 1 }));
-  expect(ProjectSchema.safeParse(project).success).toBe(true);
+  expect(MapStateSchema.safeParse(project).success).toBe(true);
   // WGS84 overlays and vector features cannot join a GCJ-02 canvas.
   expect(reconcileOverlays(project, config)).toHaveLength(2);
   expect(project.style.overlays.every((overlay) => !overlay.enabled)).toBe(
@@ -217,12 +217,12 @@ it("derives the canvas CRS from the basemap and keeps WGS overlays off it", asyn
   project.style.basemap = "esri-satellite";
   expect(canvasCrs(project, config)).toBe("wgs84");
   project.style.overlays = [{ id: "amap-labels", enabled: true, opacity: 1 }];
-  expect(ProjectSchema.safeParse(project).success).toBe(true);
+  expect(MapStateSchema.safeParse(project).success).toBe(true);
   expect(reconcileOverlays(project, config)).toEqual([]);
   // The GCJ annotation now provides road content on the WGS84 canvas.
   expect(featureReason(project, config, "roads")).toContain("高德路网注记");
   project.style.basemap = "osm-standard";
-  expect(ProjectSchema.safeParse(project).success).toBe(false);
+  expect(MapStateSchema.safeParse(project).success).toBe(false);
   expect(
     overlayReason(
       project,

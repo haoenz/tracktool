@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { SCHEMA_3 } from "../../dist/node/infrastructure/archive/schema-v3.js";
+import { SCHEMA_6 } from "../../dist/node/infrastructure/archive/schema-v6.js";
 import {
   mkdtempSync,
   rmSync,
@@ -172,7 +173,7 @@ function settings(file: string, entry: EntrySnapshot): Presentation {
   ) as Presentation;
 }
 it.each([1, 2])(
-  "migrates schema %s without changing raw bytes, entry identity, caches or projects",
+  "migrates schema %s without changing raw bytes, entry identity or caches",
   async (version) => {
     const { file } = legacy(version),
       original = logical(file);
@@ -201,10 +202,11 @@ it.each([1, 2])(
       ),
     );
     expect(
-      rows(file, "SELECT name,state,updated_at,generation FROM map_projects"),
-    ).toEqual([
-      { name: "trip", state: "{}", updated_at: "old-time", generation: 1 },
-    ]);
+      rows(
+        file,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='map_projects'",
+      ),
+    ).toEqual([]);
     expect(
       rows(
         file,
@@ -222,7 +224,7 @@ it.each([1, 2])(
     ).toEqual([{ connected: 0 }, { connected: 0 }]);
     const db = new Database(file);
     expect(verifyArchive(db)).toMatchObject({
-      schema: 6,
+      schema: 7,
       revision: 3,
       storage_revision: 1,
     });
@@ -270,6 +272,50 @@ it("rejects changes made while the migration backup was being prepared", async (
   expect(rows(file, "SELECT state FROM map_projects")).toEqual([
     { state: "changed" },
   ]);
+});
+it("backs up schema 6 projects, rolls back a failed drop, and preserves all track history on upgrade", async () => {
+  const file = path.join(temporary(), "archive.sqlite3");
+  const db = new Database(file);
+  db.exec(SCHEMA_6);
+  db.prepare(
+    "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'schema6')",
+  ).run();
+  db.prepare(
+    "INSERT INTO map_projects(name,state,updated_at) VALUES ('old','{}','2026-01-01')",
+  ).run();
+  db.close();
+  transaction(file, true, (db) =>
+    addEntry(db, "Default/a.kml", raw, "Default"),
+  );
+  const before = logical(file);
+  await expect(
+    migrateArchive(file, (point) => {
+      if (point === "migration-before-commit")
+        throw new Error("injected failure");
+    }),
+  ).rejects.toThrow("injected failure");
+  expect(logical(file)).toEqual(before);
+  const backup = (await migrateArchive(file))!;
+  expect(logical(backup)).toEqual(before);
+  expect(rows(file, "PRAGMA user_version")).toEqual([{ user_version: 7 }]);
+  expect(
+    rows(
+      file,
+      "SELECT name FROM sqlite_master WHERE name='map_projects' OR name LIKE 'project_%'",
+    ),
+  ).toEqual([]);
+  for (const table of [
+    "kml_objects",
+    "archive_entries",
+    "track_versions",
+    "track_presentations",
+    "track_operations",
+    "track_analysis_cache",
+    "track_endpoint_locations",
+  ])
+    expect(rows(file, `SELECT * FROM ${table}`)).toEqual(
+      rows(backup, `SELECT * FROM ${table}`),
+    );
 });
 it("locates mixed geometries without treating untimed lines as hand drawing or changing bytes", () => {
   const bytes = Buffer.from(
@@ -584,9 +630,7 @@ it("verifies full WAL snapshots and restores all logical tables into a new libra
   const holding = new Database(file);
   holding.pragma("journal_mode=WAL");
   holding
-    .prepare(
-      "INSERT INTO map_projects(name,state,updated_at) VALUES ('trip','{}','now')",
-    )
+    .prepare("UPDATE archive_meta SET revision=revision+1 WHERE singleton=1")
     .run();
   const expected = logical(file),
     backup = path.join(directory, "full.sqlite3");

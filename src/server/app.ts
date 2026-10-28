@@ -102,7 +102,7 @@ export async function createApp(options: {
     const fallback = path.join(userDataDir(), "archive.sqlite3");
     return existsSync(fallback) ? userDataDir() : "";
   };
-  overviewRoutes(app, {
+  const overviewStatus = overviewRoutes(app, {
     cache: options.maps?.cache,
     archive: async () =>
       options.maps?.initialArchive ??
@@ -116,6 +116,7 @@ export async function createApp(options: {
     ...options.maps,
     display,
     archiveDefault,
+    overview: overviewStatus,
   });
   await app.register(staticFiles, {
     root: webRoot,

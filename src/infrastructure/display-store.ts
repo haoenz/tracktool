@@ -1,6 +1,6 @@
 import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { ProjectStyleSchema, type ProjectStyle } from "../shared/project.js";
+import { MapStyleSchema, type MapStyle } from "../shared/map-state.js";
 import { AppError } from "../domain/errors.js";
 import { replace } from "./durable-files.js";
 
@@ -16,7 +16,7 @@ export class DisplayStore {
     this.path = path;
   }
 
-  async load(): Promise<ProjectStyle | undefined> {
+  async load(): Promise<MapStyle | undefined> {
     let text: string;
     try {
       text = await readFile(this.path, "utf8");
@@ -35,11 +35,11 @@ export class DisplayStore {
     if (!value || typeof value !== "object" || Array.isArray(value))
       return undefined;
     if ((value as StoredDisplay).schema !== schema) return undefined;
-    const parsed = ProjectStyleSchema.safeParse((value as StoredDisplay).style);
+    const parsed = MapStyleSchema.safeParse((value as StoredDisplay).style);
     return parsed.success ? parsed.data : undefined;
   }
 
-  save(style: ProjectStyle): Promise<void> {
+  save(style: MapStyle): Promise<void> {
     const bytes = Buffer.from(
       JSON.stringify({ schema, style }, null, 2) + "\n",
     );

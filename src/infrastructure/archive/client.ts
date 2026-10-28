@@ -5,8 +5,6 @@ import type { ArchiveRequest, ArchiveResult } from "../../domain/archive.js";
 import { Worker } from "node:worker_threads";
 import type { MapStore } from "../../services/map-service.js";
 import type { Catalog, Selection } from "../../shared/map.js";
-import type { Project } from "../../shared/project.js";
-import type { ProjectTrack } from "../../shared/project-track.js";
 import type { ErrorInfo } from "../../shared/contracts.js";
 import { AppError, checkCancelled } from "../../domain/errors.js";
 type Request = {
@@ -17,10 +15,7 @@ type Request = {
   request?: ArchiveRequest;
   path?: string;
   entries?: string[];
-  expected?: Record<string, string>;
-  references?: ProjectTrack[];
   name?: string;
-  state?: Project;
 };
 type Job = {
   id: number;
@@ -158,32 +153,8 @@ export class ArchiveClient implements MapStore {
       signal,
     );
   }
-  selection(
-    path: string,
-    entries: string[],
-    expected?: Record<string, string>,
-    signal?: AbortSignal,
-    references?: ProjectTrack[],
-  ) {
-    return this.call<Selection>(
-      { op: "selection", path, entries, expected, references },
-      signal,
-    );
-  }
-  projects(path: string) {
-    return this.call<string[]>({ op: "projects", path });
-  }
-  displayKml(path: string, references: ProjectTrack[]) {
-    return this.call<Uint8Array>({ op: "display-kml", path, references });
-  }
-  currentReference(path: string, name: string) {
-    return this.call<ProjectTrack>({ op: "current-reference", path, name });
-  }
-  load(path: string, name: string) {
-    return this.call<unknown>({ op: "load", path, name });
-  }
-  save(path: string, name: string, state: Project) {
-    return this.call<void>({ op: "save", path, name, state });
+  selection(path: string, entries: string[], signal?: AbortSignal) {
+    return this.call<Selection>({ op: "selection", path, entries }, signal);
   }
   stats() {
     return this.call<{ xml: number; indexHits: number; memoryHits: number }>({

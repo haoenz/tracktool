@@ -28,7 +28,7 @@ ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL
 ## 从 Python 切换
 
 1. 先停止正在执行写入的旧 CLI/网页服务。保留 Python 环境作为回退入口。
-2. 对归档执行旧版本 `archive backup`；需要地图项目时，在没有任何写进程的情况下另备份完整归档目录（含 SQLite/WAL）或使用 SQLite 在线备份工具。ZIP 恢复原始轨迹和成员路径，不包含数据库项目。
+2. 对归档执行旧版本 `archive backup`；需要出图文档时，在没有任何写进程的情况下另备份完整归档目录（含 SQLite/WAL）或使用 SQLite 在线备份工具。ZIP 恢复原始轨迹和成员路径，不包含浏览器草稿。
 3. 复制配置文件和重要媒体原件/首次 `_original` 备份；配置可能含密钥，应按个人数据保管。
 4. 先用源码 `pnpm cli --config /备份副本/config.json config show --public`、`pnpm start --config /备份副本/config.json --archive /备份副本/归档 --files-root /备份副本` 验证副本。已有 schema 2 库可直接读取；不因安装改变原始 KML。
 5. 准备切换时，按原安装工具卸载旧 `tracktool` 命令，或调整 PATH。只保留一个默认 `tracktool` / `tracktool-map` 提供者。Linux/macOS 用 `command -v tracktool`，PowerShell 用 `Get-Command tracktool` 核对；执行 `tracktool --version` 应显示 2.0.0-rc.2。
@@ -36,9 +36,11 @@ ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL
 
 配置位置沿用 Linux `$XDG_CONFIG_HOME/tracktool`（默认 `~/.config/tracktool`）、macOS `~/Library/Application Support/tracktool`、Windows `%APPDATA%/tracktool`。网页任务默认存入 `~/.local/state/tracktool/tasks.sqlite3`，上传存入同目录 `uploads/`（macOS 在 Application Support 的 `state/` 子目录，Windows 在 `%LOCALAPPDATA%/tracktool/state`）；可指定 `--state-dir`。浏览地图的显示设置保存在同一状态目录的 `display.json`，需要随任务状态一起备份。不要把状态目录当作永久文件备份。
 
-已有 schema 2/3/4/5 归档不自动升级；新库使用 schema 6，`archive migrate` 先生成完整备份再升级。地图项目 JSON schema 3 固定库和版本；schema 1/2 按 path + SHA 唯一关联基线，不自动跟随最新轨迹。渲染器资源版本不同仍需确认后另存。新版展示 ZIP 只保留可见结果，原件和隐藏历史用 full-backup 保留。PNG 的短期出图会话不跨进程恢复。配置密钥读取优先级仍为环境变量 > CLI 参数 > 文件；网页不回显密钥。
+已有 schema 2/3/4/5/6 归档不自动升级；新库使用 schema 7，`archive migrate` 先生成完整备份再升级。schema 7 只删除已废弃的地图项目表，不修改轨迹、版本、展示设置或缓存。出图文档由浏览器草稿或 JSON 保存，服务器不存工程。新版展示 ZIP 只保留可见结果，原件和隐藏历史用 full-backup 保留。PNG 的短期出图会话不跨进程恢复。配置密钥读取优先级仍为环境变量 > CLI 参数 > 文件；网页不回显密钥。
 
 ## 回退
+
+schema 7 已删除旧地图工程表。需要回到 schema 6 或更早版本时，停止服务，将迁移前自动生成的完整 SQLite 备份恢复到独立目录，再使用相应旧版本打开；不要直接用旧版本打开 schema 7。旧工程只能从升级前备份中找回，浏览器草稿另用 JSON 导出备份。
 
 若已升级 schema 3/4，先用 `archive restore-backup` 将迁移前的 schema 1/2 完整备份恢复到独立目录，再交给旧版本打开；旧程序不能直接使用 schema 3/4 库。
 

@@ -1,7 +1,7 @@
 import { pickEditorPoint } from "./map-tools.js";
 import { filterTracks, expectTrackFilter } from "./map-tools.js";
 import { test, expect, type Page } from "@playwright/test";
-import { tool, batchTrack } from "./map-tools.js";
+import { tool } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 async function call<T>(page: Page, url: string, body?: unknown): Promise<T> {
   return page.evaluate(
@@ -72,27 +72,28 @@ test("list visibility covers all matching pages and stays independent of batch s
     page.locator(".map-track-list").getByRole("checkbox"),
   ).toHaveCount(0);
   await page.getByRole("button", { name: "批量操作", exact: true }).click();
-  await page.getByRole("button", { name: "选择当前页", exact: true }).click();
-  await expect(page.getByRole("region", { name: "批量操作" })).toContainText(
-    "已选 50 条",
-  );
+  await page.getByRole("checkbox", { name: "全选本页", exact: true }).check();
+  await expect(
+    page.getByRole("region", { name: "所选轨迹操作" }),
+  ).toContainText("已选 50 条");
   await page.getByRole("button", { name: "下一页", exact: true }).click();
   await page
     .getByRole("checkbox", { name: "选择 行程50", exact: true })
     .check();
-  await expect(page.getByRole("region", { name: "批量操作" })).toContainText(
-    "已选 51 条",
-  );
+  await expect(
+    page.getByRole("region", { name: "所选轨迹操作" }),
+  ).toContainText("已选 51 条");
   await filterTracks(page, "行程54");
   await expect(
     page.getByRole("checkbox", { name: "选择 行程54", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("region", { name: "批量操作" })).toContainText(
-    "已选 51 条",
-  );
+  await expect(
+    page.getByRole("region", { name: "所选轨迹操作" }),
+  ).toContainText("已选 51 条");
   await page.getByRole("button", { name: "筛选", exact: true }).click();
   await page.getByLabel("起始日期", { exact: true }).fill("2026-10-01");
   await page.getByRole("button", { name: "应用", exact: true }).click();
+  await page.getByRole("button", { name: "批量操作", exact: true }).click();
   const mapRequest = page.waitForRequest(
     (r) =>
       r.url().includes("/api/overview/entries?") &&
@@ -104,20 +105,17 @@ test("list visibility covers all matching pages and stays independent of batch s
   expect(new URL((await mapRequest).url()).searchParams.get("from")).toBe(
     "2026-10-01",
   );
-  await page.getByRole("button", { name: "批量操作", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "显示 行程54", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "批量操作", exact: true }).click();
-  await expect(page.getByRole("region", { name: "批量操作" })).toContainText(
-    "已选 51 条",
-  );
+  await expect(page.getByRole("region", { name: "所选轨迹操作" })).toBeHidden();
   await page
-    .getByRole("button", { name: "选择全部筛选结果（1）", exact: true })
+    .getByRole("button", { name: "勾选全部筛选结果", exact: true })
     .click();
-  await expect(page.getByRole("region", { name: "批量操作" })).toContainText(
-    "已选 1 条",
-  );
+  await expect(
+    page.getByRole("region", { name: "所选轨迹操作" }),
+  ).toContainText("已选 1 条");
   await page.getByRole("button", { name: "批量操作", exact: true }).click();
   await filterTracks(page, "");
   await expect(
@@ -127,7 +125,11 @@ test("list visibility covers all matching pages and stays independent of batch s
     name: "切换当前列表可见性",
     exact: true,
   });
-  // Mixed visibility selects the whole matching list, including later pages.
+  // Toggle the entire matching list, including later pages, independently of selection.
+  await visibility.click();
+  await expect(
+    page.getByRole("button", { name: "显示 行程0", exact: true }),
+  ).toBeVisible();
   await visibility.click();
   await page.getByRole("button", { name: "下一页", exact: true }).click();
   await expect(
@@ -153,9 +155,13 @@ test("list visibility covers all matching pages and stays independent of batch s
   await page.reload();
   await expectTrackFilter(page, "行程54");
   await page.getByRole("button", { name: "批量操作", exact: true }).click();
-  await expect(page.getByRole("region", { name: "批量操作" })).toContainText(
-    "已选 1 条",
-  );
+  await expect(page.getByRole("region", { name: "所选轨迹操作" })).toBeHidden();
+  await page
+    .getByRole("checkbox", { name: "选择 行程54", exact: true })
+    .check();
+  await expect(
+    page.getByRole("region", { name: "所选轨迹操作" }),
+  ).toContainText("已选 1 条");
 });
 
 test("details preserve list scroll; hover and focus do not repaint map highlights; mobile sheet stays usable", async ({
@@ -286,21 +292,8 @@ test("map picks real points, marks a range and preserves draft when switching pa
       .click();
     await page.getByRole("button", { name: "编辑轨迹", exact: true }).click();
     await page.getByRole("button", { name: "删除轨迹点", exact: true }).click();
-    await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
-    const clickPoint = async (lon: number) => {
-      const point = await page.evaluate((lon) => {
-        const r = window.renderer!,
-          p = r.map.project([lon, 30]),
-          box = r.mapElement.getBoundingClientRect();
-        return {
-          x: box.left + (p.x * box.width) / r.mapElement.clientWidth,
-          y: box.top + (p.y * box.height) / r.mapElement.clientHeight,
-        };
-      }, lon);
-      await page.mouse.click(point.x, point.y);
-    };
-    await clickPoint(120.01);
-    await clickPoint(120.02);
+    await pickEditorPoint(page, 1);
+    await pickEditorPoint(page, 2, false);
     await expect
       .poll(() =>
         page.evaluate(
@@ -322,9 +315,9 @@ test("map picks real points, marks a range and preserves draft when switching pa
     await tool(page, "设置");
     await tool(page, "轨迹库");
     await expect(
-      page.getByRole("button", { name: "保存", exact: true }),
+      page.getByRole("button", { name: "删除", exact: true }),
     ).toBeEnabled();
-    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await page.getByRole("button", { name: "删除", exact: true }).click();
     await expect(page.getByRole("region", { name: "轨迹详情" })).toContainText(
       "编辑已保存",
       { timeout: 20000 },
@@ -341,35 +334,7 @@ test("map picks real points, marks a range and preserves draft when switching pa
   }
 });
 
-test("selected tracks enter a new project explicitly and hiding the library never removes project content", async ({
-  page,
-}) => {
-  await page.goto("/map?panel=library");
-  await expect(
-    page.getByRole("complementary", { name: "地图控制面板" }),
-  ).toBeVisible();
-  if (
-    await page
-      .getByRole("button", { name: "轨迹列表", exact: true })
-      .isVisible()
-  )
-    await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
-  await batchTrack(page, "Train/same.kml");
-  await page.getByRole("button", { name: "加入新建工程", exact: true }).click();
-  await expect
-    .poll(() => page.evaluate(() => window.renderer!.state.tracks.length))
-    .toBe(1);
-  await page.getByRole("button", { name: "从轨迹库添加", exact: true }).click();
-  await page
-    .getByRole("button", { name: "切换当前列表可见性", exact: true })
-    .click();
-  await page.getByRole("button", { name: "回到工程", exact: true }).click();
-  await expect
-    .poll(() => page.evaluate(() => window.renderer!.state.tracks.length))
-    .toBe(1);
-});
-
-test("map draft pins its geometry version and refuses a concurrent library change", async ({
+test("an open edit draft pins its geometry version and refuses a concurrent library change", async ({
   page,
 }) => {
   test.setTimeout(60000);
@@ -409,7 +374,7 @@ test("map draft pins its geometry version and refuses a concurrent library chang
       name: "编辑轨迹",
       exact: true,
     });
-    if (await editEntry.isVisible()) await editEntry.click();
+    await editEntry.click();
     await expect.poll(() => geometryRequests.length).toBeGreaterThan(0);
     const params = new URL(geometryRequests[0]!).searchParams;
     expect(params.get("version_id")).toBe(before.entry.version_id);
@@ -517,10 +482,12 @@ for (const width of [1280, 390]) {
     ).toBeVisible();
     await expect(search).toHaveValue("same");
     await sort.click();
-    await page.getByRole("radio", { name: "名称", exact: true }).click();
+    await page
+      .getByRole("radio", { name: "日期从旧到新", exact: true })
+      .click();
     await sort.click();
     await expect(
-      page.getByRole("radio", { name: "名称", exact: true }),
+      page.getByRole("radio", { name: "日期从旧到新", exact: true }),
     ).toBeChecked();
     await page.keyboard.press("Escape");
     await expect(sort).toBeFocused();
