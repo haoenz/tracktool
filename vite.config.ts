@@ -89,6 +89,12 @@ export default defineConfig({
         main: resolve(webRoot, "index.html"),
         render: resolve(webRoot, "render.html"),
       },
+      output: {
+        // MapLibre is the bulk of the client bundle and changes with its own
+        // version, so keep it in a separately cached chunk.
+        manualChunks: (id: string) =>
+          id.includes("node_modules/maplibre-gl") ? "maplibre" : undefined,
+      },
     },
   },
 });

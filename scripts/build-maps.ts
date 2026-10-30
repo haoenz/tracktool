@@ -1,4 +1,5 @@
 import { cp, mkdir, readFile, writeFile, readdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -28,8 +29,13 @@ else {
   const hash = createHash("sha256");
   for (const name of (await readdir("src/drawing")).sort())
     hash.update(await readFile(path.join("src/drawing", name)));
-  hash.update(await readFile("src/web/render.ts", "utf8"));
-  hash.update(await readFile("src/web/map.css", "utf8"));
+  for (const file of [
+    "src/web/render.ts",
+    "src/web/overview-layer.ts",
+    "src/web/analysis-layer.ts",
+    "src/web/map.css",
+  ])
+    if (existsSync(file)) hash.update(await readFile(file, "utf8"));
   assets.renderer_sha256 = hash.digest("hex");
   await writeFile(
     path.join(output, "maps/data/assets.json"),

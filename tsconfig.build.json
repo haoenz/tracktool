@@ -5,6 +5,7 @@
     "rootDir": "src",
     "outDir": "dist/node",
     "declaration": true,
+    "incremental": true,
     "sourceMap": true
   }
 }

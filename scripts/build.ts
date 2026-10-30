@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -28,8 +29,23 @@ for (const args of [
     "tsconfig.build.json",
     "--outDir",
     resolve(output, "node"),
+    ...(output === resolve("dist")
+      ? ["--tsBuildInfoFile", resolve(output, "node", ".tsbuildinfo")]
+      : ["--incremental", "false"]),
     "--noEmitOnError",
   ],
+  // Vite only strips types; type-check the browser source before shipping it.
+  // Minimal development roots without a web config are skipped.
+  ...(existsSync("tsconfig.web.json")
+    ? [
+        [
+          "node_modules/typescript/bin/tsc",
+          "-p",
+          "tsconfig.web.json",
+          "--noEmit",
+        ],
+      ]
+    : []),
   [
     "node_modules/vite/bin/vite.js",
     "build",
