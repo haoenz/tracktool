@@ -137,6 +137,8 @@ export default function MapPage() {
   return <Editor initial={bootstrap.data} />;
 }
 function Editor({ initial }: { initial: Bootstrap }) {
+  const [starting, setStarting] = useState(true);
+  const finishStartup = useCallback(() => setStarting(false), []);
   const { appearance } = useTheme();
   const [libraryVisibility, setLibraryVisibility] = useEntryVisibility(
     `tracktool:${initial.initialArchive}:visibility`,
@@ -1214,7 +1216,12 @@ function Editor({ initial }: { initial: Bootstrap }) {
         refresh: refreshCatalog,
       }}
     >
-      <div className="map-app" data-sheet={sheet}>
+      <div
+        className="map-app"
+        data-sheet={sheet}
+        inert={starting}
+        aria-hidden={starting || undefined}
+      >
         <header className="map-header">
           <button
             className="app-icon"
@@ -1874,6 +1881,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
             onOverviewError={handleOverviewError}
             onCamera={handleCamera}
             onError={setError}
+            onInitialized={finishStartup}
           />
         </div>
         <Modal
@@ -2039,6 +2047,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
           )}
         </div>
       </div>
+      {starting && <StartupScreen />}
     </WorkspaceContext.Provider>
   );
 }

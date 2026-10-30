@@ -1,6 +1,10 @@
 .startup-screen {
   position: fixed;
   inset: 0;
+  z-index: 100;
+  max-width: none;
+  margin: 0;
+  padding: 0;
   display: grid;
   place-items: center;
   background: var(--background);

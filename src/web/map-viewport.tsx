@@ -47,6 +47,7 @@ type Props = {
   onOverviewError?: (message: string) => void;
   onCamera: (camera: MapState["camera"]) => void;
   onError: (message: string) => void;
+  onInitialized?: () => void;
   onPointPick?: (position: [number, number]) => void;
   exposeRenderer?: boolean;
   highlightSegment?: string;
@@ -294,6 +295,13 @@ export const MapViewport = memo(
       const map = create(latest.current.state);
       current.current = map;
       if (latest.current.exposeRenderer !== false) window.renderer = map;
+      const initialized = () => {
+        if (!map.destroyed && current.current === map)
+          latest.current.onInitialized?.();
+      };
+      // The first paint covers the fixed export frame with the full viewport.
+      // Waiting for idle here would block the workspace on slow tile requests.
+      map.map.once("render", initialized);
       layout();
       void map
         .ready(undefined, false)
@@ -304,7 +312,10 @@ export const MapViewport = memo(
           }
         })
         .catch((e: unknown) => {
-          if (!map.destroyed) setResourceError("地图加载未完成，请重试");
+          if (!map.destroyed) {
+            setResourceError("地图加载未完成，请重试");
+            initialized();
+          }
           console.warn("[地图初始化]", e);
         });
       const online = () => {
@@ -321,6 +332,7 @@ export const MapViewport = memo(
       const panel = document.getElementById("map-panel");
       if (panel) observer.observe(panel);
       return () => {
+        map.map.off("render", initialized);
         window.removeEventListener("online", online);
         observer.disconnect();
         cancel();
