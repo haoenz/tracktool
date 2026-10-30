@@ -14,7 +14,6 @@ import { MapContentSettings } from "./map-content-settings.js";
 import { StartupScreen } from "./components/startup-screen.js";
 import { PanelHeader } from "./components/panel-header.js";
 import {
-  Fragment,
   lazy,
   Suspense,
   useEffect,
@@ -28,12 +27,10 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
   Button,
-  Checkbox,
   Input,
   Select,
   Spin,
   Modal,
-  Pagination,
 } from "./components/controls.js";
 import { Link, useSearchParams } from "react-router-dom";
 import { WorkspaceContext, type Panel, type EditMap } from "./workspace.js";
@@ -76,8 +73,7 @@ import {
 } from "./print-session.js";
 import { useSessionState } from "./session-state.js";
 import { basemapLabel } from "./basemap-catalog.js";
-import { TrackListRow } from "./track-list-row.js";
-import { LibraryToolbar } from "./library-toolbar.js";
+import { LibraryList } from "./library-list.js";
 import { TrackDetailToolbar } from "./track-detail-toolbar.js";
 import { TrackDetailLinks } from "./track-detail-links.js";
 import { DetailPanel } from "./detail-panel.js";
@@ -95,6 +91,7 @@ const panels: Record<Panel, string> = {
   settings: "设置",
 };
 const emptyTracks: SelectedTrack[] = [];
+const emptyEntries: OverviewEntry[] = [];
 type Bootstrap = {
   config: MapConfig;
   state: MapState;
@@ -786,9 +783,13 @@ function Editor({ initial }: { initial: Bootstrap }) {
       if (request === batchRequest.current) setBatchSelecting(false);
     }
   }
-  const visible = overview.list.data?.entries ?? [];
+  const visible = overview.list.data?.entries ?? emptyEntries;
+  const hasVisibilityExceptions = useMemo(
+    () => Object.keys(browseVisibility.exceptions).length > 0,
+    [browseVisibility.exceptions],
+  );
   const needsVisibilityRows =
-    Object.keys(browseVisibility.exceptions).length > 0 &&
+    hasVisibilityExceptions &&
     (overview.list.data?.total ?? 0) > visible.length;
   const visibilityRows = useQuery({
     queryKey: [
@@ -809,34 +810,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
   const visibilityPending =
     overview.list.isFetching ||
     (needsVisibilityRows && visibilityRows.isPending);
-  const visibilityEntries = needsVisibilityRows ? visibilityRows.data : visible;
-  const visibleCount =
-    visibilityEntries?.filter(
-      (e) =>
-        browseVisibility.all !==
-        Object.hasOwn(browseVisibility.exceptions, e.id),
-    ).length ?? 0;
-  const listVisibility =
-    visibilityPending || (needsVisibilityRows && visibilityRows.isError)
-      ? undefined
-      : !needsVisibilityRows && !Object.keys(browseVisibility.exceptions).length
-        ? browseVisibility.all
-          ? "all"
-          : "none"
-        : !visibleCount
-          ? "none"
-          : visibleCount === visibilityEntries?.length
-            ? "all"
-            : "mixed";
-  const visibilityLabel =
-    listVisibility === "all"
-      ? "全部显示"
-      : listVisibility === "none"
-        ? "全部隐藏"
-        : listVisibility === "mixed"
-          ? "部分显示"
-          : "正在确认显示状态";
-  const batchCount = Object.keys(batch).length;
   const batchEntries =
     (overview.list.data?.total ?? 0) > visible.length
       ? visibilityRows.data
@@ -845,15 +818,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
     overview.list.isFetching ||
     ((overview.list.data?.total ?? 0) > visible.length &&
       visibilityRows.isPending);
-  const selectedInFilter =
-    batchEntries?.filter((e) => Object.hasOwn(batch, e.id)).length ?? 0;
-  const batchAllSelected =
-    !!batchEntries?.length && selectedInFilter === batchEntries.length;
-  const batchMixed = selectedInFilter > 0 && !batchAllSelected;
-  const selectedOnPage = visible.filter((e) =>
-    Object.hasOwn(batch, e.id),
-  ).length;
-  const pageSelected = visible.length > 0 && selectedOnPage === visible.length;
   // Map events fire after this render. Keep stable wrappers so MapViewport can
   // bail out of panel-driven re-renders while still seeing the latest state.
   const viewportHandlers = useRef<{
@@ -1544,184 +1508,92 @@ function Editor({ initial }: { initial: Bootstrap }) {
                     <PanelLoading>正在读取轨迹库…</PanelLoading>
                   ))}
                 {catalog && (
-                  <>
-                    <LibraryToolbar
-                      batchMode={batchMode}
-                      batchAllSelected={batchAllSelected}
-                      batchMixed={batchMixed}
-                      batchBusy={batchSelecting || batchPending}
-                      batchDisabled={
+                  <LibraryList
+                    toolbar={{
+                      batchMode,
+                      batchBusy: batchSelecting || batchPending,
+                      batchDisabled:
                         batchSelecting ||
                         batchPending ||
                         !overview.list.data?.total ||
-                        !batchEntries
-                      }
-                      onSelectAll={() =>
-                        void selectAllMatching(!batchAllSelected)
-                      }
-                      visibility={listVisibility}
-                      visibilityBusy={visibilityBusy || visibilityPending}
-                      visibilityDisabled={
+                        !batchEntries,
+                      onSelectAll: (checked) => void selectAllMatching(checked),
+                      visibilityBusy: visibilityBusy || visibilityPending,
+                      visibilityDisabled:
                         visibilityBusy ||
                         visibilityPending ||
-                        !overview.list.data?.total
-                      }
-                      visibilityLabel={visibilityLabel}
-                      onToggleVisibility={() => void toggleListVisibility()}
-                      filtersApplied={filtersApplied}
-                      onOpenFilters={() =>
+                        !overview.list.data?.total,
+                      onToggleVisibility: () => void toggleListVisibility(),
+                      filtersApplied,
+                      onOpenFilters: () =>
                         setFilterDraft({
                           kind,
                           from: dates.from,
                           to: dates.to,
                           candidates: overview.candidates,
-                        })
-                      }
-                      filter={filter}
-                      onFilter={setFilter}
-                      sort={dates.sort}
-                      onSort={(sort: string) => setDates({ ...dates, sort })}
-                      onToggleBatch={() => {
+                        }),
+                      filter,
+                      onFilter: setFilter,
+                      sort: dates.sort,
+                      onSort: (sort: string) => setDates({ ...dates, sort }),
+                      onToggleBatch: () => {
                         if (batchMode) clearBatch(true);
                         else setBatchMode(true);
-                      }}
-                    />
-                    <div className="map-track-list" aria-busy={listLoading}>
-                      {listLoading ? (
-                        <PanelLoading>正在读取轨迹列表…</PanelLoading>
-                      ) : overview.list.data?.total === 0 ? (
-                        <div className="track-list-status" role="status">
-                          无匹配
-                        </div>
-                      ) : null}
-                      {!listLoading &&
-                        visible.map((e, index) => (
-                          <Fragment key={e.id}>
-                            {(index === 0 ||
-                              e.date.slice(0, 7) !==
-                                visible[index - 1]!.date.slice(0, 7)) && (
-                              <h4 className="month-heading">
-                                {e.date.slice(0, 7) || "日期未知"}
-                              </h4>
-                            )}
-                            <TrackListRow
-                              entry={e}
-                              selected={overview.id === e.id}
-                              visible={
-                                browseVisibility.all !==
-                                Object.hasOwn(browseVisibility.exceptions, e.id)
-                              }
-                              batchMode={batchMode}
-                              batchSelecting={batchSelecting}
-                              checked={Object.hasOwn(batch, e.id)}
-                              onOpen={() => {
-                                if (
-                                  e.id !== overview.id &&
-                                  hasDraft &&
-                                  !window.confirm(
-                                    "当前轨迹有编辑草稿，切换轨迹将放弃草稿。是否继续？",
-                                  )
-                                )
-                                  return;
-                                overview.setId(e.id);
-                                setDetailOpen(true);
-                                setEditing(false);
-                              }}
-                              onToggleBatch={() => toggleBatchEntry(e)}
-                              onToggleVisible={() =>
-                                toggleBrowse(
-                                  e.id,
-                                  e.entry,
-                                  !(
-                                    browseVisibility.all !==
-                                    Object.hasOwn(
-                                      browseVisibility.exceptions,
-                                      e.id,
-                                    )
-                                  ),
-                                )
-                              }
-                            />
-                          </Fragment>
-                        ))}
-                    </div>
-                    {overview.list.error && !overview.list.data && (
-                      <div role="alert">
-                        {overview.list.error.message}
-                        <Button onClick={() => void overview.list.refetch()}>
-                          重试列表
-                        </Button>
-                      </div>
-                    )}
-                    {(batchMode || (overview.list.data?.total ?? 0) > 50) && (
-                      <div className="track-list-footer">
-                        {batchMode && (
-                          <div
-                            className="page-selection"
-                            role="region"
-                            aria-label="多选范围"
-                          >
-                            <Checkbox
-                              checked={
-                                pageSelected
-                                  ? true
-                                  : selectedOnPage > 0
-                                    ? "indeterminate"
-                                    : false
-                              }
-                              disabled={
-                                !visible.length ||
-                                overview.list.isFetching ||
-                                batchSelecting
-                              }
-                              onCheckedChange={(checked) => {
-                                setBatch((old) => {
-                                  const next = { ...old };
-                                  for (const e of visible) {
-                                    if (checked) next[e.id] = e.entry;
-                                    else delete next[e.id];
-                                  }
-                                  return next;
-                                });
-                              }}
-                            >
-                              全选本页
-                            </Checkbox>
-                          </div>
-                        )}
-                        <Pagination
-                          current={Math.floor(overview.offset / 50) + 1}
-                          pageSize={50}
-                          total={overview.list.data?.total ?? 0}
-                          onChange={(page) =>
-                            overview.setOffset((page - 1) * 50)
-                          }
-                          showQuickJumper
-                          hideOnSinglePage
-                        />
-                      </div>
-                    )}
-                    {batchMode && batchCount > 0 && (
-                      <div
-                        className="batch-action-bar"
-                        role="region"
-                        aria-label="所选轨迹操作"
-                      >
-                        <span aria-live="polite">已选 {batchCount} 条</span>
-                        <Button
-                          variant="default"
-                          disabled={busy || batchSelecting}
-                          onClick={() => {
-                            setExportEntries(Object.values(batch));
-                            openPanel("export");
-                            setExportKind(undefined);
-                          }}
-                        >
-                          导出
-                        </Button>
-                      </div>
-                    )}
-                  </>
+                      },
+                    }}
+                    entries={visible}
+                    matchingEntries={visibilityRows.data}
+                    visibilityPending={visibilityPending}
+                    visibilityError={visibilityRows.isError}
+                    selectedId={overview.id}
+                    visibility={browseVisibility}
+                    batch={batch}
+                    batchSelecting={batchSelecting}
+                    loading={listLoading}
+                    fetching={overview.list.isFetching}
+                    error={
+                      !overview.list.data
+                        ? overview.list.error?.message
+                        : undefined
+                    }
+                    onRetry={() => void overview.list.refetch()}
+                    total={overview.list.data?.total}
+                    offset={overview.offset}
+                    onOffset={overview.setOffset}
+                    onOpen={(entry) => {
+                      if (
+                        entry.id !== overview.id &&
+                        hasDraft &&
+                        !window.confirm(
+                          "当前轨迹有编辑草稿，切换轨迹将放弃草稿。是否继续？",
+                        )
+                      )
+                        return;
+                      overview.setId(entry.id);
+                      setDetailOpen(true);
+                      setEditing(false);
+                    }}
+                    onToggleBatch={toggleBatchEntry}
+                    onToggleVisible={(entry, checked) =>
+                      toggleBrowse(entry.id, entry.entry, checked)
+                    }
+                    onSelectPage={(checked) =>
+                      setBatch((old) => {
+                        const next = { ...old };
+                        for (const entry of visible) {
+                          if (checked) next[entry.id] = entry.entry;
+                          else delete next[entry.id];
+                        }
+                        return next;
+                      })
+                    }
+                    exportDisabled={busy || batchSelecting}
+                    onExport={() => {
+                      setExportEntries(Object.values(batch));
+                      openPanel("export");
+                      setExportKind(undefined);
+                    }}
+                  />
                 )}
               </div>
             </section>
