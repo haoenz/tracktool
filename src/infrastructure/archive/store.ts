@@ -28,6 +28,7 @@ import {
   schemaVersion,
   databasePath,
   transaction,
+  independentTransaction,
   rawObject,
   snapshot,
 } from "./database.js";
@@ -134,7 +135,7 @@ export class ArchiveStore {
       error = e.message;
     }
     // Separate WAL writer: the caller's snapshot can survive a concurrent deletion.
-    transaction(file, true, (writer) => {
+    independentTransaction(file, true, (writer) => {
       if (
         !writer.prepare("SELECT 1 FROM kml_objects WHERE sha256=?").get(digest)
       )

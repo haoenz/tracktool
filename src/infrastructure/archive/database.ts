@@ -161,6 +161,14 @@ export function transaction<T>(
       nesting--;
     }
   }
+  return independentTransaction(file, write, run);
+}
+/** Derived index writes must not upgrade a reader's older WAL snapshot. */
+export function independentTransaction<T>(
+  file: string,
+  write: boolean,
+  run: (db: Database.Database) => T,
+): T {
   const db = connect(file, write);
   try {
     const result = run(db);

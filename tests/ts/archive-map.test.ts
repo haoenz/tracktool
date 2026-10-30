@@ -167,11 +167,16 @@ it("reads the exact complete paths, uses persisted/memory indices and rejects pa
   db.close();
 });
 it("reuses one database connection across archive reads", async () => {
+  // Cold index writes use independent connections so a concurrent writer
+  // cannot force an old read snapshot to upgrade. Warm reads still reuse one.
+  await client.selection(archive, [first, "Train/same.kml"]);
+  await client.close();
+  client = new ArchiveClient();
   const before = (await client.stats()).opens;
   await client.catalog(directory);
   await client.selection(archive, [first]);
   await client.selection(archive, ["Train/same.kml"]);
-  expect((await client.stats()).opens - before).toBeLessThanOrEqual(1);
+  expect((await client.stats()).opens - before).toBe(1);
 });
 it("rebuilds corrupt disposable indices without altering originals, rejects bad/polar members and preserves segments/dateline", async () => {
   const db = new Database(archive);
