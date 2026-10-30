@@ -16,6 +16,7 @@ type Request = {
   path?: string;
   entries?: string[];
   name?: string;
+  sha256?: string;
 };
 type Job = {
   id: number;
@@ -147,6 +148,9 @@ export class ArchiveClient implements MapStore {
   readBytes(path: string, name: string, signal?: AbortSignal) {
     return this.call<Uint8Array>({ op: "bytes", path, name }, signal);
   }
+  readObject(path: string, sha256: string, signal?: AbortSignal) {
+    return this.call<Uint8Array>({ op: "raw", path, sha256 }, signal);
+  }
   readTrackData(path: string, name: string, signal?: AbortSignal) {
     return this.call<{ data: TrackData; sha256: string }>(
       { op: "track-data", path, name },
@@ -157,9 +161,13 @@ export class ArchiveClient implements MapStore {
     return this.call<Selection>({ op: "selection", path, entries }, signal);
   }
   stats() {
-    return this.call<{ xml: number; indexHits: number; memoryHits: number }>({
-      op: "stats",
-    });
+    return this.call<{
+      xml: number;
+      indexHits: number;
+      memoryHits: number;
+      parses: number;
+      opens: number;
+    }>({ op: "stats" });
   }
   async close() {
     this.closed = true;

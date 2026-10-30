@@ -21,12 +21,79 @@ export function databasePath(input: string): string {
       ? p
       : path.join(path.dirname(p), "archive.sqlite3");
 }
+/** Connection counters; the archive worker reuses one session per file. */
+export const databaseStats = { opens: 0 };
+type Shared = { file: string; db: Database.Database };
+let shared: Shared | undefined;
+let sharedEnabled = false;
+/** The archive worker handles one message at a time, so it can keep a single
+ * connection open for the whole process instead of re-opening per operation. */
+export function enableSharedConnections() {
+  sharedEnabled = true;
+}
+export function resetSharedConnections() {
+  if (!shared) return;
+  try {
+    if (shared.db.inTransaction) shared.db.exec("ROLLBACK");
+  } catch {
+    /* Closing below reports the real failure. */
+  }
+  shared.db.close();
+  shared = undefined;
+}
+function sharedDatabase(file: string, write: boolean): Database.Database {
+  if (shared && shared.file !== file) resetSharedConnections();
+  if (!shared) {
+    const db = connect(file, write);
+    // connect() opens an implicit transaction; the session owns the boundaries.
+    if (db.inTransaction) db.exec("COMMIT");
+    shared = { file, db };
+  }
+  return shared.db;
+}
+let nesting = 0;
+type Scope = { db: Database.Database; nested: boolean; name: string };
+function beginScope(file: string, write: boolean): Scope {
+  const db = sharedDatabase(file, write),
+    nested = db.inTransaction,
+    name = `tracktool_scope_${++nesting}`;
+  if (nested) db.exec(`SAVEPOINT ${name}`);
+  else db.exec(write ? "BEGIN IMMEDIATE" : "BEGIN");
+  return { db, nested, name };
+}
+function commitScope({ db, nested, name }: Scope) {
+  db.exec(nested ? `RELEASE ${name}` : "COMMIT");
+}
+function rollbackScope({ db, nested, name }: Scope) {
+  if (nested) db.exec(`ROLLBACK TO ${name}; RELEASE ${name}`);
+  else if (db.inTransaction) db.exec("ROLLBACK");
+}
+/** One connection can be re-entered: an index write runs inside the read
+ * snapshot that triggered it, so inner calls become savepoints. */
+async function sharedScope<T>(
+  file: string,
+  write: boolean,
+  run: (db: Database.Database) => T | Promise<T>,
+): Promise<T> {
+  const scope = beginScope(file, write);
+  try {
+    const result = await run(scope.db);
+    commitScope(scope);
+    return result;
+  } catch (error) {
+    rollbackScope(scope);
+    throw error;
+  } finally {
+    nesting--;
+  }
+}
 export function connect(
   file: string,
   write = false,
   allowedSchemas = [2, 3, 4, 5, 6, 7, 8],
 ): Database.Database {
   let db: Database.Database;
+  databaseStats.opens++;
   try {
     db = new Database(file, { fileMustExist: true, timeout: 30_000 });
   } catch (cause) {
@@ -81,6 +148,19 @@ export function transaction<T>(
   write: boolean,
   run: (db: Database.Database) => T,
 ): T {
+  if (sharedEnabled) {
+    const scope = beginScope(file, write);
+    try {
+      const result = run(scope.db);
+      commitScope(scope);
+      return result;
+    } catch (error) {
+      rollbackScope(scope);
+      throw error;
+    } finally {
+      nesting--;
+    }
+  }
   const db = connect(file, write);
   try {
     const result = run(db);
@@ -123,6 +203,7 @@ export async function snapshot<T>(
   file: string,
   run: (db: Database.Database) => Promise<T>,
 ): Promise<T> {
+  if (sharedEnabled) return sharedScope(file, false, run);
   const db = connect(file);
   try {
     const result = await run(db);

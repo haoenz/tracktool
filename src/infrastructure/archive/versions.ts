@@ -1,10 +1,15 @@
-import { analyzeOnIngest } from "./analysis-ingest.js";
+import {
+  analyzeDocument,
+  analyzeOnIngest,
+  needsAnalysis,
+} from "./analysis-ingest.js";
 import type Database from "better-sqlite3";
 import { deflateSync } from "node:zlib";
 import { randomUUID } from "node:crypto";
 import { AppError } from "../../domain/errors.js";
 import { memberName, type Category } from "../../domain/archive.js";
 import { MAX_KML_BYTES } from "../../domain/trackdata.js";
+import type { TrackAnalysis } from "../../shared/track-analysis.js";
 import {
   validatePresentation,
   type EntrySnapshot,
@@ -15,8 +20,11 @@ import {
   type VersionRef,
 } from "../../domain/track-version.js";
 import { digest } from "../durable-files.js";
-import { readManifest } from "../xml/manifest.js";
-import { importedPresentation } from "../xml/display.js";
+import { buildManifest, unavailableManifest } from "../xml/manifest.js";
+import { presentationFromDocument } from "../xml/display.js";
+import { withDocument } from "../xml/document.js";
+import { readTrackData } from "../xml/trackdata.js";
+import { writeAnalysis } from "./analysis-cache.js";
 import {
   canonical,
   hashJson,
@@ -167,6 +175,7 @@ export function insertVersion(
   manifest: Manifest,
   origin: "migration_baseline" | "imported" | "legacy_result" | "derived",
   versionNo: number,
+  analysis?: TrackAnalysis,
 ): void {
   if (raw.length > MAX_KML_BYTES)
     throw new AppError("USER_INPUT", "KML 超过 128 MiB 限制");
@@ -175,7 +184,8 @@ export function insertVersion(
     raw.length,
     deflateSync(raw),
   );
-  if (manifest.status === "ready") analyzeOnIngest(db, entry.sha256, raw);
+  if (analysis) writeAnalysis(db, entry.sha256, analysis);
+  else if (manifest.status === "ready") analyzeOnIngest(db, entry.sha256, raw);
   db.prepare("INSERT INTO track_versions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").run(
     entry.version_id,
     entry.entry_id,
@@ -330,6 +340,66 @@ function requireArchive(db: Database.Database, id: string): void {
   if (archiveId(db) !== id) throw new AppError("USER_INPUT", "轨迹库已切换");
   if (!db.inTransaction) throw new Error("版本写入需要事务");
 }
+/** One document parse supplies the manifest, presentation and statistics. */
+function parseVersionOutput(
+  db: Database.Database,
+  output: VersionOutput,
+  version: string,
+  sha256: string,
+): {
+  manifest: Manifest;
+  presentation?: Presentation;
+  analysis?: TrackAnalysis;
+} {
+  // A failure before the manifest exists means the XML itself is unusable;
+  // later failures are validation errors and must abort the publish.
+  const state = { built: false };
+  try {
+    return withDocument(output.raw, (doc) => {
+      const data = readTrackData(doc);
+      const manifest = buildManifest(
+        doc,
+        (n) => stableId(`${version}:segment:${n}`),
+        data,
+      );
+      state.built = true;
+      if (manifest.status === "ready") {
+        if (output.segment_ids) {
+          if (
+            output.segment_ids.length !== manifest.segments.length ||
+            new Set(output.segment_ids).size !== output.segment_ids.length ||
+            output.segment_ids.some((id) => !id || id.length > 200)
+          )
+            throw new AppError("USER_INPUT", "片段标识必须与完整输出清单一致");
+          manifest.segments.forEach((segment, index) => {
+            segment.segment_id = output.segment_ids![index]!;
+          });
+        }
+        for (const [ordinal, kind] of Object.entries(
+          output.source_kinds ?? {},
+        )) {
+          const segment = manifest.segments[Number(ordinal)];
+          if (!segment) throw new AppError("USER_INPUT", "未知的来源片段");
+          segment.source_kind = kind;
+        }
+      }
+      return {
+        manifest,
+        presentation:
+          manifest.status === "ready"
+            ? presentationFromDocument(doc, manifest.segments)
+            : undefined,
+        analysis:
+          manifest.status === "ready" && needsAnalysis(db, sha256)
+            ? analyzeDocument(doc, data)
+            : undefined,
+      };
+    });
+  } catch (error) {
+    if (state.built) throw error;
+    return { manifest: unavailableManifest(error) };
+  }
+}
 /** Called inside one reserved transaction. All outputs and pointer changes commit together. */
 export function publishVersions(
   db: Database.Database,
@@ -405,39 +475,18 @@ export function publishVersions(
     };
     if (output.kind === "version" && !entry.path.toLowerCase().endsWith(".kml"))
       throw new AppError("USER_INPUT", "轨迹库条目必须是 KML");
-    const manifest =
+    const parsed =
       output.kind === "version"
-        ? readManifest(output.raw, (n) => stableId(`${version}:segment:${n}`))
-        : null;
-    if (manifest && output.kind === "version") {
-      if (output.segment_ids) {
-        if (
-          output.segment_ids.length !== manifest.segments.length ||
-          new Set(output.segment_ids).size !== output.segment_ids.length ||
-          output.segment_ids.some((id) => !id || id.length > 200)
-        )
-          throw new AppError("USER_INPUT", "片段标识必须与完整输出清单一致");
-        manifest.segments.forEach((segment, index) => {
-          segment.segment_id = output.segment_ids![index]!;
-        });
-      }
-      for (const [ordinal, kind] of Object.entries(output.source_kinds ?? {})) {
-        const segment = manifest.segments[Number(ordinal)];
-        if (!segment) throw new AppError("USER_INPUT", "未知的来源片段");
-        segment.source_kind = kind;
-      }
-      if (
-        manifest.status !== "ready" &&
-        output.origin !== "imported" &&
-        request.kind !== "import" &&
-        request.kind !== "restore"
-      )
-        throw new AppError(
-          "USER_INPUT",
-          `无法发布编辑后的 KML：${manifest.error}`,
-        );
-    }
-    return { output, old: old ?? null, entry, manifest };
+        ? parseVersionOutput(db, output, version, entry.sha256)
+        : undefined;
+    return {
+      output,
+      old: old ?? null,
+      entry,
+      manifest: parsed?.manifest ?? null,
+      presentation: parsed?.presentation,
+      analysis: parsed?.analysis,
+    };
   });
   if (new Set(prepared.map((p) => p.entry.entry_id)).size !== prepared.length)
     throw new AppError("USER_INPUT", "输出行程重复");
@@ -475,7 +524,14 @@ export function publishVersions(
       (i) => i.version_id,
     ),
   );
-  for (const { output, old, entry, manifest } of prepared) {
+  for (const {
+    output,
+    old,
+    entry,
+    manifest,
+    presentation,
+    analysis,
+  } of prepared) {
     if (output.kind === "version") {
       const number = (
         db
@@ -493,6 +549,7 @@ export function publishVersions(
         manifest!,
         output.origin ?? "derived",
         number,
+        analysis,
       );
       for (const source of output.sources ?? []) {
         const segment = manifest!.segments[source.ordinal];
@@ -522,7 +579,7 @@ export function publishVersions(
     if (output.kind !== "state") {
       const imported =
         output.kind === "version" && manifest!.status === "ready"
-          ? importedPresentation(output.raw, manifest!.segments)
+          ? presentation
           : undefined;
       const settings = output.settings ??
         imported ?? {

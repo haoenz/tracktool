@@ -26,12 +26,20 @@ export function requireVersioned(db: Database.Database) {
       "段编辑需要 schema 4；请先备份并显式执行 archive migrate",
     );
 }
-export function versionInput(
+export type VersionInputMeta = {
+  version_id: string;
+  sha256: string;
+  segments: SegmentManifest[];
+  settings: SegmentInput["settings"];
+};
+/** Everything a caller needs except the original bytes, which the archive
+ * worker can inflate off the HTTP event loop. */
+export function versionInputMeta(
   db: Database.Database,
   entryId: string,
   versionId: string,
   presentationId: string,
-): SegmentInput {
+): VersionInputMeta {
   requireVersioned(db);
   const row = db
     .prepare(
@@ -56,10 +64,24 @@ export function versionInput(
     throw new AppError("USER_INPUT", "展示设置校验失败");
   return {
     version_id: versionId,
-    raw: rawObject(db, row.sha256),
+    sha256: row.sha256,
     segments,
     settings,
   };
+}
+export function versionInput(
+  db: Database.Database,
+  entryId: string,
+  versionId: string,
+  presentationId: string,
+): SegmentInput {
+  const { sha256, ...meta } = versionInputMeta(
+    db,
+    entryId,
+    versionId,
+    presentationId,
+  );
+  return { ...meta, raw: rawObject(db, sha256) };
 }
 function segmentRows(
   db: Database.Database,

@@ -166,6 +166,13 @@ it("reads the exact complete paths, uses persisted/memory indices and rejects pa
   ).toBe(true);
   db.close();
 });
+it("reuses one database connection across archive reads", async () => {
+  const before = (await client.stats()).opens;
+  await client.catalog(directory);
+  await client.selection(archive, [first]);
+  await client.selection(archive, ["Train/same.kml"]);
+  expect((await client.stats()).opens - before).toBeLessThanOrEqual(1);
+});
 it("rebuilds corrupt disposable indices without altering originals, rejects bad/polar members and preserves segments/dateline", async () => {
   const db = new Database(archive);
   const original = db

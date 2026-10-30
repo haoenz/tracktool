@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import { XmlElement } from "libxml2-wasm";
+import { XmlElement, type XmlDocument } from "libxml2-wasm";
 import { AppError } from "../../domain/errors.js";
 import {
   bindSegments,
@@ -150,34 +150,39 @@ export function importedPresentation(
   raw: Uint8Array,
   segments: SegmentManifest[],
 ): Presentation | undefined {
-  return withDocument(raw, (doc) => {
-    const groups = displayMetadata(doc);
-    if (!groups.length) return;
-    const byXml = new Map(
-      segments.map((s) => [
-        locate(doc.root, s.locator).attr("id")?.content,
-        s.segment_id,
-      ]),
-    );
-    const order = groups.flatMap((g) =>
-      g.segments.map((s) => byXml.get(s.xml_id)!),
-    );
-    const connections = groups.flatMap((g) =>
-      g.edges.map((e) => ({
-        from: byXml.get(e.from)!,
-        to: byXml.get(e.to)!,
-        connect: true,
-      })),
-    );
-    const imported = new Set(order);
-    order.push(
-      ...segments
-        .filter((s) => !imported.has(s.segment_id))
-        .map((s) => s.segment_id),
-    );
-    return validatePresentation(
-      { schema: 1, default_connect: false, order, ignored: [], connections },
-      segments.map((s) => s.segment_id),
-    );
-  });
+  return withDocument(raw, (doc) => presentationFromDocument(doc, segments));
+}
+/** Same as importedPresentation for an already parsed document. */
+export function presentationFromDocument(
+  doc: XmlDocument,
+  segments: SegmentManifest[],
+): Presentation | undefined {
+  const groups = displayMetadata(doc);
+  if (!groups.length) return;
+  const byXml = new Map(
+    segments.map((s) => [
+      locate(doc.root, s.locator).attr("id")?.content,
+      s.segment_id,
+    ]),
+  );
+  const order = groups.flatMap((g) =>
+    g.segments.map((s) => byXml.get(s.xml_id)!),
+  );
+  const connections = groups.flatMap((g) =>
+    g.edges.map((e) => ({
+      from: byXml.get(e.from)!,
+      to: byXml.get(e.to)!,
+      connect: true,
+    })),
+  );
+  const imported = new Set(order);
+  order.push(
+    ...segments
+      .filter((s) => !imported.has(s.segment_id))
+      .map((s) => s.segment_id),
+  );
+  return validatePresentation(
+    { schema: 1, default_connect: false, order, ignored: [], connections },
+    segments.map((s) => s.segment_id),
+  );
 }

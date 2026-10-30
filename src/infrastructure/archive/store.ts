@@ -17,6 +17,7 @@ import {
 } from "../../domain/trackdata.js";
 import type { TrackData } from "../../domain/trackdata.js";
 import { geojson } from "../../domain/geometry.js";
+import { LruStore } from "../../domain/lru.js";
 import type { Catalog, Selection } from "../../shared/map.js";
 import { resolveTrack, readPresentation, displayed } from "./presentation.js";
 import { XmlWorkers } from "../xml/client.js";
@@ -40,8 +41,11 @@ type IndexRow = {
 /** Lives only in the serial archive worker; snapshots never cross threads. */
 export class ArchiveStore {
   constructor(private readonly xml: XmlPort = new XmlWorkers(1, 0)) {}
-  private cache = new Map<string, { data: TrackData; points: number }>();
-  private points = 0;
+  private cache = new LruStore<string, { data: TrackData; points: number }>(
+    128,
+    CACHE_POINTS,
+    (value) => value.points,
+  );
   private mediaValidated = new WeakSet<TrackData>();
   readonly stats = { xml: 0, indexHits: 0, memoryHits: 0 };
   readBytes(input: string, entry: string): Uint8Array {
@@ -53,6 +57,11 @@ export class ArchiveStore {
         throw new AppError("USER_INPUT", `Archive member not found: ${entry}`);
       return rawObject(db, row.sha256);
     });
+  }
+  readObject(input: string, digest: string): Uint8Array {
+    return transaction(databasePath(input), false, (db) =>
+      rawObject(db, digest),
+    );
   }
   async readTrackData(input: string, entry: string) {
     const archive = databasePath(input);
@@ -221,24 +230,9 @@ export class ArchiveStore {
                 "USER_INPUT",
                 "单条轨迹超过 200 万点，请先拆分后再选择",
               );
-            while (
-              this.cache.size &&
-              (this.points + points > CACHE_POINTS || this.cache.size >= 128)
-            ) {
-              const first = this.cache.keys().next().value!;
-              this.points -= this.cache.get(first)!.points;
-              this.cache.delete(first);
-            }
             hit = { data, points };
-            if (points <= CACHE_POINTS) {
-              this.cache.set(key, hit);
-              this.points += points;
-            }
-          } else {
-            this.stats.memoryHits++;
-            this.cache.delete(key);
             this.cache.set(key, hit);
-          }
+          } else this.stats.memoryHits++;
           selected += hit.points;
           if (selected > MAX_POINTS)
             throw new AppError(
@@ -312,19 +306,8 @@ export class ArchiveStore {
           if (!hit) {
             const data = await this.read(db, archive, entry.path, entry.sha256),
               points = pointCount(data);
-            while (
-              this.cache.size &&
-              (this.points + points > CACHE_POINTS || this.cache.size >= 128)
-            ) {
-              const first = this.cache.keys().next().value!;
-              this.points -= this.cache.get(first)!.points;
-              this.cache.delete(first);
-            }
             hit = { data, points };
-            if (points <= CACHE_POINTS) {
-              this.cache.set(key, hit);
-              this.points += points;
-            }
+            this.cache.set(key, hit);
           } else this.stats.memoryHits++;
           if (!this.mediaValidated.has(hit.data)) {
             validateTrackOrder(hit.data, name);

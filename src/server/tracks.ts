@@ -17,23 +17,22 @@ import {
   checkRef,
   currentEntry,
 } from "../infrastructure/archive/versions.js";
-import {
-  readTransaction,
-  rawObject,
-} from "../infrastructure/archive/database.js";
+import { readTransaction } from "../infrastructure/archive/database.js";
 import {
   trackCatalog,
   trackDetail,
   trackHistory,
   trackTimeline,
   operationDetail,
-  versionInput,
+  versionInputMeta,
   inputGeometry,
   requireVersioned,
+  type VersionInputMeta,
 } from "../infrastructure/archive/track-reader.js";
 import { downloadBytes } from "../infrastructure/archive/download.js";
 import { exportSelectedOriginals } from "../infrastructure/archive/selected-export.js";
 import { XmlWorkers } from "../infrastructure/xml/client.js";
+import { ArchiveClient } from "../infrastructure/archive/client.js";
 
 const id = z.string().min(1).max(200),
   page = z.object({
@@ -75,8 +74,17 @@ export function trackRoutes(
   });
   const analysisWorkers = new XmlWorkers(2, 8);
   const analysisCache = new TrackAnalysisCache(analysisWorkers);
+  // One long-lived archive worker keeps inflate/sha256 off the HTTP loop.
+  const archive = new ArchiveClient();
+  const source = async (file: string, meta: VersionInputMeta) => ({
+    version_id: meta.version_id,
+    segments: meta.segments,
+    settings: meta.settings,
+    raw: await archive.readObject(file, meta.sha256),
+  });
   app.addHook("onClose", async () => {
     await analysisWorkers.close();
+    await archive.close();
   });
   app.get("/api/tracks/:entryId/analysis", async (req, reply) => {
     const { entryId } = z.object({ entryId: id }).parse(req.params);
@@ -145,17 +153,18 @@ export function trackRoutes(
   app.get(
     "/api/tracks/:entryId/versions/:versionId/raw",
     async (req, reply) => {
-      const p = z.object({ entryId: id, versionId: id }).parse(req.params);
-      const raw = readTransaction((await get()).file, (db) => {
-        requireVersioned(db);
-        const row = db
-          .prepare(
-            "SELECT sha256 FROM track_versions WHERE entry_id=? AND id=?",
-          )
-          .get(p.entryId, p.versionId) as { sha256: string } | undefined;
-        if (!row) throw new AppError("USER_INPUT", "版本不存在");
-        return rawObject(db, row.sha256);
-      });
+      const p = z.object({ entryId: id, versionId: id }).parse(req.params),
+        { file } = await get(),
+        row = readTransaction(file, (db) => {
+          requireVersioned(db);
+          return db
+            .prepare(
+              "SELECT sha256 FROM track_versions WHERE entry_id=? AND id=?",
+            )
+            .get(p.entryId, p.versionId) as { sha256: string } | undefined;
+        });
+      if (!row) throw new AppError("USER_INPUT", "版本不存在");
+      const raw = await archive.readObject(file, row.sha256);
       return reply
         .type("application/vnd.google-earth.kml+xml")
         .header("Content-Disposition", 'attachment; filename="track.kml"')
@@ -196,21 +205,21 @@ export function trackRoutes(
   );
   app.get("/api/tracks/:entryId/tag", async (req) => {
     const { entryId } = z.object({ entryId: id }).parse(req.params);
-    const { version_id } = z.object({ version_id: id }).parse(req.query);
-    const input = readTransaction((await get()).file, (db) => {
-      const entry = currentEntry(db, entryId);
-      const version = db
-        .prepare("SELECT sha256 FROM track_versions WHERE id=? AND entry_id=?")
-        .get(version_id, entry.entry_id) as { sha256: string } | undefined;
-      if (!version) throw new AppError("USER_INPUT", "轨迹版本不存在");
-      return rawObject(db, version.sha256);
-    });
-    const xml = new XmlWorkers(1, 0);
-    try {
-      return { tag: (await xml.run(input, { kind: "content" })).content!.tag };
-    } finally {
-      await xml.close();
-    }
+    const { version_id } = z.object({ version_id: id }).parse(req.query),
+      { file } = await get(),
+      row = readTransaction(file, (db) => {
+        const entry = currentEntry(db, entryId);
+        return db
+          .prepare(
+            "SELECT sha256 FROM track_versions WHERE id=? AND entry_id=?",
+          )
+          .get(version_id, entry.entry_id) as { sha256: string } | undefined;
+      });
+    if (!row) throw new AppError("USER_INPUT", "轨迹版本不存在");
+    const input = await archive.readObject(file, row.sha256);
+    return {
+      tag: (await analysisWorkers.run(input, { kind: "content" })).content!.tag,
+    };
   });
   app.get("/api/tracks/:entryId/geometry", async (req) => {
     const p = z.object({ entryId: id }).parse(req.params),
@@ -221,17 +230,18 @@ export function trackRoutes(
           raw: z.enum(["true", "false"]).default("false"),
         })
         .parse(req.query);
-    const input = readTransaction((await get()).file, (db) => {
-      requireVersioned(db);
-      const e = currentEntry(db, p.entryId);
-      return versionInput(
-        db,
-        e.entry_id,
-        q.version_id ?? e.version_id,
-        q.presentation_id ?? e.presentation_id,
-      );
-    });
-    return inputGeometry(input, undefined, q.raw === "true");
+    const { file } = await get(),
+      meta = readTransaction(file, (db) => {
+        requireVersioned(db);
+        const e = currentEntry(db, p.entryId);
+        return versionInputMeta(
+          db,
+          e.entry_id,
+          q.version_id ?? e.version_id,
+          q.presentation_id ?? e.presentation_id,
+        );
+      });
+    return inputGeometry(await source(file, meta), undefined, q.raw === "true");
   });
   app.post("/api/tracks/detect", async (req) => {
     const q = z
@@ -261,33 +271,33 @@ export function trackRoutes(
       })
       .strict()
       .parse(req.body);
-    const input = readTransaction((await get()).file, (db) => {
-      requireVersioned(db);
-      if (archiveId(db) !== q.archive_id)
-        throw new AppError("USER_INPUT", "轨迹库已切换");
-      checkRef(db, q.target);
-      return versionInput(
-        db,
-        q.target.entry_id,
-        q.target.version_id,
-        q.target.presentation_id,
-      );
-    });
-    const xml = new XmlWorkers(1, 0);
-    try {
-      const data = (
-        await xml.run(input.raw, { kind: "tracks", source: "detect" })
-      ).tracks!;
-      const s = bindSegments(data, input.segments).find(
-        (s) => s.segment_id === q.segment_id,
-      );
-      if (!s) throw new AppError("USER_INPUT", "未知段");
-      return q.kind === "gaps"
-        ? { after_point_indices: detectSegmentGaps(s, q.options) }
-        : { ranges: detectSegmentDrift(s, q.options) };
-    } finally {
-      await xml.close();
-    }
+    const { file } = await get(),
+      meta = readTransaction(file, (db) => {
+        requireVersioned(db);
+        if (archiveId(db) !== q.archive_id)
+          throw new AppError("USER_INPUT", "轨迹库已切换");
+        checkRef(db, q.target);
+        return versionInputMeta(
+          db,
+          q.target.entry_id,
+          q.target.version_id,
+          q.target.presentation_id,
+        );
+      }),
+      input = await source(file, meta);
+    const data = (
+      await analysisWorkers.run(input.raw, {
+        kind: "tracks",
+        source: "detect",
+      })
+    ).tracks!;
+    const segment = bindSegments(data, input.segments).find(
+      (s) => s.segment_id === q.segment_id,
+    );
+    if (!segment) throw new AppError("USER_INPUT", "未知段");
+    return q.kind === "gaps"
+      ? { after_point_indices: detectSegmentGaps(segment, q.options) }
+      : { ranges: detectSegmentDrift(segment, q.options) };
   });
   app.post(
     "/api/tracks/import-line",

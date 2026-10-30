@@ -16,11 +16,14 @@ export function xpathLiteral(value: string): string {
     .join(', "\'", ')})`;
 }
 /** Documents and nodes must never escape this synchronous scope. Import/initialization occurs in a worker. */
+/** Parse counters; exposed through the archive worker's stats op. */
+export const xmlStats = { parses: 0 };
 export function withDocument<T>(
   bytes: Uint8Array,
   action: (doc: XmlDocument) => T,
 ): T {
   let doc: XmlDocument;
+  xmlStats.parses++;
   try {
     doc = XmlDocument.fromBuffer(bytes, {
       option: ParseOption.XML_PARSE_NO_XXE | ParseOption.XML_PARSE_NONET,

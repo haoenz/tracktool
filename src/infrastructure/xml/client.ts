@@ -4,6 +4,7 @@ import type { ErrorInfo } from "../../shared/contracts.js";
 import type { XmlOperation, XmlPort, XmlResult } from "../../services/ports.js";
 
 type Job = {
+  id: number;
   bytes: Uint8Array;
   operation: XmlOperation;
   signal?: AbortSignal;
@@ -11,10 +12,14 @@ type Job = {
   reject: (error: unknown) => void;
   abort: () => void;
 };
-/** Bounded, disposable workers: CPU work never blocks HTTP or the CLI event loop. */
+type Busy = { job: Job; timer: ReturnType<typeof setTimeout> };
+/** Bounded, long-lived workers: parsing state is per message, so threads are reused. */
 export class XmlWorkers implements XmlPort {
   private queue: Job[] = [];
-  private active = new Map<Job, Worker>();
+  private idle: Worker[] = [];
+  private busy = new Map<Worker, Busy>();
+  private retired = new WeakSet<Worker>();
+  private serial = 0;
   private closed = false;
   constructor(
     private readonly concurrency = 2,
@@ -48,7 +53,7 @@ export class XmlWorkers implements XmlPort {
       )
         throw new AppError("USER_INPUT", "组合输入超过 128 MiB");
       if (
-        this.active.size >= this.concurrency &&
+        this.busy.size >= this.concurrency &&
         this.queue.length >= this.queueLimit
       )
         throw new AppError("TOOL", "XML 工作队列已满");
@@ -57,6 +62,8 @@ export class XmlWorkers implements XmlPort {
     }
     return new Promise((resolve, reject) => {
       const job: Job = {
+        id: ++this.serial,
+        // The caller may reuse its buffer; the worker owns this copy.
         bytes: new Uint8Array(bytes),
         operation: structuredClone(operation),
         signal,
@@ -70,89 +77,120 @@ export class XmlWorkers implements XmlPort {
           this.queue.splice(index, 1);
           signal?.removeEventListener("abort", job.abort);
           reject(new AppError("CANCELLED", "操作已取消"));
+          return;
         }
+        for (const [worker, value] of this.busy)
+          if (value.job === job) {
+            this.retire(worker, new AppError("CANCELLED", "操作已取消"));
+            return;
+          }
       };
       signal?.addEventListener("abort", job.abort, { once: true });
       this.queue.push(job);
       this.drain();
     });
   }
+  private spawn(): Worker {
+    const worker = new Worker(new URL("./worker.js", import.meta.url), {
+      execArgv: [],
+    });
+    worker.on(
+      "message",
+      (message: { id?: number; result?: unknown; error?: ErrorInfo }) => {
+        // Node watch mode forwards dependency notifications through this port.
+        if (typeof message?.id !== "number") return;
+        const value = this.busy.get(worker);
+        if (!value || value.job.id !== message.id) return;
+        this.release(worker);
+        if (message.error)
+          value.job.reject(
+            new AppError(message.error.code, message.error.message),
+          );
+        else value.job.resolve(message.result as XmlResult);
+        this.drain();
+      },
+    );
+    worker.once("error", (error) =>
+      this.retire(
+        worker,
+        new AppError("TOOL", "XML worker 执行失败", { cause: error }),
+      ),
+    );
+    worker.once("exit", () => {
+      if (this.retired.has(worker)) return;
+      this.retire(worker, new AppError("TOOL", "XML worker 意外退出"));
+    });
+    // An idle worker must not keep a short-lived CLI process alive; it is
+    // referenced again while it owns a job.
+    worker.unref();
+    return worker;
+  }
+  /** Detach a busy worker, fail its job and replace it on the next drain. */
+  private retire(worker: Worker, error: unknown) {
+    const value = this.busy.get(worker);
+    this.retired.add(worker);
+    if (value) {
+      this.release(worker);
+      value.job.reject(error);
+    }
+    const index = this.idle.indexOf(worker);
+    if (index >= 0) this.idle.splice(index, 1);
+    void worker.terminate();
+    this.drain();
+  }
+  private release(worker: Worker) {
+    const value = this.busy.get(worker);
+    if (!value) return;
+    clearTimeout(value.timer);
+    value.job.signal?.removeEventListener("abort", value.job.abort);
+    this.busy.delete(worker);
+    worker.unref();
+  }
   private drain(): void {
     while (
       !this.closed &&
-      this.active.size < this.concurrency &&
+      this.busy.size < this.concurrency &&
       this.queue.length
     ) {
       const job = this.queue.shift()!;
+      if (job.signal?.aborted) {
+        job.reject(new AppError("CANCELLED", "操作已取消"));
+        continue;
+      }
       job.signal?.removeEventListener("abort", job.abort);
-      let worker: Worker;
+      const worker = this.idle.pop() ?? this.spawn();
+      const timer = setTimeout(
+        () => this.retire(worker, new AppError("TOOL", "XML 处理超时")),
+        this.timeoutMs,
+      );
+      worker.ref();
+      this.busy.set(worker, { job, timer });
       try {
-        worker = new Worker(new URL("./worker.js", import.meta.url), {
-          execArgv: [],
-          workerData: { bytes: job.bytes, operation: job.operation },
-          transferList: [job.bytes.buffer as ArrayBuffer],
-        });
+        worker.postMessage(
+          { id: job.id, bytes: job.bytes, operation: job.operation },
+          [job.bytes.buffer as ArrayBuffer],
+        );
       } catch (error) {
-        job.reject(
+        this.retire(
+          worker,
           new AppError("TOOL", "无法启动 XML worker", { cause: error }),
         );
         continue;
       }
-      this.active.set(job, worker);
-      let settled = false;
-      const finish = (error?: unknown, result?: XmlResult) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        job.signal?.removeEventListener("abort", job.abort);
-        // Release the slot only after termination; cancellation cannot exceed the concurrency bound.
-        void worker.terminate().then(() => {
-          this.active.delete(job);
-          if (error) job.reject(error);
-          else job.resolve(result!);
-          this.drain();
-        });
-      };
-      const timer = setTimeout(
-        () => finish(new AppError("TOOL", "XML 处理超时")),
-        this.timeoutMs,
-      );
-      job.abort = () => finish(new AppError("CANCELLED", "操作已取消"));
+      job.abort = () =>
+        this.retire(worker, new AppError("CANCELLED", "操作已取消"));
       job.signal?.addEventListener("abort", job.abort, { once: true });
-      worker.on(
-        "message",
-        (message: {
-          result?: XmlResult;
-          error?: ErrorInfo;
-          "watch:import"?: unknown;
-          "watch:require"?: unknown;
-        }) => {
-          // Node watch mode forwards dependency notifications through this port.
-          // Keep listening for the actual XML result after those notifications.
-          if (
-            Array.isArray(message?.["watch:import"]) ||
-            Array.isArray(message?.["watch:require"])
-          )
-            return;
-          if (message.error)
-            finish(new AppError(message.error.code, message.error.message));
-          else if (message.result) finish(undefined, message.result);
-          else finish(new AppError("TOOL", "XML worker 返回无效结果"));
-        },
-      );
-      worker.once("error", (error) =>
-        finish(new AppError("TOOL", "XML worker 执行失败", { cause: error })),
-      );
-      worker.once("exit", () =>
-        finish(new AppError("TOOL", "XML worker 意外退出")),
-      );
     }
   }
   async close(): Promise<void> {
     this.closed = true;
     for (const job of [...this.queue]) job.abort();
-    const workers = [...this.active.values()];
-    for (const job of this.active.keys()) job.abort();
+    const workers = [...this.busy.keys(), ...this.idle];
+    for (const worker of this.busy.keys()) this.retired.add(worker);
+    for (const job of [...this.busy.values()])
+      job.job.reject(new AppError("CANCELLED", "XML 服务已关闭"));
+    this.busy.clear();
+    this.idle = [];
     await Promise.all(workers.map((worker) => worker.terminate()));
   }
 }

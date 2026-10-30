@@ -4,6 +4,14 @@ import type { ArchiveRequest } from "../../domain/archive.js";
 import { parentPort } from "node:worker_threads";
 import { ArchiveStore } from "./store.js";
 import { errorInfo } from "../../domain/errors.js";
+import { xmlStats } from "../xml/document.js";
+import {
+  databaseStats,
+  enableSharedConnections,
+  resetSharedConnections,
+} from "./database.js";
+// One message at a time: a single connection serves the whole worker.
+enableSharedConnections();
 const store = new ArchiveStore();
 const writer = new ArchiveWriter();
 const exportsInProgress = new Map<number, AbortController>();
@@ -19,6 +27,7 @@ parentPort!.on(
     path: string;
     entries?: string[];
     name?: string;
+    sha256?: string;
   }) => {
     if (m.op === "cancel-export") {
       exportsInProgress.get(m.id)?.abort();
@@ -34,6 +43,9 @@ parentPort!.on(
       switch (m.op) {
         case "bytes":
           result = store.readBytes(m.path, m.name!);
+          break;
+        case "raw":
+          result = store.readObject(m.path, m.sha256!);
           break;
         case "track-data":
           result = await store.readTrackData(m.path, m.name!);
@@ -56,7 +68,11 @@ parentPort!.on(
           result = await store.selection(m.path, m.entries!);
           break;
         case "stats":
-          result = store.stats;
+          result = {
+            ...store.stats,
+            parses: xmlStats.parses,
+            opens: databaseStats.opens,
+          };
           break;
         default:
           throw new Error("Unknown archive operation");
@@ -66,6 +82,8 @@ parentPort!.on(
       parentPort!.postMessage({ id: m.id, error: errorInfo(error) });
     } finally {
       exportsInProgress.delete(m.id);
+      // Restores and inits may replace the database file under the session.
+      if (m.op === "write") resetSharedConnections();
     }
   },
 );
