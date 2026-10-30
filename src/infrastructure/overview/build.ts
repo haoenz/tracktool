@@ -184,7 +184,12 @@ export async function buildOverview(
         entry.start_time_us = value.start_time_us ?? undefined;
         // Measuring every point is the expensive part of a rebuild; persist it
         // with the geometry object so unchanged tracks are not re-measured.
-        value.distance_m ??= measureDistance(value.segments);
+        if (value.distance_m === undefined) {
+          value.distance_m = measureDistance(value.segments);
+          const bytes = encodeObject(row.sha256, value);
+          account(bytes.length);
+          await atomic(objectPath(root, row.sha256), bytes);
+        }
         entry.distance_m = value.distance_m;
         if (presentation) {
           try {

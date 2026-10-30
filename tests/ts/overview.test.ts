@@ -2,7 +2,8 @@ import {
   compareOverviewEntries,
   type OverviewEntry,
 } from "../../dist/node/shared/overview.js";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import * as geometry from "../../dist/node/domain/kml-edit.js";
 import {
   mkdtemp,
   mkdir,
@@ -29,6 +30,9 @@ import {
   fingerprint,
   generation,
   readStamp,
+  readObject,
+  encodeObject,
+  objectPath,
 } from "../../dist/node/infrastructure/overview/files.js";
 import { LIMITS } from "../../dist/node/infrastructure/overview/types.js";
 import {
@@ -63,6 +67,7 @@ const { VectorTile } = decoderRequire("@mapbox/vector-tile") as {
 const cleanup: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
+  vi.restoreAllMocks();
 });
 const kml = (lines: string[], name = "test") =>
   `<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${name}</name><Placemark>${lines.map((line) => `<LineString><coordinates>${line}</coordinates></LineString>`).join("")}</Placemark></Document></kml>`;
@@ -653,4 +658,46 @@ it("sorts complete start times including microseconds, with UTC+8 filename fallb
       .sort((a, b) => compareOverviewEntries(a, b, "date-desc"))
       .map((e) => e.id),
   ).toEqual(["a-later", "z-earlier", "filename", "previous", "unknown"]);
+});
+
+it("backfills old distance caches atomically within budget and never measures them again", async () => {
+  const { source, cache } = await fixture(),
+    stamp = readStamp(source);
+  const request = {
+    source,
+    root: cache,
+    crs: "wgs84" as const,
+    stamp,
+    fingerprint: fingerprint(stamp, "wgs84"),
+    budget: LIMITS.buildBytes,
+  };
+  const warm = await buildOverview(request, () => {});
+  const entry = warm.entries.find((value) => value.id === "normal")!;
+  const file = objectPath(cache, entry.sha256),
+    old = await readObject(cache, entry.sha256);
+  delete old.distance_m;
+  const legacy = encodeObject(entry.sha256, old);
+  await writeFile(file, legacy);
+  const measure = vi.spyOn(geometry, "distance");
+  await expect(
+    buildOverview({ ...request, budget: 1 }, () => {}),
+  ).rejects.toThrow("预算");
+  expect(await readFile(file)).toEqual(legacy);
+  expect(
+    (await readdir(cache)).some((name) => name.startsWith("staging-")),
+  ).toBe(false);
+  measure.mockClear();
+  const first = await buildOverview(request, () => {});
+  expect(measure).toHaveBeenCalled();
+  expect((await readObject(cache, entry.sha256)).distance_m).toBe(
+    entry.distance_m,
+  );
+  expect(first.entries.find((value) => value.id === "normal")?.distance_m).toBe(
+    entry.distance_m,
+  );
+  const updated = await readFile(file);
+  measure.mockClear();
+  await buildOverview(request, () => {});
+  expect(measure).not.toHaveBeenCalled();
+  expect(await readFile(file)).toEqual(updated);
 });
