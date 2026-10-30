@@ -25,7 +25,11 @@ import { WorkFiles } from "../../dist/node/infrastructure/work-files.js";
 import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
 import { BusinessRunner } from "../../dist/node/infrastructure/work-runner.js";
 import { AppError } from "../../dist/node/domain/errors.js";
-import { WorkRequestSchema } from "../../dist/node/shared/work.js";
+import {
+  WorkRequestSchema,
+  WorkTaskSchema,
+  WorkTasksResponseSchema,
+} from "../../dist/node/shared/work.js";
 import type { WorkTask, WorkRequest } from "../../dist/node/shared/work.js";
 import type { WorkRunner } from "../../dist/node/services/work-ports.js";
 const cleanup: (() => Promise<unknown> | void)[] = [];
@@ -255,6 +259,12 @@ async function server(host = "127.0.0.1") {
     });
     const data = (await r.json()) as T & { error?: { message: string } };
     if (!r.ok) throw new Error(data.error?.message || String(r.status));
+    if (route === "/api/work/tasks") WorkTasksResponseSchema.parse(data);
+    else if (
+      route === "/api/work/preview" ||
+      /^\/api\/work\/tasks\/[^/]+(?:\/(?:apply|retry|cancel))?$/.test(route)
+    )
+      WorkTaskSchema.parse(data);
     return data;
   };
   const settled = (id: string) =>

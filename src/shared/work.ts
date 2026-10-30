@@ -2,7 +2,7 @@ import { EXPORT_FORMATS, COMPRESSION_PRESETS } from "./export-format.js";
 import { z } from "zod";
 import { DeleteRequestSchema } from "./archive-actions.js";
 import { EditRequestSchema, EditApplySchema } from "./track-edit.js";
-import type { Task, TaskEvent } from "./contracts.js";
+import { TaskSchema, TaskEventSchema } from "./contracts.js";
 export const OPERATIONS = {
   "archive:init": "建立归档",
   "archive:import-zip": "导入 ZIP",
@@ -138,23 +138,41 @@ export interface ImportItem {
   status: "new" | "duplicate" | "conflict" | "invalid";
   reason: string;
 }
-export interface WorkOutput {
-  paths: string[];
-  temporary?: boolean;
-  data?: unknown;
-  committed?: boolean;
-}
-export interface WorkTask extends Task {
-  uploadsCleaned?: boolean;
-  exportsCleaned?: boolean;
-  downloadedFiles?: number[];
-  request: Omit<WorkRequest, "operation"> & { operation: string };
-  previewId?: string;
-  expiresAt?: string;
-  output?: WorkOutput;
-  events: { sequence: number; event: TaskEvent }[];
-  cancelRequested: boolean;
-}
+export const WorkOutputSchema = z.object({
+  paths: z.array(z.string()),
+  temporary: z.boolean().optional(),
+  data: z.unknown().optional(),
+  committed: z.boolean().optional(),
+});
+export type WorkOutput = z.infer<typeof WorkOutputSchema>;
+// Historical tasks remain readable even when their operation is no longer executable.
+// Responses must contain normalized inputs/options; request defaults must not hide omissions.
+const TaskRequestSchema = WorkRequestSchema.extend({
+  operation: z.string().min(1),
+  inputs: WorkRequestSchema.shape.inputs.removeDefault(),
+  // Removed options can still be present in persisted historical requests.
+  options: WorkRequestSchema.shape.options.removeDefault().loose(),
+});
+export const WorkTaskSchema = TaskSchema.extend({
+  uploadsCleaned: z.boolean().optional(),
+  exportsCleaned: z.boolean().optional(),
+  downloadedFiles: z.array(z.number().int().nonnegative()).optional(),
+  request: TaskRequestSchema,
+  previewId: z.string().min(1).optional(),
+  expiresAt: z.iso.datetime().optional(),
+  output: WorkOutputSchema.optional(),
+  events: z.array(
+    z.object({
+      sequence: z.number().int().nonnegative(),
+      event: TaskEventSchema,
+    }),
+  ),
+  cancelRequested: z.boolean(),
+});
+export type WorkTask = z.infer<typeof WorkTaskSchema>;
+export const WorkTasksResponseSchema = z.object({
+  tasks: z.array(WorkTaskSchema),
+});
 export interface FileEntry {
   name: string;
   path: string;

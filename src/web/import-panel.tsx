@@ -22,7 +22,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./components/ui/dialog.js";
-import { api, readConfig } from "./api.js";
+import { requestWorkTask, api, readConfig } from "./api.js";
 import { importError } from "./import-error.js";
 import { useWorkspace } from "./workspace.js";
 import type { ImportItem, UploadResult, WorkTask } from "../shared/work.js";
@@ -227,7 +227,7 @@ export function ImportPanel() {
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 300));
-      next = await api<WorkTask>(`/api/work/tasks/${next.id}`);
+      next = await requestWorkTask(`/api/work/tasks/${next.id}`);
     }
     return next;
   }
@@ -356,7 +356,7 @@ export function ImportPanel() {
       }
       if (!stop.current && uploaded.length) {
         const plan = await settle(
-          await api<WorkTask>("/api/work/preview", {
+          await requestWorkTask("/api/work/preview", {
             operation: "archive:push",
             archive: workspace.archive,
             inputs: uploaded.map((row) => row.path),
@@ -440,8 +440,8 @@ export function ImportPanel() {
       try {
         // Retrying a lost response resumes the same idempotent batch operation.
         applied = confirmed.applyId
-          ? await api<WorkTask>(`/api/work/tasks/${confirmed.applyId}`)
-          : await api<WorkTask>(
+          ? await requestWorkTask(`/api/work/tasks/${confirmed.applyId}`)
+          : await requestWorkTask(
               `/api/work/tasks/${confirmed.planId}/apply`,
               {},
             );

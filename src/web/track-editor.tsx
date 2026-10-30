@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { Alert, Button, Select, Spin, Modal } from "./components/controls.js";
-import { api, waitForWorkTask } from "./api.js";
+import { requestWorkTask, api, waitForWorkTask } from "./api.js";
 import { useWorkspace } from "./workspace.js";
 import { isRegisteredTag, TagPicker } from "./components/tag-picker.js";
 import { TrackEditorMap } from "./track-editor-map.js";
@@ -39,7 +39,6 @@ import type {
   EntrySnapshot,
 } from "../shared/track-edit.js";
 import type { PublicConfig } from "../shared/contracts.js";
-import type { WorkTask } from "../shared/work.js";
 
 const editActions: Record<string, string> = {
   split_segment: "断开轨迹",
@@ -191,7 +190,8 @@ function TrackEditor({
   });
   const task = useQuery({
     queryKey: ["task", taskId],
-    queryFn: () => api<WorkTask>(`/api/work/tasks/${taskId}`),
+    queryFn: ({ signal }) =>
+      requestWorkTask(`/api/work/tasks/${taskId}`, undefined, signal),
     enabled: visible && !!taskId,
     refetchInterval: (q) =>
       q.state.data && !["running", "queued"].includes(q.state.data.status)

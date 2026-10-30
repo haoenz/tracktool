@@ -21,6 +21,7 @@ import {
   Tag,
 } from "./components/controls.js";
 import {
+  requestWorkTask,
   api,
   waitForWorkTask,
   downloadWorkFiles,
@@ -35,7 +36,6 @@ import {
 } from "../shared/work.js";
 import type {
   Operation,
-  WorkTask,
   FileListing,
   UploadResult,
   ImportItem,
@@ -88,7 +88,7 @@ export function TaskDetail({
   const query = useQuery({
     queryKey: ["task", id],
     queryFn: ({ signal }) =>
-      api<WorkTask>("/api/work/tasks/" + id, undefined, signal),
+      requestWorkTask("/api/work/tasks/" + id, undefined, signal),
     refetchInterval: (q) =>
       q.state.data && !["queued", "running"].includes(q.state.data.status)
         ? false
@@ -129,7 +129,7 @@ export function TaskDetail({
     setBusy(true);
     setError(undefined);
     try {
-      const next = await api<WorkTask>(
+      const next = await requestWorkTask(
         `/api/work/tasks/${id}/${action}`,
         action === "cancel" ? { revision: task!.revision } : {},
       );
@@ -1040,7 +1040,7 @@ function FileOperation({
           : output || undefined,
         options: { ...options, ...(entries ? { entries } : {}) },
       });
-      const task = await api<WorkTask>("/api/work/preview", body);
+      const task = await requestWorkTask("/api/work/preview", body);
       setTask(task.id);
       if (
         ["archive:backup", "archive:rebuild", "archive:download"].includes(
@@ -1048,7 +1048,7 @@ function FileOperation({
         )
       ) {
         await waitForWorkTask(task.id);
-        const applied = await api<WorkTask>(
+        const applied = await requestWorkTask(
           `/api/work/tasks/${task.id}/apply`,
           {},
         );

@@ -9,9 +9,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "./components/ui/dialog.js";
-import { api, waitForWorkTask } from "./api.js";
+import { requestWorkTask, waitForWorkTask } from "./api.js";
 import { useWorkspace } from "./workspace.js";
-import type { WorkTask } from "../shared/work.js";
 import type { DeletePreview } from "../shared/archive-actions.js";
 
 export function DeleteTrackDialog({
@@ -38,7 +37,7 @@ export function DeleteTrackDialog({
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     queryFn: async () => {
-      const task = await api<WorkTask>("/api/work/preview", {
+      const task = await requestWorkTask("/api/work/preview", {
         operation: "archive:delete",
         archive: workspace.archive,
         inputs: [],
@@ -60,7 +59,7 @@ export function DeleteTrackDialog({
     setBusy(true);
     setError(undefined);
     try {
-      const task = await api<WorkTask>(
+      const task = await requestWorkTask(
         `/api/work/tasks/${preview.data.task.id}/apply`,
         {},
       );

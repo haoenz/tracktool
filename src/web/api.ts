@@ -2,6 +2,7 @@ import {
   ConfigResponseSchema,
   ErrorResponseSchema,
 } from "../shared/contracts.js";
+import { WorkTaskSchema } from "../shared/work.js";
 import { downloadBlob } from "./lib/download.js";
 export async function request(
   path: string,
@@ -39,6 +40,17 @@ export async function api<T>(
 ): Promise<T> {
   return (await request(path, body, signal)).json() as Promise<T>;
 }
+export async function requestWorkTask(
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+) {
+  const parsed = WorkTaskSchema.safeParse(
+    await api<unknown>(path, body, signal),
+  );
+  if (!parsed.success) throw new Error("任务响应格式无效，请刷新后重试");
+  return parsed.data;
+}
 export async function readConfig(signal?: AbortSignal) {
   const token =
     document.querySelector<HTMLMetaElement>('meta[name="tracktool-token"]')
@@ -75,8 +87,10 @@ export async function waitForWorkTask(id: string, signal?: AbortSignal) {
   const deadline = Date.now() + 30 * 60_000;
   for (;;) {
     signal?.throwIfAborted();
-    const task = await api<import("../shared/work.js").WorkTask>(
+    const task = await requestWorkTask(
       `/api/work/tasks/${id}`,
+      undefined,
+      signal,
     );
     if (!["queued", "running"].includes(task.status)) {
       if (task.status !== "succeeded")
