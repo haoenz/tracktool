@@ -15,6 +15,7 @@ export class TileCache {
   private readonly insert;
   private readonly account;
   private readonly flushTimer: ReturnType<typeof setInterval>;
+  private scheduledFlush?: ReturnType<typeof setTimeout>;
   private dirty = new Map<string, number>();
   private writes = 0;
   constructor(
@@ -52,13 +53,7 @@ export class TileCache {
       }
     // Tile reads outnumber writes by orders of magnitude; keep recency in
     // memory and fold it into the LRU index in batches.
-    this.flushTimer = setInterval(() => {
-      try {
-        this.flush();
-      } catch {
-        /* A checkpoint or competing writer retries on the next flush. */
-      }
-    }, 15_000);
+    this.flushTimer = setInterval(() => this.tryFlush(), 15_000);
     this.flushTimer.unref();
   }
   get(key: string): Buffer | undefined {
@@ -66,17 +61,36 @@ export class TileCache {
     if (row) {
       this.dirty.delete(key);
       this.dirty.set(key, Date.now() / 1000);
-      if (this.dirty.size >= 512) this.flush();
+      if (this.dirty.size >= 512 && !this.scheduledFlush) {
+        this.scheduledFlush = setTimeout(() => {
+          this.scheduledFlush = undefined;
+          this.tryFlush();
+        }, 0);
+        this.scheduledFlush.unref();
+      }
     }
     return row?.data;
   }
   flush() {
     if (!this.dirty.size) return;
-    const entries = [...this.dirty];
-    this.dirty.clear();
-    this.db.transaction(() => {
-      for (const [key, accessed] of entries) this.touch.run(accessed, key);
-    })();
+    // Recency is optional metadata: never stall the event loop behind another
+    // writer. Keep pending touches until COMMIT so the timer can retry.
+    this.db.pragma("busy_timeout=0");
+    try {
+      this.db.transaction(() => {
+        for (const [key, accessed] of this.dirty) this.touch.run(accessed, key);
+      })();
+      this.dirty.clear();
+    } finally {
+      this.db.pragma("busy_timeout=10000");
+    }
+  }
+  private tryFlush() {
+    try {
+      this.flush();
+    } catch {
+      /* A competing writer or temporary failure retries on the next flush. */
+    }
   }
   delete(key: string) {
     this.dirty.delete(key);
@@ -112,9 +126,13 @@ export class TileCache {
   }
   close() {
     clearInterval(this.flushTimer);
-    this.flush();
-    this.db.pragma("incremental_vacuum");
-    this.db.pragma("wal_checkpoint(TRUNCATE)");
-    this.db.close();
+    clearTimeout(this.scheduledFlush);
+    try {
+      this.flush();
+      this.db.pragma("incremental_vacuum");
+      this.db.pragma("wal_checkpoint(TRUNCATE)");
+    } finally {
+      this.db.close();
+    }
   }
 }

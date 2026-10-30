@@ -378,7 +378,7 @@ export class MapResources {
         const hit = this.tiles.get(key);
         if (hit !== undefined) {
           try {
-            this.validateCached(source, hit);
+            await this.validate(source, hit, false);
             return hit;
           } catch {
             this.tiles.delete(key);
@@ -448,7 +448,7 @@ export class MapResources {
       const data = this.tiles.get(key);
       if (data !== undefined) {
         try {
-          this.validateCached(source, data);
+          await this.validate(source, data, false);
           return data;
         } catch {
           this.tiles.delete(key);
@@ -458,7 +458,7 @@ export class MapResources {
         old = this.tiles.get(oldKey);
       if (old !== undefined) {
         try {
-          this.validateCached(source, old);
+          await this.validate(source, old);
           this.tiles.put(key, old);
           return old;
         } catch {
@@ -498,7 +498,11 @@ export class MapResources {
               : "image/png",
     };
   }
-  async validate(source: string, data: Buffer): Promise<void> {
+  async validate(
+    source: string,
+    data: Buffer,
+    decodeRaster = true,
+  ): Promise<void> {
     const preset = this.presets[source];
     if (!data.length && source === "openinframap-power") return;
     if (!data.length) throw new AppError("USER_INPUT", "数据源返回空瓦片");
@@ -569,7 +573,9 @@ export class MapResources {
         info.height !== size
       )
         throw new Error();
-      await image.raw().toBuffer();
+      // Current cache hits need header/size validation, while downloads and
+      // legacy imports must also prove the complete raster decodes.
+      if (decodeRaster) await image.raw().toBuffer();
     } catch (cause) {
       throw new AppError(
         "USER_INPUT",
@@ -577,23 +583,6 @@ export class MapResources {
         { cause },
       );
     }
-  }
-  /**
-   * Cached bytes were fully validated when fetched. Re-decoding every hit
-   * costs far more than the corruption it protects against, so only reject
-   * empty payloads and known placeholder tiles here.
-   */
-  private validateCached(source: string, data: Buffer) {
-    const preset = this.presets[source];
-    if (!data.length) {
-      if (source === "openinframap-power") return;
-      throw new AppError("USER_INPUT", "数据源返回空瓦片");
-    }
-    if (preset?.invalid_tile_sha256?.includes(hash(data)))
-      throw new AppError(
-        "USER_INPUT",
-        "地图源返回暂无地图的占位图片，不能导出；请更换底图",
-      );
   }
   async close() {
     await this.reprojections.close();
