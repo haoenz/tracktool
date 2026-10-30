@@ -528,7 +528,7 @@ it("explicitly migrates schema 3 preserving history and can roll back its new DD
   const backup = await migrateArchive(file);
   expect(snapshot(backup!)).toEqual(before);
   const after = snapshot(file);
-  expect(after.schema).toBe(7);
+  expect(after.schema).toBe(8);
   for (const [table, contents] of Object.entries(before.tables))
     if (table !== "archive_meta" && table !== "map_projects")
       expect(after.tables[table], table).toEqual(contents);

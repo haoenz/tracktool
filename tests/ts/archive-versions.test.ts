@@ -224,7 +224,7 @@ it.each([1, 2])(
     ).toEqual([{ connected: 0 }, { connected: 0 }]);
     const db = new Database(file);
     expect(verifyArchive(db)).toMatchObject({
-      schema: 7,
+      schema: 8,
       revision: 3,
       storage_revision: 1,
     });
@@ -297,7 +297,7 @@ it("backs up schema 6 projects, rolls back a failed drop, and preserves all trac
   expect(logical(file)).toEqual(before);
   const backup = (await migrateArchive(file))!;
   expect(logical(backup)).toEqual(before);
-  expect(rows(file, "PRAGMA user_version")).toEqual([{ user_version: 7 }]);
+  expect(rows(file, "PRAGMA user_version")).toEqual([{ user_version: 8 }]);
   expect(
     rows(
       file,

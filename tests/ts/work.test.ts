@@ -607,7 +607,7 @@ it("a killed worker is not replayed and another process can recover its lease", 
   const restarted = new SqliteTasks(file, () => Date.now() + 16000);
   cleanup.push(() => restarted.close());
   expect(restarted.recover()).toBe(1);
-  const task = restarted.list()[0]!;
+  const task = restarted.read(restarted.list()[0]!.id)!;
   expect(task.status).toBe("interrupted");
   expect(restarted.claim("replacement")).toBeUndefined();
   expect(

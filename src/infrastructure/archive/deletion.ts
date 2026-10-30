@@ -198,8 +198,14 @@ export function deleteEntryInTransaction(
         "track_segments",
         "track_versions",
       ]) {
-        const remove = db.prepare(`DELETE FROM ${table} WHERE rowid=?`);
-        for (const row of scope.get(table)!) remove.run(row);
+        const rows = [...scope.get(table)!];
+        // One statement per 400 rows instead of one per row.
+        for (let index = 0; index < rows.length; index += 400) {
+          const chunk = rows.slice(index, index + 400);
+          db.prepare(
+            `DELETE FROM ${table} WHERE rowid IN (${chunk.map(() => "?").join(",")})`,
+          ).run(...chunk);
+        }
       }
       fault("delete-history");
       db.prepare("DELETE FROM archive_entries WHERE id=?").run(id);

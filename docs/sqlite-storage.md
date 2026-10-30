@@ -33,7 +33,7 @@ tracktool archive backup                         # 默认写归档目录 / Archi
 tracktool archive backup --output /backup/Archive.zip
 tracktool archive full-backup --output /backup/tracks-2026-10-14.sqlite3
 tracktool archive restore-backup /backup/tracks-2026-10-14.sqlite3 /fresh/restored
-tracktool archive migrate                        # 完整备份后升级至当前 schema 7
+tracktool archive migrate                        # 完整备份后升级至当前 schema 8
 tracktool archive rebuild                        # SQLite → 桌面/手机聚合 KML
 tracktool archive recover                        # 完成上次中断的文件操作
 ```
@@ -91,7 +91,7 @@ push 会先尝试恢复未完成操作，也可以显式 `archive recover`。旧
 
 ## schema 5：轨迹分析缓存
 
-运行 `tracktool archive migrate` 在引入此缓存时升级到 schema 5；当前命令会继续升级至 schema 7。沿用先生成完整 SQLite 备份、再事务迁移的机制；失败回滚，不批量计算轨迹。schema 4 → 5 不改变业务 `revision`，只因结构升级推进一次 `storage_revision`。
+运行 `tracktool archive migrate` 在引入此缓存时升级到 schema 5；当前命令会继续升级至 schema 8。沿用先生成完整 SQLite 备份、再事务迁移的机制；失败回滚，不批量计算轨迹。schema 4 → 5 不改变业务 `revision`，只因结构升级推进一次 `storage_revision`。
 
 `track_analysis_cache` 的联合主键为 `(sha256, parser_version, analysis_version, params_hash)`。`sha256` 外键关联 `kml_objects`，使用 `ON DELETE CASCADE`。其他字段为：
 
@@ -119,5 +119,9 @@ push 会先尝试恢复未完成操作，也可以显式 `archive recover`。旧
 ## schema 7：移除地图项目表
 
 `map_projects` 只保存旧版网页工程；工程管理改为浏览器草稿和 JSON 后不再使用。schema 6 → 7 在完整备份后执行 `DROP TABLE map_projects` 并移除相关触发器，不修改轨迹、版本、展示设置或缓存。`archive migrate` 会处理 schema 2–6；新库直接使用 schema 7。
+
+## schema 8：版本谱系索引
+
+`track_segment_sources`、`track_source_locations` 和 `track_operation_inputs` 原来只能按主键或 `operation_id` 查找；删除条目、恢复历史和谱系环路触发器都要按 `version_id` 过滤，只能全表扫描。schema 7 → 8 在完整备份后补三个 `version_id` 索引，不修改任何业务数据、不推进 `revision`。`archive migrate` 会处理 schema 2–7；schema 7 的库不升级也能继续使用，只是维持扫描。
 
 解析器 v2 无需新增表或升级 SQLite schema：继续以 `resolver_version` 区分派生版本，读取每个端点不高于当前解析器版本的最新结果。`location_json` 新增 `raw_response`、`raw_source`、`resolution`；新响应完整保留全部 Google 候选及元数据，旧数据仅有选中组件时明确标注局限，不能恢复成伪造的完整响应。离线重算不改变真实查询时间，也不读取或重写原轨迹。缺少某层、当地不适用和候选冲突分别记录；候选冲突自动退到共同上级，保留完整证据以便以后重算。

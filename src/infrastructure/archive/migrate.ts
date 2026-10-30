@@ -11,6 +11,7 @@ import { rawObject, schemaVersion } from "./database.js";
 import { hashJson, stableId } from "./identity.js";
 import { MIGRATE_5 } from "./schema-v6.js";
 import { MIGRATE_6 } from "./schema-v7.js";
+import { MIGRATE_7 } from "./schema-v8.js";
 import { MIGRATE_4 } from "./schema-v5.js";
 import { MIGRATE_3 } from "./schema-v4.js";
 import { MIGRATE_1 } from "./schema.js";
@@ -45,9 +46,28 @@ export async function migrateArchive(
     db.pragma("foreign_keys=ON");
     db.pragma("synchronous=FULL");
     const version = schemaVersion(db);
-    if (version === 7) {
+    if (version === 8) {
       verifyArchive(db);
       return;
+    }
+    if (version === 7) {
+      // Index-only upgrade: keep the backup so an interrupted run is recoverable.
+      const backup = `${file}.schema7-${randomUUID()}.sqlite3`;
+      stage = temporary(backup);
+      await snapshotDatabase(db, stage);
+      syncFile(stage);
+      linkSync(stage, backup);
+      syncDirectory(path.dirname(backup));
+      db.exec("BEGIN EXCLUSIVE");
+      try {
+        db.exec(MIGRATE_7);
+        verifyArchive(db);
+        db.exec("COMMIT");
+      } catch (error) {
+        if (db.inTransaction) db.exec("ROLLBACK");
+        throw error;
+      }
+      return backup;
     }
     if (
       version !== 1 &&
@@ -88,6 +108,7 @@ export async function migrateArchive(
       if (version < 5) db.exec(MIGRATE_4);
       if (version < 6) db.exec(MIGRATE_5);
       db.exec(MIGRATE_6);
+      db.exec(MIGRATE_7);
       db.exec(
         version === 3
           ? "UPDATE archive_meta SET revision=revision+1,storage_revision=storage_revision+1 WHERE singleton=1"
@@ -207,6 +228,7 @@ export async function migrateArchive(
     db.exec(MIGRATE_4);
     db.exec(MIGRATE_5);
     db.exec(MIGRATE_6);
+    db.exec(MIGRATE_7);
     verifyArchive(db);
     await fault("migration-before-commit");
     db.exec("COMMIT");
