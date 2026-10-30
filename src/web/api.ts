@@ -2,6 +2,7 @@ import {
   ConfigResponseSchema,
   ErrorResponseSchema,
 } from "../shared/contracts.js";
+import { downloadBlob } from "./lib/download.js";
 export async function request(
   path: string,
   body?: unknown,
@@ -57,8 +58,23 @@ export async function readConfig(signal?: AbortSignal) {
 }
 
 /** Wait for a user-requested operation without exposing its internal phases. */
-export async function waitForWorkTask(id: string) {
+const pause = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+  });
+export async function waitForWorkTask(id: string, signal?: AbortSignal) {
+  const deadline = Date.now() + 30 * 60_000;
   for (;;) {
+    signal?.throwIfAborted();
     const task = await api<import("../shared/work.js").WorkTask>(
       `/api/work/tasks/${id}`,
     );
@@ -67,7 +83,9 @@ export async function waitForWorkTask(id: string) {
         throw new Error(task.error?.message ?? "操作未完成，请检查结果后重试");
       return task;
     }
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    if (Date.now() > deadline)
+      throw new Error("等待任务超时，请刷新任务状态后重试");
+    await pause(300, signal);
   }
 }
 export async function downloadWorkFiles(
@@ -87,13 +105,7 @@ export async function downloadWorkFile(
   const response = await request(
     `/api/work/tasks/${task.id}/download?index=${index}`,
   );
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(await response.blob(), name);
   // A successful response header alone does not mean the browser received the entire file.
   if (task.output?.temporary)
     await api(`/api/work/tasks/${task.id}/download-complete`, { index });

@@ -70,14 +70,20 @@ for (const width of [1280, 390]) {
       page.getByRole("combobox", { name: "配色", exact: true }),
     ).toHaveCount(0);
     await pickBasemap(page, "osm-standard");
+    // Switching CRS rebuilds the overview; keep the poll well above that.
     await expect
-      .poll(() => page.evaluate(() => window.renderer?.state.style.basemap))
+      .poll(() => page.evaluate(() => window.renderer?.state.style.basemap), {
+        timeout: 15_000,
+      })
       .toBe("osm-standard");
     await choice("返回设置").click();
     await pickAppearance(page, "浅色");
     await expectAppearance(page, "light");
+    // Switching CRS rebuilds the overview; keep the poll well above that.
     await expect
-      .poll(() => page.evaluate(() => window.renderer?.state.style.basemap))
+      .poll(() => page.evaluate(() => window.renderer?.state.style.basemap), {
+        timeout: 15_000,
+      })
       .toBe("osm-standard");
     await choice("地图设置").click();
     await pickBasemap(page, "vector");

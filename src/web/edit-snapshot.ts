@@ -6,11 +6,12 @@ import type { TrackDetail } from "../shared/track-edit.js";
 export function useEditSnapshot(
   id: string,
   read: (id: string) => Promise<TrackDetail>,
+  enabled = true,
 ) {
   const query = useQuery({
     queryKey: ["track-detail", id],
     queryFn: () => read(id),
-    enabled: !!id,
+    enabled: enabled && !!id,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,

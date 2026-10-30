@@ -187,17 +187,26 @@ function WorkspaceEditMap({
 
   useEffect(() => {
     if (!active) return;
-    setMap?.((old) =>
-      old &&
-      old.segment === selectedSegment &&
-      JSON.stringify(old.tracks) === JSON.stringify(tracks)
-        ? old
-        : {
-            tracks,
-            segment: selectedSegment,
-            pick: (p) => pickRef.current?.(p),
-          },
-    );
+    setMap?.((old) => {
+      if (old && old.segment === selectedSegment) {
+        // One serialization per state change instead of two: reuse the
+        // previous push's signature rather than re-encoding its tracks.
+        const signature = JSON.stringify(tracks);
+        if (old.signature === signature) return old;
+        return {
+          tracks,
+          segment: selectedSegment,
+          pick: (p) => pickRef.current?.(p),
+          signature,
+        };
+      }
+      return {
+        tracks,
+        segment: selectedSegment,
+        pick: (p) => pickRef.current?.(p),
+        signature: JSON.stringify(tracks),
+      };
+    });
   }, [active, tracks, selectedSegment, setMap]);
   useEffect(
     () => () => {

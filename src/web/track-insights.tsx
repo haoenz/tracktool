@@ -71,12 +71,14 @@ export function TrackInsights({
   scope,
   active,
   onOverlay,
+  onSample,
   children,
 }: {
   entry: OverviewEntry;
   scope: string;
   active: boolean;
   onOverlay: (value: AnalysisOverlay | undefined) => void;
+  onSample?: (sample?: AnalysisSample) => void;
   children: ReactNode;
 }) {
   const [metric, setMetric] = useState<AnalysisMetric>("altitude");
@@ -154,12 +156,14 @@ export function TrackInsights({
             key: entry.id + entry.sha256,
             metric: overlay,
             analysis: data,
-            sample: hover,
           }
         : undefined,
     );
     return () => onOverlay(undefined);
-  }, [active, data, entry.id, entry.sha256, overlay, hover, onOverlay]);
+  }, [active, data, entry.id, entry.sha256, overlay, onOverlay]);
+  useEffect(() => {
+    onSample?.(hover);
+  }, [hover, onSample]);
   const currentAxis = data?.time_complete ? axis : "distance";
   const range = data && metricRange(data, metric);
   const overlayRange =
@@ -464,6 +468,19 @@ function ProfileChart({
     if (current.length) groups.push(current);
     return groups;
   }, [data, metric]);
+  // Path text is rebuilt only when the series changes, not on every hover.
+  const drawn = useMemo(
+    () =>
+      paths.map((points) =>
+        points
+          .map(
+            (p, i) =>
+              `${i ? "L" : "M"}${x(p).toFixed(2)},${y(p[metric]!).toFixed(2)}`,
+          )
+          .join(" "),
+      ),
+    [paths, metric, extent, min, max],
+  );
   const pick = (clientX: number, rect: DOMRect) => {
     const target =
       Math.max(
@@ -538,12 +555,7 @@ function ProfileChart({
           </g>
         ))}
       {paths.map((points, index) => {
-        const path = points
-          .map(
-            (p, i) =>
-              `${i ? "L" : "M"}${x(p).toFixed(2)},${y(p[metric]!).toFixed(2)}`,
-          )
-          .join(" ");
+        const path = drawn[index]!;
         return (
           <g key={index}>
             {metric === "altitude" && (

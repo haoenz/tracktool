@@ -10,14 +10,13 @@ import { editTracks } from "./track-editor-map.js";
 import { TrackHistory } from "./track-history.js";
 import "./work.css";
 import { useEditSnapshot } from "./edit-snapshot.js";
+import { AltitudePreviewTable } from "./altitude-preview-table.js";
 import { importError } from "./import-error.js";
 import { nearestPoint, previewAnnotations } from "../shared/edit-map.js";
-import { Fragment, useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
-  ChevronDown,
-  ChevronRight,
   CircleAlert,
   LoaderCircle,
   LocateFixed,
@@ -136,9 +135,6 @@ function TrackEditor({
     [preview, setPreview] = useState<EditPreview>(),
     [outputIndex, setOutputIndex] = useState(0),
     [showBefore, setShowBefore] = useState(false);
-  const [collapsedAltitude, setCollapsedAltitude] = useState<
-    Record<string, boolean>
-  >({});
   const [locatedAltitude, setLocatedAltitude] = useState<{
     segment_id: string;
     longitude: number;
@@ -167,16 +163,16 @@ function TrackEditor({
   const config = useQuery({
     queryKey: ["work-bootstrap"],
     queryFn: () => api<{ config: PublicConfig }>("/api/work/bootstrap"),
-    enabled: view === "edit",
+    enabled: visible && view === "edit",
   });
-  const target = useEditSnapshot(entryId, detail);
+  const target = useEditSnapshot(entryId, detail, visible);
   const tagData = useQuery({
     queryKey: ["track-tag", entryId, target.data?.entry.version_id],
     queryFn: () =>
       api<{ tag: string }>(
         `/api/tracks/${entryId}/tag?version_id=${target.data!.entry.version_id}`,
       ),
-    enabled: mode === "set_tag" && !!target.data,
+    enabled: visible && mode === "set_tag" && !!target.data,
   });
   const geometryRef =
     preview?.before.find((e) => e.entry_id === entryId) ?? target.data?.entry;
@@ -191,12 +187,12 @@ function TrackEditor({
       api<EditGeometry>(
         `/api/tracks/${entryId}/geometry?${new URLSearchParams({ raw: "true", version_id: geometryRef!.version_id, presentation_id: geometryRef!.presentation_id })}`,
       ),
-    enabled: !!geometryRef && (view !== "history" || !!preview),
+    enabled: visible && !!geometryRef && (view !== "history" || !!preview),
   });
   const task = useQuery({
     queryKey: ["task", taskId],
     queryFn: () => api<WorkTask>(`/api/work/tasks/${taskId}`),
-    enabled: !!taskId,
+    enabled: visible && !!taskId,
     refetchInterval: (q) =>
       q.state.data && !["running", "queued"].includes(q.state.data.status)
         ? false
@@ -395,29 +391,32 @@ function TrackEditor({
     ) ?? 0;
   const fillAltitudeFailure =
     mode === "fill_altitude" && !preview && (!!error || !!task.data?.error);
-  const altitudeWholeById = new Map(
-    altitudeResult.data?.segments.map((segment) => [
-      segment.segment_id,
-      segment.whole,
-    ]) ?? [],
-  );
-  const altitudeGroups: {
-    segment_id: string;
-    segment_ordinal: number;
-    whole: boolean;
-    points: AltitudePreview["points"];
-  }[] = [];
-  for (const point of altitudeResult.data?.points ?? []) {
-    const last = altitudeGroups.at(-1);
-    if (last?.segment_id === point.segment_id) last.points.push(point);
-    else
-      altitudeGroups.push({
-        segment_id: point.segment_id,
-        segment_ordinal: point.segment_ordinal,
-        whole: altitudeWholeById.get(point.segment_id) ?? false,
-        points: [point],
-      });
-  }
+  const altitudeGroups = useMemo(() => {
+    const whole = new Map(
+      altitudeResult.data?.segments.map((segment) => [
+        segment.segment_id,
+        segment.whole,
+      ]) ?? [],
+    );
+    const groups: {
+      segment_id: string;
+      segment_ordinal: number;
+      whole: boolean;
+      points: AltitudePreview["points"];
+    }[] = [];
+    for (const point of altitudeResult.data?.points ?? []) {
+      const last = groups.at(-1);
+      if (last?.segment_id === point.segment_id) last.points.push(point);
+      else
+        groups.push({
+          segment_id: point.segment_id,
+          segment_ordinal: point.segment_ordinal,
+          whole: whole.get(point.segment_id) ?? false,
+          points: [point],
+        });
+    }
+    return groups;
+  }, [altitudeResult.data]);
   const canSave =
     !!d &&
     d.entry.state === "active" &&
@@ -1100,93 +1099,13 @@ function TrackEditor({
                   )}
                   {altitudeResult.data &&
                     altitudeResult.data.points.length > 0 && (
-                      <div className="max-h-72 overflow-auto rounded-md border">
-                        <table className="w-full text-sm">
-                          <thead className="sticky top-0 bg-muted">
-                            <tr>
-                              <th className="w-10 p-2">
-                                <span className="sr-only">定位</span>
-                              </th>
-                              <th className="p-2 text-left">经度</th>
-                              <th className="p-2 text-left">纬度</th>
-                              <th className="p-2 text-left">高程</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {altitudeGroups.map((group) => {
-                              const collapsed =
-                                altitudeGroups.length > 1 &&
-                                !!collapsedAltitude[group.segment_id];
-                              return (
-                                <Fragment key={group.segment_id}>
-                                  {altitudeGroups.length > 1 && (
-                                    <tr className="border-t bg-muted/60">
-                                      <th colSpan={4} className="p-0">
-                                        <button
-                                          type="button"
-                                          className="flex w-full items-center gap-1 p-2 text-left font-medium"
-                                          aria-expanded={!collapsed}
-                                          onClick={() =>
-                                            setCollapsedAltitude((value) => ({
-                                              ...value,
-                                              [group.segment_id]:
-                                                !value[group.segment_id],
-                                            }))
-                                          }
-                                        >
-                                          {collapsed ? (
-                                            <ChevronRight className="size-4" />
-                                          ) : (
-                                            <ChevronDown className="size-4" />
-                                          )}
-                                          段 {group.segment_ordinal + 1}
-                                          {group.whole
-                                            ? "（整段缺失）"
-                                            : "（部分缺失）"}{" "}
-                                          · {group.points.length} 个点
-                                        </button>
-                                      </th>
-                                    </tr>
-                                  )}
-                                  {!collapsed &&
-                                    group.points.map((point) => (
-                                      <tr
-                                        key={`${point.segment_id}:${point.index}`}
-                                        className="border-t"
-                                      >
-                                        <td className="p-2">
-                                          <Button
-                                            variant="ghost"
-                                            className="h-7 w-7 p-0"
-                                            aria-label={`定位第 ${point.index + 1} 点`}
-                                            title="定位"
-                                            onClick={() => {
-                                              setLocatedAltitude(point);
-                                              locateAltitudePoint(point);
-                                            }}
-                                          >
-                                            <LocateFixed className="size-4" />
-                                          </Button>
-                                        </td>
-                                        <td className="p-2">
-                                          {point.longitude.toFixed(6)}
-                                        </td>
-                                        <td className="p-2">
-                                          {point.latitude.toFixed(6)}
-                                        </td>
-                                        <td className="p-2">
-                                          {point.altitude === null
-                                            ? "未补齐"
-                                            : `${point.altitude.toFixed(2)} m`}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                </Fragment>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+                      <AltitudePreviewTable
+                        groups={altitudeGroups}
+                        onLocate={(point) => {
+                          setLocatedAltitude(point);
+                          locateAltitudePoint(point);
+                        }}
+                      />
                     )}
                   <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-background py-3">
                     <Button

@@ -43,9 +43,10 @@ for (const format of EXPORT_FORMAT_OPTIONS) {
       expect(download.suggestedFilename()).toBe(encoding.filename);
       const bytes = await readFile((await download.path())!);
       expect(bytes.length).toBeGreaterThan(0);
-      await expect(
-        page.getByRole("heading", { name: "下载完成" }),
-      ).toBeVisible();
+      // Extreme xz compression can outrun the default assertion timeout.
+      await expect(page.getByRole("heading", { name: "下载完成" })).toBeVisible(
+        { timeout: 20_000 },
+      );
       await expect(
         page.getByRole("button", { name: "导出", exact: true }),
       ).toBeEnabled();

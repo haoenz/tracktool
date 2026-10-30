@@ -1,37 +1,14 @@
 import { PanelLoading } from "./components/panel-loading.js";
 import { DeleteTrackDialog } from "./delete-track-dialog.js";
-import { TrackInsights, type AnalysisOverlay } from "./track-insights.js";
-import { Popover as PopoverPrimitive } from "radix-ui";
+import type { AnalysisOverlay } from "./track-insights.js";
 import { toast } from "sonner";
 import {
-  Eye,
-  EyeOff,
-  Square,
-  SquareCheck,
-  SquareMinus,
-  LoaderCircle,
-  Funnel,
-  ListChecks,
-  ArrowDownWideNarrow,
   Settings as SettingsIcon,
   List,
   Upload,
   FileOutput,
-  LocateFixed,
-  Download,
-  Ellipsis,
-  Trash2,
-  Pencil,
-  SlidersHorizontal,
-  History,
-  ChevronRight,
   Map as MapIcon,
 } from "lucide-react";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "./components/ui/popover.js";
 import { SheetHandle } from "./components/sheet-handle.js";
 import { MapContentSettings } from "./map-content-settings.js";
 import { StartupScreen } from "./components/startup-screen.js";
@@ -57,7 +34,6 @@ import {
   Spin,
   Modal,
   Pagination,
-  RadioGroup,
 } from "./components/controls.js";
 import { Link, useSearchParams } from "react-router-dom";
 import { WorkspaceContext, type Panel, type EditMap } from "./workspace.js";
@@ -99,6 +75,14 @@ import {
   rememberPrintDraft,
 } from "./print-session.js";
 import { useSessionState } from "./session-state.js";
+import { basemapLabel } from "./basemap-catalog.js";
+import { TrackListRow } from "./track-list-row.js";
+import { LibraryToolbar } from "./library-toolbar.js";
+import { TrackDetailToolbar } from "./track-detail-toolbar.js";
+import { TrackDetailLinks } from "./track-detail-links.js";
+import { DetailPanel } from "./detail-panel.js";
+import { downloadBlob } from "./lib/download.js";
+import { BasemapPicker } from "./basemap-picker.js";
 import Settings from "./settings.js";
 import { useEntryVisibility } from "./visibility-preference.js";
 import { useTheme } from "./theme.js";
@@ -118,106 +102,6 @@ type Bootstrap = {
   directory: string;
 };
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-// Open-map vendors share one heading so the list reads by licensing, not by
-// whoever happens to host the tiles.
-const openVendors = new Set(["OSM", "memomaps", "OpenTopoMap", "OpenFreeMap"]);
-const vendorName = (group: string) =>
-  openVendors.has(group) ? "开放地图" : group;
-const vendorOrder = [
-  "开放地图",
-  "高德",
-  "谷歌",
-  "ArcGIS",
-  "必应",
-  "腾讯",
-  "360",
-];
-const basemapLabel = (config: MapConfig, id: string) => {
-  if (id === "vector") return "开放地图 · OpenFreeMap 矢量底图";
-  const preset = config.basemaps.find((b) => b.id === id);
-  return preset ? `${vendorName(preset.group)} · ${preset.name}` : id;
-};
-type BasemapChoice = {
-  value: string;
-  label: string;
-  vendor: string;
-  hint?: string;
-};
-const basemapVendorRank = (vendor: string) => {
-  const index = vendorOrder.indexOf(vendor);
-  return index === -1 ? vendorOrder.length : index;
-};
-// Hand-picked order inside each vendor: general maps first, then imagery,
-// then the large-font variants.
-const basemapOrder = [
-  "vector",
-  "osm-standard",
-  "opentopomap-terrain",
-  "memomaps-transport",
-  "amap-road",
-  "amap-satellite",
-  "amap-road-legacy",
-  "google-satellite",
-  "google-road",
-  "google-terrain",
-  "google-hybrid",
-  "google-hybrid-large",
-  "google-road-large",
-  "google-terrain-large",
-  "esri-satellite",
-  "esri-topo",
-  "bing-satellite",
-  "bing-terrain",
-  "tencent-satellite",
-  "tencent-road",
-  "tencent-terrain",
-  "360-road",
-];
-const basemapRank = (id: string) => {
-  const index = basemapOrder.indexOf(id);
-  return index === -1 ? basemapOrder.length : index;
-};
-const groupBasemaps = (choices: BasemapChoice[]) => {
-  const groups = new Map<string, BasemapChoice[]>();
-  for (const choice of choices) {
-    const vendor = vendorName(choice.vendor);
-    const items = groups.get(vendor);
-    if (items) items.push(choice);
-    else groups.set(vendor, [choice]);
-  }
-  for (const items of groups.values())
-    items.sort(
-      (left, right) => basemapRank(left.value) - basemapRank(right.value),
-    );
-  return [...groups].sort(
-    ([left], [right]) => basemapVendorRank(left) - basemapVendorRank(right),
-  );
-};
-const download = (blob: Blob, name: string) => {
-  const url = URL.createObjectURL(blob),
-    a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-};
-function VisibilityIcon({ visible }: { visible: boolean }) {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden="true"
-    >
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
-      <circle cx="12" cy="12" r="3" />
-      {!visible && <path d="M3 3l18 18" />}
-    </svg>
-  );
-}
 export default function MapPage() {
   const [params] = useSearchParams();
   const bootstrap = useQuery({
@@ -311,7 +195,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [switching, setSwitching] = useState("");
-  const [pickerVendor, setPickerVendor] = useState("");
   const [basemapError, setBasemapError] = useState("");
   const [displaySaveState, setDisplaySaveState] = useState<
     "" | "saving" | "saved" | "error"
@@ -340,6 +223,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
   );
   const hasDraft = Object.values(drafts).some(Boolean);
   const [editMap, setEditMap] = useState<EditMap>();
+  const cameraSave = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const batch = browseBatch;
   const setBatch = setBrowseBatch;
   const state = mapState;
@@ -379,7 +265,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
     to: string;
     candidates: string[];
   }>();
-  const [sortOpen, setSortOpen] = useState(false);
   const invalidDateRange = !!(
     filterDraft?.from &&
     filterDraft.to &&
@@ -1006,11 +891,22 @@ function Editor({ initial }: { initial: Bootstrap }) {
       setInspection((old) => (old ? { ...old, camera } : old));
       return;
     }
-    if (JSON.stringify(stateRef.current.camera) !== JSON.stringify(camera)) {
-      fitted.current = true;
-      rememberCamera(initial.initialArchive, camera);
-      setState((prev) => ({ ...prev, camera }));
-    }
+    const previous = stateRef.current.camera;
+    if (
+      previous.zoom === camera.zoom &&
+      previous.center[0] === camera.center[0] &&
+      previous.center[1] === camera.center[1]
+    )
+      return;
+    fitted.current = true;
+    // "moveend" fires after every pan; defer the session write so a drag does
+    // not serialize storage on each stop.
+    if (cameraSave.current) clearTimeout(cameraSave.current);
+    cameraSave.current = setTimeout(
+      () => rememberCamera(initial.initialArchive, camera),
+      400,
+    );
+    setState((prev) => ({ ...prev, camera }));
   };
   viewportHandlers.current.error = (error) => {
     overview.setTileError(error);
@@ -1028,50 +924,16 @@ function Editor({ initial }: { initial: Bootstrap }) {
     (error: string) => viewportHandlers.current.error(error),
     [],
   );
+  const handleSample = useCallback(
+    (sample?: import("../shared/track-analysis.js").AnalysisSample) =>
+      viewport.current?.setAnalysisSample(sample),
+    [],
+  );
   const viewportState = useMemo(
     () =>
       inspection ? { ...state, camera: inspection.camera, title: "" } : state,
     [inspection, state],
   );
-  const basemapList = useRef<HTMLDivElement | null>(null);
-  // Badges only mark sources whose CRS differs from the render canvas.
-  const crsBadge = (source: string) =>
-    source === "gcj02" ? "GCJ-02" : "WGS84";
-  const presetCrs = (b: MapConfig["basemaps"][number]) =>
-    b.format === "vector" ? "wgs84" : b.crs;
-  const basemapGroups = groupBasemaps([
-    {
-      value: "vector",
-      label: "OpenFreeMap 矢量底图",
-      vendor: "OpenFreeMap",
-      hint: crs === "gcj02" ? "WGS84" : undefined,
-    },
-    ...config.basemaps.map((b) => ({
-      value: b.id,
-      label: b.name,
-      vendor: b.group,
-      hint: presetCrs(b) === crs ? undefined : crsBadge(presetCrs(b)),
-    })),
-  ]);
-  const activeBasemapVendor =
-    basemapGroups.find(([, items]) =>
-      items.some((item) => item.value === state.style.basemap),
-    )?.[0] ??
-    basemapGroups[0]?.[0] ??
-    "";
-  const shownVendor = basemapGroups.some(([vendor]) => vendor === pickerVendor)
-    ? pickerVendor
-    : activeBasemapVendor;
-  const shownBasemaps =
-    basemapGroups.find(([vendor]) => vendor === shownVendor)?.[1] ?? [];
-  // Switching the basemap (including undo) realigns the vendor column.
-  useEffect(() => setPickerVendor(""), [state.style.basemap]);
-  // Keep the active row visible when the column scrolls.
-  useEffect(() => {
-    basemapList.current
-      ?.querySelector('[aria-pressed="true"]')
-      ?.scrollIntoView({ block: "nearest" });
-  }, [shownVendor, state.style.basemap]);
   const titleError = mapTitleError(state.title);
   const visibleTracks = useMemo<PrintTrack[]>(() => {
     if (!catalog) return [];
@@ -1262,11 +1124,14 @@ function Editor({ initial }: { initial: Bootstrap }) {
         },
       );
       if (warnings.length) toast.warning(warnings.join("；"));
+      const deadline = Date.now() + 5 * 60_000;
       for (;;) {
         await new Promise((resolve) => setTimeout(resolve, 700));
+        if (Date.now() > deadline)
+          throw new Error("图片生成超时，请重试或稍后检查结果");
         const status = await api<MapExport>(`/api/jobs/${job}`);
         if (status.status === "done") {
-          download(
+          downloadBlob(
             await (await request(`/api/jobs/${job}/png`)).blob(),
             status.fileName,
           );
@@ -1302,7 +1167,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
     if (!printValue) return;
     setPrintError("");
     try {
-      download(
+      downloadBlob(
         new Blob([JSON.stringify(printValue, null, 2)], {
           type: "application/json",
         }),
@@ -1680,170 +1545,47 @@ function Editor({ initial }: { initial: Bootstrap }) {
                   ))}
                 {catalog && (
                   <>
-                    <div className="list-visibility-toolbar">
-                      {batchMode ? (
-                        <Button
-                          variant="ghost"
-                          className="list-visibility-button"
-                          aria-label={
-                            batchAllSelected
-                              ? "清空全部勾选"
-                              : "勾选全部筛选结果"
-                          }
-                          title={
-                            batchAllSelected
-                              ? "取消当前筛选的全部勾选（包含所有分页）"
-                              : "勾选当前筛选的全部轨迹（包含所有分页）"
-                          }
-                          aria-pressed={batchMixed ? "mixed" : batchAllSelected}
-                          aria-busy={
-                            batchSelecting || batchPending || undefined
-                          }
-                          disabled={
-                            batchSelecting ||
-                            batchPending ||
-                            !overview.list.data?.total ||
-                            !batchEntries
-                          }
-                          onClick={() =>
-                            void selectAllMatching(!batchAllSelected)
-                          }
-                        >
-                          {batchAllSelected ? (
-                            <SquareCheck size={20} aria-hidden="true" />
-                          ) : batchMixed ? (
-                            <SquareMinus size={20} aria-hidden="true" />
-                          ) : (
-                            <Square size={20} aria-hidden="true" />
-                          )}
-                          {(batchSelecting || batchPending) && (
-                            <span
-                              className="visibility-loading-mask"
-                              aria-hidden="true"
-                            >
-                              <LoaderCircle
-                                size={20}
-                                className="animate-spin"
-                              />
-                            </span>
-                          )}
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          aria-label="切换当前列表可见性"
-                          className="list-visibility-button"
-                          title={`${visibilityLabel}：点击${listVisibility === "none" ? "全部显示" : "全部隐藏"}（包含所有分页）`}
-                          aria-pressed={
-                            listVisibility === undefined
-                              ? undefined
-                              : listVisibility === "mixed"
-                                ? "mixed"
-                                : listVisibility === "all"
-                          }
-                          aria-busy={
-                            visibilityBusy || visibilityPending || undefined
-                          }
-                          data-visibility={listVisibility ?? "pending"}
-                          disabled={
-                            visibilityBusy ||
-                            visibilityPending ||
-                            !overview.list.data?.total
-                          }
-                          onClick={() => void toggleListVisibility()}
-                        >
-                          {listVisibility === "none" ? (
-                            <EyeOff size={20} aria-hidden="true" />
-                          ) : (
-                            <Eye size={20} aria-hidden="true" />
-                          )}
-                          {(visibilityBusy || visibilityPending) && (
-                            <span
-                              className="visibility-loading-mask"
-                              aria-hidden="true"
-                            >
-                              <LoaderCircle
-                                size={20}
-                                className="animate-spin"
-                              />
-                            </span>
-                          )}
-                        </Button>
-                      )}
-                      <Button
-                        className="list-filter-button"
-                        variant={filtersApplied ? "secondary" : "ghost"}
-                        aria-label="筛选"
-                        aria-haspopup="dialog"
-                        title={filtersApplied ? "筛选：已设置" : "筛选"}
-                        onClick={() =>
-                          setFilterDraft({
-                            kind,
-                            from: dates.from,
-                            to: dates.to,
-                            candidates: overview.candidates,
-                          })
-                        }
-                      >
-                        <Funnel size={20} aria-hidden="true" />
-                        {filtersApplied && (
-                          <span
-                            className="filter-indicator"
-                            aria-label="已设置"
-                          />
-                        )}
-                      </Button>
-                      <Input
-                        id="filter"
-                        aria-label="筛选轨迹"
-                        placeholder="搜索轨迹"
-                        value={filter}
-                        onChange={(e) => setFilter(e.target.value)}
-                      />
-                      <Popover open={sortOpen} onOpenChange={setSortOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant={
-                              dates.sort === "date-desc" ? "ghost" : "secondary"
-                            }
-                            aria-label="排序"
-                            title="排序"
-                          >
-                            <ArrowDownWideNarrow size={20} aria-hidden="true" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent
-                          align="end"
-                          className="list-sort-menu"
-                          aria-label="排序"
-                        >
-                          <p className="mb-3 font-medium">排序</p>
-                          <RadioGroup
-                            value={dates.sort}
-                            onValueChange={(sort) => {
-                              setDates({ ...dates, sort });
-                              setSortOpen(false);
-                            }}
-                            options={[
-                              { value: "date-desc", label: "日期从新到旧" },
-                              { value: "date-asc", label: "日期从旧到新" },
-                            ]}
-                          />
-                        </PopoverContent>
-                      </Popover>
-                      <Button
-                        variant={batchMode ? "secondary" : "ghost"}
-                        aria-label="批量操作"
-                        title="批量操作"
-                        aria-pressed={batchMode}
-                        onClick={() => {
-                          if (batchMode) clearBatch(true);
-                          else setBatchMode(true);
-                        }}
-                      >
-                        <ListChecks size={20} aria-hidden="true" />
-                      </Button>
-                    </div>
+                    <LibraryToolbar
+                      batchMode={batchMode}
+                      batchAllSelected={batchAllSelected}
+                      batchMixed={batchMixed}
+                      batchBusy={batchSelecting || batchPending}
+                      batchDisabled={
+                        batchSelecting ||
+                        batchPending ||
+                        !overview.list.data?.total ||
+                        !batchEntries
+                      }
+                      onSelectAll={() =>
+                        void selectAllMatching(!batchAllSelected)
+                      }
+                      visibility={listVisibility}
+                      visibilityBusy={visibilityBusy || visibilityPending}
+                      visibilityDisabled={
+                        visibilityBusy ||
+                        visibilityPending ||
+                        !overview.list.data?.total
+                      }
+                      visibilityLabel={visibilityLabel}
+                      onToggleVisibility={() => void toggleListVisibility()}
+                      filtersApplied={filtersApplied}
+                      onOpenFilters={() =>
+                        setFilterDraft({
+                          kind,
+                          from: dates.from,
+                          to: dates.to,
+                          candidates: overview.candidates,
+                        })
+                      }
+                      filter={filter}
+                      onFilter={setFilter}
+                      sort={dates.sort}
+                      onSort={(sort: string) => setDates({ ...dates, sort })}
+                      onToggleBatch={() => {
+                        if (batchMode) clearBatch(true);
+                        else setBatchMode(true);
+                      }}
+                    />
                     <div className="map-track-list" aria-busy={listLoading}>
                       {listLoading ? (
                         <PanelLoading>正在读取轨迹列表…</PanelLoading>
@@ -1862,93 +1604,44 @@ function Editor({ initial }: { initial: Bootstrap }) {
                                 {e.date.slice(0, 7) || "日期未知"}
                               </h4>
                             )}
-                            <div
-                              className={`overview-row${(batchMode ? Object.hasOwn(batch, e.id) : overview.id === e.id) ? " selected" : ""}`}
-                            >
-                              <button
-                                className="track-row-name"
-                                aria-label={`${batchMode ? "选择" : "查看"} ${e.entry}`}
-                                disabled={batchMode && batchSelecting}
-                                aria-pressed={
-                                  batchMode
-                                    ? Object.hasOwn(batch, e.id)
-                                    : overview.id === e.id
-                                }
-                                onClick={() => {
-                                  if (batchMode) {
-                                    toggleBatchEntry(e);
-                                    return;
-                                  }
-                                  if (
-                                    e.id !== overview.id &&
-                                    hasDraft &&
-                                    !window.confirm(
-                                      "当前轨迹有编辑草稿，切换轨迹将放弃草稿。是否继续？",
-                                    )
+                            <TrackListRow
+                              entry={e}
+                              selected={overview.id === e.id}
+                              visible={
+                                browseVisibility.all !==
+                                Object.hasOwn(browseVisibility.exceptions, e.id)
+                              }
+                              batchMode={batchMode}
+                              batchSelecting={batchSelecting}
+                              checked={Object.hasOwn(batch, e.id)}
+                              onOpen={() => {
+                                if (
+                                  e.id !== overview.id &&
+                                  hasDraft &&
+                                  !window.confirm(
+                                    "当前轨迹有编辑草稿，切换轨迹将放弃草稿。是否继续？",
                                   )
-                                    return;
-                                  overview.setId(e.id);
-                                  setDetailOpen(true);
-                                  setEditing(false);
-                                }}
-                              >
-                                <strong title={e.name.replace(/\.kml$/i, "")}>
-                                  {e.name.replace(/\.kml$/i, "")}
-                                </strong>
-                                {e.distance_m !== undefined && (
-                                  <span className="track-distance">
-                                    {(e.distance_m / 1000).toFixed(1)} km
-                                  </span>
-                                )}
-                              </button>
-                              {batchMode ? (
-                                <Checkbox
-                                  aria-label={`选择 ${e.name}`}
-                                  checked={Object.hasOwn(batch, e.id)}
-                                  disabled={batchSelecting}
-                                  onCheckedChange={() => toggleBatchEntry(e)}
-                                />
-                              ) : (
-                                <Button
-                                  className="track-row-visibility"
-                                  variant="ghost"
-                                  aria-label={`${browseVisibility.all !== Object.hasOwn(browseVisibility.exceptions, e.id) ? "隐藏" : "显示"} ${e.name}`}
-                                  aria-pressed={
+                                )
+                                  return;
+                                overview.setId(e.id);
+                                setDetailOpen(true);
+                                setEditing(false);
+                              }}
+                              onToggleBatch={() => toggleBatchEntry(e)}
+                              onToggleVisible={() =>
+                                toggleBrowse(
+                                  e.id,
+                                  e.entry,
+                                  !(
                                     browseVisibility.all !==
                                     Object.hasOwn(
                                       browseVisibility.exceptions,
                                       e.id,
                                     )
-                                  }
-                                  onClick={() =>
-                                    toggleBrowse(
-                                      e.id,
-                                      e.entry,
-                                      !(
-                                        browseVisibility.all !==
-                                        Object.hasOwn(
-                                          browseVisibility.exceptions,
-                                          e.id,
-                                        )
-                                      ),
-                                    )
-                                  }
-                                >
-                                  <VisibilityIcon
-                                    visible={
-                                      browseVisibility.all !==
-                                      Object.hasOwn(
-                                        browseVisibility.exceptions,
-                                        e.id,
-                                      )
-                                    }
-                                  />
-                                </Button>
-                              )}
-                              {e.error && (
-                                <span className="map-error">{e.error}</span>
-                              )}
-                            </div>
+                                  ),
+                                )
+                              }
+                            />
                           </Fragment>
                         ))}
                     </div>
@@ -2047,94 +1740,18 @@ function Editor({ initial }: { initial: Bootstrap }) {
                       </Button>
                     </p>
                   )}
-                  <span
-                    className="settings-field-label"
-                    id="settings-basemap-label"
-                  >
-                    图源
-                  </span>
-                  <div
-                    className="settings-basemap"
-                    role="group"
-                    aria-labelledby="settings-basemap-label"
-                    aria-describedby={
-                      basemapError ? "settings-basemap-error" : undefined
+                  <BasemapPicker
+                    config={config}
+                    crs={crs}
+                    value={state.style.basemap}
+                    error={basemapError}
+                    onPick={(id) => void switchBase(id)}
+                    onRetry={
+                      baseRetry
+                        ? () => void switchBase(baseRetry.id, baseRetry.style)
+                        : undefined
                     }
-                  >
-                    <div className="settings-basemap-columns">
-                      <div
-                        className="settings-vendor-list"
-                        role="group"
-                        aria-label="供应商"
-                      >
-                        {basemapGroups.map(([vendor]) => (
-                          <button
-                            key={vendor}
-                            type="button"
-                            className="settings-vendor-option"
-                            aria-pressed={vendor === shownVendor}
-                            onClick={() => setPickerVendor(vendor)}
-                          >
-                            {vendor}
-                            <span
-                              className="settings-vendor-dot"
-                              data-active={vendor === activeBasemapVendor}
-                              aria-hidden="true"
-                            />
-                          </button>
-                        ))}
-                      </div>
-                      <div
-                        className="settings-map-list"
-                        role="group"
-                        aria-label={shownVendor}
-                        ref={basemapList}
-                      >
-                        {shownBasemaps.map((item) => (
-                          <button
-                            key={item.value}
-                            type="button"
-                            className="settings-map-option"
-                            aria-label={item.label}
-                            aria-pressed={state.style.basemap === item.value}
-                            onClick={() => void switchBase(item.value)}
-                          >
-                            <span className="settings-map-name">
-                              {item.label}
-                            </span>
-                            {state.style.basemap === item.value && (
-                              <span className="settings-map-badge">当前</span>
-                            )}
-                            {item.hint && (
-                              <span className="settings-map-hint">
-                                {item.hint}
-                              </span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  {basemapError && (
-                    <p
-                      className="settings-error"
-                      id="settings-basemap-error"
-                      role="alert"
-                    >
-                      {basemapError}
-                      {baseRetry && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() =>
-                            void switchBase(baseRetry.id, baseRetry.style)
-                          }
-                        >
-                          重试
-                        </Button>
-                      )}
-                    </p>
-                  )}
+                  />
                   <MapContentSettings
                     state={state}
                     config={config}
@@ -2145,233 +1762,27 @@ function Editor({ initial }: { initial: Bootstrap }) {
               </section>
             )}
             {overview.id && (
-              <section
+              <DetailPanel
                 hidden={panel !== "library" || !detailOpen || !!archiveAction}
-              >
-                <div role="region" aria-label="轨迹详情">
-                  <div className="track-summary" hidden={editing}>
-                    {!overview.selected &&
-                      !overview.detail.error &&
-                      !overview.matching.error && (
-                        <div className="track-detail-loading" role="status">
-                          <Spin decorative />
-                          <span>正在读取轨迹详情…</span>
-                        </div>
-                      )}
-                    {(overview.detail.error ?? overview.matching.error) && (
-                      <p role="alert">
-                        {
-                          (overview.detail.error ?? overview.matching.error)
-                            ?.message
-                        }
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            void overview.detail.refetch();
-                            void overview.matching.refetch();
-                          }}
-                        >
-                          重试详情
-                        </Button>
-                      </p>
-                    )}
-                    {overview.selected && (
-                      <TrackInsights
-                        key={`${initial.initialArchive}:${overview.selected.id}:${overview.selected.sha256}`}
-                        entry={overview.selected}
-                        scope={initial.initialArchive}
-                        active={
-                          panel === "library" &&
-                          detailOpen &&
-                          !editing &&
-                          !archiveAction
-                        }
-                        onOverlay={setAnalysisOverlay}
-                      >
-                        <div className="track-detail-toolbar">
-                          <Button
-                            variant="default"
-                            className="track-locate-primary"
-                            onClick={() =>
-                              fitTracks(
-                                editMap
-                                  ? editMap.tracks
-                                  : [overview.selectedTrack!],
-                              )
-                            }
-                            disabled={
-                              editMap
-                                ? !editMap.tracks.some(
-                                    (track) => track.points > 0,
-                                  )
-                                : !overview.selectedTrack
-                            }
-                          >
-                            <LocateFixed aria-hidden="true" />
-                            定位轨迹
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            aria-label={
-                              selectedVisible
-                                ? "在地图上隐藏该轨迹"
-                                : "在地图上显示该轨迹"
-                            }
-                            title={
-                              selectedVisible
-                                ? "在地图上隐藏该轨迹"
-                                : "在地图上显示该轨迹"
-                            }
-                            aria-pressed={selectedVisible}
-                            disabled={!overview.selected}
-                            onClick={() =>
-                              toggleBrowse(
-                                overview.selected!.id,
-                                overview.selected!.entry,
-                                !selectedVisible,
-                              )
-                            }
-                          >
-                            <VisibilityIcon visible={selectedVisible} />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            aria-label="编辑轨迹"
-                            title="编辑轨迹"
-                            onClick={() => {
-                              if (
-                                editorView !== "edit" &&
-                                hasDraft &&
-                                !window.confirm(
-                                  "切换编辑功能将放弃当前草稿，是否继续？",
-                                )
-                              )
-                                return;
-                              setEditorView("edit");
-                              setEditing(true);
-                              setDetailAction(undefined);
-                            }}
-                          >
-                            <Pencil aria-hidden="true" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            aria-label="下载轨迹"
-                            title="下载轨迹"
-                            loading={downloadingTrack}
-                            disabled={
-                              !overview.detail.data ||
-                              overview.detail.data.entry.id !== overview.id ||
-                              overview.detail.data.entry.sha256 !==
-                                overview.selected?.sha256
-                            }
-                            onClick={() => {
-                              const entry = overview.detail.data!.entry;
-                              setDownloadingTrack(true);
-                              void request(
-                                `/api/tracks/${encodeURIComponent(entry.id)}/download?sha256=${entry.sha256}`,
-                              )
-                                .then(async (response) => {
-                                  const url = URL.createObjectURL(
-                                    await response.blob(),
-                                  );
-                                  const anchor = document.createElement("a");
-                                  anchor.href = url;
-                                  anchor.download =
-                                    entry.entry.split("/").at(-1) ??
-                                    "track.kml";
-                                  anchor.click();
-                                  setTimeout(
-                                    () => URL.revokeObjectURL(url),
-                                    1000,
-                                  );
-                                })
-                                .catch((error) =>
-                                  toast.error(
-                                    error instanceof Error
-                                      ? error.message
-                                      : "下载失败，请重试",
-                                  ),
-                                )
-                                .finally(() => setDownloadingTrack(false));
-                            }}
-                          >
-                            {!downloadingTrack && (
-                              <Download aria-hidden="true" />
-                            )}
-                          </Button>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                aria-label="更多轨迹操作"
-                                title="更多轨迹操作"
-                              >
-                                <Ellipsis aria-hidden="true" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent align="end" className="w-44 p-1">
-                              <PopoverPrimitive.Close asChild>
-                                <Button
-                                  variant="ghost"
-                                  className="w-full justify-start text-destructive"
-                                  disabled={!overview.selected}
-                                  onClick={() =>
-                                    setDetailAction({
-                                      operation: "archive:delete",
-                                      entry: overview.selected!.entry,
-                                    })
-                                  }
-                                >
-                                  <Trash2 aria-hidden="true" />
-                                  删除轨迹
-                                </Button>
-                              </PopoverPrimitive.Close>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-                        {detailLinks.length > 0 && (
-                          <div className="track-detail-links">
-                            {detailLinks.map((view) => (
-                              <Button
-                                key={view}
-                                variant="ghost"
-                                className="track-detail-link"
-                                aria-label={editorTitles[view]}
-                                onClick={() => {
-                                  if (
-                                    view !== editorView &&
-                                    hasDraft &&
-                                    !window.confirm(
-                                      "切换编辑功能将放弃当前草稿，是否继续？",
-                                    )
-                                  )
-                                    return;
-                                  setEditorView(view);
-                                  setEditing(true);
-                                  setDetailAction(undefined);
-                                }}
-                              >
-                                {view === "display" ? (
-                                  <SlidersHorizontal aria-hidden="true" />
-                                ) : (
-                                  <History aria-hidden="true" />
-                                )}
-                                <span>
-                                  <strong>{editorTitles[view]}</strong>
-                                </span>
-                                <ChevronRight aria-hidden="true" />
-                              </Button>
-                            ))}
-                          </div>
-                        )}
-                      </TrackInsights>
-                    )}
-                  </div>
+                editing={editing}
+                entry={overview.selected}
+                scope={initial.initialArchive}
+                insightsActive={
+                  panel === "library" &&
+                  detailOpen &&
+                  !editing &&
+                  !archiveAction
+                }
+                onOverlay={setAnalysisOverlay}
+                onSample={handleSample}
+                error={
+                  overview.detail.error ?? overview.matching.error ?? undefined
+                }
+                onRetry={() => {
+                  void overview.detail.refetch();
+                  void overview.matching.refetch();
+                }}
+                editor={
                   <Suspense fallback={<Spin />}>
                     <div hidden={!editing}>
                       {(editorView === "edit" ||
@@ -2380,7 +1791,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                           panel === "library" &&
                           !archiveAction)) && (
                         <TrackEditor
-                          key={`${overview.id}:${editorView}`}
+                          key={overview.id + ":" + editorView}
                           view={editorView}
                           onHeaderChange={setEditorHeader}
                           initialEntry={overview.id}
@@ -2398,7 +1809,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
                       )}
                     </div>
                   </Suspense>
-                  {detailAction && (
+                }
+                dialog={
+                  detailAction ? (
                     <DeleteTrackDialog
                       key={detailAction.entry}
                       entry={detailAction.entry}
@@ -2411,9 +1824,95 @@ function Editor({ initial }: { initial: Bootstrap }) {
                         setLibraryList(true);
                       }}
                     />
-                  )}
-                </div>
-              </section>
+                  ) : undefined
+                }
+              >
+                <TrackDetailToolbar
+                  onLocate={() =>
+                    fitTracks(
+                      editMap ? editMap.tracks : [overview.selectedTrack!],
+                    )
+                  }
+                  locateDisabled={
+                    editMap
+                      ? !editMap.tracks.some((track) => track.points > 0)
+                      : !overview.selectedTrack
+                  }
+                  visible={selectedVisible}
+                  visibilityDisabled={!overview.selected}
+                  onToggleVisible={() =>
+                    toggleBrowse(
+                      overview.selected!.id,
+                      overview.selected!.entry,
+                      !selectedVisible,
+                    )
+                  }
+                  onEdit={() => {
+                    if (
+                      editorView !== "edit" &&
+                      hasDraft &&
+                      !window.confirm("切换编辑功能将放弃当前草稿，是否继续？")
+                    )
+                      return;
+                    setEditorView("edit");
+                    setEditing(true);
+                    setDetailAction(undefined);
+                  }}
+                  downloading={downloadingTrack}
+                  downloadDisabled={
+                    !overview.detail.data ||
+                    overview.detail.data.entry.id !== overview.id ||
+                    overview.detail.data.entry.sha256 !==
+                      overview.selected?.sha256
+                  }
+                  onDownload={() => {
+                    const entry = overview.detail.data!.entry;
+                    setDownloadingTrack(true);
+                    void request(
+                      "/api/tracks/" +
+                        encodeURIComponent(entry.id) +
+                        "/download?sha256=" +
+                        entry.sha256,
+                    )
+                      .then(async (response) =>
+                        downloadBlob(
+                          await response.blob(),
+                          entry.entry.split("/").at(-1) ?? "track.kml",
+                        ),
+                      )
+                      .catch((error) =>
+                        toast.error(
+                          error instanceof Error
+                            ? error.message
+                            : "下载失败，请重试",
+                        ),
+                      )
+                      .finally(() => setDownloadingTrack(false));
+                  }}
+                  deleteDisabled={!overview.selected}
+                  onDelete={() =>
+                    setDetailAction({
+                      operation: "archive:delete",
+                      entry: overview.selected!.entry,
+                    })
+                  }
+                />
+                <TrackDetailLinks
+                  views={detailLinks}
+                  titles={editorTitles}
+                  onSelect={(view) => {
+                    if (
+                      view !== editorView &&
+                      hasDraft &&
+                      !window.confirm("切换编辑功能将放弃当前草稿，是否继续？")
+                    )
+                      return;
+                    setEditorView(view);
+                    setEditing(true);
+                    setDetailAction(undefined);
+                  }}
+                />
+              </DetailPanel>
             )}
             <section
               hidden={!archiveAction || panel !== "library"}

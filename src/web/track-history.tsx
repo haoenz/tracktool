@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { Alert, Button, Modal, Space, Spin } from "./components/controls.js";
 import { api, request, waitForWorkTask } from "./api.js";
+import { downloadBlob } from "./lib/download.js";
 import { TrackEditorMap } from "./track-editor-map.js";
 import { useWorkspace } from "./workspace.js";
 import type {
@@ -78,12 +79,10 @@ export function TrackHistory({
       const response = await request(
         `/api/tracks/${entryId}/versions/${selected.after.version_id}/raw`,
       );
-      const url = URL.createObjectURL(await response.blob()),
-        a = document.createElement("a");
-      a.href = url;
-      a.download = selected.after.path.split("/").at(-1) ?? "track.kml";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      downloadBlob(
+        await response.blob(),
+        selected.after.path.split("/").at(-1) ?? "track.kml",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

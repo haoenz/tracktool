@@ -99,6 +99,11 @@ export function useOverview(
     [kind, version, dates.from, dates.to, dates.sort, candidates],
   );
   const listVersion = version ?? query.data?.version;
+  // Candidate selections are paged and "select all" walks every page; fetch
+  // the whole candidate set once and slice locally instead of per page.
+  const candidateCache = useRef<
+    { key: string; entries: OverviewEntry[] } | undefined
+  >(undefined);
   async function fetchEntries(
     params: Record<string, string>,
     signal?: AbortSignal,
@@ -110,27 +115,39 @@ export function useOverview(
         signal,
       );
     if (!candidates.length) return fetch(params);
-    const entries: OverviewEntry[] = [];
-    const chunks: string[][] = [];
-    for (let i = 0; i < candidates.length; i += 100)
-      chunks.push(candidates.slice(i, i + 100));
-    // Keep large selections fast without flooding the local server.
-    for (let i = 0; i < chunks.length; i += 4) {
-      const results = await Promise.all(
-        chunks.slice(i, i + 4).map((ids) =>
-          fetch({
-            ...params,
-            ids: ids.join(","),
-            offset: "0",
-            limit: "100",
-          }),
-        ),
+    const { offset: _offset, limit: _limit, ...identity } = params;
+    void _offset;
+    void _limit;
+    const key = JSON.stringify([identity, candidates]);
+    let entries =
+      candidateCache.current?.key === key
+        ? candidateCache.current.entries
+        : undefined;
+    if (!entries) {
+      const collected: OverviewEntry[] = [];
+      const chunks: string[][] = [];
+      for (let i = 0; i < candidates.length; i += 100)
+        chunks.push(candidates.slice(i, i + 100));
+      // Keep large selections fast without flooding the local server.
+      for (let i = 0; i < chunks.length; i += 4) {
+        const results = await Promise.all(
+          chunks.slice(i, i + 4).map((ids) =>
+            fetch({
+              ...params,
+              ids: ids.join(","),
+              offset: "0",
+              limit: "100",
+            }),
+          ),
+        );
+        for (const result of results) collected.push(...result.entries);
+      }
+      collected.sort((a, b) =>
+        compareOverviewEntries(a, b, params.sort ?? "date-desc"),
       );
-      for (const result of results) entries.push(...result.entries);
+      entries = collected;
+      candidateCache.current = { key, entries };
     }
-    entries.sort((a, b) =>
-      compareOverviewEntries(a, b, params.sort ?? "date-desc"),
-    );
     const offset = Number(params.offset ?? 0);
     return {
       version: params.version!,

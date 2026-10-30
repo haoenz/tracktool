@@ -89,7 +89,10 @@ export function TaskDetail({
     queryKey: ["task", id],
     queryFn: ({ signal }) =>
       api<WorkTask>("/api/work/tasks/" + id, undefined, signal),
-    refetchInterval: 1000,
+    refetchInterval: (q) =>
+      q.state.data && !["queued", "running"].includes(q.state.data.status)
+        ? false
+        : 1000,
   });
   const task = query.data;
   useEffect(() => {

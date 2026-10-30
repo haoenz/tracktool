@@ -15,6 +15,7 @@ import {
   type OverviewVisibility,
 } from "./overview-layer.js";
 import type { OverviewStatus } from "../shared/overview.js";
+import type { AnalysisSample } from "../shared/track-analysis.js";
 import { MapCanvas } from "../drawing/core.js";
 import { trackColor } from "../drawing/track-style.js";
 import type { MapState } from "../shared/map-state.js";
@@ -25,6 +26,7 @@ export interface Viewport {
   stage(state: MapState, overview?: OverviewStatus): Promise<boolean>;
   fitOverview(bounds: [number, number, number, number]): void;
   retryOverview(): void;
+  setAnalysisSample(sample?: AnalysisSample): void;
   cancel(): void;
   ready(): Promise<unknown>;
 }
@@ -367,6 +369,14 @@ export const MapViewport = memo(
       retryOverview: () => {
         if (current.current) layers.current.get(current.current)?.retry();
       },
+      // Chart hover updates the analysis layer imperatively: keeping the
+      // sample in page state re-rendered the whole workspace per pointer move.
+      setAnalysisSample: (sample) => {
+        const overlay = latest.current.analysisOverlay;
+        if (!overlay) return;
+        for (const layer of analysisLayers.current.values())
+          layer.update({ ...overlay, sample });
+      },
       fitOverview: ([west, south, east, north]) => {
         const map = current.current;
         if (!map) return;
@@ -408,7 +418,12 @@ export const MapViewport = memo(
           return;
         // Locate within the viewport regardless of floating panels or toolbars.
         const margin = Math.min(16, bounds.width / 4, bounds.height / 4);
-        const left = bounds.left + margin;
+        const panel = document.getElementById("map-panel");
+        const panelRight =
+          panel && panel.offsetParent !== null
+            ? panel.getBoundingClientRect().right
+            : bounds.left;
+        const left = Math.max(bounds.left + margin, panelRight + margin);
         const right = bounds.right - margin;
         const top = bounds.top + margin;
         const bottom = bounds.bottom - margin;

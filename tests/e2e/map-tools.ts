@@ -179,35 +179,61 @@ export async function pickEditorPoint(
       ),
     )
     .toBe(true);
-  const point = await page.evaluate((index) => {
-    const r = window.renderer!;
-    const feature = (r.displayData ?? r.data)!.features.find(
-      (f) =>
-        f.properties?.segment_id &&
-        !String(f.properties.segment_id).startsWith("ux-") &&
-        f.geometry.type === "MultiLineString",
-    )!;
-    if (feature.geometry.type !== "MultiLineString")
-      throw Error("Expected line");
-    const coord = feature.geometry.coordinates[0]![index]!;
-    const p = r.map.project([coord[0]!, coord[1]!]),
-      box = r.mapElement.getBoundingClientRect();
-    return {
-      x: box.left + (p.x * box.width) / r.mapElement.clientWidth,
-      y: box.top + (p.y * box.height) / r.mapElement.clientHeight,
-    };
-  }, index);
-  await expect
-    .poll(() =>
-      page.evaluate(
-        ({ x, y }) =>
-          document
-            .elementFromPoint(x, y)
-            ?.classList.contains("maplibregl-canvas"),
-        point,
-      ),
-    )
-    .toBe(true);
+  // The frame is CSS-transformed and can settle after the camera stops, so
+  // re-project and re-check the hit target until the canvas owns the point.
+  let point: { x: number; y: number } | undefined;
+  let lastHit = "";
+  let candidateX = 0,
+    candidateY = 0;
+  for (let attempt = 0; attempt < 50 && !point; attempt++) {
+    const candidate = await page.evaluate((index) => {
+      const r = window.renderer!;
+      const feature = (r.displayData ?? r.data)!.features.find(
+        (f) =>
+          f.properties?.segment_id &&
+          !String(f.properties.segment_id).startsWith("ux-") &&
+          f.geometry.type === "MultiLineString",
+      )!;
+      if (feature.geometry.type !== "MultiLineString")
+        throw Error("Expected line");
+      const coord = feature.geometry.coordinates[0]![index]!;
+      const p = r.map.project([coord[0]!, coord[1]!]),
+        box = r.mapElement.getBoundingClientRect();
+      return {
+        x: box.left + (p.x * box.width) / r.mapElement.clientWidth,
+        y: box.top + (p.y * box.height) / r.mapElement.clientHeight,
+      };
+    }, index);
+    candidateX = candidate.x;
+    candidateY = candidate.y;
+    const hit = await page.evaluate(({ x, y }) => {
+      const element = document.elementFromPoint(x, y);
+      return element ? element.className + "|" + element.tagName : "null";
+    }, candidate);
+    if (hit.startsWith("maplibregl-canvas")) point = candidate;
+    else {
+      lastHit = hit;
+      await page.waitForTimeout(100);
+    }
+  }
+  if (!point) {
+    const state = await page.evaluate(() => {
+      const r = window.renderer!;
+      const panel = document.getElementById("map-panel");
+      return JSON.stringify({
+        camera: r.state.camera,
+        panel: panel?.getBoundingClientRect().toJSON(),
+        stage: document
+          .querySelector(".map-stage")
+          ?.getBoundingClientRect()
+          .toJSON(),
+        groups: (r.data?.features ?? []).map((f) => f.properties?.segment_id),
+      });
+    });
+    throw new Error(
+      `地图点位被遮挡，无法拾取：${lastHit} @ ${candidateX},${candidateY} ${state}`,
+    );
+  }
   await page.mouse.click(point.x, point.y);
   if (mobile && sheet !== "collapsed") {
     await handle.press(sheet === "full" ? "End" : "ArrowUp");

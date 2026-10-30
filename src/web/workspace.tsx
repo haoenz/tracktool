@@ -11,6 +11,8 @@ export interface EditMap {
   tracks: SelectedTrack[];
   pick?: (p: [number, number]) => void;
   segment?: string;
+  /** Serialized tracks of the last push, so re-renders compare once. */
+  signature?: string;
 }
 export interface Workspace {
   editMap?: Dispatch<SetStateAction<EditMap | undefined>>;
