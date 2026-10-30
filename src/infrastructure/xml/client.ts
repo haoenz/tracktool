@@ -18,9 +18,12 @@ export class XmlWorkers implements XmlPort {
   private queue: Job[] = [];
   private idle: Worker[] = [];
   private busy = new Map<Worker, Busy>();
+  private workers = new Set<Worker>();
+  private stopping = new Map<Worker, Promise<number>>();
   private retired = new WeakSet<Worker>();
   private serial = 0;
   private closed = false;
+  private closing?: Promise<void>;
   constructor(
     private readonly concurrency = 2,
     private readonly queueLimit = 8,
@@ -53,7 +56,7 @@ export class XmlWorkers implements XmlPort {
       )
         throw new AppError("USER_INPUT", "组合输入超过 128 MiB");
       if (
-        this.busy.size >= this.concurrency &&
+        this.workers.size - this.idle.length >= this.concurrency &&
         this.queue.length >= this.queueLimit
       )
         throw new AppError("TOOL", "XML 工作队列已满");
@@ -94,6 +97,7 @@ export class XmlWorkers implements XmlPort {
     const worker = new Worker(new URL("./worker.js", import.meta.url), {
       execArgv: [],
     });
+    this.workers.add(worker);
     worker.on(
       "message",
       (message: { id?: number; result?: unknown; error?: ErrorInfo }) => {
@@ -102,6 +106,7 @@ export class XmlWorkers implements XmlPort {
         const value = this.busy.get(worker);
         if (!value || value.job.id !== message.id) return;
         this.release(worker);
+        this.idle.push(worker);
         if (message.error)
           value.job.reject(
             new AppError(message.error.code, message.error.message),
@@ -117,8 +122,10 @@ export class XmlWorkers implements XmlPort {
       ),
     );
     worker.once("exit", () => {
-      if (this.retired.has(worker)) return;
-      this.retire(worker, new AppError("TOOL", "XML worker 意外退出"));
+      this.workers.delete(worker);
+      if (!this.retired.has(worker))
+        this.retire(worker, new AppError("TOOL", "XML worker 意外退出"));
+      this.drain();
     });
     // An idle worker must not keep a short-lived CLI process alive; it is
     // referenced again while it owns a job.
@@ -127,6 +134,7 @@ export class XmlWorkers implements XmlPort {
   }
   /** Detach a busy worker, fail its job and replace it on the next drain. */
   private retire(worker: Worker, error: unknown) {
+    if (this.retired.has(worker)) return;
     const value = this.busy.get(worker);
     this.retired.add(worker);
     if (value) {
@@ -135,7 +143,14 @@ export class XmlWorkers implements XmlPort {
     }
     const index = this.idle.indexOf(worker);
     if (index >= 0) this.idle.splice(index, 1);
-    void worker.terminate();
+    const stopping = worker.terminate();
+    this.stopping.set(worker, stopping);
+    const stopped = () => {
+      this.stopping.delete(worker);
+      this.workers.delete(worker);
+      this.drain();
+    };
+    void stopping.then(stopped, stopped);
     this.drain();
   }
   private release(worker: Worker) {
@@ -152,8 +167,12 @@ export class XmlWorkers implements XmlPort {
       this.busy.size < this.concurrency &&
       this.queue.length
     ) {
+      // Retiring threads still count until they exit; cancellation must not
+      // temporarily exceed the pool's thread/wasm memory budget.
+      if (!this.idle.length && this.workers.size >= this.concurrency) return;
       const job = this.queue.shift()!;
       if (job.signal?.aborted) {
+        job.signal.removeEventListener("abort", job.abort);
         job.reject(new AppError("CANCELLED", "操作已取消"));
         continue;
       }
@@ -182,15 +201,13 @@ export class XmlWorkers implements XmlPort {
       job.signal?.addEventListener("abort", job.abort, { once: true });
     }
   }
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
     this.closed = true;
     for (const job of [...this.queue]) job.abort();
-    const workers = [...this.busy.keys(), ...this.idle];
-    for (const worker of this.busy.keys()) this.retired.add(worker);
-    for (const job of [...this.busy.values()])
-      job.job.reject(new AppError("CANCELLED", "XML 服务已关闭"));
-    this.busy.clear();
-    this.idle = [];
-    await Promise.all(workers.map((worker) => worker.terminate()));
+    for (const worker of this.workers)
+      this.retire(worker, new AppError("CANCELLED", "XML 服务已关闭"));
+    this.closing = Promise.all(this.stopping.values()).then(() => {});
+    return this.closing;
   }
 }

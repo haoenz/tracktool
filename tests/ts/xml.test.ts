@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { readFile } from "node:fs/promises";
+import { Worker } from "node:worker_threads";
+import { getEventListeners } from "node:events";
 import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
 import {
   withDocument,
@@ -16,6 +18,7 @@ function pool(concurrency = 2, queue = 8, timeout = 15_000) {
 }
 afterEach(async () => {
   await Promise.all(pools.splice(0).map((p) => p.close()));
+  vi.restoreAllMocks();
 });
 const sample = (name: string) =>
   readFile(new URL(`./fixtures/xml/${name}`, import.meta.url));
@@ -129,4 +132,102 @@ it("times out and shuts down with outstanding requests", async () => {
   await expect(p.run(bytes, { kind: "inspect" })).rejects.toMatchObject({
     code: "CANCELLED",
   });
+});
+
+function observeWorkers() {
+  const workers = new Set<Worker>();
+  const post = Worker.prototype.postMessage;
+  let peak = 0;
+  vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (
+    this: Worker,
+    value,
+    transfer,
+  ) {
+    workers.add(this);
+    peak = Math.max(
+      peak,
+      [...workers].filter((worker) => worker.threadId !== -1).length,
+    );
+    post.call(this, value, transfer);
+  });
+  return { workers, peak: () => peak };
+}
+it("reuses a bounded set of workers after success and invalid XML, then closes every thread", async () => {
+  const observed = observeWorkers();
+  const p = pool(2, 8),
+    bytes = await sample("complex.kml");
+  try {
+    await Promise.all(
+      Array.from({ length: 8 }, () => p.run(bytes, { kind: "inspect" })),
+    );
+    await expect(
+      p.run(await sample("unclosed.kml"), { kind: "inspect" }),
+    ).rejects.toMatchObject({ code: "USER_INPUT" });
+    expect((await p.run(bytes, { kind: "inspect" })).name).toBe("原始中文");
+    expect(observed.workers.size).toBe(2);
+    expect(observed.peak()).toBe(2);
+    await p.close();
+    expect(
+      [...observed.workers].every((worker) => worker.threadId === -1),
+    ).toBe(true);
+  } finally {
+    await p.close();
+    await Promise.all(
+      [...observed.workers].map((worker) => worker.terminate()),
+    );
+  }
+});
+it("closing busy and queued jobs clears deadlines and abort listeners, and waits for thread exit", async () => {
+  const observed = observeWorkers(),
+    bytes = await sample("complex.kml");
+  const timers = vi.spyOn(globalThis, "setTimeout"),
+    cleared = vi.spyOn(globalThis, "clearTimeout");
+  const p = pool(1, 1, 60_000),
+    a = new AbortController(),
+    b = new AbortController();
+  const first = expect(
+    p.run(bytes, { kind: "inspect" }, a.signal),
+  ).rejects.toMatchObject({ code: "CANCELLED" });
+  const second = expect(
+    p.run(bytes, { kind: "inspect" }, b.signal),
+  ).rejects.toMatchObject({ code: "CANCELLED" });
+  const deadlines = timers.mock.calls.flatMap((call, index) =>
+    call[1] === 60_000
+      ? [timers.mock.results[index]!.value as ReturnType<typeof setTimeout>]
+      : [],
+  );
+  try {
+    await Promise.all([p.close(), p.close(), first, second]);
+    expect(deadlines).toHaveLength(1);
+    for (const timer of deadlines) expect(cleared).toHaveBeenCalledWith(timer);
+    expect(getEventListeners(a.signal, "abort")).toHaveLength(0);
+    expect(getEventListeners(b.signal, "abort")).toHaveLength(0);
+    expect(
+      [...observed.workers].every((worker) => worker.threadId === -1),
+    ).toBe(true);
+  } finally {
+    for (const timer of deadlines) clearTimeout(timer);
+    await Promise.all(
+      [...observed.workers].map((worker) => worker.terminate()),
+    );
+  }
+});
+it("waits for cancelled workers to exit before replacing them", async () => {
+  const observed = observeWorkers(),
+    bytes = await sample("complex.kml"),
+    p = pool(1, 1);
+  for (let i = 0; i < 3; i++) {
+    const controller = new AbortController();
+    const rejected = expect(
+      p.run(bytes, { kind: "inspect" }, controller.signal),
+    ).rejects.toMatchObject({ code: "CANCELLED" });
+    controller.abort();
+    await rejected;
+    expect((await p.run(bytes, { kind: "inspect" })).name).toBe("原始中文");
+  }
+  await p.close();
+  expect(observed.peak()).toBe(1);
+  expect([...observed.workers].every((worker) => worker.threadId === -1)).toBe(
+    true,
+  );
 });
