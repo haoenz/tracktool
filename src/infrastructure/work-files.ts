@@ -218,7 +218,15 @@ export class WorkFiles {
       throw new AppError("USER_INPUT", "无效的上传批次");
     await rm(path.join(this.uploads, id), { recursive: true, force: true });
   }
-  async fileSignature(file: string, signal: AbortSignal): Promise<unknown> {
+  async fileSignature(
+    file: string,
+    signal: AbortSignal,
+    // Only reused inside one fingerprint pass: the same file can be reached
+    // through a directory and a direct selection, but a later call must see
+    // same-size edits even when the timestamp was restored.
+    hashes = new Map<string, string>(),
+    deep = false,
+  ): Promise<unknown> {
     checkCancelled(signal);
     let info;
     try {
@@ -229,11 +237,14 @@ export class WorkFiles {
     }
     if (info.isSymbolicLink())
       throw new AppError("USER_INPUT", "输入或输出包含符号链接");
+    if (info.isDirectory() && deep)
+      return this.directorySignature(file, signal, 0, { count: 0 });
     if (info.isDirectory()) {
       const entries = (await readdir(file))
         .filter(
-          (n) =>
-            !n.startsWith(".") && !/archive\.sqlite3(?:-wal|-shm)?$/.test(n),
+          (name) =>
+            !name.startsWith(".") &&
+            !/archive\.sqlite3(?:-wal|-shm)?$/.test(name),
         )
         .sort();
       if (entries.length > 5000)
@@ -243,34 +254,70 @@ export class WorkFiles {
         );
       return Promise.all(
         entries.map(async (name) => {
-          const p = path.join(file, name),
-            s = await lstat(p, { bigint: true });
-          return s.isDirectory()
+          const child = path.join(file, name),
+            childInfo = await lstat(child, { bigint: true });
+          return childInfo.isDirectory()
             ? [name, "directory"]
             : [
                 name,
-                s.isSymbolicLink() ? "symlink" : "file",
-                String(s.size),
-                String(s.mtimeNs),
+                childInfo.isSymbolicLink() ? "symlink" : "file",
+                String(childInfo.size),
+                String(childInfo.mtimeNs),
               ];
         }),
       );
     }
     if (!info.isFile())
       throw new AppError("USER_INPUT", "只支持普通文件或目录");
-    // Full hashes of directly selected files catch same-size changes with restored timestamps.
+    // Full hashes of directly selected files catch same-size changes with
+    // restored timestamps. Reuse the digest while inode size and mtime match:
+    // one apply fingerprints the same inputs two or three times.
+    const key = `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}`;
+    const known = hashes.get(key);
+    if (known) return [key, known];
     const hash = createHash("sha256");
     for await (const chunk of createReadStream(file)) {
       checkCancelled(signal);
       hash.update(chunk as Buffer);
     }
-    return [
-      String(info.dev),
-      String(info.ino),
-      String(info.size),
-      String(info.mtimeNs),
-      hash.digest("hex"),
-    ];
+    const digest = hash.digest("hex");
+    hashes.set(key, digest);
+    return [key, digest];
+  }
+  /** Nested directories are part of the fingerprint, not just their name. */
+  private async directorySignature(
+    directory: string,
+    signal: AbortSignal,
+    depth: number,
+    budget: { count: number },
+  ): Promise<unknown> {
+    checkCancelled(signal);
+    if (depth > 8) return [path.basename(directory), "too-deep"];
+    const entries = (await readdir(directory))
+      .filter(
+        (name) =>
+          !name.startsWith(".") &&
+          !/archive\.sqlite3(?:-wal|-shm)?$/.test(name),
+      )
+      .sort();
+    const result: unknown[] = [];
+    for (const name of entries) {
+      if (++budget.count > 5000)
+        throw new AppError(
+          "USER_INPUT",
+          "目录超过 5000 个文件，请缩小选择范围",
+        );
+      const file = path.join(directory, name),
+        info = await lstat(file, { bigint: true });
+      if (info.isSymbolicLink()) result.push([name, "symlink"]);
+      else if (info.isDirectory())
+        result.push([
+          name,
+          await this.directorySignature(file, signal, depth + 1, budget),
+        ]);
+      else result.push([name, "file", String(info.size), String(info.mtimeNs)]);
+    }
+    return result;
   }
   async sweep(activePaths: string[], age = 7 * 86400_000) {
     await this.prepare();
