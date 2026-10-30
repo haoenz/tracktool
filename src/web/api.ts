@@ -84,24 +84,41 @@ const pause = (ms: number, signal?: AbortSignal) =>
     else signal?.addEventListener("abort", abort, { once: true });
   });
 export async function waitForWorkTask(id: string, signal?: AbortSignal) {
-  const deadline = Date.now() + 30 * 60_000;
-  for (;;) {
-    signal?.throwIfAborted();
-    const task = await requestWorkTask(
-      `/api/work/tasks/${id}`,
-      undefined,
-      signal,
-    );
-    if (!["queued", "running"].includes(task.status)) {
-      if (task.status !== "succeeded")
-        throw new Error(task.error?.message ?? "操作未完成，请检查结果后重试");
-      return task;
+  const controller = new AbortController();
+  const timeout = new Error("等待任务超时，请刷新任务状态后重试");
+  const timer = setTimeout(() => controller.abort(timeout), 30 * 60_000);
+  const cancel = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted) cancel();
+  try {
+    for (;;) {
+      controller.signal.throwIfAborted();
+      const task = await requestWorkTask(
+        `/api/work/tasks/${id}`,
+        undefined,
+        controller.signal,
+      );
+      controller.signal.throwIfAborted();
+      if (!["queued", "running"].includes(task.status)) {
+        if (task.status !== "succeeded")
+          throw new Error(
+            task.error?.message ?? "操作未完成，请检查结果后重试",
+          );
+        return task;
+      }
+      await pause(300, controller.signal);
     }
-    if (Date.now() > deadline)
-      throw new Error("等待任务超时，请刷新任务状态后重试");
-    await pause(300, signal);
+  } catch (error) {
+    // Fetch and response-body reads may report their own AbortError. Preserve
+    // the deadline message or caller's cancellation reason consistently.
+    if (controller.signal.aborted) throw controller.signal.reason;
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", cancel);
   }
 }
+
 export async function downloadWorkFiles(
   task: import("../shared/work.js").WorkTask,
 ) {

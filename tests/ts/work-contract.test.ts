@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { getEventListeners } from "node:events";
 import {
   WorkTaskSchema,
   WorkTasksResponseSchema,
@@ -162,5 +163,82 @@ describe("work response boundary", () => {
     await assertion;
     await vi.advanceTimersByTimeAsync(1000);
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("task polling deadline", () => {
+  it.each(["headers", "body"])(
+    "aborts a hung response %s at the overall deadline",
+    async (phase) => {
+      vi.useFakeTimers();
+      vi.stubGlobal("document", { querySelector: () => null });
+      let requestSignal: AbortSignal | undefined;
+      const fetch = vi.fn((_path: string, options: RequestInit) => {
+        requestSignal = options.signal!;
+        const hung = () =>
+          new Promise((_resolve, reject) => {
+            requestSignal!.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          });
+        return phase === "headers"
+          ? hung()
+          : Promise.resolve({ ok: true, json: hung });
+      });
+      vi.stubGlobal("fetch", fetch);
+      const controller = new AbortController();
+      const result = waitForWorkTask(task.id, controller.signal);
+      const failure = expect(result).rejects.toThrow("等待任务超时");
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      await failure;
+      expect(requestSignal?.aborted).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+  it("applies one deadline across multiple slow polls", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("document", { querySelector: () => null });
+    const fetch = vi.fn(
+      (_path: string, options: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          const abort = () => {
+            clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+          };
+          const timer = setTimeout(() => {
+            options.signal?.removeEventListener("abort", abort);
+            resolve(
+              new Response(JSON.stringify({ ...task, status: "running" })),
+            );
+          }, 20 * 60_000);
+          options.signal?.addEventListener("abort", abort, { once: true });
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const failure = expect(waitForWorkTask(task.id)).rejects.toThrow(
+      "等待任务超时",
+    );
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    await failure;
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("cleans the deadline on success and preserves pre-existing cancellation", async () => {
+    vi.useFakeTimers();
+    const fetch = mockResponse(task),
+      controller = new AbortController();
+    await waitForWorkTask(task.id, controller.signal);
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    controller.abort();
+    await expect(
+      waitForWorkTask(task.id, controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
