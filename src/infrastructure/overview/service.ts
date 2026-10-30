@@ -35,6 +35,7 @@ export class OverviewService {
     done: Promise<void>;
   };
   private stamp?: SourceStamp;
+  private stampAt = 0;
   private sourceError?: string;
   private closed = false;
   private timer: ReturnType<typeof setInterval>;
@@ -61,6 +62,7 @@ export class OverviewService {
     if (this.closed) return;
     try {
       this.stamp = readStamp(this.source);
+      this.stampAt = Date.now();
       this.sourceError = undefined;
     } catch (e) {
       this.sourceError = message(e);
@@ -229,7 +231,11 @@ export class OverviewService {
   async manifest(version: string) {
     await this.initialized;
     // Tile URLs can be requested immediately after restart, before status polling.
-    this.stamp = readStamp(this.source);
+    // Re-open the archive at most once per second instead of per tile request.
+    if (!this.stamp || Date.now() - this.stampAt > 1000) {
+      this.stamp = readStamp(this.source);
+      this.stampAt = Date.now();
+    }
     const m = this.cache.manifests.get(version);
     if (!m || (this.stamp && m.archiveId !== this.stamp.archiveId))
       throw new AppError("USER_INPUT", "概览版本已过期，请刷新概览状态");

@@ -60,6 +60,13 @@ export function encodedTile(
     throw new AppError("TOOL", "当前区域轨迹瓦片过大，请放大地图");
   return gzipSync(bytes);
 }
+function measureDistance(segments: [number, number][][]) {
+  let total = 0;
+  for (const segment of segments)
+    for (let i = 1; i < segment.length; i++)
+      total += distance(segment[i - 1]!, segment[i]!);
+  return total;
+}
 export async function buildOverview(
   request: BuildRequest,
   progress: (p: OverviewProgress) => void,
@@ -167,6 +174,7 @@ export async function buildOverview(
           };
           if (value.points > LIMITS.points)
             throw new AppError("TOOL", "单条轨迹超过概览点数预算");
+          value.distance_m ??= measureDistance(value.segments);
           const bytes = encodeObject(row.sha256, value);
           account(bytes.length);
           await atomic(objectPath(root, row.sha256), bytes);
@@ -174,15 +182,10 @@ export async function buildOverview(
         entry.tags = value.tags;
         entry.date = value.date || entry.date;
         entry.start_time_us = value.start_time_us ?? undefined;
-        entry.distance_m = value.segments.reduce(
-          (total, segment) =>
-            total +
-            segment.reduce(
-              (sum, p, i) => sum + (i ? distance(segment[i - 1]!, p) : 0),
-              0,
-            ),
-          0,
-        );
+        // Measuring every point is the expensive part of a rebuild; persist it
+        // with the geometry object so unchanged tracks are not re-measured.
+        value.distance_m ??= measureDistance(value.segments);
+        entry.distance_m = value.distance_m;
         if (presentation) {
           try {
             value = await readObject(root, presentation.key);
@@ -231,6 +234,7 @@ export async function buildOverview(
                 ),
               ),
             };
+            value.distance_m ??= measureDistance(value.segments);
             const bytes = encodeObject(presentation.key, value);
             account(bytes.length);
             await atomic(objectPath(root, presentation.key), bytes);

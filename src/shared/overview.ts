@@ -61,22 +61,42 @@ export interface OverviewStatus {
   maxZoom: number;
 }
 
+export interface OverviewSortKey {
+  name: string;
+  dated: boolean;
+  time: bigint;
+}
+/** Parse once per entry; sorting large manifests otherwise re-parses every comparison. */
+export function overviewSortKey(entry: OverviewEntry): OverviewSortKey {
+  return {
+    name: entry.name,
+    dated: !!entry.date,
+    time:
+      entry.start_time_us !== undefined
+        ? BigInt(entry.start_time_us)
+        : entry.date
+          ? BigInt(Date.parse(`${entry.date}T00:00:00+08:00`)) * 1000n
+          : 0n,
+  };
+}
+export function compareOverviewSortKeys(
+  a: OverviewSortKey,
+  b: OverviewSortKey,
+  sort: string,
+): number {
+  if (sort === "name") return a.name.localeCompare(b.name);
+  if (!a.dated || !b.dated) return a.dated ? -1 : b.dated ? 1 : 0;
+  const order = a.time < b.time ? -1 : a.time > b.time ? 1 : 0;
+  return sort === "date-asc" ? order : -order;
+}
 /** Shared by server pagination and client-side candidate merging. */
 export function compareOverviewEntries(
   a: OverviewEntry,
   b: OverviewEntry,
   sort: string,
 ): number {
-  if (sort === "name")
-    return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
-  if (!a.date || !b.date)
-    return (a.date ? -1 : b.date ? 1 : 0) || a.id.localeCompare(b.id);
-  const time = (entry: OverviewEntry) =>
-    entry.start_time_us !== undefined
-      ? BigInt(entry.start_time_us)
-      : BigInt(Date.parse(`${entry.date}T00:00:00+08:00`)) * 1000n;
-  const left = time(a),
-    right = time(b);
-  const order = left < right ? -1 : left > right ? 1 : 0;
-  return (sort === "date-asc" ? order : -order) || a.id.localeCompare(b.id);
+  return (
+    compareOverviewSortKeys(overviewSortKey(a), overviewSortKey(b), sort) ||
+    a.id.localeCompare(b.id)
+  );
 }

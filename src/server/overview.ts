@@ -9,11 +9,23 @@ import { databasePath } from "../infrastructure/archive/database.js";
 import { OverviewService } from "../infrastructure/overview/service.js";
 import { digest } from "../infrastructure/overview/files.js";
 import {
-  compareOverviewEntries,
+  compareOverviewSortKeys,
+  overviewSortKey,
   OverviewCrs,
   OverviewVersion,
+  type OverviewEntry,
   type OverviewStatus,
 } from "../shared/overview.js";
+const searchText = new WeakMap<OverviewEntry, string>();
+function entryText(entry: OverviewEntry) {
+  let text = searchText.get(entry);
+  if (text === undefined) {
+    text =
+      `${entry.name} ${entry.entry} ${entry.kind} ${entry.date} ${entry.tags ?? ""}`.toLocaleLowerCase();
+    searchText.set(entry, text);
+  }
+  return text;
+}
 
 export function overviewRoutes(
   app: FastifyInstance,
@@ -128,24 +140,30 @@ export function overviewRoutes(
       .parse(request.query);
     const m = await (await required()).manifest(query.version);
     const text = query.q.toLocaleLowerCase(),
-      rows = m.entries.filter(
-        (e) =>
-          (!query.from || (!!e.date && e.date >= query.from)) &&
-          (!query.to || (!!e.date && e.date <= query.to)) &&
-          (query.kinds
-            ? !query.kinds.length || query.kinds.includes(e.kind)
-            : query.kind === "all" || e.kind === query.kind) &&
-          (!query.ids || query.ids.split(",").includes(e.id)) &&
-          (!text ||
-            `${e.name} ${e.entry} ${e.kind} ${e.date} ${e.tags ?? ""}`
-              .toLocaleLowerCase()
-              .includes(text)),
-      );
-    rows.sort((a, b) => compareOverviewEntries(a, b, query.sort));
+      ids = query.ids ? new Set(query.ids.split(",")) : undefined,
+      rows = m.entries
+        .filter(
+          (e) =>
+            (!query.from || (!!e.date && e.date >= query.from)) &&
+            (!query.to || (!!e.date && e.date <= query.to)) &&
+            (query.kinds
+              ? !query.kinds.length || query.kinds.includes(e.kind)
+              : query.kind === "all" || e.kind === query.kind) &&
+            (!ids || ids.has(e.id)) &&
+            (!text || entryText(e).includes(text)),
+        )
+        .map((entry) => ({ entry, key: overviewSortKey(entry) }))
+        .sort(
+          (a, b) =>
+            compareOverviewSortKeys(a.key, b.key, query.sort) ||
+            a.entry.id.localeCompare(b.entry.id),
+        );
     return {
       version: m.version,
       total: rows.length,
-      entries: rows.slice(query.offset, query.offset + query.limit),
+      entries: rows
+        .slice(query.offset, query.offset + query.limit)
+        .map((row) => row.entry),
     };
   });
   app.get("/api/overview/entries/:id/geometry", async (request, reply) => {

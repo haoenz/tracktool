@@ -88,6 +88,7 @@ const Coordinates = z.object({
   name: z.string(),
   tags: z.string(),
   date: z.string(),
+  distance_m: z.number().nonnegative().optional(),
   start_time_us: z
     .string()
     .regex(/^-?\d+$/)
