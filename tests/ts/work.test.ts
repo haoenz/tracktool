@@ -1414,3 +1414,37 @@ it("incremental import previews reuse parsing while refreshing config, archive a
     xml.mockRestore();
   }
 });
+
+it("reads progress timestamps consistently from individual tasks and summaries, including legacy fallbacks", async () => {
+  let now = 10_000;
+  const store = new SqliteTasks(
+    path.join(await tmp(), "progress.sqlite3"),
+    () => now,
+  );
+  cleanup.push(() => store.close());
+  const task = store.enqueue(body());
+  store.claim("owner");
+  now = 20_000;
+  store.progress(task.id, "owner", 1, 2);
+  const updatedAt = new Date(now).toISOString();
+  expect(store.read(task.id)).toMatchObject({
+    updatedAt,
+    progress: { completed: 1, total: 2 },
+  });
+  expect(store.list().find((item) => item.id === task.id)).toMatchObject({
+    updatedAt,
+    progress: { completed: 1, total: 2 },
+  });
+  // A migrated row may still rely on fields in the original JSON body.
+  store.db
+    .prepare("UPDATE tasks SET progress=NULL,updated_at=NULL WHERE id=?")
+    .run(task.id);
+  expect(store.read(task.id)).toMatchObject({
+    updatedAt: task.createdAt,
+    progress: { completed: 0, total: 0 },
+  });
+  expect(store.list().find((item) => item.id === task.id)).toMatchObject({
+    updatedAt: task.createdAt,
+    progress: { completed: 0, total: 0 },
+  });
+});

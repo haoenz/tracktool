@@ -13,6 +13,23 @@ export type StoredTask = WorkTask & {
   lease: number;
 };
 const terminal = (state: TaskState) => !["queued", "running"].includes(state);
+type TaskRow = {
+  body: string;
+  owner: string | null;
+  lease: number;
+  progress: string | null;
+  updated_at: string | null;
+};
+// Both task reads and summaries must overlay the same independently written columns.
+function decodeTask(row: TaskRow): StoredTask {
+  const task = JSON.parse(row.body) as StoredTask;
+  task.owner = row.owner ?? undefined;
+  task.lease = row.lease;
+  task.events = [];
+  if (row.progress) task.progress = JSON.parse(row.progress);
+  if (row.updated_at !== null) task.updatedAt = row.updated_at;
+  return task;
+}
 const EVENT_LIMIT = 1000;
 export class SqliteTasks implements TaskStore {
   readonly db: Database.Database;
@@ -54,23 +71,13 @@ export class SqliteTasks implements TaskStore {
   }
   private readCore(id: string): StoredTask | undefined {
     const row = this.db
-      .prepare("SELECT body,owner,lease,progress FROM tasks WHERE id=?")
-      .get(id) as
-      | {
-          body: string;
-          owner: string | null;
-          lease: number;
-          progress: string | null;
-        }
-      | undefined;
-    if (!row) return undefined;
-    const task = JSON.parse(row.body) as StoredTask;
-    task.owner = row.owner ?? undefined;
-    task.lease = row.lease;
-    task.events = [];
-    if (row.progress) task.progress = JSON.parse(row.progress);
-    return task;
+      .prepare(
+        "SELECT body,owner,lease,progress,updated_at FROM tasks WHERE id=?",
+      )
+      .get(id) as TaskRow | undefined;
+    return row && decodeTask(row);
   }
+
   private withEvents(task: StoredTask): StoredTask {
     task.events = (
       this.db
@@ -103,23 +110,12 @@ export class SqliteTasks implements TaskStore {
     return (
       this.db
         .prepare(
-          "SELECT body,owner,lease,progress FROM tasks ORDER BY rowid DESC LIMIT 200",
+          "SELECT body,owner,lease,progress,updated_at FROM tasks ORDER BY rowid DESC LIMIT 200",
         )
-        .all() as {
-        body: string;
-        owner: string | null;
-        lease: number;
-        progress: string | null;
-      }[]
-    ).map((row) => {
-      const task = JSON.parse(row.body) as StoredTask;
-      task.owner = row.owner ?? undefined;
-      task.lease = row.lease;
-      task.events = [];
-      if (row.progress) task.progress = JSON.parse(row.progress);
-      return this.public(task);
-    });
+        .all() as TaskRow[]
+    ).map((row) => this.public(decodeTask(row)));
   }
+
   enqueue(
     request: WorkRequest,
     preview?: StoredTask,
