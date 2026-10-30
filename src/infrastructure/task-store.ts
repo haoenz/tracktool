@@ -13,8 +13,11 @@ export type StoredTask = WorkTask & {
   lease: number;
 };
 const terminal = (state: TaskState) => !["queued", "running"].includes(state);
+const EVENT_LIMIT = 1000;
 export class SqliteTasks implements TaskStore {
   readonly db: Database.Database;
+  private appended = new Map<string, number>();
+  private lastRecover = 0;
   constructor(
     file: string,
     private readonly now = () => Date.now(),
@@ -27,32 +30,65 @@ export class SqliteTasks implements TaskStore {
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,status TEXT NOT NULL,revision INTEGER NOT NULL,owner TEXT,lease INTEGER NOT NULL DEFAULT 0,preview_id TEXT UNIQUE,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS task_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,task_id TEXT NOT NULL,event TEXT NOT NULL); CREATE INDEX IF NOT EXISTS event_task ON task_events(task_id,sequence); CREATE INDEX IF NOT EXISTS task_status ON tasks(status);`,
     );
+    // Progress and retention need cheap columns; keeping them in the JSON body
+    // forced a full row rewrite on every progress event.
+    const columns = new Set(
+      (this.db.pragma("table_info(tasks)") as { name: string }[]).map(
+        (column) => column.name,
+      ),
+    );
+    if (!columns.has("progress"))
+      this.db.exec("ALTER TABLE tasks ADD COLUMN progress TEXT");
+    if (!columns.has("updated_at"))
+      this.db.exec("ALTER TABLE tasks ADD COLUMN updated_at TEXT");
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS task_retention ON tasks(status,updated_at)",
+    );
+    if (!columns.has("updated_at"))
+      this.db.exec(
+        "UPDATE tasks SET updated_at=json_extract(body,'$.updatedAt') WHERE updated_at IS NULL",
+      );
   }
   private transaction<T>(run: () => T): T {
     return this.db.transaction(run).immediate();
   }
-  read(id: string): StoredTask | undefined {
+  private readCore(id: string): StoredTask | undefined {
     const row = this.db
-      .prepare("SELECT body,owner,lease FROM tasks WHERE id=?")
+      .prepare("SELECT body,owner,lease,progress FROM tasks WHERE id=?")
       .get(id) as
-      { body: string; owner: string | null; lease: number } | undefined;
+      | {
+          body: string;
+          owner: string | null;
+          lease: number;
+          progress: string | null;
+        }
+      | undefined;
     if (!row) return undefined;
     const task = JSON.parse(row.body) as StoredTask;
     task.owner = row.owner ?? undefined;
     task.lease = row.lease;
+    task.events = [];
+    if (row.progress) task.progress = JSON.parse(row.progress);
+    return task;
+  }
+  private withEvents(task: StoredTask): StoredTask {
     task.events = (
       this.db
         .prepare(
           "SELECT sequence,event FROM task_events WHERE task_id=? ORDER BY sequence DESC LIMIT 500",
         )
-        .all(id) as { sequence: number; event: string }[]
+        .all(task.id) as { sequence: number; event: string }[]
     )
       .reverse()
-      .map((r) => ({
-        sequence: r.sequence,
-        event: JSON.parse(r.event) as TaskEvent,
+      .map((row) => ({
+        sequence: row.sequence,
+        event: JSON.parse(row.event) as TaskEvent,
       }));
     return task;
+  }
+  read(id: string): StoredTask | undefined {
+    const task = this.readCore(id);
+    return task && this.withEvents(task);
   }
   public(task: StoredTask): WorkTask {
     const value = { ...task };
@@ -63,11 +99,26 @@ export class SqliteTasks implements TaskStore {
     return result;
   }
   list(): WorkTask[] {
+    // One scan instead of one read + 500 events per task.
     return (
       this.db
-        .prepare("SELECT id FROM tasks ORDER BY rowid DESC LIMIT 200")
-        .all() as { id: string }[]
-    ).map((row) => this.public(this.read(row.id)!));
+        .prepare(
+          "SELECT body,owner,lease,progress FROM tasks ORDER BY rowid DESC LIMIT 200",
+        )
+        .all() as {
+        body: string;
+        owner: string | null;
+        lease: number;
+        progress: string | null;
+      }[]
+    ).map((row) => {
+      const task = JSON.parse(row.body) as StoredTask;
+      task.owner = row.owner ?? undefined;
+      task.lease = row.lease;
+      task.events = [];
+      if (row.progress) task.progress = JSON.parse(row.progress);
+      return this.public(task);
+    });
   }
   enqueue(
     request: WorkRequest,
@@ -85,7 +136,7 @@ export class SqliteTasks implements TaskStore {
       if (queued >= 50)
         throw new AppError("USER_INPUT", "任务队列已满，请等待已有任务完成");
       if (preview) {
-        const current = this.read(preview.id);
+        const current = this.readCore(preview.id);
         if (
           !current ||
           current.mode !== "plan" ||
@@ -123,7 +174,7 @@ export class SqliteTasks implements TaskStore {
       };
       this.db
         .prepare(
-          "INSERT INTO tasks(id,status,revision,preview_id,body) VALUES (?,?,?,?,?)",
+          "INSERT INTO tasks(id,status,revision,preview_id,body,progress,updated_at) VALUES (?,?,?,?,?,?,?)",
         )
         .run(
           task.id,
@@ -131,6 +182,8 @@ export class SqliteTasks implements TaskStore {
           0,
           preview?.id ?? null,
           JSON.stringify(task),
+          JSON.stringify(task.progress),
+          now,
         );
       return task;
     });
@@ -143,7 +196,7 @@ export class SqliteTasks implements TaskStore {
     const clean = { ...task, events: [] };
     const result = this.db
       .prepare(
-        "UPDATE tasks SET status=?,revision=?,owner=?,lease=?,body=? WHERE id=? AND revision=?",
+        "UPDATE tasks SET status=?,revision=?,owner=?,lease=?,body=?,progress=?,updated_at=? WHERE id=? AND revision=?",
       )
       .run(
         task.status,
@@ -151,20 +204,29 @@ export class SqliteTasks implements TaskStore {
         task.owner ?? null,
         task.lease,
         JSON.stringify(clean),
+        JSON.stringify(task.progress),
+        task.updatedAt,
         task.id,
         revision,
       );
     if (!result.changes)
       throw new AppError("USER_INPUT", "任务已变化，请刷新后重试");
+    if (!events.length) return;
     const append = this.db.prepare(
       "INSERT INTO task_events(task_id,event) VALUES (?,?)",
     );
     for (const event of events) append.run(task.id, JSON.stringify(event));
-    this.db
-      .prepare(
-        "DELETE FROM task_events WHERE task_id=? AND sequence NOT IN (SELECT sequence FROM task_events WHERE task_id=? ORDER BY sequence DESC LIMIT 1000)",
-      )
-      .run(task.id, task.id);
+    const appended = (this.appended.get(task.id) ?? 0) + events.length;
+    this.appended.set(task.id, appended);
+    // Keep the newest EVENT_LIMIT rows without rewriting the whole table.
+    if (appended >= 64) {
+      this.appended.delete(task.id);
+      this.db
+        .prepare(
+          "DELETE FROM task_events WHERE task_id=? AND sequence <= (SELECT sequence FROM task_events WHERE task_id=? ORDER BY sequence DESC LIMIT 1 OFFSET ?)",
+        )
+        .run(task.id, task.id, EVENT_LIMIT);
+    }
   }
   change(
     id: string,
@@ -174,7 +236,7 @@ export class SqliteTasks implements TaskStore {
     expected?: number,
   ): StoredTask {
     return this.transaction(() => {
-      const task = this.read(id);
+      const task = this.readCore(id);
       if (!task) throw new AppError("USER_INPUT", "任务不存在");
       if (owner && (task.owner !== owner || task.lease < this.now()))
         throw new AppError("CANCELLED", "任务租约已失效");
@@ -189,6 +251,19 @@ export class SqliteTasks implements TaskStore {
       this.save(task, revision, events);
       return task;
     });
+  }
+  /** Progress-only writes touch a small column and never parse the event log. */
+  progress(id: string, owner: string, completed: number, total: number): void {
+    this.db
+      .prepare(
+        "UPDATE tasks SET progress=?,updated_at=? WHERE id=? AND owner=? AND status='running'",
+      )
+      .run(
+        JSON.stringify({ completed, total }),
+        new Date(this.now()).toISOString(),
+        id,
+        owner,
+      );
   }
   recover(): number {
     return this.transaction(() => {
@@ -222,7 +297,11 @@ export class SqliteTasks implements TaskStore {
   }
   claim(owner: string): StoredTask | undefined {
     return this.transaction(() => {
-      this.recover();
+      // Lease recovery does not need to run twice a second.
+      if (this.now() - this.lastRecover > 5000) {
+        this.lastRecover = this.now();
+        this.recover();
+      }
       if (this.db.prepare("SELECT 1 FROM tasks WHERE status='running'").get())
         return undefined;
       const row = this.db
@@ -239,34 +318,29 @@ export class SqliteTasks implements TaskStore {
     });
   }
   heartbeat(id: string, owner: string): boolean {
-    return this.transaction(() => {
-      const task = this.read(id);
-      if (
-        !task ||
-        task.owner !== owner ||
-        task.status !== "running" ||
-        task.lease < this.now()
+    const now = this.now();
+    const row = this.db
+      .prepare(
+        "UPDATE tasks SET lease=? WHERE id=? AND owner=? AND status='running' AND lease>=? RETURNING body",
       )
-        return false;
-      this.db
-        .prepare("UPDATE tasks SET lease=? WHERE id=? AND owner=?")
-        .run(this.now() + 15_000, id, owner);
-      return !task.cancelRequested;
-    });
+      .get(now + 15_000, id, owner, now) as { body: string } | undefined;
+    if (!row) return false;
+    return !(JSON.parse(row.body) as StoredTask).cancelRequested;
   }
   cancel(id: string, revision: number): StoredTask {
-    return this.change(
+    const task = this.change(
       id,
-      (task) => {
-        if (terminal(task.status))
+      (value) => {
+        if (terminal(value.status))
           throw new AppError("USER_INPUT", "任务已经结束");
-        task.cancelRequested = true;
-        if (task.status === "queued") task.status = "cancelled";
+        value.cancelRequested = true;
+        if (value.status === "queued") value.status = "cancelled";
       },
       [],
       undefined,
       revision,
     );
+    return this.withEvents(task);
   }
   finish(
     id: string,
@@ -300,10 +374,13 @@ export class SqliteTasks implements TaskStore {
       [],
       owner,
     );
+    this.appended.delete(id);
   }
   async create(task: Task): Promise<void> {
     this.db
-      .prepare("INSERT INTO tasks(id,status,revision,body) VALUES (?,?,?,?)")
+      .prepare(
+        "INSERT INTO tasks(id,status,revision,body,progress,updated_at) VALUES (?,?,?,?,?,?)",
+      )
       .run(
         task.id,
         task.status,
@@ -314,6 +391,8 @@ export class SqliteTasks implements TaskStore {
           cancelRequested: false,
           request: { operation: task.operation, inputs: [], options: {} },
         }),
+        JSON.stringify(task.progress),
+        task.updatedAt,
       );
   }
   async get(id: string): Promise<Task | undefined> {
@@ -334,6 +413,27 @@ export class SqliteTasks implements TaskStore {
   }
   async interruptUnfinished(): Promise<number> {
     return this.recover();
+  }
+  /** Drop finished tasks past their retention so table scans stay bounded. */
+  retain(days = 7): number {
+    const cutoff = new Date(this.now() - days * 86400_000).toISOString();
+    return this.transaction(() => {
+      const rows = this.db
+        .prepare(
+          "SELECT id FROM tasks WHERE status NOT IN ('queued','running') AND updated_at IS NOT NULL AND updated_at<? LIMIT 500",
+        )
+        .all(cutoff) as { id: string }[];
+      const removeEvents = this.db.prepare(
+        "DELETE FROM task_events WHERE task_id=?",
+      );
+      const removeTask = this.db.prepare("DELETE FROM tasks WHERE id=?");
+      for (const row of rows) {
+        removeEvents.run(row.id);
+        removeTask.run(row.id);
+        this.appended.delete(row.id);
+      }
+      return rows.length;
+    });
   }
   close() {
     this.db.close();

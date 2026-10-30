@@ -11,6 +11,8 @@ export class TaskQueue {
   private active?: Promise<void>;
   private abort?: AbortController;
   private closed = false;
+  /** Raised once a task reaches a terminal state so staging files can settle. */
+  onTaskSettled?: () => void;
   constructor(
     readonly store: SqliteTasks,
     readonly runner: WorkRunner,
@@ -119,6 +121,11 @@ export class TaskQueue {
       this.active = this.execute(task.id, this.abort).finally(() => {
         this.active = undefined;
         this.abort = undefined;
+        try {
+          this.onTaskSettled?.();
+        } catch {
+          /* Cleanup retries on the periodic sweep. */
+        }
         if (!this.closed) this.tick();
       });
     } catch {
@@ -135,6 +142,7 @@ export class TaskQueue {
     }, 500);
     heartbeat.unref();
     const task = this.store.read(id)!;
+    let lastProgress = 0;
     try {
       const request = WorkRequestSchema.parse(task.request);
       if (request.operation.startsWith("track:")) {
@@ -182,15 +190,19 @@ export class TaskQueue {
         controller.signal,
         (event) => {
           checkCancelled(controller.signal);
+          if (event.type === "progress") {
+            // Coalesce: a full row rewrite per file dominated batch runs, and
+            // the UI polls slower than this budget.
+            const at = Date.now();
+            if (at - lastProgress < 250 && event.completed < event.total)
+              return;
+            lastProgress = at;
+            this.store.progress(id, this.owner, event.completed, event.total);
+            return;
+          }
           this.store.change(
             id,
-            (current) => {
-              if (event.type === "progress")
-                current.progress = {
-                  completed: event.completed,
-                  total: event.total,
-                };
-            },
+            () => {},
             [
               {
                 ...event,

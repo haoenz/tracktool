@@ -85,9 +85,10 @@ export function workRoutes(
             t.request.archive ?? "",
           ]),
       );
-      queue.start();
       const cleanup = new UploadCleanup(store, files);
       const exports = new ExportCleanup(store, files);
+      queue.start();
+      let lastRetain = 0;
       const sweep = () => {
         try {
           cleanup.sweep();
@@ -99,9 +100,21 @@ export function workRoutes(
         } catch (error) {
           app.log.warn({ err: error }, "Export cleanup will retry");
         }
+        // Retention is a full table pass; hourly is plenty.
+        if (Date.now() - lastRetain > 3600_000) {
+          lastRetain = Date.now();
+          try {
+            store.retain();
+          } catch (error) {
+            app.log.warn({ err: error }, "Task retention will retry");
+          }
+        }
       };
+      queue.onTaskSettled = sweep;
       sweep();
-      cleanupTimer = setInterval(sweep, 1000);
+      // Both sweeps scan every task, so they run when a task settles and only
+      // as a coarse safety net on a timer.
+      cleanupTimer = setInterval(sweep, 60_000);
       cleanupTimer.unref();
       return { queue, files, edits, runner, exports };
     })());
