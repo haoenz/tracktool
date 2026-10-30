@@ -9,6 +9,14 @@ import {
 import path from "node:path";
 export class TileCache {
   private db: Database.Database;
+  private readonly select;
+  private readonly touch;
+  private readonly remove;
+  private readonly insert;
+  private readonly account;
+  private readonly flushTimer: ReturnType<typeof setInterval>;
+  private dirty = new Map<string, number>();
+  private writes = 0;
   constructor(
     directory: string,
     private capacity: number,
@@ -22,6 +30,11 @@ export class TileCache {
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS tiles(key TEXT PRIMARY KEY,data BLOB NOT NULL,size INTEGER NOT NULL,accessed REAL NOT NULL);CREATE INDEX IF NOT EXISTS tile_lru ON tiles(accessed);CREATE TABLE IF NOT EXISTS accounting(id INTEGER PRIMARY KEY,size INTEGER NOT NULL);INSERT OR IGNORE INTO accounting VALUES(1,0);CREATE TRIGGER IF NOT EXISTS tile_insert AFTER INSERT ON tiles BEGIN UPDATE accounting SET size=size+NEW.size WHERE id=1;END;CREATE TRIGGER IF NOT EXISTS tile_delete AFTER DELETE ON tiles BEGIN UPDATE accounting SET size=size-OLD.size WHERE id=1;END;`,
     );
+    this.select = this.db.prepare("SELECT data FROM tiles WHERE key=?");
+    this.touch = this.db.prepare("UPDATE tiles SET accessed=? WHERE key=?");
+    this.remove = this.db.prepare("DELETE FROM tiles WHERE key=?");
+    this.insert = this.db.prepare("INSERT INTO tiles VALUES(?,?,?,?)");
+    this.account = this.db.prepare("SELECT size FROM accounting WHERE id=1");
     this.db.transaction(() => this.evict()).immediate();
     for (const name of readdirSync(directory))
       if (/^[0-9a-f]{64}\.tile$/.test(name)) {
@@ -37,39 +50,54 @@ export class TileCache {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
       }
+    // Tile reads outnumber writes by orders of magnitude; keep recency in
+    // memory and fold it into the LRU index in batches.
+    this.flushTimer = setInterval(() => {
+      try {
+        this.flush();
+      } catch {
+        /* A checkpoint or competing writer retries on the next flush. */
+      }
+    }, 15_000);
+    this.flushTimer.unref();
   }
   get(key: string): Buffer | undefined {
-    const row = this.db
-      .prepare("SELECT data FROM tiles WHERE key=?")
-      .get(key) as { data: Buffer } | undefined;
-    if (row)
-      this.db
-        .prepare("UPDATE tiles SET accessed=? WHERE key=?")
-        .run(Date.now() / 1000, key);
+    const row = this.select.get(key) as { data: Buffer } | undefined;
+    if (row) {
+      this.dirty.delete(key);
+      this.dirty.set(key, Date.now() / 1000);
+      if (this.dirty.size >= 512) this.flush();
+    }
     return row?.data;
   }
+  flush() {
+    if (!this.dirty.size) return;
+    const entries = [...this.dirty];
+    this.dirty.clear();
+    this.db.transaction(() => {
+      for (const [key, accessed] of entries) this.touch.run(accessed, key);
+    })();
+  }
   delete(key: string) {
-    this.db.prepare("DELETE FROM tiles WHERE key=?").run(key);
+    this.dirty.delete(key);
+    this.remove.run(key);
   }
   put(key: string, data: Buffer, accessed = Date.now() / 1000) {
     if (data.length > this.capacity) return;
+    // Let eviction see recent reads before it picks victims.
+    this.flush();
     this.db
       .transaction(() => {
-        this.db.prepare("DELETE FROM tiles WHERE key=?").run(key);
-        this.db
-          .prepare("INSERT INTO tiles VALUES(?,?,?,?)")
-          .run(key, data, data.length, accessed);
+        this.remove.run(key);
+        this.insert.run(key, data, data.length, accessed);
         this.evict();
       })
       .immediate();
-    this.db.pragma("incremental_vacuum(64)");
+    // Reclaiming per insert costs more than the space it saves; amortize it.
+    if (++this.writes % 256 === 0) this.db.pragma("incremental_vacuum(64)");
   }
   private evict() {
-    let total = (
-      this.db.prepare("SELECT size FROM accounting WHERE id=1").get() as {
-        size: number;
-      }
-    ).size;
+    let total = (this.account.get() as { size: number }).size;
     while (total > this.capacity) {
       const rows = this.db
         .prepare("SELECT key,size FROM tiles ORDER BY accessed LIMIT 32")
@@ -83,6 +111,9 @@ export class TileCache {
     }
   }
   close() {
+    clearInterval(this.flushTimer);
+    this.flush();
+    this.db.pragma("incremental_vacuum");
     this.db.pragma("wal_checkpoint(TRUNCATE)");
     this.db.close();
   }

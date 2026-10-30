@@ -378,7 +378,7 @@ export class MapResources {
         const hit = this.tiles.get(key);
         if (hit !== undefined) {
           try {
-            await this.validate(source, hit);
+            this.validateCached(source, hit);
             return hit;
           } catch {
             this.tiles.delete(key);
@@ -448,7 +448,7 @@ export class MapResources {
       const data = this.tiles.get(key);
       if (data !== undefined) {
         try {
-          await this.validate(source, data);
+          this.validateCached(source, data);
           return data;
         } catch {
           this.tiles.delete(key);
@@ -458,7 +458,7 @@ export class MapResources {
         old = this.tiles.get(oldKey);
       if (old !== undefined) {
         try {
-          await this.validate(source, old);
+          this.validateCached(source, old);
           this.tiles.put(key, old);
           return old;
         } catch {
@@ -577,6 +577,23 @@ export class MapResources {
         { cause },
       );
     }
+  }
+  /**
+   * Cached bytes were fully validated when fetched. Re-decoding every hit
+   * costs far more than the corruption it protects against, so only reject
+   * empty payloads and known placeholder tiles here.
+   */
+  private validateCached(source: string, data: Buffer) {
+    const preset = this.presets[source];
+    if (!data.length) {
+      if (source === "openinframap-power") return;
+      throw new AppError("USER_INPUT", "数据源返回空瓦片");
+    }
+    if (preset?.invalid_tile_sha256?.includes(hash(data)))
+      throw new AppError(
+        "USER_INPUT",
+        "地图源返回暂无地图的占位图片，不能导出；请更换底图",
+      );
   }
   async close() {
     await this.reprojections.close();
