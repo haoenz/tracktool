@@ -53,7 +53,11 @@ import {
   temporary,
 } from "../durable-files.js";
 import { readZip } from "./zip.js";
-import { readPackedExport, writePackedExport } from "./packed-export.js";
+import {
+  checkPackedStructure,
+  readPackedExport,
+  writePackedExport,
+} from "./packed-export.js";
 import { validateExport } from "../../domain/export-format.js";
 import type { ExportOptions } from "../../shared/export-format.js";
 import { readManifest } from "../xml/manifest.js";
@@ -503,6 +507,10 @@ export class ArchiveWriter {
               "部分所选轨迹已不存在，请返回列表重新选择",
             );
         }
+        // Re-reading every member after writing doubles CPU on large exports.
+        // Byte verification stays available behind an explicit switch; the
+        // default path validates the container plus the writer's own checks.
+        const verify = process.env.TRACKTOOL_VERIFY_EXPORT === "1";
         const expectedHashes: string[] = [];
         function* originals() {
           for (const e of entries) {
@@ -522,28 +530,37 @@ export class ArchiveWriter {
             const raw = fallback
               ? rawObject(db, e.sha256)
               : exportDisplay(db, e.path);
-            expectedHashes.push(digest(raw));
+            if (verify) expectedHashes.push(digest(raw));
             yield { path: e.path, raw };
           }
         }
         await writePackedExport(stage, originals(), options, signal);
-        let index = 0;
-        await readPackedExport(
-          stage,
-          (name, raw) => {
-            const expected = entries[index++];
-            if (
-              !expected ||
-              expected.path !== name ||
-              expectedHashes[index - 1] !== digest(raw)
-            )
-              throw new AppError("USER_INPUT", "压缩包内容校验失败");
-          },
-          options,
-          signal,
-        );
-        if (index !== entries.length)
-          throw new AppError("USER_INPUT", "压缩包内容校验失败");
+        if (!verify) {
+          await checkPackedStructure(
+            stage,
+            entries.map((entry) => entry.path),
+            options,
+            signal,
+          );
+        } else {
+          let index = 0;
+          await readPackedExport(
+            stage,
+            (name, raw) => {
+              const expected = entries[index++];
+              if (
+                !expected ||
+                expected.path !== name ||
+                expectedHashes[index - 1] !== digest(raw)
+              )
+                throw new AppError("USER_INPUT", "压缩包内容校验失败");
+            },
+            options,
+            signal,
+          );
+          if (index !== entries.length)
+            throw new AppError("USER_INPUT", "压缩包内容校验失败");
+        }
         return rev;
       });
       checkCancelled(signal);

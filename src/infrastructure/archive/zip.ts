@@ -193,6 +193,56 @@ export async function readZip(
     await reader.close();
   }
 }
+/** Central-directory only: catches truncation, duplicates and size drift without
+ * decompressing every member. */
+export async function checkZipStructure(
+  file: string,
+  expected: readonly string[],
+  signal?: AbortSignal,
+): Promise<void> {
+  const reader = new ZipReader(new BlobReader(await openAsBlob(file)), {
+    useWebWorkers: false,
+    checkSignature: true,
+    filenameValidation: "strict",
+  });
+  try {
+    const names: string[] = [];
+    for await (const entry of reader.getEntriesGenerator()) {
+      checkCancelled(signal);
+      const name = entry.filename;
+      memberName(entry.directory ? name.replace(/\/$/, "") : name);
+      if (
+        names.includes(name) ||
+        entry.rawFilename.includes(0) ||
+        ((entry.externalFileAttributes >>> 16) & 0o170000) === 0o120000
+      )
+        throw new AppError(
+          "USER_INPUT",
+          `Duplicate or unsafe ZIP member: ${name}`,
+        );
+      if (entry.directory || !name.toLowerCase().endsWith(".kml"))
+        throw new AppError("USER_INPUT", `Non-KML ZIP member: ${name}`);
+      if (entry.uncompressedSize > MAX_KML_BYTES)
+        throw new AppError("USER_INPUT", `ZIP member exceeds 128 MiB: ${name}`);
+      names.push(name);
+    }
+    if (
+      names.length !== expected.length ||
+      names.some((name, index) => name !== expected[index])
+    )
+      throw new AppError("USER_INPUT", "压缩包内容校验失败");
+  } catch (cause) {
+    checkCancelled(signal);
+    if (cause instanceof AppError) throw cause;
+    throw new AppError(
+      "USER_INPUT",
+      `ZIP validation failed: ${cause instanceof Error ? cause.message : "invalid archive"}`,
+      { cause },
+    );
+  } finally {
+    await reader.close();
+  }
+}
 export async function writeZip(
   file: string,
   entries: Iterable<{ path: string; raw: Uint8Array }>,

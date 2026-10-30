@@ -11,7 +11,7 @@ import {
   type ExportOptions,
 } from "../../shared/export-format.js";
 import { syncFile } from "../durable-files.js";
-import { readZip, writeZip } from "./zip.js";
+import { checkZipStructure, readZip, writeZip } from "./zip.js";
 
 type Member = { path: string; raw: Uint8Array };
 type Consumer = (name: string, raw: Uint8Array) => void | Promise<void>;
@@ -139,6 +139,19 @@ export async function writePackedExport(
   }
 }
 
+/** Container check used after writing when full content verification is off. */
+export async function checkPackedStructure(
+  file: string,
+  expected: readonly string[],
+  options: ExportOptions = {},
+  signal?: AbortSignal,
+): Promise<void> {
+  checkCancelled(signal);
+  if (exportEncoding(options).format !== "tar-xz")
+    return checkZipStructure(file, expected, signal);
+  // A tar.xz stream cannot be framed without decompressing it; the writer
+  // already checks xz's exit code and the packer validates member names/sizes.
+}
 export async function readPackedExport(
   file: string,
   consume: Consumer,

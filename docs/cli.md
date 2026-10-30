@@ -276,7 +276,7 @@ tracktool track export ENTRY_ID --version VERSION_ID --presentation PRESENTATION
 
 ### 压缩包格式与压缩程度
 
-`archive backup` 支持 `--format zip-deflate|zip-zstd|tar-xz` 和 `--compression store|normal|extreme`。新建导出默认 ZIP · Deflate、极致压缩；`--output` 可指定目标文件，扩展名必须与选项一致。
+`archive backup` 支持 `--format zip-deflate|zip-zstd|tar-xz` 和 `--compression store|normal|extreme`。新建导出默认 ZIP · Deflate、极致压缩；`--output` 可指定目标文件，扩展名必须与选项一致。写入完成后默认只校验压缩包结构（成员名、重复项、大小与 ZIP 中央目录），不再整包解压重读；需要逐成员字节复核时设置 `TRACKTOOL_VERIFY_EXPORT=1`，代价是再来一遍解压与哈希。tar.xz 由 xz 自身的校验与退出码保证。
 
 | 格式        | 仅打包（store）   | 正常（normal）    | 极致（extreme）   |
 | ----------- | ----------------- | ----------------- | ----------------- |

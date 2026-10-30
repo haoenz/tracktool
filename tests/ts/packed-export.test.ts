@@ -9,6 +9,7 @@ import os from "node:os";
 import { pack } from "tar-stream";
 import { ZipReader, BlobReader } from "@zip.js/zip.js";
 import {
+  checkPackedStructure,
   writePackedExport,
   readPackedExport,
 } from "../../dist/node/infrastructure/archive/packed-export.js";
@@ -108,6 +109,31 @@ it.each(combinations)(
     expect(count).toBe(0);
   },
 );
+
+it("checks the ZIP container without decompressing members", async () => {
+  const dir = await tmp(),
+    file = path.join(dir, "export.zip"),
+    entries = [
+      { path: "Default/2026-10/a.kml", raw: Buffer.from("<kml>a</kml>") },
+      { path: "Default/2026-10/b.kml", raw: Buffer.from("<kml>b</kml>") },
+    ];
+  await writePackedExport(file, entries);
+  await checkPackedStructure(
+    file,
+    entries.map((entry) => entry.path),
+  );
+  await expect(
+    checkPackedStructure(file, ["Default/2026-10/a.kml"]),
+  ).rejects.toThrow("压缩包内容校验失败");
+  const bytes = await readFile(file);
+  await writeFile(file, bytes.subarray(0, Math.floor(bytes.length / 2)));
+  await expect(
+    checkPackedStructure(
+      file,
+      entries.map((entry) => entry.path),
+    ),
+  ).rejects.toThrow();
+});
 
 it("validates the resolved extension and keeps old requests on normal ZIP", () => {
   expect(exportEncoding()).toMatchObject({ codec: "deflate", level: 6 });
