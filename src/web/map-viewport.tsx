@@ -17,6 +17,7 @@ import {
 import type { OverviewStatus } from "../shared/overview.js";
 import type { AnalysisSample } from "../shared/track-analysis.js";
 import { MapCanvas } from "../drawing/core.js";
+import { compositionPadding } from "../drawing/viewport.js";
 import { trackColor } from "../drawing/track-style.js";
 import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, SelectedTrack } from "../shared/map.js";
@@ -178,7 +179,10 @@ export const MapViewport = memo(
       for (const map of [current.current, candidate.current]) {
         if (!map) continue;
         const { frame } = map.state;
-        map.frame.style.transform = `scale(${scale})`;
+        // Layout zoom keeps the oversized map in the browser's layout bounds.
+        // A transformed export frame can clip its overflowing canvas on mobile.
+        map.frame.style.zoom = mobile ? String(scale) : "";
+        map.frame.style.transform = mobile ? "" : `scale(${scale})`;
         layers.current.get(map)?.setScale(scale);
         analysisLayers.current.get(map)?.setScale(scale);
         if (map === current.current) {
@@ -377,6 +381,42 @@ export const MapViewport = memo(
       for (const layer of analysisLayers.current.values())
         layer.update(props.analysisOverlay);
     }, [props.analysisOverlay]);
+    const fitPadding = (
+      map: MapCanvas,
+    ): Required<PaddingOptions> | undefined => {
+      if (latest.current.print)
+        return compositionPadding(
+          map.surround,
+          !!map.state.title,
+          map.credit.offsetHeight,
+        );
+      const bounds = stage.current?.getBoundingClientRect();
+      const canvas = map.mapElement.getBoundingClientRect();
+      const scale = canvas.width / map.mapElement.clientWidth;
+      if (!bounds || !scale || bounds.width <= 0 || bounds.height <= 0) return;
+      const margin = Math.min(16, bounds.width / 4, bounds.height / 4);
+      let left = bounds.left + margin;
+      const right = bounds.right - margin;
+      const top = bounds.top + margin;
+      let bottom = bounds.bottom - margin;
+      const panel = document.getElementById("map-panel");
+      if (panel && panel.offsetParent !== null) {
+        const rect = panel.getBoundingClientRect();
+        if (bounds.width <= 700) {
+          if (rect.top - margin > top + 32) bottom = rect.top - margin;
+        } else if (rect.right + margin < right - 32) {
+          left = rect.right + margin;
+        }
+      }
+      // MapLibre fits the oversized logical canvas. Convert the visible,
+      // unobscured screen rectangle back into that canvas's coordinate space.
+      return {
+        left: Math.max(0, (left - canvas.left) / scale),
+        right: Math.max(0, (canvas.right - right) / scale),
+        top: Math.max(0, (top - canvas.top) / scale),
+        bottom: Math.max(0, (canvas.bottom - bottom) / scale),
+      };
+    };
     useImperativeHandle(ref, () => ({
       retryOverview: () => {
         if (current.current) layers.current.get(current.current)?.retry();
@@ -392,20 +432,8 @@ export const MapViewport = memo(
       fitOverview: ([west, south, east, north]) => {
         const map = current.current;
         if (!map) return;
-        let padding: number | PaddingOptions = 65;
-        if (latest.current.print) {
-          // The frame, not the whole canvas, is the exported area.
-          const element = map.mapElement.getBoundingClientRect();
-          const scale = element.width / map.mapElement.clientWidth || 1;
-          const frame = map.state.frame;
-          padding = {
-            top: Math.max(0, (element.height - frame.height * scale) / 2) + 55,
-            bottom:
-              Math.max(0, (element.height - frame.height * scale) / 2) + 55,
-            left: Math.max(0, (element.width - frame.width * scale) / 2) + 55,
-            right: Math.max(0, (element.width - frame.width * scale) / 2) + 55,
-          };
-        }
+        const padding = fitPadding(map);
+        if (!padding) return;
         map.map.fitBounds(
           [
             [west, south],
@@ -417,34 +445,8 @@ export const MapViewport = memo(
       fit: (tracks) => {
         const map = current.current;
         if (!map) return;
-        // Print mode fits the final output frame even while its surroundings
-        // are visible. Library locating fits the free viewport instead.
-        if (latest.current.print) {
-          map.fit(tracks);
-          return;
-        }
-        const bounds = stage.current?.getBoundingClientRect();
-        const canvas = map.mapElement.getBoundingClientRect();
-        const scale = canvas.width / map.mapElement.clientWidth;
-        if (!bounds || !scale || bounds.width <= 0 || bounds.height <= 0)
-          return;
-        // Locate within the viewport regardless of floating panels or toolbars.
-        const margin = Math.min(16, bounds.width / 4, bounds.height / 4);
-        const panel = document.getElementById("map-panel");
-        const panelRight =
-          panel && panel.offsetParent !== null
-            ? panel.getBoundingClientRect().right
-            : bounds.left;
-        const left = Math.max(bounds.left + margin, panelRight + margin);
-        const right = bounds.right - margin;
-        const top = bounds.top + margin;
-        const bottom = bounds.bottom - margin;
-        map.fit(tracks, {
-          left: (left - canvas.left) / scale,
-          right: (canvas.right - right) / scale,
-          top: (top - canvas.top) / scale,
-          bottom: (canvas.bottom - bottom) / scale,
-        });
+        const padding = fitPadding(map);
+        if (padding) map.fit(tracks, padding);
       },
       cancel,
       ready: async () => {

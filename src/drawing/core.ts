@@ -247,7 +247,7 @@ export class MapCanvas {
     });
     this.resizing = true;
     try {
-      // The CSS transform already scales the preview. Render at its displayed
+      // CSS already scales the preview. Render at its displayed
       // density instead of allocating a several-thousand-pixel mobile canvas.
       const pixelRatio = devicePixelRatio * scale;
       if (this.map.getPixelRatio() !== pixelRatio)

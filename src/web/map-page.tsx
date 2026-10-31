@@ -499,6 +499,19 @@ function Editor({ initial }: { initial: Bootstrap }) {
   }, [detailOpen, panel]);
   const fitted = useRef(!!rememberedCamera(initial.initialArchive));
   const browsing = !inspection;
+  useEffect(() => {
+    if (
+      !starting &&
+      !fitted.current &&
+      overview.query.data?.bounds &&
+      overview.query.data.version &&
+      browsing &&
+      !printMode
+    ) {
+      fitted.current = true;
+      viewport.current?.fitOverview(overview.query.data.bounds);
+    }
+  }, [starting, overview.query.data, browsing, printMode]);
   const change = (edit: (next: MapState) => void) => {
     setState((prev) => {
       const next = structuredClone(prev);
@@ -864,7 +877,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
       previous.center[1] === camera.center[1]
     )
       return;
-    fitted.current = true;
+    // Initial layout may constrain the camera before overview bounds arrive.
+    // Only later camera changes should cancel the first automatic fit.
+    if (!starting) fitted.current = true;
     // "moveend" fires after every pan; defer the session write so a drag does
     // not serialize storage on each stop.
     if (cameraSave.current) clearTimeout(cameraSave.current);
