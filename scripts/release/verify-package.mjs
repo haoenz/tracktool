@@ -136,14 +136,7 @@ const api = async (url, body) => {
 };
 let report, png;
 try {
-  for (const route of [
-    "/map",
-    "/archive",
-    "/tracks",
-    "/media",
-    "/tasks",
-    "/settings",
-  ])
+  for (const route of ["/map", "/map?panel=library", "/map?panel=settings"])
     assert.equal((await fetch(origin + route)).status, 200);
   const { state } = await (await api("/api/bootstrap")).json();
   const selected = await timed("cold_selection", async () =>

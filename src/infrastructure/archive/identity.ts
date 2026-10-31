@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Presentation } from "../../domain/track-version.js";
 
-/** UUID v5, URL namespace. Stable across retries and migration rehearsals. */
+/** UUID v5, URL namespace. Stable across retries and concurrent requests. */
 export function stableId(name: string): string {
   const hash = createHash("sha1")
     .update(Buffer.from("6ba7b8119dad11d180b400c04fd430c8", "hex"))

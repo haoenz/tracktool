@@ -12,7 +12,7 @@ export default defineConfig({
   },
   webServer: {
     command: "node tests/e2e/server.ts",
-    url: "http://127.0.0.1:18765/settings",
+    url: "http://127.0.0.1:18765/map",
     reuseExistingServer: false,
   },
 });

@@ -1,30 +1,28 @@
-import { exportEncoding } from "../shared/export-format.js";
-import { XmlWorkers } from "../infrastructure/xml/client.js";
-import { LocalKmlFiles } from "../infrastructure/kml-files.js";
-import { geojson } from "../domain/geometry.js";
-import { pointCount, MAX_POINTS } from "../domain/trackdata.js";
-import type { SelectedTrack } from "../shared/map.js";
 import type { FastifyInstance } from "fastify";
-import { z } from "zod";
-import path from "node:path";
 import { createReadStream } from "node:fs";
 import { lstat } from "node:fs/promises";
-import { Readable } from "node:stream";
-import { createHash } from "node:crypto";
-import { memberName } from "../domain/archive.js";
-import { AppError } from "../domain/errors.js";
+import path from "node:path";
+import type { Readable } from "node:stream";
+import { z } from "zod";
 import { publicConfig } from "../domain/config.js";
-import { userStateDir } from "../infrastructure/paths.js";
-import type { ConfigStore } from "../services/ports.js";
-import { WorkRequestSchema } from "../shared/work.js";
-import { SqliteTasks } from "../infrastructure/task-store.js";
-import { UploadCleanup } from "../infrastructure/upload-cleanup.js";
-import { ExportCleanup } from "../infrastructure/export-cleanup.js";
-import { WorkFiles } from "../infrastructure/work-files.js";
-import { BusinessRunner } from "../infrastructure/work-runner.js";
-import { TaskQueue } from "../infrastructure/task-queue.js";
+import { AppError } from "../domain/errors.js";
+import { geojson } from "../domain/geometry.js";
+import { MAX_POINTS, pointCount } from "../domain/trackdata.js";
 import { ArchiveClient } from "../infrastructure/archive/client.js";
 import { EditPreviews } from "../infrastructure/archive/edit-previews.js";
+import { ExportCleanup } from "../infrastructure/export-cleanup.js";
+import { LocalKmlFiles } from "../infrastructure/kml-files.js";
+import { userStateDir } from "../infrastructure/paths.js";
+import { TaskQueue } from "../infrastructure/task-queue.js";
+import { SqliteTasks } from "../infrastructure/task-store.js";
+import { UploadCleanup } from "../infrastructure/upload-cleanup.js";
+import { WorkFiles } from "../infrastructure/work-files.js";
+import { BusinessRunner } from "../infrastructure/work-runner.js";
+import { XmlWorkers } from "../infrastructure/xml/client.js";
+import type { ConfigStore } from "../services/ports.js";
+import { exportEncoding } from "../shared/export-format.js";
+import type { SelectedTrack } from "../shared/map.js";
+import { WorkRequestSchema } from "../shared/work.js";
 import { trackRoutes } from "./tracks.js";
 export interface WorkOptions {
   stateDir?: string;
@@ -152,11 +150,8 @@ export function workRoutes(
   );
   app.addContentTypeParser(
     "application/octet-stream",
-    (request, payload, done) => done(null, payload),
+    (_request, payload, done) => done(null, payload),
   );
-  app.get("/api/work/uploads", async () => ({
-    uploads: await (await get()).files.uploadList(),
-  }));
   app.post("/api/work/uploads", async (request) => {
     const query = z
       .object({ name: z.string().min(1), id: z.string().optional() })
@@ -166,57 +161,6 @@ export function workRoutes(
       request.body as Readable,
       query.id,
     );
-  });
-  // Editing a map selection works on explicit staging copies, never on archive originals.
-  app.post("/api/work/selection-copy", async (request) => {
-    const input = z
-      .object({
-        archive: z.string().min(1).max(4096),
-        tracks: z
-          .array(
-            z.object({
-              entry: z.string().min(1).max(4096),
-              sha256: z.string().regex(/^[a-f0-9]{64}$/),
-            }),
-          )
-          .min(1)
-          .max(200),
-      })
-      .parse(request.body);
-    const { files } = await get();
-    const archive = await files.resolve(input.archive);
-    const client = new ArchiveClient();
-    let batch: Awaited<ReturnType<WorkFiles["upload"]>> | undefined;
-    try {
-      const names = new Set<string>();
-      for (const track of input.tracks) {
-        memberName(track.entry);
-        const bytes = await client.readBytes(archive, track.entry);
-        if (createHash("sha256").update(bytes).digest("hex") !== track.sha256)
-          throw new AppError("USER_INPUT", "源轨迹已变化，请重新选择后再处理");
-        let name = path.posix.basename(track.entry);
-        let suffix = 1;
-        while (names.has(name))
-          name = `${++suffix}-${path.posix.basename(track.entry)}`;
-        names.add(name);
-        const uploaded = await files.upload(
-          name,
-          Readable.from([bytes]),
-          batch?.id,
-        );
-        batch = {
-          ...uploaded,
-          files: [...(batch?.files ?? []), ...uploaded.files],
-          bytes: (batch?.bytes ?? 0) + uploaded.bytes,
-        };
-      }
-      return batch!;
-    } catch (error) {
-      if (batch) await files.cleanup(batch.id);
-      throw error;
-    } finally {
-      await client.close();
-    }
   });
   app.post("/api/work/uploads/:id/cleanup", async (request) => {
     const { id } = z.object({ id: z.string() }).parse(request.params),
@@ -241,9 +185,6 @@ export function workRoutes(
     await files.cleanup(id);
     return { ok: true };
   });
-  app.get("/api/work/tasks", async () => ({
-    tasks: (await get()).queue.store.list(),
-  }));
   const taskId = (params: unknown) =>
     z.object({ id: z.string().uuid() }).parse(params).id;
   app.get("/api/work/tasks/:id", async (request) => {

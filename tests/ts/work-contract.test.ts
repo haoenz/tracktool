@@ -1,12 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { getEventListeners } from "node:events";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  WorkTaskSchema,
-  WorkTasksResponseSchema,
   WorkRequestSchema,
+  WorkTaskSchema,
   type WorkTask,
 } from "../../src/shared/work.js";
-import { waitForWorkTask, requestWorkTask } from "../../src/web/api.js";
+import { requestWorkTask, waitForWorkTask } from "../../src/web/api.js";
 
 const task: WorkTask = {
   schema: 1,
@@ -53,21 +52,18 @@ describe("work response contracts", () => {
   ] as const)("accepts %s tasks and preserves output payloads", (status) => {
     const value = { ...task, status };
     expect(WorkTaskSchema.parse(value)).toEqual(value);
-    expect(WorkTasksResponseSchema.parse({ tasks: [value] }).tasks).toEqual([
-      value,
-    ]);
   });
-  it("keeps historical operations readable without allowing them to execute", () => {
+  it("rejects unknown operations in requests and responses", () => {
     const value = {
       ...task,
-      operation: "archive:pop",
+      operation: "unknown:operation",
       request: {
         ...task.request,
-        operation: "archive:pop",
-        options: { retiredOption: true },
+        operation: "unknown:operation",
+        options: { unknownOption: true },
       },
     };
-    expect(WorkTaskSchema.parse(value)).toEqual(value);
+    expect(WorkTaskSchema.safeParse(value).success).toBe(false);
     expect(WorkRequestSchema.safeParse(value.request).success).toBe(false);
   });
   it.each([

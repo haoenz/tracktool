@@ -1,12 +1,12 @@
-import { afterEach, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { get } from "node:http";
-import { promisify } from "node:util";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { get } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { createApp } from "../../dist/node/server/app.js";
+import { promisify } from "node:util";
+import { afterEach, expect, it } from "vitest";
 import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js";
+import { createApp } from "../../dist/node/server/app.js";
 
 const execute = promisify(execFile),
   cleanup: (() => Promise<unknown>)[] = [];
@@ -35,7 +35,7 @@ it("serves the built page; CLI and HTTP share the exact public result without pr
       custom: "private-extra",
     }),
   );
-  const page = await fetch(`${address}/settings`).then((r) => r.text());
+  const page = await fetch(`${address}/map`).then((r) => r.text());
   expect(page).toContain("test-token");
   expect(page).not.toContain("fixture-secret");
   const response = await fetch(`${address}/api/config`, {

@@ -892,16 +892,16 @@ it("prepares a composition from fixed historical/source-only versions and publis
   ]);
 });
 
-it("rejects retired reversal operations and composition flags", () => {
+it("rejects unknown operations and composition flags", () => {
   expect(
-    SegmentEditSchema.safeParse({ kind: "reverse", segment_id: "segment" })
+    SegmentEditSchema.safeParse({ kind: "unknown", segment_id: "segment" })
       .success,
   ).toBe(false);
-  for (const reverse of [true, false])
+  for (const unknown of [true, false])
     expect(
       SegmentEditSchema.safeParse({
         kind: "compose",
-        segments: [{ version_id: "version", segment_id: "segment", reverse }],
+        segments: [{ version_id: "version", segment_id: "segment", unknown }],
         default_connect: false,
       }).success,
     ).toBe(false);

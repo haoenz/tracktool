@@ -1,33 +1,34 @@
+import geodesic from "geographiclib-geodesic";
 import { AppError, checkCancelled, errorInfo } from "../domain/errors.js";
-import { TAGS as T } from "../domain/tags.js";
+import type { Metadata } from "../domain/media-time.js";
 import {
-  altitude,
-  position,
-  missingAltitude,
-  gpsTags,
-  fail,
-  shiftTime,
-  convertPlan,
-  MEDIA_EXTENSIONS,
-} from "../domain/media.js";
-import type { MediaAction, MediaFile } from "../domain/media.js";
-import {
-  parseMediaTime,
   offsetMinutes,
+  parseMediaTime,
   parseTimeDiff,
   VIDEO_SOURCES,
 } from "../domain/media-time.js";
-import type { Metadata } from "../domain/media-time.js";
+import type { MediaAction, MediaFile } from "../domain/media.js";
+import {
+  altitude,
+  convertPlan,
+  fail,
+  gpsTags,
+  MEDIA_EXTENSIONS,
+  missingAltitude,
+  position,
+  shiftTime,
+} from "../domain/media.js";
+import { TAGS as T } from "../domain/tags.js";
+import { batchResult } from "../domain/tasks.js";
+import type { BatchResult } from "../shared/contracts.js";
 import type { Context } from "./context.js";
+import type { ElevationPort } from "./kml-service.js";
 import type {
-  MetadataBackend,
+  GeocodePort,
   MediaFiles,
   MediaTracks,
-  GeocodePort,
+  MetadataBackend,
 } from "./media-ports.js";
-import type { ElevationPort } from "./kml-service.js";
-import type { BatchResult } from "../shared/contracts.js";
-import geodesic from "geographiclib-geodesic";
 export interface MediaOptions {
   overwrite?: boolean;
   parallel?: boolean;
@@ -212,8 +213,7 @@ export class MediaService {
       },
     );
     return {
-      items,
-      exitCode: items.some((i) => i.status === "failed") ? 3 : 0,
+      ...batchResult(items),
       plans: checked,
     };
   }
@@ -586,9 +586,8 @@ export class MediaService {
       }
     }
     return {
-      items,
+      ...batchResult(items),
       plans,
-      exitCode: items.some((i) => i.status === "failed") ? 3 : 0,
     };
   }
   async repair(
@@ -640,9 +639,8 @@ export class MediaService {
       plans.push(...result.plans);
     }
     return {
-      items,
+      ...batchResult(items),
       plans,
-      exitCode: items.some((i) => i.status === "failed") ? 3 : 0,
     };
   }
   async repairVideo(

@@ -15,7 +15,7 @@ import { LocalKmlFiles } from "../../dist/node/infrastructure/kml-files.js";
 import { GoogleElevation } from "../../dist/node/infrastructure/elevation.js";
 import { DEFAULTS } from "../../dist/node/domain/config.js";
 import { createContext } from "../../dist/node/services/context.js";
-import expected from "./fixtures/m4/python.json";
+import expected from "./fixtures/m4/expected.json";
 const raw = readFileSync(
   new URL("./fixtures/m4/2026-10-01 轨迹.kml", import.meta.url),
 );
@@ -62,7 +62,7 @@ export function summary(bytes: Uint8Array) {
     ),
   );
 }
-it("matches Python content, nearest microsecond split and WGS84 drift removal", async () => {
+it("preserves content, nearest microsecond split and WGS84 drift removal", async () => {
   const p = pool();
   expect((await p.run(raw, { kind: "content" })).content).toEqual(
     expected.content,
@@ -291,7 +291,7 @@ it("Google batches at 512, aligns missing results and retries transport only wit
     { code: "CANCELLED" },
   );
 });
-it("Google elevation rounding matches Python ties-to-even and binary64 decimals", async () => {
+it("Google elevation rounding uses ties-to-even and binary64 decimals", async () => {
   const elevations = [0.125, 0.375, -0.125, -0.375, 2.675, 12.345];
   const api = new GoogleElevation(
     async () =>

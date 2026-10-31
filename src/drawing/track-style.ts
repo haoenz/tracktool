@@ -1,5 +1,5 @@
-import type { Feature, Position, SelectedTrack } from "../shared/map.js";
 import type { MapStyle } from "../shared/map-state.js";
+import type { Feature, Position, SelectedTrack } from "../shared/map.js";
 
 const colors = [
   "#2563eb",
@@ -124,27 +124,4 @@ export function trackSegmentFeatures(track: SelectedTrack): Feature[] {
       geometry: { type: "MultiPoint", coordinates: points.slice(point) },
     });
   return features;
-}
-
-export function selectedTrackSegment(
-  track: SelectedTrack,
-  segment: string,
-): SelectedTrack | undefined {
-  const feature = trackSegmentFeatures(track).find(
-    (item) => item.properties.segment_id === segment,
-  );
-  if (!feature) return;
-  const points =
-    feature.geometry.type === "MultiLineString"
-      ? feature.geometry.coordinates.reduce(
-          (count, line) => count + line.length,
-          0,
-        )
-      : feature.geometry.coordinates.length;
-  return {
-    ...track,
-    presentation: undefined,
-    points,
-    geojson: { type: "FeatureCollection", features: [feature] },
-  };
 }

@@ -1,10 +1,29 @@
-import { PanelLoading } from "./components/panel-loading.js";
-import { ImportPanel } from "./import-panel.js";
-import { ExportOptions, ExportResult } from "./export-panel.js";
-import { Textarea } from "./components/controls.js";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { DeletePreview } from "../shared/archive-actions.js";
+import type { PublicConfig } from "../shared/contracts.js";
+import type { Catalog } from "../shared/map.js";
+import type {
+  FileListing,
+  ImportItem,
+  Operation,
+  UploadResult,
+} from "../shared/work.js";
+import {
+  executableOperation,
+  operationLabel,
+  OPERATIONS,
+  READ_OPERATIONS,
+  WorkRequestSchema,
+} from "../shared/work.js";
+import {
+  api,
+  downloadWorkFile,
+  downloadWorkFiles,
+  requestWorkTask,
+  waitForWorkTask,
+} from "./api.js";
 import {
   Alert,
   Button,
@@ -19,30 +38,11 @@ import {
   Spin,
   Table,
   Tag,
+  Textarea,
 } from "./components/controls.js";
-import {
-  requestWorkTask,
-  api,
-  waitForWorkTask,
-  downloadWorkFiles,
-  downloadWorkFile,
-} from "./api.js";
-import {
-  OPERATIONS,
-  executableOperation,
-  operationLabel,
-  READ_OPERATIONS,
-  WorkRequestSchema,
-} from "../shared/work.js";
-import type {
-  Operation,
-  FileListing,
-  UploadResult,
-  ImportItem,
-} from "../shared/work.js";
-import type { PublicConfig } from "../shared/contracts.js";
-import type { DeletePreview } from "../shared/archive-actions.js";
-import type { Catalog } from "../shared/map.js";
+import { PanelLoading } from "./components/panel-loading.js";
+import { ExportOptions, ExportResult } from "./export-panel.js";
+import { ImportPanel } from "./import-panel.js";
 import "./work.css";
 import { useWorkspace } from "./workspace.js";
 const statusLabel: Record<string, string> = {
@@ -110,12 +110,9 @@ export function TaskDetail({
     if (
       task?.mode !== "apply" ||
       !["succeeded", "partial"].includes(task.status) ||
-      ![
-        "archive:push",
-        "archive:delete",
-        "archive:recover",
-        "archive:migrate",
-      ].includes(task.request.operation) ||
+      !["archive:push", "archive:delete", "archive:recover"].includes(
+        task.request.operation,
+      ) ||
       !task.request.archive ||
       refreshedTask.current === task.id
     )
@@ -304,12 +301,6 @@ export function TaskDetail({
               ? "入库校验失败，本批次未入库；请修正异常文件后重新预览。"
               : "部分文件失败；已完成结果保留。请检查逐文件原因，重新预览后重试。"
           }
-        />
-      )}
-      {!executable && (
-        <Alert
-          type="info"
-          title="此历史操作已移除，仅可查看记录和下载已有结果"
         />
       )}
       {deletion && (
@@ -846,7 +837,7 @@ function CatalogPanel({
           entries: number;
           revision: number;
           pending: number;
-          zip_fresh: boolean;
+          export_fresh: boolean;
         };
       }>("/api/work/catalog", { archive }, signal),
     enabled: !!archive,
@@ -864,7 +855,7 @@ function CatalogPanel({
             {catalog.data.status.entries} 条轨迹 · 修订{" "}
             {catalog.data.status.revision} · 待恢复{" "}
             {catalog.data.status.pending} · 展示导出
-            {catalog.data.status.zip_fresh ? "已同步" : "需更新"}
+            {catalog.data.status.export_fresh ? "已同步" : "需更新"}
           </p>
           <Space wrap>
             <Input
@@ -1000,7 +991,6 @@ function FileOperation({
         "archive:import-zip",
         "archive:recover",
         "archive:status",
-        "archive:migrate",
       ].includes(key),
   );
   const choose = (next: Operation) => {
@@ -1155,7 +1145,6 @@ function FileOperation({
                     "archive:push",
                     "archive:status",
                     "archive:recover",
-                    "archive:migrate",
                   ].includes(operation) && (
                     <>
                       <label className="work-label" htmlFor="work-output">

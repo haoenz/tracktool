@@ -70,7 +70,6 @@ export const MapCameraSchema = z
     zoom: number(0, 18),
   })
   .passthrough();
-export type MapCamera = z.infer<typeof MapCameraSchema>;
 
 export const MapFrameSchema = z
   .object({
@@ -153,13 +152,4 @@ export function mapTitleError(title: string) {
   if ([...title].length > 60) return "标题最多 60 字，请缩短后再保存或导出。";
   if (/[\u0000-\u001f]/.test(title)) return "标题不能包含换行或控制字符。";
   return "";
-}
-
-export function mapFrameSize(ratio: MapFrame["ratio"]): {
-  ratio: MapFrame["ratio"];
-  width: number;
-  height: number;
-} {
-  const [width, height] = catalog.frames[ratio];
-  return { ratio, width, height };
 }

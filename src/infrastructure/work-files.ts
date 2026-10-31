@@ -1,23 +1,23 @@
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
+import {
+  lstat,
+  mkdir,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  unlink,
+} from "node:fs/promises";
+import path from "node:path";
+import { Transform, type Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { AppError, checkCancelled } from "../domain/errors.js";
 import {
   EXPORT_FILENAMES,
   exportEncoding,
   type ExportOptions,
 } from "../shared/export-format.js";
-import path from "node:path";
-import { randomUUID, createHash } from "node:crypto";
-import { createWriteStream, createReadStream } from "node:fs";
-import {
-  mkdir,
-  realpath,
-  lstat,
-  readdir,
-  stat,
-  unlink,
-  rm,
-} from "node:fs/promises";
-import { pipeline } from "node:stream/promises";
-import { Transform, type Readable } from "node:stream";
-import { AppError, checkCancelled } from "../domain/errors.js";
 import type { FileListing, UploadResult } from "../shared/work.js";
 const inside = (root: string, file: string) => {
   const relative = path.relative(root, file);
@@ -198,20 +198,6 @@ export class WorkFiles {
           });
     }
     return { id: batch, directory, files: [file], bytes };
-  }
-  async uploadList(): Promise<UploadResult[]> {
-    await this.prepare();
-    const batches: UploadResult[] = [];
-    for (const entry of (await readdir(this.uploads, { withFileTypes: true }))
-      .filter((e) => e.isDirectory() && /^[0-9a-f-]{36}$/.test(e.name))
-      .slice(-200)) {
-      const directory = path.join(this.uploads, entry.name),
-        files = await this.regularPaths(directory);
-      let bytes = 0;
-      for (const file of files) bytes += (await stat(file)).size;
-      batches.push({ id: entry.name, directory, files, bytes });
-    }
-    return batches;
   }
   async cleanup(id: string) {
     if (!/^[0-9a-f-]{36}$/.test(id))

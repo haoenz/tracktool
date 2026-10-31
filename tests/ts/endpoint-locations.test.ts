@@ -1,33 +1,30 @@
-import { afterEach, expect, it, vi } from "vitest";
-import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, expect, it, vi } from "vitest";
 import { administrativeLocation } from "../../dist/node/domain/administrative-location.js";
-import { GoogleGeocode } from "../../dist/node/infrastructure/geocode.js";
-import {
-  fillEndpointLocations,
-  currentEndpointLocations,
-} from "../../dist/node/infrastructure/archive/endpoint-locations.js";
-import {
-  ArchiveWriter,
-  addEntry,
-} from "../../dist/node/infrastructure/archive/writer.js";
+import { AppError } from "../../dist/node/domain/errors.js";
 import {
   readTransaction,
   transaction,
 } from "../../dist/node/infrastructure/archive/database.js";
-import { SCHEMA_5 } from "../../dist/node/infrastructure/archive/schema-v5.js";
-import { migrateArchive } from "../../dist/node/infrastructure/archive/migrate.js";
-import { fullBackup } from "../../dist/node/infrastructure/archive/full-backup.js";
-import { VersionStore } from "../../dist/node/infrastructure/archive/versions.js";
-import { trackDetail } from "../../dist/node/infrastructure/archive/track-reader.js";
 import {
-  previewDeletion,
   deleteEntry,
+  previewDeletion,
 } from "../../dist/node/infrastructure/archive/deletion.js";
+import {
+  currentEndpointLocations,
+  fillEndpointLocations,
+} from "../../dist/node/infrastructure/archive/endpoint-locations.js";
+import { fullBackup } from "../../dist/node/infrastructure/archive/full-backup.js";
+import { trackDetail } from "../../dist/node/infrastructure/archive/track-reader.js";
+import { VersionStore } from "../../dist/node/infrastructure/archive/versions.js";
+import {
+  ArchiveWriter,
+  addEntry,
+} from "../../dist/node/infrastructure/archive/writer.js";
+import { GoogleGeocode } from "../../dist/node/infrastructure/geocode.js";
 import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
-import { AppError } from "../../dist/node/domain/errors.js";
 import type { AddressComponent } from "../../dist/node/shared/endpoint-location.js";
 const clean: (() => unknown | Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -46,18 +43,11 @@ const cn = [
 ];
 const location = administrativeLocation([{ address_components: cn }]);
 const signal = new AbortController().signal;
-async function fixture(old = false) {
+async function fixture() {
   const dir = mkdtempSync(path.join(os.tmpdir(), "tracktool-endpoints-"));
   clean.push(() => rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, "archive.sqlite3");
-  if (old) {
-    const db = new Database(file);
-    db.exec(SCHEMA_5);
-    db.exec(
-      "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'endpoint-test')",
-    );
-    db.close();
-  } else await new ArchiveWriter().init(dir);
+  await new ArchiveWriter().init(dir);
   const raw = Buffer.from(
     '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><MultiGeometry><LineString><coordinates>120,30 121,31</coordinates></LineString><LineString><coordinates>122,32 123,33</coordinates></LineString></MultiGeometry></Placemark></Document></kml>',
   );
@@ -127,37 +117,6 @@ it("shares the Google request implementation while preserving the existing media
   const url = request.mock.calls[0]![0] as URL;
   expect(url.searchParams.get("latlng")).toBe("30,120");
   expect(url.searchParams.get("language")).toBe("zh-CN");
-});
-it("dry-run does not query or migrate; migration backs up and rolls back safely", async () => {
-  const f = await fixture(true);
-  expect(
-    await fillEndpointLocations(f.file, f.xml, f.geocoder, "", signal, {
-      dryRun: true,
-    }),
-  ).toMatchObject({ queries: 2, planned: 2, saved: 0 });
-  expect(f.geocoder.getAdministrative).not.toHaveBeenCalled();
-  await expect(
-    migrateArchive(f.file, (stage) => {
-      if (stage === "migration-before-commit") throw new Error("fault");
-    }),
-  ).rejects.toThrow("fault");
-  expect(
-    readTransaction(f.file, (db) =>
-      db.pragma("user_version", { simple: true }),
-    ),
-  ).toBe(5);
-  const backup = await migrateArchive(f.file);
-  expect(
-    readTransaction(backup!, (db) =>
-      db.pragma("user_version", { simple: true }),
-    ),
-  ).toBe(5);
-  expect(
-    readTransaction(f.file, (db) =>
-      db.pragma("user_version", { simple: true }),
-    ),
-  ).toBe(8);
-  expect(await migrateArchive(f.file)).toBeUndefined();
 });
 it("persists, resumes, deduplicates exact coordinates and survives full backup and controlled deletion", async () => {
   const f = await fixture();
@@ -373,64 +332,6 @@ it("counts malformed tracks toward the requested batch limit", async () => {
   ).toMatchObject({ tracks: 1, failed: 1, queries: 0, saved: 0 });
   expect(f.geocoder.getAdministrative).not.toHaveBeenCalled();
 });
-it("upgrades legacy resolver rows offline without re-querying, re-reading geometry or changing query time", async () => {
-  const f = await fixture();
-  await fillEndpointLocations(f.file, f.xml, f.geocoder, "key", signal);
-  const before = currentEndpointLocations(f.file, f.entry.id).endpoints;
-  transaction(f.file, true, (db) => {
-    for (const endpoint of before) {
-      const legacy = { ...endpoint.location };
-      delete legacy.raw_response;
-      delete legacy.raw_source;
-      delete legacy.resolution;
-      db.prepare(
-        "UPDATE track_endpoint_locations SET resolver_version=1,location_json=? WHERE endpoint=?",
-      ).run(JSON.stringify(legacy), endpoint.endpoint);
-    }
-  });
-  const old = currentEndpointLocations(f.file, f.entry.id).endpoints;
-  expect(old.every((v) => v.resolver_version === 1)).toBe(true);
-  const xml = {
-    run: vi.fn().mockRejectedValue(new Error("must not read geometry")),
-  };
-  f.geocoder.getAdministrative.mockClear();
-  expect(
-    await fillEndpointLocations(f.file, xml, f.geocoder, "", signal, {
-      offline: true,
-      dryRun: true,
-    }),
-  ).toMatchObject({ queries: 0, saved: 0, planned: 2 });
-  expect(
-    currentEndpointLocations(f.file, f.entry.id).endpoints[0]!.resolver_version,
-  ).toBe(1);
-  expect(
-    await fillEndpointLocations(f.file, xml, f.geocoder, "", signal, {
-      offline: true,
-    }),
-  ).toMatchObject({ queries: 0, reparsed: 2, saved: 2 });
-  expect(f.geocoder.getAdministrative).not.toHaveBeenCalled();
-  expect(xml.run).not.toHaveBeenCalled();
-  const after = currentEndpointLocations(f.file, f.entry.id).endpoints;
-  expect(after.map((v) => v.queried_at)).toEqual(
-    before.map((v) => v.queried_at),
-  );
-  expect(
-    after.every(
-      (v) =>
-        v.resolver_version === 2 &&
-        v.location.raw_source === "legacy_components",
-    ),
-  ).toBe(true);
-  expect(
-    readTransaction(f.file, (db) =>
-      db
-        .prepare(
-          "SELECT count(*) AS n FROM track_endpoint_locations WHERE resolver_version=1",
-        )
-        .get(),
-    ),
-  ).toEqual({ n: 2 });
-});
 it("offline mode reports missing evidence without calling Google or manufacturing a result", async () => {
   const f = await fixture();
   expect(
@@ -442,42 +343,6 @@ it("offline mode reports missing evidence without calling Google or manufacturin
   expect(currentEndpointLocations(f.file, f.entry.id).endpoints).toHaveLength(
     0,
   );
-});
-it("fetches full evidence only for legacy fallback rows, then stops retrying a known fallback", async () => {
-  const f = await fixture();
-  const partial = {
-    ...location,
-    city: null,
-    district: null,
-    status: "partial" as const,
-  };
-  // A minimal legacy candidate with no lower administrative tiers.
-  partial.components = partial.components.filter(
-    (c) =>
-      c.types.includes("country") ||
-      c.types.includes("administrative_area_level_1"),
-  );
-  delete partial.raw_response;
-  delete partial.raw_source;
-  delete partial.resolution;
-  f.geocoder.getAdministrative.mockResolvedValue(partial);
-  await fillEndpointLocations(f.file, f.xml, f.geocoder, "key", signal);
-  f.geocoder.getAdministrative.mockClear();
-  const full = administrativeLocation([
-    { address_components: partial.components },
-  ]);
-  f.geocoder.getAdministrative.mockResolvedValue(full);
-  expect(
-    await fillEndpointLocations(f.file, f.xml, f.geocoder, "key", signal, {
-      completeEvidence: true,
-    }),
-  ).toMatchObject({ queries: 2, saved: 2, fallback: 2 });
-  expect(
-    await fillEndpointLocations(f.file, f.xml, f.geocoder, "key", signal, {
-      completeEvidence: true,
-    }),
-  ).toMatchObject({ queries: 0, skipped: 1 });
-  expect(f.geocoder.getAdministrative).toHaveBeenCalledTimes(2);
 });
 it("reuses an explicitly supplied full response and its original query time without network access", async () => {
   const f = await fixture();
@@ -512,5 +377,29 @@ it("reuses an explicitly supplied full response and its original query time with
   for (const row of currentEndpointLocations(f.file, f.entry.id).endpoints) {
     expect(row.queried_at).toBe(time);
     expect(row.location.raw_response).toEqual(response);
+  }
+});
+
+it("refreshes complete endpoint evidence offline without changing query time or reading geometry", async () => {
+  const f = await fixture();
+  await fillEndpointLocations(f.file, f.xml, f.geocoder, "key", signal);
+  const before = currentEndpointLocations(f.file, f.entry.id);
+  f.geocoder.getAdministrative.mockClear();
+  const run = vi.spyOn(f.xml, "run");
+  try {
+    const result = await fillEndpointLocations(
+      f.file,
+      f.xml,
+      f.geocoder,
+      "",
+      signal,
+      { offline: true, refresh: true },
+    );
+    expect(result).toMatchObject({ queries: 0, reparsed: 2, saved: 2 });
+    expect(f.geocoder.getAdministrative).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(currentEndpointLocations(f.file, f.entry.id)).toEqual(before);
+  } finally {
+    run.mockRestore();
   }
 });

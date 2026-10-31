@@ -1,31 +1,24 @@
-import { endpointLocations } from "./endpoint-locations.js";
 import type Database from "better-sqlite3";
 import { AppError } from "../../domain/errors.js";
-import { validatePresentation } from "../../domain/track-version.js";
-import { missingAltitudePoints } from "../../domain/trackdata.js";
-import type { SegmentInput } from "../../domain/segment-edit.js";
-import type {
-  EditGeometry,
-  TrackDetail,
-  VersionSummary,
-  SegmentManifest,
-} from "../../shared/track-edit.js";
 import {
   bindSegments,
   evaluatePresentation,
 } from "../../domain/presentation.js";
-import { readTransaction, rawObject, schemaVersion } from "./database.js";
-import { archiveId, currentEntry } from "./versions.js";
-import { presentationDigest } from "./identity.js";
+import type { SegmentInput } from "../../domain/segment-edit.js";
+import { validatePresentation } from "../../domain/track-version.js";
+import { missingAltitudePoints } from "../../domain/trackdata.js";
+import type {
+  EditGeometry,
+  SegmentManifest,
+  TrackDetail,
+  VersionSummary,
+} from "../../shared/track-edit.js";
 import { XmlWorkers } from "../xml/client.js";
+import { rawObject, readTransaction } from "./database.js";
+import { endpointLocations } from "./endpoint-locations.js";
+import { presentationDigest } from "./identity.js";
+import { archiveId, currentEntry } from "./versions.js";
 
-export function requireVersioned(db: Database.Database) {
-  if (schemaVersion(db) < 4)
-    throw new AppError(
-      "USER_INPUT",
-      "段编辑需要 schema 4；请先备份并显式执行 archive migrate",
-    );
-}
 export type VersionInputMeta = {
   version_id: string;
   sha256: string;
@@ -40,7 +33,6 @@ export function versionInputMeta(
   versionId: string,
   presentationId: string,
 ): VersionInputMeta {
-  requireVersioned(db);
   const row = db
     .prepare(
       "SELECT v.sha256,v.manifest_status,p.settings_json,p.settings_sha256 FROM track_versions v JOIN track_presentations p ON p.version_id=v.id WHERE v.id=? AND v.entry_id=? AND p.id=?",
@@ -102,7 +94,6 @@ function segmentRows(
 }
 export function trackCatalog(file: string, search = "", cursor = 0) {
   return readTransaction(file, (db) => {
-    requireVersioned(db);
     const rows = db
       .prepare(
         "SELECT id,path FROM archive_entries WHERE state='active' AND instr(lower(path),lower(?))>0 ORDER BY path LIMIT 201 OFFSET ?",
@@ -123,7 +114,6 @@ export function trackDetail(
   cursor = 0,
 ): TrackDetail {
   return readTransaction(file, (db) => {
-    requireVersioned(db);
     const entry = currentEntry(db, entryId),
       version = versionId ?? entry.version_id;
     const row = db
@@ -171,7 +161,6 @@ export function trackDetail(
 }
 export function trackHistory(file: string, entryId: string, cursor = 0) {
   return readTransaction(file, (db) => {
-    requireVersioned(db);
     currentEntry(db, entryId);
     const rows = db
       .prepare(
@@ -193,7 +182,6 @@ export function trackHistory(file: string, entryId: string, cursor = 0) {
 }
 export function trackTimeline(file: string, entryId: string, cursor = 0) {
   return readTransaction(file, (db) => {
-    requireVersioned(db);
     const current = currentEntry(db, entryId);
     const rows = db
       .prepare(
@@ -211,8 +199,6 @@ export function trackTimeline(file: string, entryId: string, cursor = 0) {
     const labels: Record<string, string> = {
       import: "导入轨迹",
       push: "导入轨迹",
-      migration_baseline: "初始轨迹",
-      baseline: "初始轨迹",
       split_segment: "断开轨迹",
       prune: "删除轨迹点",
       fill_altitude: "填充高程",
@@ -224,10 +210,8 @@ export function trackTimeline(file: string, entryId: string, cursor = 0) {
       restore_group: "撤销拆分",
       restore: "恢复历史状态",
       compose: "组合轨迹片段",
-      withdraw: "移出轨迹列表",
       source_link: "补充来源信息",
       reindex_manifest: "更新轨迹片段信息",
-      legacy_regroup: "重新整理行程",
     };
     return {
       events: rows.slice(0, 50).map((row) => {
@@ -255,7 +239,6 @@ export function trackTimeline(file: string, entryId: string, cursor = 0) {
 }
 export function operationDetail(file: string, id: string) {
   return readTransaction(file, (db) => {
-    requireVersioned(db);
     const op = db
       .prepare(
         "SELECT id,kind,params_json,created_at FROM track_operations WHERE id=?",

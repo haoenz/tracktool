@@ -1,30 +1,30 @@
-import { openAsBlob, openSync, writeSync, closeSync, fsyncSync } from "node:fs";
 import {
   BlobReader,
+  Uint8ArrayReader,
   ZipReader,
   ZipWriter,
-  Uint8ArrayReader,
-  registerCodec,
   configure,
+  registerCodec,
   type CompressionStreamOptions,
-  type FileEntry,
   type DecompressionStreamOptions,
+  type FileEntry,
 } from "@zip.js/zip.js";
+import { closeSync, fsyncSync, openAsBlob, openSync, writeSync } from "node:fs";
+import { Duplex } from "node:stream";
 import {
-  createZstdDecompress,
-  createZstdCompress,
-  createGzip,
-  createDeflateRaw,
   constants,
+  createDeflateRaw,
+  createGzip,
+  createZstdCompress,
+  createZstdDecompress,
 } from "node:zlib";
+import { memberName } from "../../domain/archive.js";
+import { AppError, checkCancelled } from "../../domain/errors.js";
+import { MAX_KML_BYTES } from "../../domain/trackdata.js";
 import {
   exportEncoding,
   type ExportOptions,
 } from "../../shared/export-format.js";
-import { Duplex } from "node:stream";
-import { AppError, checkCancelled } from "../../domain/errors.js";
-import { memberName } from "../../domain/archive.js";
-import { MAX_KML_BYTES } from "../../domain/trackdata.js";
 // Keep compression native even when a non-default Deflate level is requested.
 export class NativeDeflateStream {
   readonly readable: ReadableStream<Uint8Array>;
@@ -59,7 +59,7 @@ class ZstdCompressionStream {
     this.writable = pair.writable;
   }
 }
-// Python 3.14 ZIP_ZSTANDARD archives use 93 (early archives used 20).
+// ZIP_ZSTANDARD uses method 93; method 20 is also registered for ZIP input.
 class ZstdStream {
   readonly readable: ReadableStream<Uint8Array>;
   readonly writable: WritableStream<Uint8Array>;
@@ -80,7 +80,10 @@ for (const compressionMethod of [20, 93])
   });
 // Optional codecs are loaded only when a historical ZIP actually uses them.
 let bzip2: Promise<import("@foxglove/wasm-bz2")> | undefined;
-class LegacyStream extends TransformStream<Uint8Array, Uint8Array> {
+class BufferedDecompressionStream extends TransformStream<
+  Uint8Array,
+  Uint8Array
+> {
   constructor(format: string, options: DecompressionStreamOptions = {}) {
     const chunks: Uint8Array[] = [];
     let length = 0;
@@ -127,12 +130,12 @@ class LegacyStream extends TransformStream<Uint8Array, Uint8Array> {
 registerCodec({
   compressionMethod: 12,
   format: "bzip2",
-  DecompressionStream: LegacyStream,
+  DecompressionStream: BufferedDecompressionStream,
 });
 registerCodec({
   compressionMethod: 14,
   format: "lzma",
-  DecompressionStream: LegacyStream,
+  DecompressionStream: BufferedDecompressionStream,
 });
 export async function readZip(
   file: string,

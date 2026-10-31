@@ -47,7 +47,7 @@ export interface XmlPort {
     signal?: AbortSignal,
   ): Promise<XmlResult>;
 }
-/** M6 store must implement atomic revision comparison plus event append in one transaction. */
+/** The task store must implement atomic revision comparison plus event append in one transaction. */
 export interface TaskStore {
   create(task: Task): Promise<void>;
   get(id: string): Promise<Task | undefined>;

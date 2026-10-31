@@ -1,93 +1,91 @@
-import { PanelLoading } from "./components/panel-loading.js";
-import { DeleteTrackDialog } from "./delete-track-dialog.js";
-import type { AnalysisOverlay } from "./track-insights.js";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import {
-  Settings as SettingsIcon,
-  List,
-  Upload,
   FileOutput,
+  List,
   Map as MapIcon,
+  Settings as SettingsIcon,
+  Upload,
 } from "lucide-react";
-import { SheetHandle } from "./components/sheet-handle.js";
-import { MapContentSettings } from "./map-content-settings.js";
-import { StartupScreen } from "./components/startup-screen.js";
-import { PanelHeader } from "./components/panel-header.js";
+import "maplibre-gl/dist/maplibre-gl.css";
 import {
   lazy,
   Suspense,
-  useEffect,
-  useMemo,
   useCallback,
+  useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { canvasCrs, reconcileOverlays } from "../drawing/layers.js";
+import type { MapState } from "../shared/map-state.js";
+import { frames, mapTitleError } from "../shared/map-state.js";
+import type { Catalog, MapConfig, SelectedTrack } from "../shared/map.js";
+import type { OverviewEntry, OverviewStatus } from "../shared/overview.js";
+import type { MapExport, PrintDocument, PrintTrack } from "../shared/print.js";
+import {
+  printDocument,
+  PrintDocumentSchema,
+  resolvePrintTracks,
+} from "../shared/print.js";
+import type { HistoryEvent } from "../shared/track-edit.js";
+import { operationLabel, type Operation } from "../shared/work.js";
+import { api, request } from "./api.js";
+import appIcon from "./app-icon.svg";
+import { basemapLabel } from "./basemap-catalog.js";
+import { BasemapPicker } from "./basemap-picker.js";
 import {
   Alert,
   Button,
   Input,
+  Modal,
   Select,
   Spin,
-  Modal,
 } from "./components/controls.js";
-import { Link, useSearchParams } from "react-router-dom";
-import { WorkspaceContext, type Panel, type EditMap } from "./workspace.js";
-import { operationLabel, type Operation } from "../shared/work.js";
-import type { Catalog, MapConfig, SelectedTrack } from "../shared/map.js";
-import { useOverview, rememberedCamera, rememberCamera } from "./overview.js";
-import type { OverviewHit, OverviewVisibility } from "./overview-layer.js";
-import type { OverviewEntry, OverviewStatus } from "../shared/overview.js";
-import type { MapState } from "../shared/map-state.js";
-import { frames, mapTitleError } from "../shared/map-state.js";
-import type { MapExport, PrintDocument, PrintTrack } from "../shared/print.js";
-import {
-  PrintDocumentSchema,
-  printDocument,
-  resolvePrintTracks,
-} from "../shared/print.js";
-import { canvasCrs, reconcileOverlays } from "../drawing/layers.js";
-import { api, request } from "./api.js";
+import { PanelHeader } from "./components/panel-header.js";
+import { PanelLoading } from "./components/panel-loading.js";
+import { SheetHandle } from "./components/sheet-handle.js";
+import { StartupScreen } from "./components/startup-screen.js";
+import { DeleteTrackDialog } from "./delete-track-dialog.js";
+import { DetailPanel } from "./detail-panel.js";
+import { downloadBlob } from "./lib/download.js";
+import { LibraryList } from "./library-list.js";
+import { MapContentSettings } from "./map-content-settings.js";
 import { MapViewport, type Viewport } from "./map-viewport.js";
+import "./map.css";
+import type { OverviewHit, OverviewVisibility } from "./overview-layer.js";
+import { rememberCamera, rememberedCamera, useOverview } from "./overview.js";
 import { PrintPanel } from "./print-panel.js";
+import {
+  rememberedPrintDraft,
+  rememberedPrintFrame,
+  rememberPrintDraft,
+  rememberPrintFrame,
+} from "./print-session.js";
 import {
   deletePrint,
   listPrints,
   savePrint,
   type StoredPrint,
 } from "./print-store.js";
-import type { HistoryEvent } from "../shared/track-edit.js";
-import "maplibre-gl/dist/maplibre-gl.css";
-import "./map.css";
-import appIcon from "./app-icon.svg";
+import { useSessionState } from "./session-state.js";
+import Settings from "./settings.js";
+import { useTheme } from "./theme.js";
+import { TrackDetailLinks } from "./track-detail-links.js";
+import { TrackDetailToolbar } from "./track-detail-toolbar.js";
+import type { AnalysisOverlay } from "./track-insights.js";
+import { useEntryVisibility } from "./visibility-preference.js";
+import { WorkspaceContext, type EditMap, type Panel } from "./workspace.js";
 const TrackEditor = lazy(() => import("./track-editor.js"));
 const ArchiveAction = lazy(() =>
   import("./work-page.js").then((m) => ({ default: m.ArchiveWorkPage })),
 );
-import {
-  rememberedPrintFrame,
-  rememberPrintFrame,
-  rememberedPrintDraft,
-  rememberPrintDraft,
-} from "./print-session.js";
-import { useSessionState } from "./session-state.js";
-import { basemapLabel } from "./basemap-catalog.js";
-import { LibraryList } from "./library-list.js";
-import { TrackDetailToolbar } from "./track-detail-toolbar.js";
-import { TrackDetailLinks } from "./track-detail-links.js";
-import { DetailPanel } from "./detail-panel.js";
-import { downloadBlob } from "./lib/download.js";
-import { BasemapPicker } from "./basemap-picker.js";
-import Settings from "./settings.js";
-import { useEntryVisibility } from "./visibility-preference.js";
-import { useTheme } from "./theme.js";
 const panels: Record<Panel, string> = {
   library: "轨迹库",
-  style: "地图样式",
   export: "导出",
   print: "出图",
-  archive: "轨迹库管理",
   settings: "设置",
 };
 const emptyTracks: SelectedTrack[] = [];
@@ -286,11 +284,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
   const [params, setParams] = useSearchParams();
   const rawPanel = params.get("panel") ?? "none";
   const panel = Object.hasOwn(panels, rawPanel)
-    ? ["archive"].includes(rawPanel)
-      ? "library"
-      : rawPanel === "style"
-        ? "settings"
-        : (rawPanel as Panel)
+    ? (rawPanel as Panel)
     : undefined;
   // The composition mask belongs to the print panel, so a reload restores the
   // same view instead of a full screen map without a frame.
@@ -465,10 +459,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
         (detailHistory.data.next_cursor !== null ||
           detailHistory.data.events.length > 1 ||
           detailHistory.data.events.some(
-            (event) =>
-              !["import", "push", "migration_baseline", "baseline"].includes(
-                event.kind,
-              ),
+            (event) => !["import", "push"].includes(event.kind),
           )),
   );
   const filtersApplied = !!(
@@ -1363,7 +1354,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
             onScroll={(e) =>
               scrollPositions.current.set(scrollKey, e.currentTarget.scrollTop)
             }
-            className={`map-controls${panel === "library" && overview.id && detailOpen && !editing && !archiveAction ? " track-detail-panel" : ""}${listVisible ? " track-list-panel" : ""}${panel && ["archive", "settings"].includes(panel) ? " wide" : ""}`}
+            className={`map-controls${panel === "library" && overview.id && detailOpen && !editing && !archiveAction ? " track-detail-panel" : ""}${listVisible ? " track-list-panel" : ""}${panel && panel === "settings" ? " wide" : ""}`}
             hidden={!panel}
             aria-label="地图控制面板"
           >

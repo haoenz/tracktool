@@ -1,15 +1,8 @@
-import {
-  analyzeDocument,
-  analyzeOnIngest,
-  needsAnalysis,
-} from "./analysis-ingest.js";
 import type Database from "better-sqlite3";
-import { deflateSync } from "node:zlib";
 import { randomUUID } from "node:crypto";
-import { AppError } from "../../domain/errors.js";
+import { deflateSync } from "node:zlib";
 import { memberName, type Category } from "../../domain/archive.js";
-import { MAX_KML_BYTES } from "../../domain/trackdata.js";
-import type { TrackAnalysis } from "../../shared/track-analysis.js";
+import { AppError } from "../../domain/errors.js";
 import {
   validatePresentation,
   type EntrySnapshot,
@@ -19,23 +12,29 @@ import {
   type SegmentManifest,
   type VersionRef,
 } from "../../domain/track-version.js";
+import { MAX_KML_BYTES } from "../../domain/trackdata.js";
+import type { TrackAnalysis } from "../../shared/track-analysis.js";
 import { digest } from "../durable-files.js";
-import { buildManifest, unavailableManifest } from "../xml/manifest.js";
 import { presentationFromDocument } from "../xml/display.js";
 import { withDocument } from "../xml/document.js";
+import { buildManifest, unavailableManifest } from "../xml/manifest.js";
 import { readTrackData } from "../xml/trackdata.js";
 import { writeAnalysis } from "./analysis-cache.js";
+import {
+  analyzeDocument,
+  analyzeOnIngest,
+  needsAnalysis,
+} from "./analysis-ingest.js";
+import { rawObject, transaction } from "./database.js";
 import {
   canonical,
   hashJson,
   presentationDigest,
   stableId,
 } from "./identity.js";
-import { rawObject, schemaVersion, transaction } from "./database.js";
 
 export type OperationKind =
   | "import"
-  | "migration_baseline"
   | "split_segment"
   | "prune"
   | "draw"
@@ -43,21 +42,15 @@ export type OperationKind =
   | "split_journey"
   | "restore"
   | "presentation"
-  | "withdraw"
   | "source_link"
   | "reindex_manifest"
   | "set_tag"
-  | "fill_altitude"
-  | "legacy_regroup";
+  | "fill_altitude";
 export type SourceLocation = {
   container: string;
   member: string | null;
   display_name: string;
-  source_role:
-    | "imported_file"
-    | "legacy_result"
-    | "earlier_candidate"
-    | "verified_original";
+  source_role: "imported_file" | "earlier_candidate" | "verified_original";
   evidence: Record<string, unknown>;
 };
 export type SegmentSource = {
@@ -75,7 +68,7 @@ type VersionOutput = {
   raw: Uint8Array;
   path: string;
   category: Category | null;
-  origin?: "imported" | "derived" | "legacy_result";
+  origin?: "imported" | "derived";
   state?: EntryState;
   settings?: Presentation;
   source_kinds?: Record<number, SegmentManifest["source_kind"]>;
@@ -173,7 +166,7 @@ export function insertVersion(
   created: string,
   raw: Uint8Array,
   manifest: Manifest,
-  origin: "migration_baseline" | "imported" | "legacy_result" | "derived",
+  origin: "imported" | "derived",
   versionNo: number,
   analysis?: TrackAnalysis,
 ): void {
@@ -302,7 +295,6 @@ function checkDeletedOperation(
   operationId: string,
 ): void {
   if (
-    schemaVersion(db) >= 4 &&
     db
       .prepare(
         "SELECT 1 FROM track_operation_deletions WHERE operation_id=? LIMIT 1",
@@ -332,11 +324,6 @@ function replay(
   return JSON.parse(prior.result_json) as PublishResult;
 }
 function requireArchive(db: Database.Database, id: string): void {
-  if (schemaVersion(db) < 3)
-    throw new AppError(
-      "USER_INPUT",
-      "版本写入需要 schema 3 或更高；请先执行 archive migrate",
-    );
   if (archiveId(db) !== id) throw new AppError("USER_INPUT", "轨迹库已切换");
   if (!db.inTransaction) throw new Error("版本写入需要事务");
 }
@@ -596,7 +583,7 @@ export function publishVersions(
   return result;
 }
 
-/** Import compatibility adapter. A reserved historical path cannot silently acquire new bytes. */
+/** Import entry publication. A reserved historical path cannot silently acquire new bytes. */
 export function addVersionedEntry(
   db: Database.Database,
   name: string,

@@ -1,11 +1,5 @@
 import Database from "better-sqlite3";
-import {
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  unlinkSync,
-} from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 export class TileCache {
   private db: Database.Database;
@@ -37,20 +31,6 @@ export class TileCache {
     this.insert = this.db.prepare("INSERT INTO tiles VALUES(?,?,?,?)");
     this.account = this.db.prepare("SELECT size FROM accounting WHERE id=1");
     this.db.transaction(() => this.evict()).immediate();
-    for (const name of readdirSync(directory))
-      if (/^[0-9a-f]{64}\.tile$/.test(name)) {
-        const p = path.join(directory, name);
-        try {
-          this.put(
-            `legacy:${name.slice(0, 64)}`,
-            readFileSync(p),
-            statSync(p).mtimeMs / 1000,
-          );
-          unlinkSync(p);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        }
-      }
     // Tile reads outnumber writes by orders of magnitude; keep recency in
     // memory and fold it into the LRU index in batches.
     this.flushTimer = setInterval(() => this.tryFlush(), 15_000);

@@ -1,13 +1,13 @@
-import { exportEncoding } from "../shared/export-format.js";
-import path from "node:path";
 import {
   lstatSync,
-  realpathSync,
   readdirSync,
+  realpathSync,
   rmSync,
   unlinkSync,
 } from "node:fs";
+import path from "node:path";
 import { AppError } from "../domain/errors.js";
+import { exportEncoding } from "../shared/export-format.js";
 import type { WorkTask } from "../shared/work.js";
 import { SqliteTasks } from "./task-store.js";
 import { WorkFiles } from "./work-files.js";
@@ -17,7 +17,7 @@ const active = (task: WorkTask) => ["queued", "running"].includes(task.status);
 const within = (root: string, file: string) =>
   file === root || file.startsWith(root + path.sep);
 
-/** Only isolated web exports are eligible; archive files and legacy outputs are never removed. */
+/** Only isolated web exports are eligible; archive files and external outputs are never removed. */
 export class ExportCleanup {
   private readonly downloads = new Map<string, number>();
   constructor(

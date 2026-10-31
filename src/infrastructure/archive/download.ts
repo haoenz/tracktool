@@ -1,14 +1,9 @@
 import type Database from "better-sqlite3";
 import path from "node:path";
-import { AppError } from "../../domain/errors.js";
 import type { Category } from "../../domain/archive.js";
-import {
-  readTransaction,
-  rawObject,
-  schemaVersion,
-  activeEntries,
-} from "./database.js";
+import { AppError } from "../../domain/errors.js";
 import { exclusive, present } from "../durable-files.js";
+import { rawObject, readTransaction } from "./database.js";
 
 export type EntrySelector = {
   name?: string;
@@ -19,13 +14,10 @@ export function selectEntry(
   db: Database.Database,
   selector: EntrySelector,
 ): { id: string; path: string; sha256: string } {
-  const versioned = schemaVersion(db) >= 3;
   if (selector.entry_id) {
     const row = db
       .prepare(
-        versioned
-          ? `SELECT e.id,e.path,v.sha256 FROM archive_entries e JOIN track_versions v ON v.id=e.current_version_id WHERE e.id=?`
-          : "SELECT id,path,sha256 FROM archive_entries WHERE id=?",
+        `SELECT e.id,e.path,v.sha256 FROM archive_entries e JOIN track_versions v ON v.id=e.current_version_id WHERE e.id=?`,
       )
       .get(selector.entry_id) as
       { id: string; path: string; sha256: string } | undefined;
@@ -37,7 +29,7 @@ export function selectEntry(
   const rows = (
     db
       .prepare(
-        `SELECT id,path,sha256,category FROM ${activeEntries(db)} ORDER BY path`,
+        `SELECT id,path,sha256,category FROM active_archive_entries ORDER BY path`,
       )
       .all() as {
       id: string;
@@ -77,8 +69,6 @@ export function downloadReference(
   let sha256 = entry.sha256,
     name = entry.path;
   if (selector.version_id) {
-    if (schemaVersion(db) < 3)
-      throw new AppError("USER_INPUT", "下载历史版本需要支持版本功能的轨迹库");
     const row = db
       .prepare(
         "SELECT sha256,path FROM track_versions WHERE id=? AND entry_id=?",
@@ -90,15 +80,14 @@ export function downloadReference(
     name = row.path;
   }
   if (selector.expected_sha256 && sha256 !== selector.expected_sha256) {
-    const historical =
-      schemaVersion(db) >= 3 && !selector.version_id
-        ? (db
-            .prepare(
-              "SELECT sha256,path FROM track_versions WHERE entry_id=? AND sha256=? ORDER BY version_no DESC LIMIT 1",
-            )
-            .get(entry.id, selector.expected_sha256) as
-            { sha256: string; path: string } | undefined)
-        : undefined;
+    const historical = !selector.version_id
+      ? (db
+          .prepare(
+            "SELECT sha256,path FROM track_versions WHERE entry_id=? AND sha256=? ORDER BY version_no DESC LIMIT 1",
+          )
+          .get(entry.id, selector.expected_sha256) as
+          { sha256: string; path: string } | undefined)
+      : undefined;
     if (!historical)
       throw new AppError(
         "USER_INPUT",

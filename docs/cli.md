@@ -1,6 +1,6 @@
 # CLI 使用说明（2.x）
 
-以下沿用原有业务命令；新增程序接口见 [API](api.md)，安装与 Chromium 见 [升级说明](install-upgrade.md)。原有 undo 已退役，相关兼容参数不会恢复历史撤销功能。
+业务命令如下；程序接口见 [API](api.md)，安装与 Chromium 见 [安装说明](install-upgrade.md)。
 
 ## 快速上手
 
@@ -44,7 +44,7 @@ tracktool kml type "./tracks/2024-05-*.kml"
 
 # 默认保留源文件，整批校验后一次提交；无需 Backup 目录
 tracktool kml push ./2024-05-03\ 徒步.kml
-# --keep 仍可使用；只有 --move 显式启用旧的 Backup 搬移流程
+# --keep 仍可使用；--move 显式启用 Backup 搬移
 tracktool kml push ./2024-05-03\ 徒步.kml --move
 
 # 日常操作后按需导出当前展示；原件、隐藏段和历史请另做 full-backup
@@ -54,7 +54,7 @@ tracktool kml delete "2026-10-01 徒步"            # 删除条目及全部历�
 tracktool archive status
 tracktool archive backup
 tracktool archive rebuild
-# 中断后完成源文件搬移或已提交的旧文件操作
+# 中断后完成源文件搬移
 tracktool archive recover
 ```
 
@@ -69,7 +69,7 @@ tracktool archive recover
 
 ## 库内行程编辑
 
-`track` 命令操作 schema 4/5 中的版本化行程。默认内部断开仍是一个 KML；独立行程拆分须明确使用 split_journey。原有 `kml split/prune` 属于独立文件工具，不修改库内版本。`kml to-multigeom` 已移除，没有兼容别名；MultiGeometry 文件仍可正常读取。
+`track` 命令操作归档中的版本化行程。默认内部断开仍是一个 KML；独立行程拆分须明确使用 split_journey。原有 `kml split/prune` 属于独立文件工具，不修改库内版本。支持读取 MultiGeometry 文件。
 
 ```sh
 tracktool track list --search '2026-10-01'
@@ -111,7 +111,7 @@ operation 还支持 prune（segment_id 和半开 ranges）、draw（after_segmen
 
 ## 目录比较与重复文件查找：使用 fclones
 
-通用文件比较与去重交给 [fclones](https://github.com/pkolaczk/fclones)，tracktool 已移除 `hash dirs`、`hash compare`、`hash dupes` 和 `hash prune`。fclones 独立使用，不是 tracktool 的运行依赖；可从[官方 Releases](https://github.com/pkolaczk/fclones/releases) 下载，或参照[安装说明](https://github.com/pkolaczk/fclones#installation)安装。
+通用文件比较与去重交给 [fclones](https://github.com/pkolaczk/fclones)。fclones 独立使用，不是 tracktool 的运行依赖；可从[官方 Releases](https://github.com/pkolaczk/fclones/releases) 下载，或参照[安装说明](https://github.com/pkolaczk/fclones#installation)安装。
 
 下面的目录比较按**文件内容是否在另一目录存在**判断，忽略文件名、目录层级和副本数量。只修改 EXIF 也会造成内容差异；它不是按照片画面判断相似，也不检查目录结构是否相同。
 
@@ -154,11 +154,11 @@ fclones group --hidden --no-ignore --min 0 --hash-fn blake3 \
 
 `exif to-mp4` 和 `exif repair-vid` 使用同一套拍摄时区规则：
 
-| 情况 | 默认行为（`--timezone-policy auto`） |
-| --- | --- |
-| 有有效拍摄时间，但没有显式时区 | 保持年月日时分秒，补 `+08:00`，或 `--offset-time` 指定的时区 |
-| 已有显式时区，包括 `Z`、`+00:00`、`-00:00` | 保留文件不处理，提示用户选择 `keep` 或 `force`；退出码为 3 |
-| 没有有效拍摄时间，或多个拍摄时间相互矛盾 | 保留文件并报告原因；矛盾时可用 `--time-source TAG` 明确选择时间来源 |
+| 情况                                       | 默认行为（`--timezone-policy auto`）                                |
+| ------------------------------------------ | ------------------------------------------------------------------- |
+| 有有效拍摄时间，但没有显式时区             | 保持年月日时分秒，补 `+08:00`，或 `--offset-time` 指定的时区        |
+| 已有显式时区，包括 `Z`、`+00:00`、`-00:00` | 保留文件不处理，提示用户选择 `keep` 或 `force`；退出码为 3          |
+| 没有有效拍摄时间，或多个拍摄时间相互矛盾   | 保留文件并报告原因；矛盾时可用 `--time-source TAG` 明确选择时间来源 |
 
 ```bash
 # 没有显式时区时补 +08:00；已有时区则跳过并提醒
@@ -204,20 +204,20 @@ tracktool exif to-mp4 ./video.mp4 --timezone-policy keep --time-source XMP-exif:
 tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 ```
 
-它照常读文件、照常做判断（因此能报出哪些文件会失败），只是把写入改成打印：一条条步骤列成表（`archive undo` 不走步骤表，逐条报「Would …」，`history.jsonl` 也不写一行），磁盘一个字节都不动。写在子命令之后会被当成用法错误退 1。
+它照常读文件、照常做判断（因此能报出哪些文件会失败），只是把写入改成打印：一条条步骤列成表，磁盘一个字节都不动。写在子命令之后会被当成用法错误退 1。
 
 ## 退出码
 
-| 码 | 含义 |
-| --- | --- |
-| 0 | 全部成功 |
-| 1 | 用户输入错误（路径不存在、通配符无匹配、坐标无法解析、配置或 KML 格式错误，以及命令或选项拼写错误） |
-| 2 | 外部工具或 API 失败（exiftool 报错、Google 拒绝请求或超额） |
-| 3 | 部分失败：逐文件隔离后仍有文件未处理完 |
+| 码  | 含义                                                                                                |
+| --- | --------------------------------------------------------------------------------------------------- |
+| 0   | 全部成功                                                                                            |
+| 1   | 用户输入错误（路径不存在、通配符无匹配、坐标无法解析、配置或 KML 格式错误，以及命令或选项拼写错误） |
+| 2   | 外部工具或 API 失败（exiftool 报错、Google 拒绝请求或超额）                                         |
+| 3   | 部分失败：逐文件隔离后仍有文件未处理完                                                              |
 
 命令名、选项拼写错误、缺必填参数都退 1；2 表示外部依赖失败。
 
-表里的「KML 格式错误」只对单文件命令成立：批量命令（`kml push`、`kml set-tag`）把读不出来的那个文件当作它自己的失败，其余照常处理，命令整体退 3。1 保留给「整批还没开始」的情形——路径不存在、通配符无匹配、`--type` 或 `--tag` 取值非法（类别名不在 Default/Train/Flight 里，活动名不在词表里）。`archive undo` 同理：前提缺失、`archive_history` 关着，或归档已被未记账的改动推走时退 1、一个字节没动，`--force` 跳过自校验不符时退 3。
+表里的「KML 格式错误」只对单文件命令成立：批量命令（`kml push`、`kml set-tag`）把读不出来的那个文件当作它自己的失败，其余照常处理，命令整体退 3。1 保留给「整批还没开始」的情形——路径不存在、通配符无匹配、`--type` 或 `--tag` 取值非法（类别名不在 Default/Train/Flight 里，活动名不在词表里）。
 
 批量命令遇到单个坏文件不会中止整批：该文件计入失败清单，其余文件照常处理，命令以 3 退出，日志里给出 `N file(s) failed` 汇总。指定 `--failed-folder` 后，会在处理前检查失败目录及同名目标。真实执行会提前创建目录，并创建、删除一个空临时文件检查写入能力，因此没有失败时也可能留下空目录；预演只做只读检查。任一失败目录不可用时，停用本批次的自动整理并提示，主任务继续；同名目标只影响对应文件的整理，保留双方。执行中移动失败会同时记录处理原因和整理错误，并继续后续文件；只在实际移动成功后报告移动位置。修复编排不会把留在原处的失败文件归入成功目录。
 
@@ -227,7 +227,7 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 
 配置文件放在各平台自己的用户配置目录里，文件名统一是 `config.json`：Windows 用 `%APPDATA%\tracktool\`（Roaming，变量缺席时退回 `~\AppData\Roaming\tracktool\`），macOS 用 `~/Library/Application Support/tracktool/`，其余系统用 `$XDG_CONFIG_HOME/tracktool/`（取值未设或**不是绝对路径**时退回 `~/.config/tracktool/`——XDG 规范要求忽略相对值）。放在用户目录而不是项目里，是因为设置对工具是全局的：从照片文件夹里跑和从项目根跑必须读到同一份。
 
-字段：`log_level`、`archive_path`、`archive_history`、`auto_fill_locations`、`kml_backup_dir_name`、`output_filters`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向包含 `archive.sqlite3` 的**归档目录**；新库通过 `archive init` 创建，旧 ZIP 通过 `archive import-zip` 导入。路径打错不会静默建立新库。配置文件原先住在项目根的 `config.json`：新位置为空而旧位置有文件时，第一次加载就把它搬过去——先把完整一份写到新位置，确认落盘后再删旧文件，并在日志里报出落点；旧文件删不掉（被占用、权限不足）只留下一份过时的副本，新位置照常生效，此时另警告一句让你手工删。旧键 `kml_zip_path`（ZIP 文件）读到时会平移为所在目录的 `archive_path`。两类迁移都在正常运行里回写，`--dry-run` 只在内存中转换，所有文件保持原样。`archive_history` 作为旧配置保留，但不再记录长期历史或启用 undo；设置时会明确提示。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
+字段：`log_level`、`archive_path`、`auto_fill_locations`、`kml_backup_dir_name`、`output_filters`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向包含 `archive.sqlite3` 的**归档目录**；新库通过 `archive init` 创建，ZIP 通过 `archive import-zip` 导入。路径打错不会静默建立新库。显式指定 `--config` 时只使用该文件。版本历史自动保存。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
 
 `track_tag.<类别>` 是活动词表：KML 里的 `TrackTags` 存的是 2bulu 的活动名（徒步、地铁），归档类别（集合文件名 `Train.kml`、ZIP 条目前缀 `Train/`、`kml push --type` 的取值域）由这张表查出来。用 `tracktool config set` 增删：
 
@@ -254,16 +254,13 @@ tracktool archive status
 tracktool archive backup              # 当前活动 KML → Archive.zip（不含历史）
 tracktool archive full-backup --output /backup/tracks.sqlite3
 tracktool archive restore-backup /backup/tracks.sqlite3 /fresh/tracks
-tracktool archive migrate             # 完整备份后显式升级 schema 7
 tracktool archive rebuild             # SQLite → 聚合 KML
 tracktool archive recover             # 完成中断文件操作
 ```
 
-当前版本、默认展示或状态变化使日常导出过期；历史来源变化通过 storage_revision 使完整备份过期，解析缓存不影响修订。push/delete 不改 ZIP/集合。`--zip` 保留为所在目录的定位方式，ZIP 本身可以不存在；不作为另一个可修改的真源。
+当前版本、默认展示或状态变化使日常导出过期；历史来源变化通过 storage_revision 使完整备份过期，解析缓存不影响修订。push/delete 不改 ZIP/集合。`--archive` 可指定归档目录或 SQLite 文件。
 
-`archive undo` 已退休，会明确报错并提示替代操作：download 下载当前原字节，recover 完成中断，或把旧备份 ZIP 导入另一个新目录。`archive log` 仅查看保留的旧 history.jsonl。schema 3/4 的 ZIP 包含当前可见段及连接线，导入只恢复这份展示结果；无法解析的旧成员以原字节保留并警告。恢复原件、隐藏段、版本和内部 ID 请使用 full-backup / restore-backup。两种方式都不包含瓦片或配置。
-
-`kml download` 不修改归档，默认下载当前版本完整原字节；`--entry-id` 可定位非活动来源条目，`--version` 指定该条目的历史版本，`--output` 为目录且不覆盖已有文件。`kml delete` 需要 schema 4；预览和执行都检查来源与待恢复操作依赖，删除只清理无引用对象。没有 pop 命令或兼容别名。已有下载和备份保留，已删除历史只能从之前的完整备份恢复。
+`kml download` 不修改归档，默认下载当前版本完整原字节；`--entry-id` 可定位非活动来源条目，`--version` 指定该条目的历史版本，`--output` 为目录且不覆盖已有文件。`kml delete` 预览和执行都检查来源与待恢复操作依赖，删除只清理无引用对象。已有下载和备份保留，已删除历史只能从之前的完整备份恢复。
 
 ### 按展示导出 KML
 
@@ -294,17 +291,13 @@ tracktool archive backup --format tar-xz --compression store --output ./tracks.t
 
 `archive backup` 保留原命令名，用于当前库默认展示压缩包；`archive rebuild` 生成桌面和手机集合。两者不套用任何出图私有覆盖。导出的 Tracktool 元数据记录来源种类、段顺序和显式连线；再次导入时连接线不会成为实测采样，也不会重复补线。
 
-旧成果重组也通过 `track preview REQUEST.json` / `track apply`，请求 operation.kind 为 `legacy_regroup`，具体字段见 [API](api.md)。候选需明确完整成员、段顺序、新路径、相同分类和依据；不会按名称自动归组。使用同一持久预览和组级撤销；希望重做时可撤销上一次组级撤销操作，复用原输出，不必创建同名新条目。
-
 ## 轨迹起终点行政区
 
 在项目目录中使用 `pnpm cli`：
 
 ```bash
 pnpm cli track fill-locations --dry-run
-pnpm cli archive migrate
 pnpm cli track fill-locations --offline    # 本地升级已有结果的解析规则
-pnpm cli track fill-locations --complete-evidence  # 仅为旧版降级结果补齐完整证据
 pnpm cli track fill-locations --limit 3
 pnpm cli track fill-locations
 pnpm cli track locations ENTRY_ID
@@ -322,4 +315,4 @@ pnpm cli track locations ENTRY_ID
 
 优先选择明确的行政实体候选与自洽层级；同等证据冲突时删除分歧层及下级，保留共同上级，不按候选重复次数投票、不按行政中心距离猜归属。不跨候选随意拼接父子层级。日本区、香港行政区、泰国区等使用地区规则；香港地区中英文名称按已知别名归一。韩国直辖城市、马来西亚州与县等没有中间城市层级时标为不适用，新加坡、香港等也不硬造国内省市县结构。
 
-规则版本变化时，默认复用原查询证据重算。`--offline` 明确禁止访问 API；缺少证据的端点计入 `pending`，不会制造结果。v1 仅保存单组选中组件，重算后标为 `raw_source=legacy_components`；它不等同于完整响应。新查询标为 `full_response`，以后可本地重新解析。重新解析保留原 `queried_at` 和旧解析版本的行。`--complete-evidence` 只为缺少完整响应的旧版降级结果补查；已保留完整响应的降级结果不会因此再次查询。需要主动刷新已查询过的降级结果时才使用 `--retry-incomplete`。
+`--offline` 禁止访问 API；缺少证据的端点计入 `pending`。已有完整响应可用 `--offline --refresh` 在本地重新解析，保留真实查询时间。主动刷新不完整结果可用 `--retry-incomplete`。

@@ -5,8 +5,7 @@ import {
   type SetStateAction,
 } from "react";
 import type { SelectedTrack } from "../shared/map.js";
-export type Panel =
-  "library" | "style" | "export" | "print" | "archive" | "settings";
+export type Panel = "library" | "export" | "print" | "settings";
 export interface EditMap {
   tracks: SelectedTrack[];
   pick?: (p: [number, number]) => void;

@@ -35,7 +35,6 @@ const basemapOrder = [
   "memomaps-transport",
   "amap-road",
   "amap-satellite",
-  "amap-road-legacy",
   "google-satellite",
   "google-road",
   "google-terrain",

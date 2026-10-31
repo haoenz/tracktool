@@ -1,6 +1,3 @@
-import { validateExport } from "../domain/export-format.js";
-import { AppError, checkCancelled, errorInfo } from "../domain/errors.js";
-import { entryName, filenameDate } from "../domain/archive.js";
 import type {
   ArchiveInput,
   ArchiveRequest,
@@ -8,9 +5,13 @@ import type {
   Category,
   Content,
 } from "../domain/archive.js";
+import { entryName, filenameDate } from "../domain/archive.js";
 import { tagMap } from "../domain/config.js";
-import { kmlRoot, xmlText } from "../domain/kml-edit.js";
+import { AppError, checkCancelled, errorInfo } from "../domain/errors.js";
+import { validateExport } from "../domain/export-format.js";
 import type { EditOperation } from "../domain/kml-edit.js";
+import { kmlRoot, xmlText } from "../domain/kml-edit.js";
+import { batchResult } from "../domain/tasks.js";
 import type { BatchResult } from "../shared/contracts.js";
 import type { Context } from "./context.js";
 import type { XmlPort } from "./ports.js";
@@ -132,10 +133,7 @@ export class KmlService {
       }
       ctx.report({ type: "progress", completed: i + 1, total: unique.length });
     }
-    return {
-      items,
-      exitCode: items.some((i) => i.status === "failed") ? 3 : 0,
-    };
+    return batchResult(items);
   }
   async push(
     ctx: Context,

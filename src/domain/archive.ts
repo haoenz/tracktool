@@ -1,9 +1,9 @@
-import type { ExportOptions } from "../shared/export-format.js";
 import type {
-  DeleteRequest,
   DeletePreview,
+  DeleteRequest,
   DeleteResult,
 } from "../shared/archive-actions.js";
+import type { ExportOptions } from "../shared/export-format.js";
 import { AppError } from "./errors.js";
 export type Category = "Default" | "Train" | "Flight";
 export const CATEGORIES: Category[] = ["Default", "Train", "Flight"];
@@ -39,7 +39,7 @@ export type ArchiveInput = {
 };
 export type ArchiveRequest =
   | { kind: "init"; directory: string; zip?: string }
-  | { kind: "status" | "recover" | "migrate"; database: string }
+  | { kind: "status" | "recover"; database: string }
   | {
       kind: "push";
       database: string;
@@ -78,14 +78,14 @@ export type ArchiveRequest =
   | { kind: "rebuild"; database: string; output: string; entries?: string[] };
 export type ArchiveStatus = {
   schema: number;
-  storage_revision: number | null;
+  storage_revision: number;
   revision: number;
   entries: number;
   pending: number;
-  zip_revision: number | null;
-  zip_target: string | null;
+  export_revision: number | null;
+  export_target: string | null;
   views_revision: number | null;
-  zip_fresh: boolean;
+  export_fresh: boolean;
 };
 export type ArchiveResult = {
   message: string;

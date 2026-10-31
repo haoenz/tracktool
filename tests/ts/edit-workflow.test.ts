@@ -1,47 +1,47 @@
-import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
-import { afterEach, expect, it } from "vitest";
+import Database from "better-sqlite3";
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   mkdtempSync,
-  rmSync,
-  writeFileSync,
   readFileSync,
   readdirSync,
+  rmSync,
+  writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
-import Database from "better-sqlite3";
+import { afterEach, expect, it } from "vitest";
+import { DEFAULTS } from "../../dist/node/domain/config.js";
+import {
+  readTransaction,
+  transaction,
+} from "../../dist/node/infrastructure/archive/database.js";
+import { downloadBytes } from "../../dist/node/infrastructure/archive/download.js";
+import { EditPreviews } from "../../dist/node/infrastructure/archive/edit-previews.js";
+import {
+  operationDetail,
+  trackDetail,
+  trackHistory,
+  trackTimeline,
+} from "../../dist/node/infrastructure/archive/track-reader.js";
+import { VersionStore } from "../../dist/node/infrastructure/archive/versions.js";
 import {
   ArchiveWriter,
   addEntry,
 } from "../../dist/node/infrastructure/archive/writer.js";
-import {
-  transaction,
-  readTransaction,
-} from "../../dist/node/infrastructure/archive/database.js";
-import { VersionStore } from "../../dist/node/infrastructure/archive/versions.js";
-import { EditPreviews } from "../../dist/node/infrastructure/archive/edit-previews.js";
-import {
-  trackDetail,
-  trackHistory,
-  trackTimeline,
-  operationDetail,
-} from "../../dist/node/infrastructure/archive/track-reader.js";
-import { downloadBytes } from "../../dist/node/infrastructure/archive/download.js";
+import { TaskQueue } from "../../dist/node/infrastructure/task-queue.js";
+import { SqliteTasks } from "../../dist/node/infrastructure/task-store.js";
+import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
+import { createApp } from "../../dist/node/server/app.js";
+import type { WorkRunner } from "../../dist/node/services/work-ports.js";
 import {
   EditRequestSchema,
-  type EditRequest,
   type EditPreview,
+  type EditRequest,
   type VersionRef,
 } from "../../dist/node/shared/track-edit.js";
-import { WorkRequestSchema } from "../../dist/node/shared/work.js";
-import { SqliteTasks } from "../../dist/node/infrastructure/task-store.js";
-import { TaskQueue } from "../../dist/node/infrastructure/task-queue.js";
-import type { WorkRunner } from "../../dist/node/services/work-ports.js";
-import { createApp } from "../../dist/node/server/app.js";
-import { DEFAULTS } from "../../dist/node/domain/config.js";
 import type { WorkTask } from "../../dist/node/shared/work.js";
+import { WorkRequestSchema } from "../../dist/node/shared/work.js";
 
 const cleanup: (() => void | Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -467,7 +467,7 @@ it("CLI uses the same persisted preview and idempotent apply; dry runs leave bot
   ).toHaveLength(2);
   expect(readFileSync(input, "utf8")).toBe(JSON.stringify(f.split()));
 }, 30000);
-it("HTTP edits use the fixed archive, survive restart, expose history and reject retired operations", async () => {
+it("HTTP edits use the fixed archive, survive restart, expose history and reject unknown operations", async () => {
   const f = await fixture();
   let app = await createApp({
     configStore: { load: async () => ({ ...DEFAULTS, archive_path: f.dir }) },
@@ -502,7 +502,7 @@ it("HTTP edits use the fixed archive, survive restart, expose history and reject
   expect(
     (
       await call("/api/work/preview", {
-        operation: "kml:to-multigeom",
+        operation: "unknown:operation",
         inputs: [],
         options: {},
       })
@@ -555,231 +555,6 @@ it("HTTP edits use the fixed archive, survive restart, expose history and reject
   const result = done.output!.data as { operation_id: string };
   expect(operationDetail(f.file, result.operation_id).effects).toHaveLength(1);
 }, 30000);
-
-it("regroups complete legacy members atomically, preserves display and restores the group", async () => {
-  const f = await fixture();
-  const second = transaction(
-    f.file,
-    true,
-    (db) => addEntry(db, "Default/2026-10-01 B.kml", raw, "Default").id,
-  );
-  const members = [f.detail, trackDetail(f.file, second)];
-  const op = {
-    kind: "legacy_regroup" as const,
-    expected: members.map((d) => ref(d.entry)),
-    path: "Default/2026-10-01 regroup.kml",
-    category: "Default" as const,
-    segments: members.flatMap((d) =>
-      d.settings.order.map((segment_id) => ({
-        version_id: d.entry.version_id,
-        segment_id,
-      })),
-    ),
-    evidence: "synthetic complete legacy results; preserve old view",
-  };
-  const request = {
-    schema: 1 as const,
-    archive_id: f.detail.archive_id,
-    operation: op,
-  };
-  const before = snap(f.file);
-  const p = await f.previews.create(f.file, randomUUID(), request);
-  expect(snap(f.file)).toEqual(before);
-  expect(p.before).toHaveLength(2);
-  expect(p.outputs[0]!.settings.connections).toHaveLength(2);
-  expect(p.changes[0]!.added_points).toBe(0);
-  expect(p.outputs[0]!.segments).toHaveLength(4);
-  const result = f.previews.apply(f.file, apply(p));
-  expect(result.entries.filter((e) => e.state === "active")).toHaveLength(1);
-  expect(result.entries.filter((e) => e.state === "superseded")).toHaveLength(
-    2,
-  );
-  expect(f.previews.apply(f.file, apply(p))).toEqual(result);
-  const restored = f.version.restore(
-    f.detail.archive_id,
-    result.operation_id,
-    randomUUID(),
-    result.entries.map(ref),
-  );
-  expect(restored.entries.filter((e) => e.state === "active")).toHaveLength(2);
-  expect(
-    restored.entries.find(
-      (e) => !members.some((m) => m.entry.entry_id === e.entry_id),
-    )!.state,
-  ).toBe("source_only");
-  expect(Buffer.from(f.version.read(members[0]!.entry.version_id))).toEqual(
-    raw,
-  );
-  const again = await f.previews.create(f.file, randomUUID(), {
-    ...request,
-    operation: {
-      ...op,
-      path: "Default/2026-10-01 regroup-again.kml",
-      expected: members.map((m) => ref(f.version.current(m.entry.entry_id))),
-    },
-  });
-  const reapplied = f.previews.apply(f.file, apply(again)),
-    output = reapplied.entries.find((e) => e.state === "active")!;
-  const d = trackDetail(f.file, output.entry_id);
-  f.version.publish({
-    archive_id: d.archive_id,
-    request_key: randomUUID(),
-    kind: "presentation",
-    algorithm_version: "test",
-    params: {},
-    inputs: [ref(d.entry)],
-    outputs: [
-      {
-        kind: "presentation",
-        entry_id: output.entry_id,
-        settings: { ...d.settings, ignored: [d.settings.order[0]!] },
-      },
-    ],
-  });
-  expect(() =>
-    f.version.restore(
-      d.archive_id,
-      reapplied.operation_id,
-      randomUUID(),
-      reapplied.entries.map((e) => ref(f.version.current(e.entry_id))),
-    ),
-  ).toThrow(/已变化|changed/);
-});
-it("rejects partial, duplicate, mixed-category and stale regroup members without publishing", async () => {
-  const f = await fixture();
-  const other = transaction(
-      f.file,
-      true,
-      (db) => addEntry(db, "Train/2026-10-01 B.kml", raw, "Train").id,
-    ),
-    d = trackDetail(f.file, other);
-  const op = {
-    kind: "legacy_regroup" as const,
-    expected: [ref(f.detail.entry), ref(d.entry)],
-    path: "Default/2026-10-01 grouped.kml",
-    category: "Default" as const,
-    segments: [
-      ...f.detail.segments.map((s) => ({
-        version_id: f.detail.entry.version_id,
-        segment_id: s.segment_id,
-      })),
-      ...d.segments.map((s) => ({
-        version_id: d.entry.version_id,
-        segment_id: s.segment_id,
-      })),
-    ],
-    evidence: "synthetic",
-  };
-  const request = {
-      schema: 1 as const,
-      archive_id: d.archive_id,
-      operation: op,
-    },
-    before = snap(f.file);
-  await expect(
-    f.previews.create(f.file, randomUUID(), request),
-  ).rejects.toThrow("不同分类");
-  const same = transaction(
-      f.file,
-      true,
-      (db) => addEntry(db, "Default/2026-10-01 C.kml", raw, "Default").id,
-    ),
-    c = trackDetail(f.file, same);
-  op.expected[1] = ref(c.entry);
-  op.segments.splice(
-    2,
-    2,
-    ...c.segments.map((s) => ({
-      version_id: c.entry.version_id,
-      segment_id: s.segment_id,
-    })),
-  );
-  await expect(
-    f.previews.create(f.file, randomUUID(), {
-      ...request,
-      operation: { ...op, segments: op.segments.slice(1) },
-    }),
-  ).rejects.toThrow("全部段");
-  await expect(
-    f.previews.create(f.file, randomUUID(), {
-      ...request,
-      operation: { ...op, expected: [op.expected[0]!, op.expected[0]!] },
-    }),
-  ).rejects.toThrow("重复");
-  const p = await f.previews.create(f.file, randomUUID(), request);
-  f.version.publish({
-    archive_id: d.archive_id,
-    request_key: randomUUID(),
-    kind: "presentation",
-    algorithm_version: "test",
-    params: {},
-    inputs: [ref(c.entry)],
-    outputs: [
-      {
-        kind: "presentation",
-        entry_id: same,
-        settings: { ...c.settings, default_connect: false },
-      },
-    ],
-  });
-  const current = snap(f.file);
-  expect(() => f.previews.apply(f.file, apply(p))).toThrow(/已变化|changed/);
-  expect(snap(f.file)).toEqual(current);
-  expect(f.version.current(f.id)).toEqual(f.detail.entry);
-  expect(before.entries).toHaveLength(2);
-});
-
-it("regroup preserves ignored segments and their latent connections without adding a cross-file edge", async () => {
-  const f = await fixture(),
-    second = transaction(
-      f.file,
-      true,
-      (db) => addEntry(db, "Default/2026-10-01 other.kml", raw, "Default").id,
-    );
-  f.version.publish({
-    archive_id: f.detail.archive_id,
-    request_key: randomUUID(),
-    kind: "presentation",
-    algorithm_version: "test",
-    params: {},
-    inputs: [ref(f.detail.entry)],
-    outputs: [
-      {
-        kind: "presentation",
-        entry_id: f.id,
-        settings: {
-          ...f.detail.settings,
-          ignored: [f.detail.settings.order[0]!],
-        },
-      },
-    ],
-  });
-  const members = [trackDetail(f.file, f.id), trackDetail(f.file, second)];
-  const p = await f.previews.create(f.file, randomUUID(), {
-    schema: 1,
-    archive_id: f.detail.archive_id,
-    operation: {
-      kind: "legacy_regroup",
-      expected: members.map((d) => ref(d.entry)),
-      path: "Default/2026-10-01 hidden-regroup.kml",
-      category: "Default",
-      segments: members.flatMap((d) =>
-        d.settings.order.map((segment_id) => ({
-          version_id: d.entry.version_id,
-          segment_id,
-        })),
-      ),
-      evidence: "synthetic visibility test",
-    },
-  });
-  expect(p.outputs[0]!.settings.ignored).toHaveLength(1);
-  expect(p.outputs[0]!.settings.connections).toHaveLength(2);
-  expect(
-    (await f.previews.geometry(f.file, p.preview_id, 0)).connections,
-  ).toHaveLength(1);
-  expect(p.changes[0]!.before_edges).toHaveLength(1);
-  expect(p.changes[0]!.after_edges).toHaveLength(1);
-});
 
 it.each(["set_tag", "fill_altitude"] as const)(
   "%s previews preserve segment settings, history and reject stale apply",
@@ -900,7 +675,9 @@ it("direct HTTP download pins displayed content and creates neither tasks nor te
   const before = snap(f.file);
   const uploads = path.join(f.dir, "web", "uploads");
   const files = readdirSync(uploads, { recursive: true });
-  const tasks = await (await get("/api/work/tasks")).json();
+  const taskStore = new SqliteTasks(path.join(f.dir, "web", "tasks.sqlite3"));
+  cleanup.push(() => taskStore.close());
+  const tasks = taskStore.list();
   const old = await get(`/api/tracks/${f.id}/download?sha256=${oldSha}`);
   expect(old.status).toBe(200);
   expect(Buffer.from(await old.arrayBuffer())).toEqual(raw);
@@ -920,7 +697,7 @@ it("direct HTTP download pins displayed content and creates neither tasks nor te
   ).toBe(400);
   expect((await get(`/api/tracks/${f.id}/download`)).status).toBe(400);
   expect(readdirSync(uploads, { recursive: true })).toEqual(files);
-  expect(await (await get("/api/work/tasks")).json()).toEqual(tasks);
+  expect(taskStore.list()).toEqual(tasks);
   expect(snap(f.file)).toEqual(before);
 });
 

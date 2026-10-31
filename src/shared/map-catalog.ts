@@ -16,11 +16,6 @@ export const MAP_CATALOG = {
       crs: "gcj02",
       content: ["roads", "road_names", "places", "boundaries", "poi"],
     },
-    "amap-road-legacy": {
-      kind: "basemap",
-      crs: "gcj02",
-      content: ["roads", "road_names", "places", "boundaries", "poi"],
-    },
     "amap-roads": {
       kind: "overlay",
       crs: "gcj02",
@@ -209,15 +204,6 @@ export const MAP_CATALOG = {
       crs: "wgs84",
       content: ["power"],
     },
-  },
-  legacy: {
-    "amap-labels": "amap-satellite",
-    "amap-roads": "amap-satellite",
-    "google-labels": "google-satellite",
-    "google-labels-large": "google-satellite",
-    "tencent-labels": "tencent-satellite",
-    "tianditu-labels": "esri-satellite",
-    "openrailwaymap-standard": "vector",
   },
   features: {
     places: ["none", "major", "all"],

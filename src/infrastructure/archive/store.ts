@@ -1,36 +1,33 @@
+import type Database from "better-sqlite3";
+import path from "node:path";
+import { AppError } from "../../domain/errors.js";
+import { LruStore } from "../../domain/lru.js";
+import type { MediaTime } from "../../domain/media-time.js";
+import { formatWall } from "../../domain/media-time.js";
+import type { NearestPoint } from "../../domain/media-track.js";
 import {
-  nearestPoint,
   betterMatch,
+  nearestPoint,
   validateTrackOrder,
 } from "../../domain/media-track.js";
-import type { NearestPoint } from "../../domain/media-track.js";
-import { formatWall } from "../../domain/media-time.js";
-import type { MediaTime } from "../../domain/media-time.js";
-import type { XmlPort } from "../../services/ports.js";
-import path from "node:path";
-import type Database from "better-sqlite3";
-import { AppError } from "../../domain/errors.js";
+import type { TrackData } from "../../domain/trackdata.js";
 import {
-  MAX_POINTS,
   MAX_KML_BYTES,
+  MAX_POINTS,
   pointCount,
 } from "../../domain/trackdata.js";
-import type { TrackData } from "../../domain/trackdata.js";
-import { geojson } from "../../domain/geometry.js";
-import { LruStore } from "../../domain/lru.js";
+import type { XmlPort } from "../../services/ports.js";
 import type { Catalog, Selection } from "../../shared/map.js";
-import { resolveTrack, readPresentation, displayed } from "./presentation.js";
 import { XmlWorkers } from "../xml/client.js";
+import { displayed, readPresentation, resolveTrack } from "./presentation.js";
 
-import { deserialize, serialize, PARSER_VERSION } from "../track-index.js";
+import { deserialize, PARSER_VERSION, serialize } from "../track-index.js";
 import {
-  activeEntries,
-  schemaVersion,
   databasePath,
-  transaction,
   independentTransaction,
   rawObject,
   snapshot,
+  transaction,
 } from "./database.js";
 // RAM cache is separate from the unchanged 2m-point selection/input limit.
 const CACHE_POINTS = 500_000;
@@ -52,7 +49,7 @@ export class ArchiveStore {
   readBytes(input: string, entry: string): Uint8Array {
     return transaction(databasePath(input), false, (db) => {
       const row = db
-        .prepare(`SELECT sha256 FROM ${activeEntries(db)} WHERE path=?`)
+        .prepare(`SELECT sha256 FROM active_archive_entries WHERE path=?`)
         .get(entry) as { sha256: string } | undefined;
       if (!row)
         throw new AppError("USER_INPUT", `Archive member not found: ${entry}`);
@@ -68,7 +65,7 @@ export class ArchiveStore {
     const archive = databasePath(input);
     return snapshot(archive, async (db) => {
       const row = db
-        .prepare(`SELECT sha256 FROM ${activeEntries(db)} WHERE path=?`)
+        .prepare(`SELECT sha256 FROM active_archive_entries WHERE path=?`)
         .get(entry) as { sha256: string } | undefined;
       if (!row)
         throw new AppError("USER_INPUT", `Archive member not found: ${entry}`);
@@ -85,7 +82,7 @@ export class ArchiveStore {
       entries: (
         db
           .prepare(
-            `SELECT id,path,sha256,category FROM ${activeEntries(db)} ORDER BY path`,
+            `SELECT id,path,sha256,category FROM active_archive_entries ORDER BY path`,
           )
           .all() as {
           id: string;
@@ -196,21 +193,11 @@ export class ArchiveStore {
       let selected = 0;
       for (const entry of entries)
         try {
-          const ref =
-            schemaVersion(db) >= 3 ? resolveTrack(db, { entry }) : undefined;
-          const row = ref
-            ? (db
-                .prepare(
-                  "SELECT sha256,raw_size FROM kml_objects WHERE sha256=?",
-                )
-                .get(ref.sha256) as
-                { sha256: string; raw_size: number } | undefined)
-            : (db
-                .prepare(
-                  `SELECT e.sha256,o.raw_size FROM ${activeEntries(db)} e JOIN kml_objects o ON e.sha256=o.sha256 WHERE e.path=?`,
-                )
-                .get(entry) as
-                { sha256: string; raw_size: number } | undefined);
+          const ref = resolveTrack(db, { entry });
+          const row = db
+            .prepare("SELECT sha256,raw_size FROM kml_objects WHERE sha256=?")
+            .get(ref.sha256) as
+            { sha256: string; raw_size: number } | undefined;
           if (!row)
             throw new AppError(
               "USER_INPUT",
@@ -243,9 +230,7 @@ export class ArchiveStore {
           result.tracks.push({
             entry,
             sha256: row.sha256,
-            points: hit.points,
             ...(() => {
-              if (!ref) return { geojson: geojson(hit.data) };
               const presentation = readPresentation(db, ref);
               const display = displayed(
                 hit.data,
@@ -288,7 +273,7 @@ export class ArchiveStore {
     );
     return snapshot(archive, async (db) => {
       const entries = db
-        .prepare(`SELECT path,sha256 FROM ${activeEntries(db)} ORDER BY path`)
+        .prepare(`SELECT path,sha256 FROM active_archive_entries ORDER BY path`)
         .all() as { path: string; sha256: string }[];
       let best: NearestPoint | undefined;
       for (const entry of entries) {

@@ -12,6 +12,7 @@
     "*.config.ts",
     "scripts/build-maps.ts",
     "scripts/build.ts",
+    "scripts/build-test-fixtures.ts",
     "scripts/dev.ts"
   ],
   "exclude": []

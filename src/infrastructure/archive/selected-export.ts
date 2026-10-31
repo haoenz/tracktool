@@ -1,6 +1,6 @@
-import { ZipWriter, Uint8ArrayWriter, Uint8ArrayReader } from "@zip.js/zip.js";
+import { Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from "@zip.js/zip.js";
 import { AppError } from "../../domain/errors.js";
-import { readTransaction, rawObject, activeEntries } from "./database.js";
+import { rawObject, readTransaction } from "./database.js";
 
 /** One snapshot and one download, preserving every original byte and archive path. */
 export async function exportSelectedOriginals(file: string, ids: string[]) {
@@ -8,7 +8,7 @@ export async function exportSelectedOriginals(file: string, ids: string[]) {
     let bytes = 0;
     return [...new Set(ids)].map((id) => {
       const entry = db
-        .prepare(`SELECT path,sha256 FROM ${activeEntries(db)} WHERE id=?`)
+        .prepare(`SELECT path,sha256 FROM active_archive_entries WHERE id=?`)
         .get(id) as { path: string; sha256: string } | undefined;
       if (!entry)
         throw new AppError(

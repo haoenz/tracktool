@@ -1,3 +1,4 @@
+import { databasePath } from "./archive/database.js";
 import { readFile } from "node:fs/promises";
 import { lstatSync, statSync, readdirSync } from "node:fs";
 import path from "node:path";
@@ -86,13 +87,13 @@ export function expandPaths(inputs: string[]): string[] {
 }
 export function workspace(
   config: Record<string, unknown>,
-  zip?: string,
-): { database: string; directory: string; zip: string; backup: string } {
+  archive?: string,
+): { database: string; directory: string; bundle: string; backup: string } {
   const base = String(config.archive_path || "");
-  if (!zip && !base)
-    throw new AppError("USER_INPUT", "Configure archive_path or pass --zip");
-  const directory = zip ? path.dirname(resolvePath(zip)) : resolvePath(base);
-  const database = path.join(directory, "archive.sqlite3");
+  if (!archive && !base)
+    throw new AppError("USER_INPUT", "请配置 archive_path 或传入 --archive");
+  const database = databasePath(archive || base);
+  const directory = path.dirname(database);
   if (!present(database))
     throw new AppError(
       "USER_INPUT",
@@ -101,7 +102,7 @@ export function workspace(
   return {
     directory,
     database,
-    zip: zip ? resolvePath(zip) : path.join(directory, "Archive.zip"),
+    bundle: path.join(directory, "Archive.zip"),
     backup: path.resolve(
       directory,
       String(config.kml_backup_dir_name || "Backup"),

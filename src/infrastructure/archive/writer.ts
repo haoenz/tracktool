@@ -1,5 +1,5 @@
-import { resolvePath } from "../paths.js";
 import Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   linkSync,
@@ -11,38 +11,18 @@ import {
   unlinkSync,
 } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-import { deflateSync } from "node:zlib";
-import { AppError, checkCancelled } from "../../domain/errors.js";
-import { CATEGORIES, memberName } from "../../domain/archive.js";
 import type {
   ArchiveRequest,
   ArchiveResult,
   ArchiveStatus,
   Category,
 } from "../../domain/archive.js";
+import { CATEGORIES } from "../../domain/archive.js";
 import { DEFAULTS, tagMap } from "../../domain/config.js";
-import {
-  activeEntries,
-  schemaVersion,
-  connect,
-  rawObject,
-  snapshot,
-  transaction,
-} from "./database.js";
-import { SCHEMA_8 } from "./schema-v8.js";
-import { downloadFile } from "./download.js";
-import { previewDeletion, deleteEntry, type DeleteFault } from "./deletion.js";
-import { migrateArchive, type MigrationFault } from "./migrate.js";
-import { fullBackup, restoreBackup, type BackupFault } from "./full-backup.js";
-import {
-  addVersionedEntry,
-  archiveId,
-  currentEntry,
-  checkRef,
-  publishVersions,
-  type SourceLocation,
-} from "./versions.js";
+import { AppError, checkCancelled } from "../../domain/errors.js";
+import { validateExport } from "../../domain/export-format.js";
+import type { XmlPort } from "../../services/ports.js";
+import type { ExportOptions } from "../../shared/export-format.js";
 import {
   digest,
   exclusive,
@@ -52,22 +32,36 @@ import {
   syncFile,
   temporary,
 } from "../durable-files.js";
-import { readZip } from "./zip.js";
+import { resolvePath } from "../paths.js";
+import { XmlWorkers } from "../xml/client.js";
+import { readManifest } from "../xml/manifest.js";
+import { rebuild } from "./collections.js";
+import {
+  connect,
+  rawObject,
+  schemaVersion,
+  snapshot,
+  transaction,
+} from "./database.js";
+import { deleteEntry, previewDeletion, type DeleteFault } from "./deletion.js";
+import { exportDisplay } from "./display-export.js";
+import { downloadFile } from "./download.js";
+import { fullBackup, restoreBackup, type BackupFault } from "./full-backup.js";
 import {
   checkPackedStructure,
   readPackedExport,
   writePackedExport,
 } from "./packed-export.js";
-import { validateExport } from "../../domain/export-format.js";
-import type { ExportOptions } from "../../shared/export-format.js";
-import { readManifest } from "../xml/manifest.js";
-import { XmlWorkers } from "../xml/client.js";
-import type { XmlPort } from "../../services/ports.js";
-import { rebuild } from "./collections.js";
-import { exportDisplay } from "./display-export.js";
+import { SCHEMA } from "./schema.js";
+import {
+  addVersionedEntry,
+  checkRef,
+  currentEntry,
+  type SourceLocation,
+} from "./versions.js";
+import { readZip } from "./zip.js";
 export type FaultPoint =
   | Parameters<DeleteFault>[0]
-  | Parameters<MigrationFault>[0]
   | Parameters<BackupFault>[0]
   | "push-entry-written"
   | "push-before-commit"
@@ -86,37 +80,7 @@ export function addEntry(
   category: Category | null,
   location?: SourceLocation,
 ): Entry {
-  if (schemaVersion(db) >= 3)
-    return addVersionedEntry(db, name, raw, category, location);
-  memberName(name);
-  if (!name.toLowerCase().endsWith(".kml"))
-    throw new AppError("USER_INPUT", "Archive entries must be KML");
-  const sha256 = digest(raw);
-  const old = db
-    .prepare("SELECT id,path,sha256 FROM archive_entries WHERE path=?")
-    .get(name) as Entry | undefined;
-  if (old) {
-    if (old.sha256 !== sha256)
-      throw new AppError(
-        "USER_INPUT",
-        `Archive path conflict; source retained: ${name}`,
-      );
-    return old;
-  }
-  db.prepare("INSERT OR IGNORE INTO kml_objects VALUES (?, 'zlib', ?, ?)").run(
-    sha256,
-    raw.length,
-    deflateSync(raw),
-  );
-  const id = randomUUID().replaceAll("-", "");
-  db.prepare("INSERT INTO archive_entries VALUES (?, ?, ?, ?, ?)").run(
-    id,
-    name,
-    sha256,
-    category,
-    /\d{4}-\d{2}-\d{2}/.exec(name)?.[0] ?? null,
-  );
-  return { id, path: name, sha256 };
+  return addVersionedEntry(db, name, raw, category, location);
 }
 export class ArchiveWriter {
   constructor(
@@ -135,15 +99,6 @@ export class ArchiveWriter {
           message: "Archive status",
           status: this.status(request.database),
         };
-      case "migrate": {
-        const backup = await this.migrate(request.database);
-        return {
-          message: backup
-            ? `Schema 6 ready; pre-migration backup: ${backup}`
-            : "Schema 6 ready",
-          paths: backup ? [backup] : [],
-        };
-      }
       case "full-backup":
         return fullBackup(request.database, request.output, this.fault);
       case "restore-backup":
@@ -163,12 +118,7 @@ export class ArchiveWriter {
           signal,
         );
       case "rebuild":
-        return rebuild(
-          request.database,
-          request.output,
-          this.xml,
-          request.entries,
-        );
+        return rebuild(request.database, request.output, request.entries);
       case "push":
         return this.push(request);
       case "download":
@@ -196,15 +146,15 @@ export class ArchiveWriter {
     return transaction(file, false, (db) => {
       const meta = db
         .prepare(
-          `SELECT revision,zip_revision,zip_target,views_revision,${schemaVersion(db) >= 3 ? "storage_revision" : "NULL AS storage_revision"} FROM archive_meta`,
+          `SELECT revision,export_revision,export_target,views_revision,storage_revision FROM archive_meta`,
         )
-        .get() as Omit<ArchiveStatus, "entries" | "pending" | "zip_fresh">;
+        .get() as Omit<ArchiveStatus, "entries" | "pending" | "export_fresh">;
       return {
         ...meta,
         schema: schemaVersion(db),
         entries: (
           db
-            .prepare(`SELECT count(*) AS n FROM ${activeEntries(db)}`)
+            .prepare(`SELECT count(*) AS n FROM active_archive_entries`)
             .get() as {
             n: number;
           }
@@ -214,31 +164,18 @@ export class ArchiveWriter {
             n: number;
           }
         ).n,
-        zip_fresh:
-          meta.zip_revision === meta.revision &&
-          !!meta.zip_target &&
-          existsSync(meta.zip_target) &&
-          lstatSync(meta.zip_target).isFile(),
+        export_fresh:
+          meta.export_revision === meta.revision &&
+          !!meta.export_target &&
+          existsSync(meta.export_target) &&
+          lstatSync(meta.export_target).isFile(),
       };
     });
-  }
-  migrate(file: string): Promise<string | undefined> {
-    return migrateArchive(file, this.fault);
   }
   async init(directory: string, zip?: string): Promise<ArchiveResult> {
     const target = path.join(directory, "archive.sqlite3");
     if (present(target))
       throw new AppError("USER_INPUT", `Database already exists: ${target}`);
-    if (
-      !zip &&
-      ["Archive.zip", "archive.json"].some((n) =>
-        present(path.join(directory, n)),
-      )
-    )
-      throw new AppError(
-        "USER_INPUT",
-        "Legacy archive exists; use archive import-zip explicitly",
-      );
     mkdirSync(directory, { recursive: true });
     const stage = temporary(target);
     const db = new Database(stage);
@@ -247,7 +184,7 @@ export class ArchiveWriter {
       db.pragma("foreign_keys=ON");
       db.pragma("synchronous=FULL");
       db.exec("BEGIN");
-      db.exec(SCHEMA_8);
+      db.exec(SCHEMA);
       db.prepare(
         "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,?)",
       ).run(randomUUID().replaceAll("-", ""));
@@ -322,7 +259,7 @@ export class ArchiveWriter {
     }
   }
   async recover(file: string): Promise<number> {
-    const db = connect(file, true, [1, 2, 3, 4, 5, 6, 7, 8]);
+    const db = connect(file, true);
     try {
       const operations = db
         .prepare("SELECT * FROM file_operations ORDER BY rowid")
@@ -333,26 +270,23 @@ export class ArchiveWriter {
         sha256: string;
         source: string | null;
         target: string;
-        expected_generation?: number;
+        expected_generation: number;
       }[];
       for (const op of operations) {
-        const current =
-          schemaVersion(db) >= 3 ? currentEntry(db, op.entry_id) : null;
-        if (current)
-          checkRef(
-            db,
-            {
-              ...current,
-              generation: op.expected_generation!,
-              sha256: op.sha256,
-            },
-            true,
-          );
+        const current = currentEntry(db, op.entry_id);
+        checkRef(
+          db,
+          {
+            ...current,
+            generation: op.expected_generation,
+            sha256: op.sha256,
+          },
+          true,
+        );
         const raw = rawObject(db, op.sha256);
         exclusive(op.target, raw, true);
         await this.fault("target-durable");
         if (
-          op.operation === "push" &&
           op.source &&
           resolvePath(op.source) !== resolvePath(op.target) &&
           present(op.source)
@@ -367,28 +301,8 @@ export class ArchiveWriter {
           await this.fault("source-removed");
         }
         db.prepare("DELETE FROM file_operations WHERE id=?").run(op.id);
-        if (op.operation === "pop" && current)
-          publishVersions(db, {
-            archive_id: archiveId(db),
-            request_key: `file-pop:${op.id}`,
-            kind: "withdraw",
-            algorithm_version: "pop-v1",
-            params: { file_operation: op.id },
-            inputs: [current],
-            outputs: [
-              { kind: "state", entry_id: current.entry_id, state: "withdrawn" },
-            ],
-          });
-        else if (op.operation === "pop")
-          db.prepare("DELETE FROM archive_entries WHERE id=? AND sha256=?").run(
-            op.entry_id,
-            op.sha256,
-          );
       }
-      if (schemaVersion(db) < 3)
-        db.exec(
-          "DELETE FROM kml_objects WHERE sha256 NOT IN (SELECT sha256 FROM archive_entries) AND sha256 NOT IN (SELECT sha256 FROM file_operations)",
-        );
+
       db.exec("COMMIT");
       return operations.length;
     } finally {
@@ -442,16 +356,14 @@ export class ArchiveWriter {
           continue;
         }
         db.prepare(
-          `INSERT OR IGNORE INTO file_operations(id,operation,entry_id,sha256,source,target${schemaVersion(db) >= 3 ? ",expected_generation" : ""}) VALUES (?, 'push', ?, ?, ?, ?${schemaVersion(db) >= 3 ? ",?" : ""})`,
+          `INSERT OR IGNORE INTO file_operations(id,operation,entry_id,sha256,source,target,expected_generation) VALUES (?, 'push', ?, ?, ?, ?,?)`,
         ).run(
           randomUUID().replaceAll("-", ""),
           entry.id,
           entry.sha256,
           input.source,
           target,
-          ...(schemaVersion(db) >= 3
-            ? [currentEntry(db, entry.id).generation]
-            : []),
+          ...[currentEntry(db, entry.id).generation],
         );
       }
       await this.fault("push-before-commit");
@@ -496,7 +408,9 @@ export class ArchiveWriter {
           }
         ).revision;
         let entries = db
-          .prepare(`SELECT path,sha256 FROM ${activeEntries(db)} ORDER BY path`)
+          .prepare(
+            `SELECT path,sha256 FROM active_archive_entries ORDER BY path`,
+          )
           .all() as Entry[];
         if (selected) {
           const requested = new Set(selected);
@@ -514,15 +428,12 @@ export class ArchiveWriter {
         const expectedHashes: string[] = [];
         function* originals() {
           for (const e of entries) {
-            const unavailable =
-              schemaVersion(db) >= 3 &&
-              (db
-                .prepare(
-                  "SELECT v.manifest_status FROM archive_entries e JOIN track_versions v ON v.id=e.current_version_id WHERE e.path=?",
-                )
-                .get(e.path) as { manifest_status: string } | false);
-            const fallback =
-              unavailable && unavailable.manifest_status !== "ready";
+            const unavailable = db
+              .prepare(
+                "SELECT v.manifest_status FROM archive_entries e JOIN track_versions v ON v.id=e.current_version_id WHERE e.path=?",
+              )
+              .get(e.path) as { manifest_status: string };
+            const fallback = unavailable.manifest_status !== "ready";
             if (fallback)
               warnings.push(
                 `${e.path}: 段清单不可用，压缩包中保留原字节，未应用展示设置`,
@@ -570,7 +481,7 @@ export class ArchiveWriter {
       try {
         const newer = db
           .prepare(
-            `SELECT revision FROM export_receipts WHERE target=?${schemaVersion(db) >= 3 ? " AND kind='kml_zip'" : ""}`,
+            `SELECT revision FROM export_receipts WHERE target=? AND kind='kml_bundle'`,
           )
           .get(output) as { revision: number } | undefined;
         if (newer && newer.revision > revision)
@@ -592,12 +503,10 @@ export class ArchiveWriter {
         await this.fault("export-published");
         if (!selected && !transient) {
           db.prepare(
-            "UPDATE archive_meta SET zip_revision=?,zip_target=? WHERE singleton=1",
+            "UPDATE archive_meta SET export_revision=?,export_target=? WHERE singleton=1",
           ).run(revision, output);
           db.prepare(
-            schemaVersion(db) >= 3
-              ? "INSERT INTO export_receipts VALUES (?,'kml_zip',?,NULL) ON CONFLICT(target,kind) DO UPDATE SET revision=excluded.revision"
-              : "INSERT INTO export_receipts VALUES (?,?) ON CONFLICT(target) DO UPDATE SET revision=excluded.revision",
+            "INSERT INTO export_receipts VALUES (?,'kml_bundle',?,NULL) ON CONFLICT(target,kind) DO UPDATE SET revision=excluded.revision",
           ).run(output, revision);
         }
         await this.fault("before-export-commit");

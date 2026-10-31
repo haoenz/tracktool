@@ -1,3 +1,7 @@
+import {
+  previewDeletion,
+  deleteEntryInTransaction,
+} from "../../dist/node/infrastructure/archive/deletion.js";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
@@ -29,7 +33,7 @@ it.each(["update", "delete"] as const)(
     const writer = new Database(archive);
     writer.pragma("foreign_keys=ON");
     const { sha256 } = writer
-      .prepare("SELECT sha256 FROM archive_entries WHERE path=?")
+      .prepare("SELECT sha256 FROM active_archive_entries WHERE path=?")
       .get(member) as { sha256: string };
     writer.prepare("DELETE FROM kml_index WHERE sha256=?").run(sha256);
     let parses = 0;
@@ -40,12 +44,12 @@ it.each(["update", "delete"] as const)(
         writer
           .transaction(() => {
             if (change === "delete") {
-              writer
-                .prepare("DELETE FROM archive_entries WHERE path=?")
-                .run(member);
-              writer
-                .prepare("DELETE FROM kml_objects WHERE sha256=?")
-                .run(sha256);
+              const plan = previewDeletion(archive, { name: member });
+              deleteEntryInTransaction(writer, {
+                archive_id: plan.archive_id,
+                expected: plan.expected,
+                request_key: "remove",
+              });
             } else writer.exec("UPDATE archive_meta SET revision=revision+1");
           })
           .immediate();

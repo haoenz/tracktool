@@ -73,7 +73,7 @@ function equivalent(
 export function administrativeLocation(
   results: GeocodeResult[],
   zeroResults = false,
-  options: { rawResponse?: GeocodeResponse; legacy?: boolean } = {},
+  options: { rawResponse?: GeocodeResponse } = {},
 ): AdministrativeLocation {
   const candidates = (zeroResults ? [] : results)
     .map(parseAdministrativeCandidate)
@@ -97,7 +97,6 @@ export function administrativeLocation(
     reasons: [],
     hierarchy: [],
   };
-  if (options.legacy) resolution.reasons.push("legacy_evidence_only");
   const conflict = new Set<AdministrativeField>();
   // Resolve each level independently before discarding descendants. This can also retain
   // the common province when city/district candidates disagree.
@@ -194,29 +193,18 @@ export function administrativeLocation(
     components: base?.result.address_components ?? [],
     status: zeroResults ? "zero_results" : complete ? "complete" : "partial",
     resolution,
-    raw_source: options.legacy ? "legacy_components" : "full_response",
-    ...(!options.legacy
-      ? {
-          raw_response: options.rawResponse ?? {
-            status: zeroResults ? ("ZERO_RESULTS" as const) : ("OK" as const),
-            results,
-          },
-        }
-      : {}),
+    raw_response: options.rawResponse ?? {
+      status: zeroResults ? "ZERO_RESULTS" : "OK",
+      results,
+    },
   };
 }
 export function reparseAdministrativeLocation(
   location: AdministrativeLocation,
 ) {
-  if (location.raw_response)
-    return administrativeLocation(
-      location.raw_response.results,
-      location.raw_response.status === "ZERO_RESULTS",
-      { rawResponse: location.raw_response },
-    );
   return administrativeLocation(
-    [{ address_components: location.components }],
-    location.status === "zero_results",
-    { legacy: true },
+    location.raw_response.results,
+    location.raw_response.status === "ZERO_RESULTS",
+    { rawResponse: location.raw_response },
   );
 }

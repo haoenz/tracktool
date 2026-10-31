@@ -1,28 +1,24 @@
-import { distance } from "../../domain/kml-edit.js";
-import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
+import geojsonvt from "geojson-vt";
 import { createHash, randomBytes } from "node:crypto";
+import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
-import geojsonvt from "geojson-vt";
 import vtpbf from "vt-pbf";
 import { AppError } from "../../domain/errors.js";
+import { distance } from "../../domain/kml-edit.js";
 import {
-  overviewFeatures,
-  OverviewExtent,
   OVERVIEW_TILING,
+  OverviewExtent,
+  overviewFeatures,
   type DisplayFeature,
 } from "../../domain/overview.js";
 import { pointCount } from "../../domain/trackdata.js";
 import type { OverviewEntry, OverviewProgress } from "../../shared/overview.js";
+import { rawObject } from "../archive/database.js";
 import {
-  activeEntries,
-  rawObject,
-  schemaVersion,
-} from "../archive/database.js";
-import {
+  displayed,
   readPresentation,
   resolveTrack,
-  displayed,
 } from "../archive/presentation.js";
 import { deserialize, PARSER_VERSION } from "../track-index.js";
 import { withDocument } from "../xml/document.js";
@@ -96,7 +92,7 @@ export async function buildOverview(
       throw new AppError("CANCELLED", "轨迹库已更新，准备构建最新版本");
     const rows = db
       .prepare(
-        `SELECT id,path,sha256,category,filename_date FROM ${activeEntries(db)} ORDER BY id`,
+        `SELECT id,path,sha256,category,filename_date FROM active_archive_entries ORDER BY id`,
       )
       .all() as {
       id: string;
@@ -126,12 +122,9 @@ export async function buildOverview(
       };
       let features: DisplayFeature[];
       try {
-        const ref =
-          schemaVersion(db) >= 3
-            ? resolveTrack(db, { entry: row.path })
-            : undefined;
-        const presentation = ref ? readPresentation(db, ref) : undefined;
-        entry.display_key = presentation?.key ?? row.sha256;
+        const ref = resolveTrack(db, { entry: row.path });
+        const presentation = readPresentation(db, ref);
+        entry.display_key = presentation.key;
         let value: Coordinates;
         try {
           value = await readObject(root, row.sha256);
@@ -162,6 +155,16 @@ export async function buildOverview(
                 : new Date(Math.floor(Number(first) / 1000) + 8 * 3600_000)
                     .toISOString()
                     .slice(0, 10),
+            distance_m: measureDistance(
+              data.tracks.flatMap((t) =>
+                t.segments.map((s) =>
+                  Array.from(
+                    s.longitude,
+                    (x, i) => [x, s.latitude[i]!] as [number, number],
+                  ),
+                ),
+              ),
+            ),
             points: pointCount(data),
             segments: data.tracks.flatMap((t) =>
               t.segments.map((s) =>
@@ -174,7 +177,6 @@ export async function buildOverview(
           };
           if (value.points > LIMITS.points)
             throw new AppError("TOOL", "单条轨迹超过概览点数预算");
-          value.distance_m ??= measureDistance(value.segments);
           const bytes = encodeObject(row.sha256, value);
           account(bytes.length);
           await atomic(objectPath(root, row.sha256), bytes);
@@ -184,14 +186,8 @@ export async function buildOverview(
         entry.start_time_us = value.start_time_us ?? undefined;
         // Measuring every point is the expensive part of a rebuild; persist it
         // with the geometry object so unchanged tracks are not re-measured.
-        if (value.distance_m === undefined) {
-          value.distance_m = measureDistance(value.segments);
-          const bytes = encodeObject(row.sha256, value);
-          account(bytes.length);
-          await atomic(objectPath(root, row.sha256), bytes);
-        }
         entry.distance_m = value.distance_m;
-        if (presentation) {
+        {
           try {
             value = await readObject(root, presentation.key);
           } catch {
@@ -229,6 +225,16 @@ export async function buildOverview(
               tags: value.tags,
               date: value.date,
               start_time_us: value.start_time_us,
+              distance_m: measureDistance(
+                data.tracks.flatMap((t) =>
+                  t.segments.map((s) =>
+                    Array.from(
+                      s.longitude,
+                      (x, i) => [x, s.latitude[i]!] as [number, number],
+                    ),
+                  ),
+                ),
+              ),
               points: pointCount(data),
               segments: data.tracks.flatMap((t) =>
                 t.segments.map((s) =>
@@ -239,7 +245,6 @@ export async function buildOverview(
                 ),
               ),
             };
-            value.distance_m ??= measureDistance(value.segments);
             const bytes = encodeObject(presentation.key, value);
             account(bytes.length);
             await atomic(objectPath(root, presentation.key), bytes);

@@ -1,20 +1,25 @@
-import { beforeEach, afterEach, it, expect } from "vitest";
-import { mkdtemp, copyFile, rm, readFile } from "node:fs/promises";
+import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import Database from "better-sqlite3";
-import { inflateSync, deflateSync } from "node:zlib";
-import { createHash } from "node:crypto";
+import { deflateSync } from "node:zlib";
+import { afterEach, beforeEach, expect, it } from "vitest";
+import { timestamp } from "../../dist/node/domain/trackdata.js";
 import { ArchiveClient } from "../../dist/node/infrastructure/archive/client.js";
-import { withDocument } from "../../dist/node/infrastructure/xml/document.js";
-import { readTrackData } from "../../dist/node/infrastructure/xml/trackdata.js";
 import {
-  serialize,
+  deleteEntry,
+  previewDeletion,
+} from "../../dist/node/infrastructure/archive/deletion.js";
+import { ArchiveStore } from "../../dist/node/infrastructure/archive/store.js";
+import { addEntry } from "../../dist/node/infrastructure/archive/writer.js";
+import {
   deserialize,
   PARSER_VERSION,
+  serialize,
 } from "../../dist/node/infrastructure/track-index.js";
-import { timestamp } from "../../dist/node/domain/trackdata.js";
-import { ArchiveStore } from "../../dist/node/infrastructure/archive/store.js";
+import { withDocument } from "../../dist/node/infrastructure/xml/document.js";
+import { readTrackData } from "../../dist/node/infrastructure/xml/trackdata.js";
 import type { XmlResult } from "../../dist/node/services/ports.js";
 const first = "Default/2026-10-01 中文.kml";
 let directory: string, archive: string, client: ArchiveClient;
@@ -47,19 +52,18 @@ it("snapshot survives concurrent deletion and index creation cannot resurrect th
   const writer = new Database(archive);
   writer.pragma("foreign_keys=ON");
   const { sha256 } = writer
-    .prepare("SELECT sha256 FROM archive_entries WHERE path=?")
+    .prepare("SELECT sha256 FROM active_archive_entries WHERE path=?")
     .get("Train/same.kml") as { sha256: string };
-  writer
-    .transaction(() => {
-      writer
-        .prepare("DELETE FROM archive_entries WHERE path=?")
-        .run("Train/same.kml");
-      writer.prepare("DELETE FROM kml_objects WHERE sha256=?").run(sha256);
-    })
-    .immediate();
+  const plan = previewDeletion(archive, { name: "Train/same.kml" });
   writer.close();
-  const tracks = deserialize(
-    await readFile("tests/ts/fixtures/maps/python-index.zlib"),
+  deleteEntry(archive, {
+    archive_id: plan.archive_id,
+    expected: plan.expected,
+    request_key: "delete",
+  });
+  const tracks = withDocument(
+    await readFile("tests/ts/fixtures/xml/complex.kml"),
+    readTrackData,
   );
   finish({ name: tracks.name, placemarks: 1, coordinateNodes: 6, tracks });
   expect((await reading).tracks).toHaveLength(1);
@@ -80,8 +84,10 @@ it("enforces 200-member and raw 128 MiB limits even on index hits", async () => 
     ),
   ).rejects.toThrow("200");
   const db = new Database(archive);
+  // Deliberately corrupt a temporary fixture to test the read-size guard.
+  db.exec("DROP TRIGGER object_no_update");
   db.prepare(
-    "UPDATE kml_objects SET raw_size=? WHERE sha256=(SELECT sha256 FROM archive_entries WHERE path=?)",
+    "UPDATE kml_objects SET raw_size=? WHERE sha256=(SELECT sha256 FROM active_archive_entries WHERE path=?)",
   ).run(128 * 1024 * 1024 + 1, first);
   db.close();
   expect((await client.selection(archive, [first])).errors[0]!.error).toContain(
@@ -89,7 +95,7 @@ it("enforces 200-member and raw 128 MiB limits even on index hits", async () => 
   );
   expect((await client.stats()).indexHits).toBe(0);
 });
-it("coordinate comments, zero altitude, time mismatches and invalid aligned times retain Python semantics", () => {
+it("coordinate comments, zero altitude, time mismatches and invalid aligned times preserve coordinate and timestamp semantics", () => {
   const xml = (geometry: string) =>
     Buffer.from(
       `<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><Placemark>${geometry}</Placemark></Document></kml>`,
@@ -108,14 +114,10 @@ it("coordinate comments, zero altitude, time mismatches and invalid aligned time
     read("<LineString><coordinates>120,30 181,30</coordinates></LineString>"),
   ).toThrow("point 2: Invalid longitude");
 });
-it("reads Python binary64/int64 index exactly and writes Python-compatible payloads", async () => {
-  const python = await readFile("tests/ts/fixtures/maps/python-index.zlib"),
-    raw = await readFile("tests/ts/fixtures/xml/complex.kml");
-  const parsed = withDocument(raw, (d) => readTrackData(d));
-  expect(deserialize(python)).toEqual(parsed);
-  expect(JSON.parse(inflateSync(serialize(parsed)).toString())).toEqual(
-    JSON.parse(inflateSync(python).toString()),
-  );
+it("roundtrips binary64 coordinates and int64 timestamps exactly", async () => {
+  const raw = await readFile("tests/ts/fixtures/xml/complex.kml");
+  const parsed = withDocument(raw, readTrackData);
+  expect(deserialize(serialize(parsed))).toEqual(parsed);
   expect(parsed.tracks[0]!.segments[0]!.altitude![0]).toBeNaN();
   expect(parsed.tracks[0]!.segments[0]!.altitude![1]).toBe(0);
   expect(parsed.tracks[0]!.segments[1]!.time_us![0]).toBe(1790812800123456n);
@@ -203,6 +205,10 @@ it("rebuilds corrupt disposable indices without altering originals, rejects bad/
         [179, 30],
         [181, 31],
       ],
+      [
+        [-179, 31],
+        [-240, 40],
+      ],
     ],
     [[120, 40]],
   ]);
@@ -218,7 +224,7 @@ it("rejects unknown schemas without upgrading or creating missing files", async 
   const db = new Database(archive);
   db.pragma("user_version=99");
   db.close();
-  await expect(client.catalog(archive)).rejects.toThrow("schema 99");
+  await expect(client.catalog(archive)).rejects.toThrow("99");
   await expect(
     client.catalog(path.join(directory, "missing.sqlite3")),
   ).rejects.toThrow("找不到");
@@ -242,15 +248,7 @@ it("rebuilds old parser errors for empty time slots and preserves raw data and s
     db = new Database(archive),
     payload = deflateSync(raw);
   const schema = db.pragma("user_version", { simple: true });
-  db.prepare("INSERT INTO kml_objects VALUES (?,?,?,?)").run(
-    digest,
-    "zlib",
-    raw.length,
-    payload,
-  );
-  db.prepare(
-    "INSERT INTO archive_entries(id,path,sha256,category) VALUES (?,?,?,?)",
-  ).run("partial-time", entry, digest, "Default");
+  db.transaction(() => addEntry(db, entry, raw, "Default"))();
   db.prepare("INSERT INTO kml_index VALUES (?,?, 'error', '{}', NULL, ?)").run(
     digest,
     2,
@@ -295,18 +293,9 @@ it("tracks larger than the RAM cache remain selectable and reopen from the persi
       "104,30,0 ".repeat(500_001) +
       "</coordinates></LineString></Placemark></kml>",
   );
-  const digest = createHash("sha256").update(raw).digest("hex"),
-    db = new Database(archive),
+  const db = new Database(archive),
     entry = "Default/large.kml";
-  db.prepare("INSERT INTO kml_objects VALUES (?,?,?,?)").run(
-    digest,
-    "zlib",
-    raw.length,
-    deflateSync(raw),
-  );
-  db.prepare(
-    "INSERT INTO archive_entries(id,path,sha256,category) VALUES (?,?,?,?)",
-  ).run("large-cache-test", entry, digest, "Default");
+  db.transaction(() => addEntry(db, entry, raw, "Default"))();
   db.close();
   for (let i = 0; i < 2; i++) {
     const selected = await client.selection(archive, [entry]);

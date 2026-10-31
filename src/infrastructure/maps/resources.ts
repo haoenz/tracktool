@@ -1,21 +1,21 @@
-import { readFile, mkdir, rename, writeFile, unlink } from "node:fs/promises";
-import { readFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import sharp from "sharp";
 import opentype from "opentype.js";
+import sharp from "sharp";
 import { AppError, checkCancelled } from "../../domain/errors.js";
-import type { MapConfig, MapPreset } from "../../shared/map.js";
 import { MAP_LABEL_FONTS } from "../../shared/map-label.js";
-import { TileCache } from "./tile-cache.js";
+import type { MapConfig, MapPreset } from "../../shared/map.js";
 import { Downloads } from "./downloads.js";
-import { Transport } from "./transport.js";
-import { labelVectorTile, vectorLabelVersion } from "./vector-labels.js";
 import {
   rasterReprojectionVersion,
   reprojectGcjTile,
 } from "./raster-reprojection.js";
+import { TileCache } from "./tile-cache.js";
+import { Transport } from "./transport.js";
+import { labelVectorTile, vectorLabelVersion } from "./vector-labels.js";
 type Preset = MapPreset & { url: string; invalid_tile_sha256?: string[] };
 type Vector = {
   tiles: string[];
@@ -32,19 +32,6 @@ type Assets = {
 const hash = (value: Uint8Array | string) =>
   createHash("sha256").update(value).digest("hex");
 const credit = "OpenFreeMap © OpenMapTiles © OpenStreetMap contributors";
-/** Match Python json.dumps(sort_keys=True), including ASCII escaping and separators. */
-export function pythonJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(pythonJson).join(", ")}]`;
-  if (value && typeof value === "object")
-    return `{${Object.entries(value)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([k, v]) => `${pythonJson(k)}: ${pythonJson(v)}`)
-      .join(", ")}}`;
-  return JSON.stringify(value).replace(
-    /[\u007f-\uffff]/g,
-    (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
-  );
-}
 export function tileUrl(
   source: { url: string },
   z: number,
@@ -188,18 +175,6 @@ export class MapResources {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT")
           throw new AppError("USER_INPUT", "底图缓存无效，请刷新底图");
-      }
-    if (!value && !refresh && !this.env.TRACKTOOL_MAP_TILEJSON)
-      try {
-        const old = JSON.parse(
-          await readFile(path.join(this.cache, "basemap.json"), "utf8"),
-        ) as Vector;
-        if (
-          old.tiles?.every((u) => new URL(u).host === "tiles.openfreemap.org")
-        )
-          value = old;
-      } catch {
-        /* No usable legacy cache. */
       }
     value ??= JSON.parse((await this.fetcher(url)).toString("utf8")) as Vector;
     if (
@@ -378,7 +353,9 @@ export class MapResources {
       const original = await this.tile(source, z, x, y, signal, exporting);
       checkCancelled(signal);
       // Keep upstream tiles intact; rule changes only invalidate derived tiles.
-      const key = hash(pythonJson([vectorLabelVersion, hash(original.data)]));
+      const key = hash(
+        JSON.stringify([vectorLabelVersion, hash(original.data)]),
+      );
       const cached = this.tiles.get(key);
       if (cached !== undefined) {
         try {
@@ -394,7 +371,9 @@ export class MapResources {
     }
     if (preset?.crs !== "gcj02" || preset.format === "vector")
       return this.tile(source, z, x, y, signal, exporting);
-    const key = hash(pythonJson([rasterReprojectionVersion, preset, z, x, y]));
+    const key = hash(
+      JSON.stringify([rasterReprojectionVersion, preset, z, x, y]),
+    );
     const data = await this.reprojections.load(
       key,
       "custom",
@@ -460,7 +439,7 @@ export class MapResources {
           .replace("{y}", String(y));
     if (!url) throw new AppError("USER_INPUT", "地图源尚未配置");
     const key = hash(
-      pythonJson([
+      JSON.stringify([
         "tile-v2",
         source,
         url,
@@ -476,19 +455,6 @@ export class MapResources {
           return data;
         } catch {
           this.tiles.delete(key);
-        }
-      }
-      const oldKey = `legacy:${hash(url)}`,
-        old = this.tiles.get(oldKey);
-      if (old !== undefined) {
-        try {
-          await this.validate(source, old);
-          this.tiles.put(key, old);
-          return old;
-        } catch {
-          /* Invalid legacy entry is discarded. */
-        } finally {
-          this.tiles.delete(oldKey);
         }
       }
       return undefined;
@@ -597,8 +563,8 @@ export class MapResources {
         info.height !== size
       )
         throw new Error();
-      // Current cache hits need header/size validation, while downloads and
-      // legacy imports must also prove the complete raster decodes.
+      // Current cache hits need header/size validation, while downloads
+      // must also prove the complete raster decodes.
       if (decodeRaster) await image.raw().toBuffer();
     } catch (cause) {
       throw new AppError(

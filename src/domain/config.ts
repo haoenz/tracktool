@@ -1,16 +1,15 @@
+import type { PublicConfig } from "../shared/contracts.js";
 import {
   CategorySchema,
   LogLevelSchema,
   PublicConfigSchema,
 } from "../shared/contracts.js";
-import type { PublicConfig } from "../shared/contracts.js";
 import { AppError } from "./errors.js";
 
 export type ConfigData = Record<string, unknown>;
 export const DEFAULTS: ConfigData = {
   log_level: "INFO",
   archive_path: "",
-  archive_history: true,
   auto_fill_locations: true,
   kml_backup_dir_name: "Backup",
   output_filters: "",
@@ -106,7 +105,7 @@ export function normalizeScalar(key: string, value: string): unknown {
       throw new AppError("USER_INPUT", `未知的日志级别：${value}`);
     return parsed.data;
   }
-  if (key === "archive_history" || key === "auto_fill_locations") {
+  if (key === "auto_fill_locations") {
     const parsed = parseBool(value);
     if (parsed === undefined)
       throw new AppError("USER_INPUT", `${key} 必须是 true 或 false`);
@@ -128,7 +127,6 @@ export function publicConfig(data: ConfigData, envKey?: string): PublicConfig {
   return PublicConfigSchema.parse({
     log_level: level.success ? level.data : "INFO",
     archive_path: String(data.archive_path || ""),
-    archive_history: parseBool(data.archive_history) ?? true,
     kml_backup_dir_name: String(data.kml_backup_dir_name || "Backup"),
     google_api_key_configured: Boolean(resolveApiKey(data, envKey)),
     "track_tag.Default": (data["track_tag.Default"] as unknown[]).map((v) =>

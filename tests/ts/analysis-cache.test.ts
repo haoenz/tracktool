@@ -1,31 +1,28 @@
-import { afterEach, expect, it, vi } from "vitest";
-import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, expect, it, vi } from "vitest";
 import {
-  TrackAnalysisCache,
   CURRENT_ANALYSIS_KEY,
+  TrackAnalysisCache,
 } from "../../dist/node/infrastructure/archive/analysis-cache.js";
-import {
-  ArchiveWriter,
-  addEntry,
-} from "../../dist/node/infrastructure/archive/writer.js";
 import {
   readTransaction,
   transaction,
 } from "../../dist/node/infrastructure/archive/database.js";
-import { SCHEMA_4 } from "../../dist/node/infrastructure/archive/schema-v4.js";
-import { migrateArchive } from "../../dist/node/infrastructure/archive/migrate.js";
-import { fullBackup } from "../../dist/node/infrastructure/archive/full-backup.js";
 import {
-  previewDeletion,
   deleteEntry,
+  previewDeletion,
 } from "../../dist/node/infrastructure/archive/deletion.js";
+import { downloadBytes } from "../../dist/node/infrastructure/archive/download.js";
+import { fullBackup } from "../../dist/node/infrastructure/archive/full-backup.js";
+import { VersionStore } from "../../dist/node/infrastructure/archive/versions.js";
+import {
+  ArchiveWriter,
+  addEntry,
+} from "../../dist/node/infrastructure/archive/writer.js";
 import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
 import type { XmlPort } from "../../dist/node/services/ports.js";
-import { downloadBytes } from "../../dist/node/infrastructure/archive/download.js";
-import { VersionStore } from "../../dist/node/infrastructure/archive/versions.js";
 
 const clean: (() => unknown | Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -34,23 +31,15 @@ afterEach(async () => {
 const raw = Buffer.from(
   '<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><Placemark><gx:Track><when>2026-10-16T00:00:00Z</when><when>2026-10-16T00:01:00Z</when><when>2026-10-16T00:02:00Z</when><gx:coord>120 30 10</gx:coord><gx:coord>120.001 30 20</gx:coord><gx:coord>120.002 30 30</gx:coord></gx:Track></Placemark></Document></kml>',
 );
-async function fixture(schema = 5, keepIngestCache = false) {
+async function fixture(keepIngestCache = false) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "tracktool-analysis-"));
   clean.push(() => rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, "archive.sqlite3");
-  if (schema === 5) await new ArchiveWriter().init(dir);
-  else {
-    const db = new Database(file);
-    db.exec(SCHEMA_4);
-    db.exec(
-      "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'analysis-test')",
-    );
-    db.close();
-  }
+  await new ArchiveWriter().init(dir);
   const entry = transaction(file, true, (db) =>
     addEntry(db, "a.kml", raw, "Default"),
   );
-  if (schema === 5 && !keepIngestCache)
+  if (!keepIngestCache)
     transaction(file, true, (db) =>
       db.exec("DELETE FROM track_analysis_cache"),
     );
@@ -284,46 +273,6 @@ it("new versions are analyzed during publication while history retains its own c
   expect(rows(file)).toHaveLength(2);
 });
 
-it("migrates schema 4 with a complete backup, rollback and no eager analysis", async () => {
-  const { file, entry, cache } = await fixture(4);
-  const before = stamp(file);
-  expect((await cache.get(file, entry.id, entry.sha256)).elapsed_s).toBe(120);
-  expect(
-    readTransaction(file, (db) => db.pragma("user_version", { simple: true })),
-  ).toBe(4);
-  await expect(
-    migrateArchive(file, (stage) => {
-      if (stage === "migration-before-commit") throw new Error("fault");
-    }),
-  ).rejects.toThrow("fault");
-  expect(stamp(file)).toEqual(before);
-  expect(
-    readTransaction(file, (db) =>
-      db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE name='track_analysis_cache'",
-        )
-        .get(),
-    ),
-  ).toBeUndefined();
-  const backup = await migrateArchive(file);
-  expect(
-    readTransaction(backup!, (db) =>
-      db.pragma("user_version", { simple: true }),
-    ),
-  ).toBe(4);
-  expect(downloadBytes(backup!, { entry_id: entry.id }).bytes).toEqual(raw);
-  expect(
-    readTransaction(file, (db) => db.pragma("user_version", { simple: true })),
-  ).toBe(8);
-  expect(rows(file)).toHaveLength(0);
-  const after = stamp(file) as { revision: number };
-  expect(after.revision).toBe((before as { revision: number }).revision);
-  expect(await migrateArchive(file)).toBeUndefined();
-  await cache.get(file, entry.id, entry.sha256);
-  expect(rows(file)).toHaveLength(1);
-});
-
 it("full backups include cached profiles and can reuse them", async () => {
   const { file, dir, entry, cache } = await fixture();
   const value = await cache.get(file, entry.id, entry.sha256);
@@ -343,7 +292,7 @@ it("full backups include cached profiles and can reuse them", async () => {
 });
 
 it("imports persist analysis before the first read and reuse identical content", async () => {
-  const { file, entry, cache, run } = await fixture(5, true);
+  const { file, entry, cache, run } = await fixture(true);
   expect(rows(file)).toHaveLength(1);
   expect((await cache.get(file, entry.id, entry.sha256)).elapsed_s).toBe(120);
   expect(run).not.toHaveBeenCalled();
@@ -353,7 +302,7 @@ it("imports persist analysis before the first read and reuse identical content",
 });
 
 it("rolls back ingestion if its statistics cannot be stored", async () => {
-  const { file } = await fixture(5, true);
+  const { file } = await fixture(true);
   const before = stamp(file);
   transaction(file, true, (db) =>
     db.exec(
@@ -385,7 +334,7 @@ it("rolls back ingestion if its statistics cannot be stored", async () => {
 });
 
 it("preserves unparseable imported originals without fabricating analysis", async () => {
-  const { file } = await fixture(5, true);
+  const { file } = await fixture(true);
   const invalid = Buffer.from("invalid original KML");
   const entry = transaction(file, true, (db) =>
     addEntry(db, "invalid.kml", invalid, "Default"),

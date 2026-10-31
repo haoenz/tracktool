@@ -1,37 +1,36 @@
-import { exportEncoding } from "../../dist/node/shared/export-format.js";
-import { afterEach, expect, it, vi } from "vitest";
+import Database from "better-sqlite3";
+import { existsSync } from "node:fs";
 import {
+  copyFile,
+  mkdir,
   mkdtemp,
-  writeFile,
   readFile,
   rm,
-  mkdir,
-  copyFile,
+  stat,
   symlink,
   utimes,
-  stat,
+  writeFile,
 } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import sharp from "sharp";
-import Database from "better-sqlite3";
-import { createApp } from "../../dist/node/server/app.js";
-import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js";
-import { SqliteTasks } from "../../dist/node/infrastructure/task-store.js";
-import { TaskQueue } from "../../dist/node/infrastructure/task-queue.js";
-import { WorkFiles } from "../../dist/node/infrastructure/work-files.js";
-import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
-import { BusinessRunner } from "../../dist/node/infrastructure/work-runner.js";
+import { afterEach, expect, it, vi } from "vitest";
 import { AppError } from "../../dist/node/domain/errors.js";
+import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js";
+import { TaskQueue } from "../../dist/node/infrastructure/task-queue.js";
+import { SqliteTasks } from "../../dist/node/infrastructure/task-store.js";
+import { WorkFiles } from "../../dist/node/infrastructure/work-files.js";
+import { BusinessRunner } from "../../dist/node/infrastructure/work-runner.js";
+import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
+import { createApp } from "../../dist/node/server/app.js";
+import type { WorkRunner } from "../../dist/node/services/work-ports.js";
+import { exportEncoding } from "../../dist/node/shared/export-format.js";
+import type { WorkRequest, WorkTask } from "../../dist/node/shared/work.js";
 import {
   WorkRequestSchema,
   WorkTaskSchema,
-  WorkTasksResponseSchema,
 } from "../../dist/node/shared/work.js";
-import type { WorkTask, WorkRequest } from "../../dist/node/shared/work.js";
-import type { WorkRunner } from "../../dist/node/services/work-ports.js";
 const cleanup: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
   vi.unstubAllGlobals();
@@ -259,8 +258,7 @@ async function server(host = "127.0.0.1") {
     });
     const data = (await r.json()) as T & { error?: { message: string } };
     if (!r.ok) throw new Error(data.error?.message || String(r.status));
-    if (route === "/api/work/tasks") WorkTasksResponseSchema.parse(data);
-    else if (
+    if (
       route === "/api/work/preview" ||
       /^\/api\/work\/tasks\/[^/]+(?:\/(?:apply|retry|cancel))?$/.test(route)
     )
@@ -314,11 +312,9 @@ it("HTTP media upload → preview → execute → download survives page reload 
   expect(download.headers.get("content-disposition")).toContain("attachment");
   expect(Buffer.from(await download.arrayBuffer())).not.toEqual(bytes);
   expect(await readFile(uploaded.files[0]! + "_original")).toEqual(bytes);
-  expect(
-    (await call<{ tasks: WorkTask[] }>("/api/work/tasks")).tasks.map(
-      (t) => t.id,
-    ),
-  ).toContain(apply.id);
+  expect((await call<WorkTask>(`/api/work/tasks/${apply.id}`)).id).toBe(
+    apply.id,
+  );
   expect(JSON.stringify(result)).not.toContain("fixture-private-key");
   await call("/api/work/uploads/" + uploaded.id + "/cleanup", {});
   expect(existsSync(uploaded.files[0]!)).toBe(false);
@@ -407,7 +403,7 @@ it.each([
     const meta = () =>
       database
         .prepare(
-          "SELECT zip_revision,zip_target,views_revision FROM archive_meta",
+          "SELECT export_revision,export_target,views_revision FROM archive_meta",
         )
         .get();
     const receipts = () =>
@@ -651,7 +647,7 @@ it("LAN-bound HTTP accepts local-network uploads while keeping task API token ch
   expect(await readFile(data.files[0]!, "utf8")).toBe(
     "uploaded from another device",
   );
-  expect((await fetch(base + "/api/work/tasks")).status).toBe(403);
+  expect((await fetch(base + "/api/work/bootstrap")).status).toBe(403);
 });
 it("apply preserves successful files and exposes per-file failures if an external write fails", async () => {
   const { dir, call, settled } = await server(),
@@ -725,49 +721,6 @@ it("completed task and its events remain readable after closing and reopening th
   expect(saved.events).toEqual(complete.events);
   expect(saved.output).toEqual(complete.output);
 });
-it("map selections produce isolated copies, reject changed fingerprints and enforce file roots", async () => {
-  const { archive, call } = await server();
-  const selected = await call<{ tracks: { entry: string; sha256: string }[] }>(
-    "/api/selection",
-    {
-      archive,
-      entries: ["Default/2026-10-01 中文.kml", "Train/same.kml"],
-    },
-  );
-  expect(selected.tracks).toHaveLength(2);
-  const tracks = selected.tracks.map(({ entry, sha256 }) => ({
-    entry,
-    sha256,
-  }));
-  const copied = await call<{ id: string; files: string[] }>(
-    "/api/work/selection-copy",
-    { archive, tracks },
-  );
-  expect(copied.files).toHaveLength(2);
-  expect(new Set(copied.files).size).toBe(2);
-  expect(await readFile(copied.files[0]!, "utf8")).toContain("kml");
-  await writeFile(copied.files[0]!, "changed staging copy");
-  const again = await call<{ tracks: { sha256: string }[] }>("/api/selection", {
-    archive,
-    entries: tracks.map((t) => t.entry),
-  });
-  expect(again.tracks.map((t) => t.sha256)).toEqual(
-    tracks.map((t) => t.sha256),
-  );
-  const before = await call<{ uploads: unknown[] }>("/api/work/uploads");
-  await expect(
-    call("/api/work/selection-copy", {
-      archive,
-      tracks: [tracks[0], { ...tracks[1], sha256: "0".repeat(64) }],
-    }),
-  ).rejects.toThrow("源轨迹已变化");
-  expect(
-    (await call<{ uploads: unknown[] }>("/api/work/uploads")).uploads,
-  ).toHaveLength(before.uploads.length);
-  await expect(
-    call("/api/work/selection-copy", { archive: "/etc", tracks }),
-  ).rejects.toThrow("不在已开放");
-});
 it("web settings reject every server configuration write while CLI configuration remains available", async () => {
   const { archive, config, call } = await server();
   const before = await readFile(config);
@@ -792,99 +745,6 @@ it("web settings reject every server configuration write while CLI configuration
     "DEBUG",
   );
 });
-
-it.each(["archive:pop", "kml:to-multigeom"])(
-  "retains historical %s tasks and downloads but rejects new requests, retries and queued execution",
-  async (operation) => {
-    const { dir, call, address } = await server();
-    // Initialize the lazy task store, then seed records written by the older release.
-    await call("/api/work/tasks");
-    const store = new SqliteTasks(path.join(dir, "state/tasks.sqlite3"));
-    cleanup.push(() => store.close());
-    const output = path.join(dir, "old-download.kml");
-    await writeFile(output, "original downloaded bytes");
-    const old = store.enqueue(body());
-    store.db
-      .prepare("UPDATE tasks SET status='succeeded',body=? WHERE id=?")
-      .run(
-        JSON.stringify({
-          ...old,
-          status: "succeeded",
-          mode: "apply",
-          request: { ...old.request, operation },
-          output: { paths: [output] },
-        }),
-        old.id,
-      );
-    const listed = await call<{ tasks: WorkTask[] }>("/api/work/tasks");
-    expect(listed.tasks.find((t) => t.id === old.id)?.request.operation).toBe(
-      operation,
-    );
-    expect(
-      (await call<WorkTask>(`/api/work/tasks/${old.id}`)).output?.paths,
-    ).toEqual([output]);
-    const response = await fetch(
-      address + `/api/work/tasks/${old.id}/download?index=0`,
-      { headers: { "X-Tracktool-Token": "work-test" } },
-    );
-    expect(response.status).toBe(200);
-    expect(await response.text()).toBe("original downloaded bytes");
-    await expect(call(`/api/work/tasks/${old.id}/retry`, {})).rejects.toThrow();
-    await expect(
-      call("/api/work/preview", {
-        operation,
-        options: { name: "a.kml" },
-      }),
-    ).rejects.toThrow();
-    const preview = store.enqueue(body());
-    store.db
-      .prepare("UPDATE tasks SET status='succeeded',body=? WHERE id=?")
-      .run(
-        JSON.stringify({
-          ...preview,
-          status: "succeeded",
-          fingerprint: "old",
-          expiresAt: new Date(Date.now() + 60000).toISOString(),
-          request: { ...preview.request, operation },
-        }),
-        preview.id,
-      );
-    await expect(
-      call(`/api/work/tasks/${preview.id}/apply`, {}),
-    ).rejects.toThrow();
-    let calls = 0;
-    const isolated = new SqliteTasks(path.join(dir, "legacy-queue.sqlite3")),
-      queue = new TaskQueue(
-        isolated,
-        fake({
-          fingerprint: async () => {
-            calls++;
-            return "unchanged";
-          },
-          run: async () => {
-            calls++;
-            return { output: { paths: [] } };
-          },
-        }),
-      );
-    cleanup.push(() => queue.close());
-    const queued = isolated.enqueue(body());
-    isolated.db.prepare("UPDATE tasks SET body=? WHERE id=?").run(
-      JSON.stringify({
-        ...queued,
-        request: { ...queued.request, operation },
-      }),
-      queued.id,
-    );
-    queue.start();
-    await until(
-      () => isolated.read(queued.id),
-      (t) => t?.status === "failed",
-    );
-    expect(calls).toBe(0);
-    expect(await readFile(output, "utf8")).toBe("original downloaded bytes");
-  },
-);
 it("import preview distinguishes new, duplicate, conflict and invalid files without moving sources", async () => {
   const { dir, archive, call, settled } = await server();
   const bytes = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
@@ -1415,7 +1275,7 @@ it("incremental import previews reuse parsing while refreshing config, archive a
   }
 });
 
-it("reads progress timestamps consistently from individual tasks and summaries, including legacy fallbacks", async () => {
+it("reads progress timestamps consistently from individual tasks and summaries", async () => {
   let now = 10_000;
   const store = new SqliteTasks(
     path.join(await tmp(), "progress.sqlite3"),
@@ -1434,17 +1294,5 @@ it("reads progress timestamps consistently from individual tasks and summaries, 
   expect(store.list().find((item) => item.id === task.id)).toMatchObject({
     updatedAt,
     progress: { completed: 1, total: 2 },
-  });
-  // A migrated row may still rely on fields in the original JSON body.
-  store.db
-    .prepare("UPDATE tasks SET progress=NULL,updated_at=NULL WHERE id=?")
-    .run(task.id);
-  expect(store.read(task.id)).toMatchObject({
-    updatedAt: task.createdAt,
-    progress: { completed: 0, total: 0 },
-  });
-  expect(store.list().find((item) => item.id === task.id)).toMatchObject({
-    updatedAt: task.createdAt,
-    progress: { completed: 0, total: 0 },
   });
 });

@@ -71,7 +71,7 @@ export function nearestPoint(
       name,
       time: stamp,
     };
-    // Within one track equal distance selects the later instant, as Python bisect_left does.
+    // Within one track equal distance selects the later instant.
     if (
       !best ||
       seconds < best.seconds ||

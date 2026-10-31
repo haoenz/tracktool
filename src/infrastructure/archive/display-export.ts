@@ -1,19 +1,13 @@
 import type Database from "better-sqlite3";
-import { rawObject, schemaVersion } from "./database.js";
-import { resolveTrack, readPresentation } from "./presentation.js";
-import { displayKml } from "../xml/display.js";
 import type { TrackReference } from "../../shared/track-reference.js";
+import { displayKml } from "../xml/display.js";
+import { rawObject } from "./database.js";
+import { readPresentation, resolveTrack } from "./presentation.js";
 export function exportDisplay(
   db: Database.Database,
   entry: string,
   ref?: TrackReference,
 ): Uint8Array {
-  if (schemaVersion(db) < 3) {
-    const row = db
-      .prepare("SELECT sha256 FROM archive_entries WHERE path=?")
-      .get(entry) as { sha256: string };
-    return rawObject(db, row.sha256);
-  }
   const reference = resolveTrack(db, ref ?? { entry });
   const { segments, settings } = readPresentation(db, reference);
   return displayKml({

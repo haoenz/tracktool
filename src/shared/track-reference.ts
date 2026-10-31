@@ -6,10 +6,10 @@ export const TrackReferenceSchema = z
   .object({
     entry: z.string().min(1).max(4096),
     sha256: sha,
-    archive_id: id.optional(),
-    entry_id: id.optional(),
-    version_id: id.optional(),
-    presentation_id: id.optional(),
+    archive_id: id,
+    entry_id: id,
+    version_id: id,
+    presentation_id: id,
   })
-  .passthrough();
+  .strict();
 export type TrackReference = z.infer<typeof TrackReferenceSchema>;

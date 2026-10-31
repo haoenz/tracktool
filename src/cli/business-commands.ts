@@ -1,30 +1,29 @@
-import {
-  EXPORT_FORMATS,
-  COMPRESSION_PRESETS,
-  exportEncoding,
-  type ExportOptions,
-} from "../shared/export-format.js";
-import { randomUUID } from "node:crypto";
 import { Args, Command, Flags } from "@oclif/core";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { readFileSync, existsSync } from "node:fs";
+import type { ArchiveRequest, Category } from "../domain/archive.js";
+import { CATEGORIES } from "../domain/archive.js";
+import { resolveApiKey, tagMap } from "../domain/config.js";
+import { AppError, errorInfo } from "../domain/errors.js";
+import { ArchiveClient } from "../infrastructure/archive/client.js";
 import { FileConfigStore } from "../infrastructure/config-store.js";
+import { GoogleElevation } from "../infrastructure/elevation.js";
 import {
   LocalKmlFiles,
   expandPaths,
   workspace,
 } from "../infrastructure/kml-files.js";
-import { ArchiveClient } from "../infrastructure/archive/client.js";
-import { XmlWorkers } from "../infrastructure/xml/client.js";
-import { GoogleElevation } from "../infrastructure/elevation.js";
 import { displayPath, resolvePath } from "../infrastructure/paths.js";
-import { createContext } from "../services/context.js";
+import { XmlWorkers } from "../infrastructure/xml/client.js";
 import type { Context } from "../services/context.js";
+import { createContext } from "../services/context.js";
 import { KmlService } from "../services/kml-service.js";
-import { CATEGORIES } from "../domain/archive.js";
-import type { ArchiveRequest, Category } from "../domain/archive.js";
-import { AppError, errorInfo } from "../domain/errors.js";
-import { resolveApiKey, tagMap } from "../domain/config.js";
+import {
+  COMPRESSION_PRESETS,
+  EXPORT_FORMATS,
+  exportEncoding,
+  type ExportOptions,
+} from "../shared/export-format.js";
 import { Reporter } from "./progress.js";
 const common = {
   config: Flags.string({ description: "配置文件路径" }),
@@ -35,7 +34,7 @@ const common = {
   }),
   quiet: Flags.boolean({ char: "q", description: "只显示警告与错误" }),
 };
-const zip = Flags.string({ description: "归档 ZIP 路径；数据库位于同一目录" });
+const archive = Flags.string({ description: "归档目录或 SQLite 文件" });
 const category = () =>
   Flags.string({
     options: CATEGORIES,
@@ -76,9 +75,7 @@ export abstract class BusinessCommand extends Command {
     process.on("SIGINT", cancel);
     process.on("SIGTERM", cancel);
     try {
-      const config = await new FileConfigStore({ path: flags.config }).load({
-        persistMigration: !flags["dry-run"],
-      });
+      const config = await new FileConfigStore({ path: flags.config }).load();
       const verbosity = process.argv
         .slice(2)
         .reduce(
@@ -162,7 +159,7 @@ class ArchiveImport extends BusinessCommand {
   }
 }
 function archiveCommand(
-  kind: "status" | "backup" | "full-backup" | "recover" | "migrate" | "rebuild",
+  kind: "status" | "backup" | "full-backup" | "recover" | "rebuild",
 ) {
   return class extends BusinessCommand {
     static description = {
@@ -170,7 +167,6 @@ function archiveCommand(
       backup: "从一致快照导出当前展示 KML 压缩包（不含隐藏段和历史）",
       "full-backup": "完整备份 SQLite：原件、版本、展示设置、来源及项目",
       recover: "恢复中断的文件操作",
-      migrate: "完整备份后显式升级数据库到 schema 8",
       rebuild: "重新生成桌面与手机集合 KML",
     }[kind];
     static flags = {
@@ -188,7 +184,7 @@ function archiveCommand(
             }),
           }
         : {}),
-      zip,
+      archive,
       ...(kind === "backup" || kind === "full-backup"
         ? {
             output: Flags.string({
@@ -202,7 +198,7 @@ function archiveCommand(
     async run() {
       const { flags } = await this.parse(this.ctor);
       await this.using(flags as unknown as CommonFlags, async (ctx, s) => {
-        const w = workspace(ctx.config, flags.zip as string | undefined);
+        const w = workspace(ctx.config, flags.archive as string | undefined);
         const exportOptions: ExportOptions =
           kind === "backup"
             ? {
@@ -223,7 +219,7 @@ function archiveCommand(
                         w.directory,
                         exportEncoding(exportOptions).filename,
                       )
-                    : w.zip,
+                    : w.bundle,
               }
             : kind === "rebuild"
               ? { kind, database: w.database, output: w.directory }
@@ -248,48 +244,6 @@ class ArchiveRestoreBackup extends BusinessCommand {
         backup: resolvePath(args.source),
         directory: resolvePath(args.directory),
       });
-    });
-  }
-}
-class ArchiveUndo extends BusinessCommand {
-  static description = "已退役：不再支持历史撤销";
-  static flags = {
-    zip,
-    steps: Flags.integer({ min: 1, default: 1 }),
-    force: Flags.boolean(),
-  };
-  async run() {
-    const { flags } = await this.parse(ArchiveUndo);
-    await this.using(flags, async () => {
-      throw new AppError(
-        "USER_INPUT",
-        "Archive undo has been retired; use archive recover for interrupted file operations",
-      );
-    });
-  }
-}
-class ArchiveLog extends BusinessCommand {
-  static description = "只读查看旧版历史日志（已退役）";
-  static flags = { zip, last: Flags.integer({ min: 1, default: 10 }) };
-  async run() {
-    const { flags } = await this.parse(ArchiveLog);
-    await this.using(flags, async (ctx) => {
-      ctx.report({
-        type: "log",
-        level: "WARNING",
-        message:
-          "This command displays legacy history.jsonl only; versioned archives use separate history storage",
-      });
-      const w = workspace(ctx.config, flags.zip);
-      const file = path.join(w.directory, "history.jsonl");
-      if (existsSync(file))
-        this.log(
-          readFileSync(file, "utf8")
-            .trim()
-            .split("\n")
-            .slice(-flags.last)
-            .join("\n"),
-        );
     });
   }
 }
@@ -358,17 +312,17 @@ class Push extends BusinessCommand {
   static args = { paths };
   static flags = {
     type: category(),
-    zip,
+    archive,
     keep: Flags.boolean(),
     move: Flags.boolean({
-      description: "显式将源文件移入 Backup（旧搬移流程）",
+      description: "显式将源文件移入 Backup",
       exclusive: ["keep"],
     }),
   };
   async run() {
     const { args, flags } = await this.parse(Push);
     await this.using(flags, async (ctx, s) => {
-      const w = workspace(ctx.config, flags.zip);
+      const w = workspace(ctx.config, flags.archive);
       const result = await s.push(
         ctx,
         expandPaths(args.paths),
@@ -388,7 +342,7 @@ class Download extends BusinessCommand {
   };
   static flags = {
     type: category(),
-    zip,
+    archive,
     "entry-id": Flags.string(),
     version: Flags.string({ description: "该条目的历史版本 ID" }),
     output: Flags.string({
@@ -399,7 +353,7 @@ class Download extends BusinessCommand {
   async run() {
     const { args, flags } = await this.parse(Download);
     await this.using(flags, async (ctx, s) => {
-      const w = workspace(ctx.config, flags.zip);
+      const w = workspace(ctx.config, flags.archive);
       await s.archiveOperation(ctx, {
         kind: "download",
         database: w.database,
@@ -417,11 +371,11 @@ class DeleteTrack extends BusinessCommand {
   static args = {
     name: Args.string({ description: "完整成员路径、文件名或 stem" }),
   };
-  static flags = { type: category(), zip, "entry-id": Flags.string() };
+  static flags = { type: category(), archive, "entry-id": Flags.string() };
   async run() {
     const { args, flags } = await this.parse(DeleteTrack);
     await this.using(flags, async (ctx, s) => {
-      const w = workspace(ctx.config, flags.zip);
+      const w = workspace(ctx.config, flags.archive);
       const result = await s.archiveOperation(ctx, {
         kind: "delete-preview",
         database: w.database,
@@ -536,10 +490,8 @@ class Merge extends BusinessCommand {
         flags.connected,
         [
           w.database,
-          w.zip,
+          w.bundle,
           ...[
-            "archive.json",
-            "history.jsonl",
             ...CATEGORIES.flatMap((c) => [`${c}.kml`, `${c}.Mobile.kml`]),
           ].map((n) => path.join(w.directory, n)),
         ],
@@ -574,10 +526,7 @@ export const BUSINESS_COMMANDS: Record<string, Command.Class> = {
   "archive:full-backup": archiveCommand("full-backup"),
   "archive:restore-backup": ArchiveRestoreBackup,
   "archive:recover": archiveCommand("recover"),
-  "archive:migrate": archiveCommand("migrate"),
   "archive:rebuild": archiveCommand("rebuild"),
-  "archive:undo": ArchiveUndo,
-  "archive:log": ArchiveLog,
   "kml:type": KmlType,
   "kml:set-tag": SetTag,
   "kml:push": Push,

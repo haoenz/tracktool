@@ -1,19 +1,3 @@
-import {
-  SplitJourneyEditor,
-  journeyColors,
-  journeyName,
-  type SplitJourney,
-} from "./split-journey-editor.js";
-import { DisplaySettings } from "./display-settings.js";
-import { samePresentation } from "../shared/presentation-equality.js";
-import { editTracks } from "./track-editor-map.js";
-import { TrackHistory } from "./track-history.js";
-import "./work.css";
-import { useEditSnapshot } from "./edit-snapshot.js";
-import { AltitudePreviewTable } from "./altitude-preview-table.js";
-import { importError } from "./import-error.js";
-import { nearestPoint, previewAnnotations } from "../shared/edit-map.js";
-import { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
@@ -23,22 +7,37 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { Alert, Button, Select, Spin, Modal } from "./components/controls.js";
-import { requestWorkTask, api, waitForWorkTask } from "./api.js";
-import { useWorkspace } from "./workspace.js";
-import { isRegisteredTag, TagPicker } from "./components/tag-picker.js";
-import { TrackEditorMap } from "./track-editor-map.js";
-import type {
-  EditRequest,
-  EditPreview,
-  EditGeometry,
-  AltitudePreview,
-  TrackDetail,
-  Presentation,
-  VersionRef,
-  EntrySnapshot,
-} from "../shared/track-edit.js";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PublicConfig } from "../shared/contracts.js";
+import { nearestPoint, previewAnnotations } from "../shared/edit-map.js";
+import { samePresentation } from "../shared/presentation-equality.js";
+import type {
+  AltitudePreview,
+  EditGeometry,
+  EditPreview,
+  EditRequest,
+  EntrySnapshot,
+  Presentation,
+  TrackDetail,
+  VersionRef,
+} from "../shared/track-edit.js";
+import { AltitudePreviewTable } from "./altitude-preview-table.js";
+import { api, requestWorkTask, waitForWorkTask } from "./api.js";
+import { Alert, Button, Modal, Select, Spin } from "./components/controls.js";
+import { isRegisteredTag, TagPicker } from "./components/tag-picker.js";
+import { DisplaySettings } from "./display-settings.js";
+import { useEditSnapshot } from "./edit-snapshot.js";
+import { importError } from "./import-error.js";
+import {
+  journeyColors,
+  journeyName,
+  SplitJourneyEditor,
+  type SplitJourney,
+} from "./split-journey-editor.js";
+import { editTracks, TrackEditorMap } from "./track-editor-map.js";
+import { TrackHistory } from "./track-history.js";
+import "./work.css";
+import { useWorkspace } from "./workspace.js";
 
 const editActions: Record<string, string> = {
   split_segment: "断开轨迹",
@@ -624,9 +623,7 @@ function TrackEditor({
       setBusy(false);
     }
   }
-  async function make(
-    operation: Exclude<EditRequest["operation"], { kind: "legacy_regroup" }>,
-  ) {
+  async function make(operation: EditRequest["operation"]) {
     if (!d) return;
     const body: EditRequest =
       operation.kind === "restore_group"

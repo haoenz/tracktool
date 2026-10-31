@@ -158,11 +158,6 @@ main {
 header {
   margin-bottom: 28px;
 }
-.brand {
-  letter-spacing: 0.16em;
-  font-weight: 700;
-  color: var(--primary);
-}
 .ui-card {
   margin-bottom: 24px;
 }

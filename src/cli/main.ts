@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execute } from "@oclif/core";
-// Python accepts common flags before the command; oclif expects command-local flags.
+// Accept common flags before the command; oclif expects command-local flags.
 const argv = process.argv.slice(2);
 const globals: string[] = [];
 while (argv[0]) {

@@ -1,25 +1,25 @@
-import { randomUUID, createHash } from "node:crypto";
 import { XmlElement, type XmlDocument } from "libxml2-wasm";
+import { createHash, randomUUID } from "node:crypto";
 import { AppError } from "../../domain/errors.js";
+import { xmlText } from "../../domain/kml-edit.js";
 import {
   bindSegments,
   evaluatePresentation,
 } from "../../domain/presentation.js";
+import type { SegmentInput } from "../../domain/segment-edit.js";
 import {
   validatePresentation,
   type Presentation,
   type SegmentManifest,
 } from "../../domain/track-version.js";
-import type { SegmentInput } from "../../domain/segment-edit.js";
-import { xmlText } from "../../domain/kml-edit.js";
-import { withDocument, namespaces } from "./document.js";
-import { readTrackData } from "./trackdata.js";
 import {
   DISPLAY_NS,
   displayMetadata,
   stripDisplay,
   type DisplayMetadata,
 } from "./display-metadata.js";
+import { namespaces, withDocument } from "./document.js";
+import { readTrackData } from "./trackdata.js";
 
 function locate(root: XmlElement, path: number[]) {
   let node = root;
@@ -145,14 +145,7 @@ export function displayKml(input: SegmentInput): Uint8Array {
     return bytes;
   });
 }
-/** Import uses its own segment identities and explicit edges; generated lines never become samples. */
-export function importedPresentation(
-  raw: Uint8Array,
-  segments: SegmentManifest[],
-): Presentation | undefined {
-  return withDocument(raw, (doc) => presentationFromDocument(doc, segments));
-}
-/** Same as importedPresentation for an already parsed document. */
+/** Restore explicit presentation edges using the already parsed import document. */
 export function presentationFromDocument(
   doc: XmlDocument,
   segments: SegmentManifest[],

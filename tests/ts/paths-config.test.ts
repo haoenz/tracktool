@@ -1,13 +1,13 @@
-import { afterEach, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, expect, it } from "vitest";
 import { FileConfigStore } from "../../src/infrastructure/config-store.js";
 import {
   displayPath,
   resolvePath,
-  userDataDir,
   userConfigPath,
+  userDataDir,
   userStateDir,
 } from "../../src/infrastructure/paths.js";
 
@@ -95,12 +95,12 @@ it("displays nearby paths and handles Windows drive boundaries lexically", () =>
     }),
   ).toBe("D:\\photos");
 });
-it("loads isolated config, migrates legacy keys in memory, and resolves symlink parents", async () => {
+it("loads isolated config without writing and resolves symlink parents", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "tracktool-config-"));
   temp.push(dir);
   const file = path.join(dir, "config.json"),
     original = JSON.stringify({
-      kml_zip_path: path.join(dir, "archive.zip"),
+      archive_path: dir,
       custom: 1,
     });
   await writeFile(file, original);
@@ -108,7 +108,6 @@ it("loads isolated config, migrates legacy keys in memory, and resolves symlink 
     config = await store.load();
   expect(config.archive_path).toBe(dir);
   expect(config.custom).toBe(1);
-  expect(config).not.toHaveProperty("kml_zip_path");
   expect(await readFile(file, "utf8")).toBe(original);
   expect(
     (await new FileConfigStore({ path: path.join(dir, "missing") }).load())

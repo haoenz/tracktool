@@ -286,7 +286,7 @@ class Geotag extends MediaCommand {
   static args = input;
   static flags = {
     ...batch,
-    zip: Flags.string(),
+    archive: Flags.string(),
     force: Flags.boolean(),
     verify: Flags.boolean(),
     multiday: Flags.boolean(),
@@ -309,7 +309,7 @@ class Geotag extends MediaCommand {
         await s.geotag(
           ctx,
           resolvePath(args.path),
-          workspace(ctx.config, flags.zip).database,
+          workspace(ctx.config, flags.archive).database,
           opts,
         )
       ).exitCode;
@@ -329,7 +329,7 @@ class Group extends MediaCommand {
 class Repair extends MediaCommand {
   static description = "补全 GPS 和海拔，整理成功及失败媒体";
   static args = input;
-  static flags = { ...parallel, zip: Flags.string() };
+  static flags = { ...parallel, archive: Flags.string() };
   async run() {
     const { args, flags } = await this.parse(Repair);
     await this.media(flags, async (ctx, s) => {
@@ -337,7 +337,7 @@ class Repair extends MediaCommand {
         await s.repair(
           ctx,
           resolvePath(args.path),
-          workspace(ctx.config, flags.zip).database,
+          workspace(ctx.config, flags.archive).database,
           key(ctx),
           options(flags),
         )
@@ -348,7 +348,7 @@ class Repair extends MediaCommand {
 class RepairVideo extends MediaCommand {
   static description = "可重跑的视频转封装与 GPS 修复流程";
   static args = input;
-  static flags = { ...timezone, zip: Flags.string() };
+  static flags = { ...timezone, archive: Flags.string() };
   async run() {
     const { args, flags } = await this.parse(RepairVideo);
     await this.media(flags, async (ctx, s) => {
@@ -356,7 +356,7 @@ class RepairVideo extends MediaCommand {
         await s.repairVideo(
           ctx,
           resolvePath(args.path),
-          workspace(ctx.config, flags.zip).database,
+          workspace(ctx.config, flags.archive).database,
           key(ctx),
           convertOptions(flags),
         )

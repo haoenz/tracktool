@@ -6,7 +6,6 @@ import { exportSelectedOriginals } from "../../dist/node/infrastructure/archive/
 import {
   readTransaction,
   rawObject,
-  activeEntries,
 } from "../../dist/node/infrastructure/archive/database.js";
 import { readZip } from "../../dist/node/infrastructure/archive/zip.js";
 it("batch download is one ZIP of exact original bytes, with no archive writes or silent missing entries", async () => {
@@ -18,7 +17,7 @@ it("batch download is one ZIP of exact original bytes, with no archive writes or
     const entries = readTransaction(file, (db) =>
       (
         db
-          .prepare(`SELECT id,path,sha256 FROM ${activeEntries(db)} LIMIT 2`)
+          .prepare(`SELECT id,path,sha256 FROM active_archive_entries LIMIT 2`)
           .all() as { id: string; path: string; sha256: string }[]
       ).map((e) => ({ ...e, raw: rawObject(db, e.sha256) })),
     );

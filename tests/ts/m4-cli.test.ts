@@ -1,22 +1,22 @@
-import { afterEach, expect, it } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-  rmSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
 } from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { afterEach, expect, it } from "vitest";
+import {
+  rawObject,
+  transaction,
+} from "../../dist/node/infrastructure/archive/database.js";
 import { ArchiveWriter } from "../../dist/node/infrastructure/archive/writer.js";
 import { digest } from "../../dist/node/infrastructure/durable-files.js";
-import {
-  transaction,
-  rawObject,
-} from "../../dist/node/infrastructure/archive/database.js";
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const cli = path.join(root, "dist/node/cli/main.js");
 const writerUrl = pathToFileURL(
@@ -115,7 +115,6 @@ it("CLI init/type/tag/push/status/rebuild/backup/download/delete retains stdout 
     const result = run(dir, "archive", op);
     expect(result.status, result.stderr).toBe(0);
   }
-  expect(run(dir, "kml", "pop", path.basename(file)).status).not.toBe(0);
   const download = run(dir, "kml", "download", path.basename(file));
   expect(download.status, download.stderr).toBe(0);
   expect(JSON.parse(run(dir, "archive", "status").stdout).entries).toBe(1);
@@ -123,10 +122,8 @@ it("CLI init/type/tag/push/status/rebuild/backup/download/delete retains stdout 
   expect(deletion.status, deletion.stderr).toBe(0);
   expect(JSON.parse(run(dir, "archive", "status").stdout).entries).toBe(0);
   expect(readFileSync(file)).toEqual(raw);
-  expect(run(dir, "archive", "undo").status).toBe(1);
-  expect(run(dir, "archive", "log").status).toBe(0);
 }, 30000);
-it("CLI split/prune/merge and retired converter, wildcard batches and partial exit preserve expected behavior", async () => {
+it("CLI split/prune/merge, wildcard batches and partial exit preserve expected behavior", async () => {
   const { dir, file } = await setup();
   const split = run(dir, "kml", "split", file, "2026-10-01T00:00:01.400000Z");
   expect(split.status, split.stderr).toBe(0);
@@ -139,9 +136,6 @@ it("CLI split/prune/merge and retired converter, wildcard batches and partial ex
     lines,
     '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><name>A</name><LineString><coordinates>1,2 3,4</coordinates></LineString></Placemark></Document></kml>',
   );
-  const convert = run(dir, "kml", "to-multigeom", lines);
-  expect(convert.status, convert.stderr).not.toBe(0);
-  expect(existsSync(lines.replace(".kml", "-Merged.kml"))).toBe(false);
   const plan = run(dir, "--dry-run", "kml", "fill-altitude", lines);
   expect(plan.status, plan.stderr).toBe(0);
   expect(plan.stderr).toContain("Would query");
@@ -194,7 +188,6 @@ it("dry-run performs no archive writes or pending recovery and no Google request
   const before = readFileSync(database);
   for (const args of [
     ["archive", "recover"],
-    ["archive", "migrate"],
     ["archive", "backup"],
     ["archive", "rebuild"],
     ["kml", "push", file],
@@ -301,7 +294,7 @@ it("CLI full backup and restore preserve the library and refuse to overwrite des
   expect(result.status, result.stderr).toBe(0);
   expect(
     new ArchiveWriter().status(path.join(restored, "archive.sqlite3")),
-  ).toMatchObject({ schema: 8, entries: 1 });
+  ).toMatchObject({ schema: 9, entries: 1 });
   expect(run(dir, "archive", "full-backup", "--output", backup).status).toBe(1);
   expect(run(dir, "archive", "restore-backup", backup, archive).status).toBe(1);
 });

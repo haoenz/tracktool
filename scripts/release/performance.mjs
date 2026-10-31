@@ -1,4 +1,4 @@
-/** Same synthetic capacity samples and unchanged M3 budgets; no Python needed. */
+/** Synthetic capacity samples checked against the committed resource budgets. */
 import { open, mkdir, readFile, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";

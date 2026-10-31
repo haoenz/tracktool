@@ -1,36 +1,30 @@
 import type Database from "better-sqlite3";
-import { AppError, checkCancelled } from "../../domain/errors.js";
 import {
   ADMINISTRATIVE_RESOLVER_VERSION,
-  reparseAdministrativeLocation,
   administrativeLocation,
+  reparseAdministrativeLocation,
 } from "../../domain/administrative-location.js";
+import { AppError, checkCancelled } from "../../domain/errors.js";
 import { bindSegments } from "../../domain/presentation.js";
+import type { XmlPort } from "../../services/ports.js";
 import type {
   AdministrativeLocation,
   EndpointLocation,
   GeocodeResponse,
 } from "../../shared/endpoint-location.js";
-import type { XmlPort } from "../../services/ports.js";
 import type { TrackReference } from "../../shared/track-reference.js";
-import {
-  readTransaction,
-  transaction,
-  rawObject,
-  schemaVersion,
-} from "./database.js";
-import { resolveTrack, readPresentation } from "./presentation.js";
+import { rawObject, readTransaction, transaction } from "./database.js";
+import { readPresentation, resolveTrack } from "./presentation.js";
 
 export function endpointLocations(
   db: Database.Database,
   presentation: string,
   language = "zh-CN",
 ): EndpointLocation[] {
-  if (schemaVersion(db) < 6) return [];
   const rows = db
     .prepare(
       `SELECT endpoint,latitude,longitude,provider,language,resolver_version,queried_at,location_json FROM track_endpoint_locations
-    WHERE presentation_id=? AND provider='google' AND language=? AND resolver_version<=? ORDER BY resolver_version DESC,endpoint DESC`,
+    WHERE presentation_id=? AND provider='google' AND language=? AND resolver_version=? ORDER BY resolver_version DESC,endpoint DESC`,
     )
     .all(presentation, language, ADMINISTRATIVE_RESOLVER_VERSION) as (Omit<
     EndpointLocation,
@@ -90,7 +84,6 @@ export type FillEndpointOptions = {
   refresh?: boolean;
   retryIncomplete?: boolean;
   offline?: boolean;
-  completeEvidence?: boolean;
   evidence?: EndpointEvidence[];
   onProgress?: (value: Record<string, unknown>) => void;
 };
@@ -142,13 +135,6 @@ export async function fillEndpointLocations(
     params.push(...selected);
   }
   const entries = readTransaction(file, (db) => {
-    if (schemaVersion(db) < 6 && !options.dryRun)
-      throw new AppError(
-        "USER_INPUT",
-        "端点行政区需要 schema 6；请先执行 archive migrate",
-      );
-    if (schemaVersion(db) < 3)
-      throw new AppError("USER_INPUT", "请先执行 archive migrate");
     return db
       .prepare(
         `SELECT id,path FROM archive_entries WHERE state='active' ${filters.join(" ")} ORDER BY path`,
@@ -163,12 +149,7 @@ export async function fillEndpointLocations(
   const reusable = (v: EndpointLocation) =>
     v.resolver_version === ADMINISTRATIVE_RESOLVER_VERSION &&
     !options.refresh &&
-    (!options.retryIncomplete || v.location.status === "complete") &&
-    (!options.completeEvidence ||
-      v.location.status === "complete" ||
-      v.location.raw_source === "full_response") &&
-    (!evidence.has(JSON.stringify([v.latitude, v.longitude])) ||
-      v.location.raw_source === "full_response");
+    (!options.retryIncomplete || v.location.status === "complete");
   const plannedCoordinates = new Set<string>();
   const pending = new Map<
     string,
@@ -286,10 +267,9 @@ export async function fillEndpointLocations(
             }
           : (!options.refresh || options.offline) &&
             readTransaction(file, (db) => {
-              if (schemaVersion(db) < 6) return undefined;
               return db
                 .prepare(
-                  `SELECT location_json,queried_at,resolver_version FROM track_endpoint_locations WHERE latitude=? AND longitude=? AND provider='google' AND language=? AND resolver_version<=? ORDER BY resolver_version DESC,(json_extract(location_json,'$.raw_source')='full_response') DESC,queried_at DESC LIMIT 1`,
+                  `SELECT location_json,queried_at,resolver_version FROM track_endpoint_locations WHERE latitude=? AND longitude=? AND provider='google' AND language=? AND resolver_version=? ORDER BY queried_at DESC LIMIT 1`,
                 )
                 .get(
                   endpoint.latitude,
@@ -309,8 +289,7 @@ export async function fillEndpointLocations(
           : undefined;
         const normalized =
           oldLocation && stored
-            ? stored.resolver_version === ADMINISTRATIVE_RESOLVER_VERSION &&
-              !options.refresh
+            ? !options.refresh
               ? oldLocation
               : reparseAdministrativeLocation(oldLocation)
             : undefined;
@@ -320,9 +299,7 @@ export async function fillEndpointLocations(
           (options.offline ||
             supplied ||
             normalized.status === "complete" ||
-            (!options.retryIncomplete &&
-              (!options.completeEvidence ||
-                normalized.raw_source === "full_response")))
+            !options.retryIncomplete)
             ? { ...stored, location: normalized }
             : undefined;
         if (options.dryRun) {
@@ -335,8 +312,7 @@ export async function fillEndpointLocations(
             path: entry.path,
             ...endpoint,
             action:
-              cached &&
-              cached.resolver_version !== ADMINISTRATIVE_RESOLVER_VERSION
+              cached && options.refresh
                 ? "reparse"
                 : reuse
                   ? "reuse"
@@ -361,11 +337,7 @@ export async function fillEndpointLocations(
         let reused = !!cached;
         if (cached) {
           location = cached.location;
-          if (
-            cached.resolver_version !== ADMINISTRATIVE_RESOLVER_VERSION ||
-            options.refresh
-          )
-            summary.reparsed++;
+          if (options.refresh) summary.reparsed++;
           queriedAt = cached.queried_at;
           summary.reused++;
         } else {

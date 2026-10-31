@@ -1,8 +1,8 @@
-import { EXPORT_FORMATS, COMPRESSION_PRESETS } from "./export-format.js";
 import { z } from "zod";
 import { DeleteRequestSchema } from "./archive-actions.js";
-import { EditRequestSchema, EditApplySchema } from "./track-edit.js";
-import { TaskSchema, TaskEventSchema } from "./contracts.js";
+import { TaskEventSchema, TaskSchema } from "./contracts.js";
+import { COMPRESSION_PRESETS, EXPORT_FORMATS } from "./export-format.js";
+import { EditApplySchema, EditRequestSchema } from "./track-edit.js";
 export const OPERATIONS = {
   "archive:init": "建立归档",
   "archive:import-zip": "导入 ZIP",
@@ -13,7 +13,6 @@ export const OPERATIONS = {
   "archive:backup": "导出展示压缩包",
   "archive:rebuild": "聚合导出",
   "archive:recover": "恢复中断操作",
-  "archive:migrate": "升级数据库",
   "kml:type": "检查分类",
   "kml:set-tag": "设置活动标签",
   "kml:split": "拆分轨迹",
@@ -145,13 +144,10 @@ export const WorkOutputSchema = z.object({
   committed: z.boolean().optional(),
 });
 export type WorkOutput = z.infer<typeof WorkOutputSchema>;
-// Historical tasks remain readable even when their operation is no longer executable.
 // Responses must contain normalized inputs/options; request defaults must not hide omissions.
 const TaskRequestSchema = WorkRequestSchema.extend({
-  operation: z.string().min(1),
   inputs: WorkRequestSchema.shape.inputs.removeDefault(),
-  // Removed options can still be present in persisted historical requests.
-  options: WorkRequestSchema.shape.options.removeDefault().loose(),
+  options: WorkRequestSchema.shape.options.removeDefault(),
 });
 export const WorkTaskSchema = TaskSchema.extend({
   uploadsCleaned: z.boolean().optional(),
@@ -170,9 +166,6 @@ export const WorkTaskSchema = TaskSchema.extend({
   cancelRequested: z.boolean(),
 });
 export type WorkTask = z.infer<typeof WorkTaskSchema>;
-export const WorkTasksResponseSchema = z.object({
-  tasks: z.array(WorkTaskSchema),
-});
 export interface FileEntry {
   name: string;
   path: string;
@@ -198,5 +191,5 @@ export function executableOperation(value: string): value is Operation {
 export function operationLabel(value: string): string {
   return executableOperation(value)
     ? OPERATIONS[value]
-    : `${value}（历史操作，不能执行）`;
+    : `${value}（未知操作）`;
 }

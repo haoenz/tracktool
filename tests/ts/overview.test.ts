@@ -1,51 +1,55 @@
+import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import {
-  compareOverviewEntries,
-  type OverviewEntry,
-} from "../../dist/node/shared/overview.js";
-import { afterEach, expect, it, vi } from "vitest";
-import * as geometry from "../../dist/node/domain/kml-edit.js";
-import {
-  mkdtemp,
   mkdir,
-  writeFile,
+  mkdtemp,
   readFile,
   readdir,
-  stat,
   rm,
+  stat,
+  writeFile,
 } from "node:fs/promises";
-import path from "node:path";
-import os from "node:os";
-import { setTimeout as delay } from "node:timers/promises";
-import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { deflateSync, gunzipSync } from "node:zlib";
-import Database from "better-sqlite3";
-import {
-  SCHEMA,
-  MIGRATE_1,
-} from "../../dist/node/infrastructure/archive/schema.js";
-import { OverviewService } from "../../dist/node/infrastructure/overview/service.js";
-import { buildOverview } from "../../dist/node/infrastructure/overview/build.js";
-import {
-  fingerprint,
-  generation,
-  readStamp,
-  readObject,
-  encodeObject,
-  objectPath,
-} from "../../dist/node/infrastructure/overview/files.js";
-import { LIMITS } from "../../dist/node/infrastructure/overview/types.js";
+import os from "node:os";
+import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { gunzipSync } from "node:zlib";
+import { afterEach, expect, it, vi } from "vitest";
+import * as geometry from "../../dist/node/domain/kml-edit.js";
 import {
   OverviewExtent,
   overviewFeatures,
   splitOverviewLine,
 } from "../../dist/node/domain/overview.js";
-import type {
-  OverviewStatus,
-  OverviewCrs,
-} from "../../dist/node/shared/overview.js";
-import { createApp } from "../../dist/node/server/app.js";
+import { SCHEMA } from "../../dist/node/infrastructure/archive/schema.js";
+import {
+  insertOperation,
+  insertPresentation,
+  insertVersion,
+  publishEntry,
+} from "../../dist/node/infrastructure/archive/versions.js";
 import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js";
+import { buildOverview } from "../../dist/node/infrastructure/overview/build.js";
+import {
+  encodeObject,
+  fingerprint,
+  generation,
+  objectPath,
+  readObject,
+  readStamp,
+} from "../../dist/node/infrastructure/overview/files.js";
+import { OverviewService } from "../../dist/node/infrastructure/overview/service.js";
+import { LIMITS } from "../../dist/node/infrastructure/overview/types.js";
+import { readManifest as segmentManifest } from "../../dist/node/infrastructure/xml/manifest.js";
+import { createApp } from "../../dist/node/server/app.js";
+import type {
+  OverviewCrs,
+  OverviewStatus,
+} from "../../dist/node/shared/overview.js";
+import {
+  compareOverviewEntries,
+  type OverviewEntry,
+} from "../../dist/node/shared/overview.js";
 
 const require = createRequire(import.meta.url);
 const decoderRequire = createRequire(require.resolve("vt-pbf"));
@@ -71,40 +75,71 @@ afterEach(async () => {
 });
 const kml = (lines: string[], name = "test") =>
   `<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${name}</name><Placemark>${lines.map((line) => `<LineString><coordinates>${line}</coordinates></LineString>`).join("")}</Placemark></Document></kml>`;
-function insert(db: Database.Database, id: string, xml: string) {
+function insert(
+  db: Database.Database,
+  id: string,
+  xml: string,
+  date: string | null = "2026-10-14",
+) {
   const raw = Buffer.from(xml),
     sha = createHash("sha256").update(raw).digest("hex");
-  db.prepare("INSERT OR IGNORE INTO kml_objects VALUES (?,?,?,?)").run(
-    sha,
-    "zlib",
-    raw.length,
-    deflateSync(raw),
-  );
-  db.prepare("INSERT INTO archive_entries VALUES (?,?,?,?,?)").run(
-    id,
-    `Default/${id}.kml`,
-    sha,
-    "Default",
-    "2026-10-14",
-  );
+  const entry = {
+    entry_id: id,
+    version_id: id + ":v",
+    presentation_id: id + ":p",
+    path: `Default/${id}.kml`,
+    category: "Default" as const,
+    filename_date: date,
+    sha256: sha,
+    state: "active" as const,
+    generation: 1,
+  };
+  const manifest = segmentManifest(raw, (n) => id + ":" + n),
+    created = new Date().toISOString(),
+    op = id + ":op";
+  db.transaction(() => {
+    insertOperation(db, {
+      id: op,
+      kind: "import",
+      params: {},
+      algorithm_version: "fixture",
+      created_at: created,
+      request_key: id,
+      request_sha256: sha,
+      result: { operation_id: op, entries: [entry] },
+    });
+    insertVersion(db, entry, op, created, raw, manifest, "imported", 1);
+    insertPresentation(db, entry, op, created, {
+      schema: 1,
+      default_connect: false,
+      order: manifest.segments.map((s) => s.segment_id),
+      ignored: [],
+      connections: [],
+    });
+    publishEntry(db, entry, null, op);
+  })();
 }
-async function fixture() {
+async function fixture(
+  options: { empty?: boolean; date?: string | null } = {},
+) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "tracktool-overview-"));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   const source = path.join(dir, "archive.sqlite3"),
     cache = path.join(dir, "cache");
   const db = new Database(source);
   db.exec(SCHEMA);
-  db.exec(MIGRATE_1);
+  db.pragma("foreign_keys=ON");
   db.pragma("journal_mode=WAL");
   db.prepare(
     "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'fixture')",
   ).run();
-  insert(db, "normal", kml(["116,39 116.1,39.1 116.2,39.05"]));
-  insert(db, "tiny", kml(["116,39 116.0000001,39.0000001"]));
-  insert(db, "seam", kml(["179.8,20 -179.7,21"]));
-  insert(db, "single", kml(["116.03,39.03"]));
-  insert(db, "broken", "<kml>");
+  if (!options.empty) {
+    insert(db, "normal", kml(["116,39 116.1,39.1 116.2,39.05"]), options.date);
+    insert(db, "tiny", kml(["116,39 116.0000001,39.0000001"]));
+    insert(db, "seam", kml(["179.8,20 -179.7,21"]));
+    insert(db, "single", kml(["116.03,39.03"]));
+    insert(db, "broken", "<kml>");
+  }
   db.close();
   return { dir, source, cache };
 }
@@ -469,10 +504,7 @@ it("deduplicated tile requests survive one viewer aborting and recycle tiny inde
   expect(await s.tile(a.version!, 10, 842, 390)).toEqual(bytes);
 });
 it("handles an empty archive and refuses insufficient disk reservation", async () => {
-  const { source, cache } = await fixture(),
-    db = new Database(source);
-  db.exec("DELETE FROM archive_entries");
-  db.close();
+  const { source, cache } = await fixture({ empty: true });
   const s = service(source, cache),
     status = await ready(s);
   expect(status.bounds).toBeNull();
@@ -604,11 +636,8 @@ it("authenticates overview routes and binds data to backend configuration", asyn
 });
 
 it("overview dates use measured time before filename metadata and never invent missing time", async () => {
-  const { source, cache } = await fixture();
+  const { source, cache } = await fixture({ date: null });
   const db = new Database(source);
-  db.prepare(
-    "UPDATE archive_entries SET filename_date=NULL WHERE id='normal'",
-  ).run();
   insert(
     db,
     "timed",
@@ -660,7 +689,7 @@ it("sorts complete start times including microseconds, with UTC+8 filename fallb
   ).toEqual(["a-later", "z-earlier", "filename", "previous", "unknown"]);
 });
 
-it("backfills old distance caches atomically within budget and never measures them again", async () => {
+it("rebuilds corrupt coordinate caches within budget and reuses valid results", async () => {
   const { source, cache } = await fixture(),
     stamp = readStamp(source);
   const request = {
@@ -675,14 +704,14 @@ it("backfills old distance caches atomically within budget and never measures th
   const entry = warm.entries.find((value) => value.id === "normal")!;
   const file = objectPath(cache, entry.sha256),
     old = await readObject(cache, entry.sha256);
-  delete old.distance_m;
-  const legacy = encodeObject(entry.sha256, old);
-  await writeFile(file, legacy);
+  old.distance_m = -1;
+  const damaged = encodeObject(entry.sha256, old);
+  await writeFile(file, damaged);
   const measure = vi.spyOn(geometry, "distance");
   await expect(
     buildOverview({ ...request, budget: 1 }, () => {}),
   ).rejects.toThrow("预算");
-  expect(await readFile(file)).toEqual(legacy);
+  expect(await readFile(file)).toEqual(damaged);
   expect(
     (await readdir(cache)).some((name) => name.startsWith("staging-")),
   ).toBe(false);

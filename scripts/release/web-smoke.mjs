@@ -79,10 +79,10 @@ async function start() {
       }
     });
   });
-  const html = await (await fetch(address + "/media")).text();
+  const html = await (await fetch(address + "/map")).text();
   token = html.match(/name="tracktool-token" content="([^"]+)"/)?.[1];
   assert.ok(token, html);
-  for (const route of ["/archive", "/tracks", "/tasks", "/settings"])
+  for (const route of ["/map?panel=library", "/map?panel=settings"])
     assert.equal((await fetch(address + route)).status, 200);
   const asset = html.match(/src="([^"]+\.js)"/)?.[1];
   assert.ok(asset);

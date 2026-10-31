@@ -1,5 +1,13 @@
 // Application-level compositions of the local shadcn/ui primitives.
 import {
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  LoaderCircleIcon,
+  XIcon,
+} from "lucide-react";
+import {
   useEffect,
   useId,
   useRef,
@@ -8,76 +16,63 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { cn } from "../lib/utils.js";
 import { validateNumberDraft } from "../number-input.js";
 import {
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  LoaderCircleIcon,
-  XIcon,
-} from "lucide-react";
-import { cn } from "../lib/utils.js";
-import { Button as BaseButton } from "./ui/button.js";
-import { Input } from "./ui/input.js";
-import { Checkbox as BaseCheckbox } from "./ui/checkbox.js";
-import {
-  Alert as BaseAlert,
-  AlertTitle,
   AlertDescription,
+  AlertTitle,
+  Alert as BaseAlert,
 } from "./ui/alert.js";
+import { Badge } from "./ui/badge.js";
+import { Button as BaseButton } from "./ui/button.js";
 import {
   Card as BaseCard,
+  CardAction,
+  CardContent,
   CardHeader,
   CardTitle,
-  CardContent,
-  CardAction,
 } from "./ui/card.js";
-import { Badge } from "./ui/badge.js";
+import { Checkbox as BaseCheckbox } from "./ui/checkbox.js";
+import { Input } from "./ui/input.js";
 import { Progress as BaseProgress } from "./ui/progress.js";
+
 import {
-  Tabs as BaseTabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-} from "./ui/tabs.js";
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "./ui/command.js";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "./ui/dialog.js";
-import {
-  Select as BaseSelect,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "./ui/select.js";
-import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover.js";
-import {
-  Command,
-  CommandInput,
-  CommandList,
-  CommandEmpty,
-  CommandItem,
-} from "./ui/command.js";
-import {
-  Table as BaseTable,
-  TableHeader,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-} from "./ui/table.js";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.js";
 import {
   RadioGroup as BaseRadioGroup,
   RadioGroupItem,
 } from "./ui/radio-group.js";
+import {
+  Select as BaseSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select.js";
+import {
+  Table as BaseTable,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table.js";
 export { Input } from "./ui/input.js";
-export { Textarea } from "./ui/textarea.js";
 export { Switch } from "./ui/switch.js";
+export { Textarea } from "./ui/textarea.js";
 
 export function Button({
   loading,
@@ -629,46 +624,6 @@ export function Descriptions({
         </div>
       ))}
     </dl>
-  );
-}
-export function Tabs({
-  activeKey,
-  onChange,
-  items,
-}: {
-  activeKey: string;
-  onChange: (key: string) => void;
-  items: { key: string; label: ReactNode; children: ReactNode }[];
-}) {
-  const [visited, setVisited] = useState(() => new Set([activeKey]));
-  return (
-    <BaseTabs
-      value={activeKey}
-      onValueChange={(key) => {
-        setVisited((old) => new Set([...old, key]));
-        onChange(key);
-      }}
-    >
-      <TabsList className="w-full">
-        {items.map((i) => (
-          <TabsTrigger key={i.key} value={i.key}>
-            {i.label}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-      {items
-        .filter((i) => visited.has(i.key) || i.key === activeKey)
-        .map((i) => (
-          <TabsContent
-            key={i.key}
-            value={i.key}
-            forceMount
-            hidden={i.key !== activeKey}
-          >
-            {i.children}
-          </TabsContent>
-        ))}
-    </BaseTabs>
   );
 }
 export function Modal({

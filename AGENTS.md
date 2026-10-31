@@ -65,7 +65,7 @@ src/drawing         网页与服务端 PNG 渲染共用的绘制代码
 - 代码注释用英文，说明“为什么”而非复述代码；用户可见文本（CLI 输出、网页文案、错误消息、文档）用中文。
 - 错误统一走 `src/domain/errors.ts` 的 `AppError` 与错误码；退出码约定：0 成功、1 输入错误、2 外部工具/API 失败、3 部分失败、130 用户取消。
 - 时间与坐标保持精度：时间为整数微秒，坐标为 WGS84，不要在中间层转成毫秒或浮点时间戳；显示坐标系转换与底图相关，改动时同时检查 GCJ02 和跨日期变更线。
-- 归档 schema 升级、删除、恢复是不可逆操作。测试必须使用临时目录/临时库，不能对用户归档执行迁移、删除或写入。
+- 归档删除、恢复是不可逆操作。测试必须使用临时目录/临时库，不能对用户归档执行删除或写入。
 - 网页 UI 复用 `src/web/components/ui` 的 shadcn 基础组件和 `src/web/components/controls.tsx` 的组合控件；主题变量在 `src/web/style.css`。保持键盘可操作、中文标签和移动端底部面板行为一致，不要另起一套视觉体系。
 - 新增依赖前确认它属于哪一层；浏览器依赖不能进 `services`/`infrastructure` 的公共路径。
 
@@ -74,7 +74,7 @@ src/drawing         网页与服务端 PNG 渲染共用的绘制代码
 - `tests/ts/**/*.test.ts`：Vitest，单元与集成逻辑，使用临时目录和固定 fixture。
 - `tests/e2e/*.spec.ts`：Playwright，共享一个临时归档，`workers: 1`，测试服务固定端口 18765；运行前先 `pnpm build`。
 - `pnpm test:terminal`：Linux PTY、zsh/Bash 补全验证，非 Linux 不可用。
-- 修改归档写入、迁移、删除、概览缓存、KML 解析/导出时，同时补对应单元的失败与边界用例；仅通过 E2E 截图不能替代数据正确性验证。
+- 修改归档写入、删除、概览缓存、KML 解析/导出时，同时补对应单元的失败与边界用例；仅通过 E2E 截图不能替代数据正确性验证。
 - 不要把网络请求带到测试里：E2E 服务已用本地资源替代底图；单元测试使用 fixture。
 
 ## 数据与仓库卫生
@@ -89,4 +89,4 @@ src/drawing         网页与服务端 PNG 渲染共用的绘制代码
 - 提交信息使用 Conventional Commits 英文格式（如 `feat: ...`、`fix(web): ...`、`docs: ...`），与现有历史一致。
 - 不要为赶进度跳过 `pnpm check`、`--no-verify` 或格式钩子；依赖边界和格式失败都要真正修复。
 - 版本号在 `package.json` 与 `docs/install-upgrade.md` 中同步；打包命令为 `pnpm pack --pack-destination ./dist-pack`，发布前运行 `pnpm verify:package`。
-- 涉及 schema 变更时同步更新 `docs/sqlite-storage.md`、迁移逻辑和备份/回退说明，并确认旧 schema 的读取或显式升级路径。
+- 归档仅接受当前 schema。涉及结构变更时同步更新 `docs/sqlite-storage.md`、结构版本、合成测试库和备份恢复校验；不添加格式兼容分支。

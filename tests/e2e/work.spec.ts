@@ -1,15 +1,14 @@
-import { filterTracks } from "./map-tools.js";
-import { tool } from "./map-tools.js";
-import { test, expect } from "@playwright/test";
-import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import type { WorkTask } from "../../src/shared/work.js";
 import type { Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import {
-  EXPORT_FORMAT_OPTIONS,
   COMPRESSION_OPTIONS,
+  EXPORT_FORMAT_OPTIONS,
   exportEncoding,
 } from "../../src/shared/export-format.js";
+import type { WorkTask } from "../../src/shared/work.js";
+import { filterTracks, tool } from "./map-tools.js";
 
 for (const format of EXPORT_FORMAT_OPTIONS) {
   test(`exports all compression profiles for ${format.label}`, async ({
@@ -74,20 +73,10 @@ async function confirmImport(page: Page, count = 1) {
   );
   await button.click();
 }
-test("media links return to the map with no web media tools", async ({
-  page,
-}) => {
-  await page.goto("/media");
-  await expect(page).toHaveURL(/\/map$/);
-  await expect(page.getByRole("button", { name: "展开菜单" })).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "媒体", exact: true }),
-  ).toHaveCount(0);
-});
 test("archive upload, backup, read-only download and real deletion use separate controls", async ({
   page,
 }, info) => {
-  await page.goto("/archive");
+  await page.goto("/map?panel=library");
   await expect(page.getByText("轨迹分类图例")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "管理轨迹库" })).toHaveCount(0);
   await page.getByRole("button", { name: "上传轨迹", exact: true }).click();

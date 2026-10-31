@@ -1,17 +1,11 @@
-import { lazy, Suspense, StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import {
-  BrowserRouter,
-  Navigate,
-  Route,
-  Routes,
-  useLocation,
-} from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { lazy, StrictMode, Suspense } from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { StartupScreen } from "./components/startup-screen.js";
 import { Toaster } from "./components/ui/sonner.js";
-import { initializeTheme, ThemeProvider } from "./theme.js";
 import "./style.css";
+import { initializeTheme, ThemeProvider } from "./theme.js";
 const MapPage = lazy(() => import("./map-page.js"));
 const client = new QueryClient({
   defaultOptions: {
@@ -23,12 +17,6 @@ const client = new QueryClient({
     },
   },
 });
-function LegacyPanel({ panel }: { panel: string }) {
-  const { search } = useLocation();
-  const params = new URLSearchParams(search);
-  params.set("panel", panel);
-  return <Navigate to={"/map?" + params.toString()} replace />;
-}
 initializeTheme();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -49,14 +37,8 @@ createRoot(document.getElementById("root")!).render(
                 </Suspense>
               }
             />
-            {["archive", "settings"].map((panel) => (
-              <Route
-                key={panel}
-                path={"/" + panel}
-                element={<LegacyPanel panel={panel} />}
-              />
-            ))}
-            <Route path="*" element={<Navigate to="/map" replace />} />
+
+            <Route path="/" element={<Navigate to="/map" replace />} />
           </Routes>
         </BrowserRouter>
       </QueryClientProvider>

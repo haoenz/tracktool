@@ -1,33 +1,31 @@
-import {
-  fillEndpointLocations,
-  currentEndpointLocations,
-} from "../infrastructure/archive/endpoint-locations.js";
-import { GoogleGeocode } from "../infrastructure/geocode.js";
-import { resolveApiKey } from "../domain/config.js";
 import { Args, Flags } from "@oclif/core";
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 import { readFileSync, statSync } from "node:fs";
-import { BusinessCommand } from "./business-commands.js";
-import { userStateDir } from "../infrastructure/paths.js";
+import path from "node:path";
+import { resolveApiKey } from "../domain/config.js";
+import { AppError } from "../domain/errors.js";
 import {
   databasePath,
   readTransaction,
 } from "../infrastructure/archive/database.js";
-import { archiveId } from "../infrastructure/archive/versions.js";
+import { exportDisplay } from "../infrastructure/archive/display-export.js";
+import { EditPreviews } from "../infrastructure/archive/edit-previews.js";
 import {
+  currentEndpointLocations,
+  fillEndpointLocations,
+} from "../infrastructure/archive/endpoint-locations.js";
+import {
+  operationDetail,
   trackCatalog,
   trackDetail,
   trackHistory,
-  operationDetail,
-  requireVersioned,
 } from "../infrastructure/archive/track-reader.js";
-import { EditPreviews } from "../infrastructure/archive/edit-previews.js";
-import { EditRequestSchema } from "../shared/track-edit.js";
-import { AppError } from "../domain/errors.js";
-import { exportDisplay } from "../infrastructure/archive/display-export.js";
+import { archiveId, currentEntry } from "../infrastructure/archive/versions.js";
 import { exclusive } from "../infrastructure/durable-files.js";
-import { currentEntry } from "../infrastructure/archive/versions.js";
+import { GoogleGeocode } from "../infrastructure/geocode.js";
+import { userStateDir } from "../infrastructure/paths.js";
+import { EditRequestSchema } from "../shared/track-edit.js";
+import { BusinessCommand } from "./business-commands.js";
 const archive = Flags.string({ description: "SQLite 轨迹库；默认使用配置" }),
   state = Flags.string({
     description: "编辑预览状态目录；与网页共用时指定同一目录",
@@ -186,7 +184,6 @@ class TrackApply extends BusinessCommand {
           return;
         }
         const id = readTransaction(file, (db) => {
-          requireVersioned(db);
           return archiveId(db);
         });
         this.log(
@@ -227,7 +224,6 @@ class TrackExport extends BusinessCommand {
         flags.archive ?? String(ctx.config.archive_path),
       );
       const raw = readTransaction(file, (db) => {
-        requireVersioned(db);
         const current = currentEntry(db, args.entry);
         const version = flags.version ?? current.version_id;
         const row = db
@@ -279,9 +275,6 @@ class TrackFillLocations extends BusinessCommand {
     language: Flags.string({ default: "zh-CN" }),
     "api-key": Flags.string(),
     refresh: Flags.boolean({ description: "重新查询已有结果" }),
-    "complete-evidence": Flags.boolean({
-      description: "仅为旧版降级结果补取完整响应；已保留完整响应的结果不重查",
-    }),
     offline: Flags.boolean({
       description: "仅复用或重算已有证据，不访问 Google API",
     }),
@@ -310,7 +303,6 @@ class TrackFillLocations extends BusinessCommand {
           refresh: flags.refresh,
           retryIncomplete: flags["retry-incomplete"],
           offline: flags.offline,
-          completeEvidence: flags["complete-evidence"],
           onProgress: (value) => this.log(JSON.stringify(value)),
         },
       );

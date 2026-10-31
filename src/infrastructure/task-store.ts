@@ -1,12 +1,12 @@
 import Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 import { AppError } from "../domain/errors.js";
 import { assertTransition } from "../domain/tasks.js";
-import type { Task, TaskEvent, TaskState } from "../shared/contracts.js";
-import type { WorkTask, WorkRequest, WorkOutput } from "../shared/work.js";
 import type { TaskStore } from "../services/ports.js";
+import type { Task, TaskEvent, TaskState } from "../shared/contracts.js";
+import type { WorkOutput, WorkRequest, WorkTask } from "../shared/work.js";
 export type StoredTask = WorkTask & {
   fingerprint?: string;
   owner?: string;
@@ -18,7 +18,7 @@ type TaskRow = {
   owner: string | null;
   lease: number;
   progress: string | null;
-  updated_at: string | null;
+  updated_at: string;
 };
 // Both task reads and summaries must overlay the same independently written columns.
 function decodeTask(row: TaskRow): StoredTask {
@@ -27,7 +27,7 @@ function decodeTask(row: TaskRow): StoredTask {
   task.lease = row.lease;
   task.events = [];
   if (row.progress) task.progress = JSON.parse(row.progress);
-  if (row.updated_at !== null) task.updatedAt = row.updated_at;
+  task.updatedAt = row.updated_at;
   return task;
 }
 const EVENT_LIMIT = 1000;
@@ -45,27 +45,13 @@ export class SqliteTasks implements TaskStore {
     this.db.pragma("journal_mode=WAL");
     this.db.pragma("synchronous=FULL");
     this.db.exec(
-      `CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,status TEXT NOT NULL,revision INTEGER NOT NULL,owner TEXT,lease INTEGER NOT NULL DEFAULT 0,preview_id TEXT UNIQUE,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS task_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,task_id TEXT NOT NULL,event TEXT NOT NULL); CREATE INDEX IF NOT EXISTS event_task ON task_events(task_id,sequence); CREATE INDEX IF NOT EXISTS task_status ON tasks(status);`,
+      `CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,status TEXT NOT NULL,revision INTEGER NOT NULL,owner TEXT,lease INTEGER NOT NULL DEFAULT 0,preview_id TEXT UNIQUE,body TEXT NOT NULL,progress TEXT,updated_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS task_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,task_id TEXT NOT NULL,event TEXT NOT NULL); CREATE INDEX IF NOT EXISTS event_task ON task_events(task_id,sequence); CREATE INDEX IF NOT EXISTS task_status ON tasks(status);`,
     );
-    // Progress and retention need cheap columns; keeping them in the JSON body
-    // forced a full row rewrite on every progress event.
-    const columns = new Set(
-      (this.db.pragma("table_info(tasks)") as { name: string }[]).map(
-        (column) => column.name,
-      ),
-    );
-    if (!columns.has("progress"))
-      this.db.exec("ALTER TABLE tasks ADD COLUMN progress TEXT");
-    if (!columns.has("updated_at"))
-      this.db.exec("ALTER TABLE tasks ADD COLUMN updated_at TEXT");
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS task_retention ON tasks(status,updated_at)",
     );
-    if (!columns.has("updated_at"))
-      this.db.exec(
-        "UPDATE tasks SET updated_at=json_extract(body,'$.updatedAt') WHERE updated_at IS NULL",
-      );
   }
+
   private transaction<T>(run: () => T): T {
     return this.db.transaction(run).immediate();
   }

@@ -1,0 +1,27 @@
+[
+  {
+    "path": "Default/2026-10-01 中文.kml",
+    "category": "Default",
+    "kml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<kml xmlns=\"http://www.opengis.net/kml/2.2\" xmlns:gx=\"http://www.google.com/kml/ext/2.2\"\n xmlns:custom=\"urn:extra\"><Document><!--keep--><?probe keep?><name>原始中文</name>\n<ExtendedData><Data name=\"TrackTags\"><value>火车</value></Data>\n<Data name=\"unknown\"><value><![CDATA[a<b & c]]></value></Data></ExtendedData>\n<Style id=\"keep\"><LineStyle><color>ff0000ff</color><width>4.25</width></LineStyle></Style>\n<custom:opaque foo=\"bar\">untouched</custom:opaque>\n<Placemark id=\"p\"><name>多段</name><description><![CDATA[<b>描述</b>]]></description><styleUrl>#keep</styleUrl>\n<MultiGeometry><LineString id=\"a\"><coordinates>100,26 101,27,0 102,28,8.25</coordinates></LineString>\n<gx:Track id=\"b\"><when>2026-10-01T00:00:00.123456789Z</when><when>2026-10-01T08:00:01+08:00</when>\n<gx:coord>103 29 9</gx:coord><gx:coord>104 30</gx:coord></gx:Track>\n<LineString><coordinates>105,31</coordinates></LineString>\n<Polygon><outerBoundaryIs><LinearRing><coordinates>0,0 1,0 0,1 0,0</coordinates>\n</LinearRing></outerBoundaryIs></Polygon>\n</MultiGeometry></Placemark></Document></kml>"
+  },
+  {
+    "path": "Default/invalid.kml",
+    "category": "Default",
+    "kml": "<broken>"
+  },
+  {
+    "path": "Default/polar.kml",
+    "category": "Default",
+    "kml": "<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document><Placemark><LineString><coordinates>120,86</coordinates></LineString></Placemark></Document></kml>"
+  },
+  {
+    "path": "Flight/dateline.kml",
+    "category": "Flight",
+    "kml": "<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document><Placemark><MultiGeometry><LineString><coordinates>179,30 -179,31</coordinates></LineString><LineString><coordinates>120,40</coordinates></LineString></MultiGeometry></Placemark></Document></kml>"
+  },
+  {
+    "path": "Train/same.kml",
+    "category": "Train",
+    "kml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<kml xmlns=\"http://www.opengis.net/kml/2.2\" xmlns:gx=\"http://www.google.com/kml/ext/2.2\"\n xmlns:custom=\"urn:extra\"><Document><!--keep--><?probe keep?><name>索引未命中</name>\n<ExtendedData><Data name=\"TrackTags\"><value>火车</value></Data>\n<Data name=\"unknown\"><value><![CDATA[a<b & c]]></value></Data></ExtendedData>\n<Style id=\"keep\"><LineStyle><color>ff0000ff</color><width>4.25</width></LineStyle></Style>\n<custom:opaque foo=\"bar\">untouched</custom:opaque>\n<Placemark id=\"p\"><name>多段</name><description><![CDATA[<b>描述</b>]]></description><styleUrl>#keep</styleUrl>\n<MultiGeometry><LineString id=\"a\"><coordinates>100,26 101,27,0 102,28,8.25</coordinates></LineString>\n<gx:Track id=\"b\"><when>2026-10-01T00:00:00.123456789Z</when><when>2026-10-01T08:00:01+08:00</when>\n<gx:coord>103 29 9</gx:coord><gx:coord>104 30</gx:coord></gx:Track>\n<LineString><coordinates>105,31</coordinates></LineString>\n<Polygon><outerBoundaryIs><LinearRing><coordinates>0,0 1,0 0,1 0,0</coordinates>\n</LinearRing></outerBoundaryIs></Polygon>\n</MultiGeometry></Placemark></Document></kml>"
+  }
+]

@@ -1,16 +1,16 @@
-import { afterEach, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import {
-  mkdtempSync,
-  rmSync,
-  readFileSync,
-  writeFileSync,
   existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import sharp from "sharp";
+import { afterEach, expect, it } from "vitest";
 import { COMMANDS } from "../../dist/node/cli/commands.js";
 const exec = promisify(execFile),
   cli = path.resolve("dist/node/cli/main.js"),
@@ -37,14 +37,12 @@ async function run(dir: string, args: string[]) {
     return e;
   }
 }
-it("covers the current business commands, excludes pop and resolves every help page", async () => {
+it("covers the current business commands and resolves every help page", async () => {
   const names = Object.keys(COMMANDS).filter(
     (n) =>
       !["completion", "data:", "setup:"].some((prefix) => n.startsWith(prefix)),
   );
-  expect(names).toHaveLength(46);
-  expect(names).not.toContain("kml:pop");
-  expect(names).not.toContain("kml:to-multigeom");
+  expect(names).toHaveLength(43);
   expect(names).toEqual(
     expect.arrayContaining([
       "track:list",

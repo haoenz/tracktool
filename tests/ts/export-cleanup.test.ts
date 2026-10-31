@@ -1,24 +1,24 @@
-import { afterEach, expect, it } from "vitest";
+import { existsSync } from "node:fs";
 import {
-  mkdtemp,
   mkdir,
-  writeFile,
+  mkdtemp,
   readFile,
   rm,
   symlink,
   utimes,
+  writeFile,
 } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
+import { afterEach, expect, it } from "vitest";
 import {
-  ExportCleanup,
   EXPORT_RETENTION_MS,
+  ExportCleanup,
 } from "../../dist/node/infrastructure/export-cleanup.js";
-import { WorkFiles } from "../../dist/node/infrastructure/work-files.js";
 import { SqliteTasks } from "../../dist/node/infrastructure/task-store.js";
-import { WorkRequestSchema } from "../../dist/node/shared/work.js";
+import { WorkFiles } from "../../dist/node/infrastructure/work-files.js";
 import type { WorkTask } from "../../dist/node/shared/work.js";
+import { WorkRequestSchema } from "../../dist/node/shared/work.js";
 
 const teardown: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -187,7 +187,7 @@ it("expires unsubmitted previews and orphan allocations but preserves current al
   expect(existsSync(current)).toBe(true);
 });
 
-it("refuses legacy paths, path traversal, and symlink swaps without deleting their targets", async () => {
+it("refuses external paths, path traversal, and symlink swaps without deleting their targets", async () => {
   const { cleaner, files, store, task, paths, dir } = await setup();
   const original = path.join(dir, "original.zip");
   await writeFile(original, "original bytes");
@@ -197,16 +197,16 @@ it("refuses legacy paths, path traversal, and symlink swaps without deleting the
   await expect(files.exportOutput(true, original)).rejects.toThrow(
     "受管临时目录",
   );
-  const legacy = store.enqueue(
+  const external = store.enqueue(
     WorkRequestSchema.parse({ operation: "archive:backup", output: original }),
     undefined,
     true,
   );
-  store.claim("legacy");
-  store.finish(legacy.id, "legacy", "succeeded", {
+  store.claim("external");
+  store.finish(external.id, "external", "succeeded", {
     output: { paths: [original] },
   });
-  expect(() => cleaner.complete(legacy.id, 0)).toThrow("临时导出");
+  expect(() => cleaner.complete(external.id, 0)).toThrow("临时导出");
   await rm(paths[0]!);
   await symlink(original, paths[0]!);
   expect(() => cleaner.complete(task.id, 0)).toThrow("符号链接");

@@ -121,46 +121,6 @@
       "tile_display_size": 256
     },
     {
-      "id": "amap-road-legacy",
-      "name": "高德地图（旧版大字体）",
-      "qr_id": 531,
-      "url": "https://webst01.is.autonavi.com/appmaptile?style=7&x={x}&y={y}&z={z}",
-      "tile_size": 256,
-      "maxzoom": 18,
-      "crs": "gcj02",
-      "imagery": false,
-      "has_text": true,
-      "overlay_only": false,
-      "attribution": "© 高德地图",
-      "source_file": "v2-125e310bd136a99f1bf8e54ca95a76c4_1440w.png",
-      "source_sha256": "a1525e3ebfb116bd84cf3cfbf55e5401c31298a3c5528c24040a7688c95784d8",
-      "source_fields": {
-        "t": "37",
-        "id": "531",
-        "po": "0",
-        "pn": "1",
-        "mt": "1",
-        "hs": "1",
-        "he": "4"
-      },
-      "group": "高德",
-      "kind": "basemap",
-      "format": "raster",
-      "minzoom": 0,
-      "scheme": "xyz",
-      "coverage": "中国大陆优先；国境与港澳台附近坐标适配未保证",
-      "content": [
-        "roads",
-        "road_names",
-        "places",
-        "boundaries",
-        "poi"
-      ],
-      "addressing": "XYZ",
-      "content_note": "道路、路名、地名等已烧入瓦片，无法分别移除。",
-      "tile_display_size": 256
-    },
-    {
       "id": "amap-roads",
       "name": "高德路网（无字）",
       "qr_id": 212,

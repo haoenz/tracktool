@@ -17,7 +17,7 @@ pnpm cli setup chromium
 pnpm start --archive /绝对路径/轨迹归档
 ```
 
-Chromium 用于 PNG 导出；仅处理轨迹或媒体时无需安装。打开 `http://127.0.0.1:8765`，直接进入全屏地图工作区。默认展示全库轨迹；顶部“出图”在当前地图上叠加可改变比例的蒙版框，直接复用地图样式和轨迹库可见性。左上角只有“轨迹 / 设置”两个入口；轨迹面板仅提供轨迹列表、上传轨迹、导出轨迹三个入口；导出类型可选压缩包、聚合 KML 和 PNG 图像，选择后显示对应选项。设置首页提供浅色、深色、跟随系统的全局配色选项，并通过“地图设置”调整图源、标注、要素和叠加层；服务配置由 CLI 或后台修改。网页固定使用后台配置的一个轨迹库，不提供 SQLite 上传、选择或路径配置入口。首次建库和旧 ZIP 导入通过 CLI 完成。
+Chromium 用于 PNG 导出；仅处理轨迹或媒体时无需安装。打开 `http://127.0.0.1:8765`，直接进入全屏地图工作区。默认展示全库轨迹；顶部“出图”在当前地图上叠加可改变比例的蒙版框，直接复用地图样式和轨迹库可见性。左上角只有“轨迹 / 设置”两个入口；轨迹面板仅提供轨迹列表、上传轨迹、导出轨迹三个入口；导出类型可选压缩包、聚合 KML 和 PNG 图像，选择后显示对应选项。设置首页提供浅色、深色、跟随系统的全局配色选项，并通过“地图设置”调整图源、标注、要素和叠加层；服务配置由 CLI 或后台修改。网页固定使用后台配置的一个轨迹库，不提供 SQLite 上传、选择或路径配置入口。首次建库和 ZIP 导入通过 CLI 完成。
 
 安装打包文件：
 
@@ -28,7 +28,7 @@ tracktool setup chromium
 tracktool-map --archive /绝对路径/轨迹归档
 ```
 
-这是本地产物安装方式；本轮没有发布到公共包仓库。已有 Python 安装时，先按[升级与回退说明](docs/install-upgrade.md)备份和核对命令路径，再切换入口。
+这是本地产物安装方式；本轮没有发布到公共包仓库。安装与数据恢复见[安装说明](docs/install-upgrade.md)。
 
 后台使用 `archive_path` 配置或启动参数 `--archive` 指定轨迹库位置，例如 `pnpm cli config set archive_path ~/.local/share/tracktool`；未配置时，若 `~/.local/share/tracktool/archive.sqlite3` 存在则使用它。KML 文件仍可通过网页导入到这个固定库。
 
@@ -39,7 +39,7 @@ tracktool-map --archive /绝对路径/轨迹归档
 - **轨迹处理**：从具体行程详情的“编辑轨迹／调整显示／查看历史操作”进入，支持断开、删点、填充高程、修改标签、补绘、连接/忽略设置、版本历史和整组撤销。普通修改直接保存，填充高程、拆分和历史恢复等先展示结果再确认；原件及旧版本保留；明确选择“拆成独立行程”才产生多个条目。连接/忽略统一用于全库地图、出图 PNG 和展示 KML。
 - **操作反馈**：在当前操作页面显示预览确认、进度和结果。
 
-媒体处理暂时仅通过 CLI 使用。切换网页面板保留地图视角、轨迹选择和未保存编辑；旧的归档、轨迹、任务、设置地址会打开对应面板。
+媒体处理暂时仅通过 CLI 使用。切换网页面板保留地图视角、轨迹选择和未保存编辑。
 
 网页 KML 入库仅支持从手机或当前设备上传。上传原件保留在客户端，服务端处理暂存副本；入库成功、失败或取消后自动清理副本，中断后在服务重启时补做清理。成功的预览会保留副本直到确认入库或预览过期，再次处理需重新上传。任务和事件保存在独立 SQLite 数据库，服务重启后仍可查看；中断的写任务不会自动重放。取消不回滚已完成修改。
 
@@ -71,9 +71,9 @@ tracktool exif to-mp4 /数据/视频 --timezone-policy keep
 tracktool config show --public
 ```
 
-使用 `kml download` 只读下载轨迹，`kml delete` 删除条目及其历史；原 pop 已移除。新库使用 schema 7，旧 schema 2/3/4/5/6 可继续读取；统计缓存持久化需要 schema 5 及以上，端点行政区存储需要 schema 6，旧 schema 2/3 删除前用 `archive migrate` 完整备份后显式升级。压缩包/聚合 KML 是日常导出，完整历史使用 SQLite 完整备份；旧 ZIP 使用 `archive import-zip`。`archive undo` 已退役，`archive log` 只读已有旧日志。
+使用 `kml download` 只读下载轨迹，`kml delete` 删除条目及其历史。归档使用 schema 9；压缩包和聚合 KML 用于日常导出，完整版本历史使用 SQLite 完整备份。ZIP 可通过 `archive import-zip` 导入新库。
 
-入库默认整批校验、事务提交，保留源文件且不创建 Backup 目录；显式 `kml push --move` 或 `kml merge --move` 才启用旧的源文件搬移流程。
+入库默认整批校验、事务提交，保留源文件且不创建 Backup 目录；显式 `kml push --move` 或 `kml merge --move` 才启用源文件搬移流程。
 
 `--dry-run` 不修改源文件或请求付费 Google API；公共参数可放在业务命令前后。查询写入 stdout，日志/进度进入 stderr。退出码：0 成功、1 输入错误、2 外部工具/API 失败、3 部分失败、130 用户取消。媒体默认保留首次 `_original` 备份；重跑不覆盖该备份。视频时区冲突应显式选择 `keep`/`force` 和必要的 `--time-source`。
 
@@ -86,11 +86,11 @@ source <(tracktool completion zsh)
 
 Bash 当前会话使用 `source <(tracktool completion bash)`；同样支持动态活动标签。
 
-更多命令和兼容细节见[CLI 使用说明](docs/cli.md)。
+更多命令和使用细节见[CLI 使用说明](docs/cli.md)。
 
 ## 程序调用
 
-Node 可使用 `import { readTrackData, openArchive } from 'tracktool'`。其他语言可调用 `tracktool data track FILE`、`tracktool data entries ARCHIVE` 或本地 HTTP。微秒 JSON 使用十进制字符串，保留原有精度；见[API 与 Python 调用替代](docs/api.md)。
+Node 可使用 `import { readTrackData, openArchive } from 'tracktool'`。其他语言可调用 `tracktool data track FILE`、`tracktool data entries ARCHIVE` 或本地 HTTP。微秒 JSON 使用十进制字符串，保留原有精度；见[程序接口](docs/api.md)。
 
 ## 开发与验收
 

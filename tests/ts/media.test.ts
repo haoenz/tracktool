@@ -1,45 +1,45 @@
-import { digest } from "../../dist/node/infrastructure/durable-files.js";
-import { afterEach, expect, it, vi } from "vitest";
 import {
-  mkdtempSync,
-  writeFileSync,
-  readFileSync,
   existsSync,
-  rmSync,
   mkdirSync,
-  symlinkSync,
+  mkdtempSync,
   readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
 } from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import sharp from "sharp";
-import {
-  ExifMetadata,
-  resolveRawTags,
-} from "../../dist/node/infrastructure/metadata.js";
-import {
-  LocalMediaFiles,
-  runProcess,
-} from "../../dist/node/infrastructure/media-files.js";
-import { MediaService } from "../../dist/node/services/media-service.js";
-import type { MetadataBackend } from "../../dist/node/services/media-ports.js";
+import { afterEach, expect, it, vi } from "vitest";
+import { DEFAULTS } from "../../dist/node/domain/config.js";
 import type { Metadata } from "../../dist/node/domain/media-time.js";
 import {
   formatWall,
-  resolveVideoTime,
   parseMediaTime,
   parseTimeDiff,
+  resolveVideoTime,
 } from "../../dist/node/domain/media-time.js";
 import { coordinate, gpsTags } from "../../dist/node/domain/media.js";
 import { TAGS as T } from "../../dist/node/domain/tags.js";
 import { timestamp } from "../../dist/node/domain/trackdata.js";
-import { createContext } from "../../dist/node/services/context.js";
-import { DEFAULTS } from "../../dist/node/domain/config.js";
-import { GoogleElevation } from "../../dist/node/infrastructure/elevation.js";
-import { GoogleGeocode } from "../../dist/node/infrastructure/geocode.js";
 import { ArchiveClient } from "../../dist/node/infrastructure/archive/client.js";
 import { ArchiveWriter } from "../../dist/node/infrastructure/archive/writer.js";
 import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js";
+import { digest } from "../../dist/node/infrastructure/durable-files.js";
+import { GoogleElevation } from "../../dist/node/infrastructure/elevation.js";
+import { GoogleGeocode } from "../../dist/node/infrastructure/geocode.js";
+import {
+  LocalMediaFiles,
+  runProcess,
+} from "../../dist/node/infrastructure/media-files.js";
+import {
+  ExifMetadata,
+  resolveRawTags,
+} from "../../dist/node/infrastructure/metadata.js";
+import { createContext } from "../../dist/node/services/context.js";
+import type { MetadataBackend } from "../../dist/node/services/media-ports.js";
+import { MediaService } from "../../dist/node/services/media-service.js";
 import oracles from "./fixtures/m5/time.json";
 const dirs: string[] = [];
 function tmp() {
@@ -120,7 +120,7 @@ async function video(file: string) {
     signal,
   );
 }
-it("matches all 117 Python video timezone oracle cases with exact microseconds", () => {
+it("matches all 117 video timezone reference cases with exact microseconds", () => {
   expect(oracles).toHaveLength(117);
   for (const test of oracles) {
     const run = () =>
@@ -460,8 +460,9 @@ it("config set validates tag ownership, persists Unicode atomically and previews
   const value = await store.set("track_tag.Train", "+散步");
   expect(value["track_tag.Default"]).not.toContain("散步");
   expect(value["track_tag.Train"]).toContain("散步");
-  await store.set("archive_history", "off");
-  expect((await store.load()).archive_history).toBe(false);
+  await store.set("auto_fill_locations", "off");
+  expect((await store.load()).auto_fill_locations).toBe(false);
+  await expect(store.set("unknown-setting", "off")).rejects.toThrow();
   await expect(store.set("unknown", "x")).rejects.toThrow();
   expect(JSON.parse(readFileSync(file, "utf8"))["track_tag.Train"]).toContain(
     "散步",
@@ -579,35 +580,6 @@ it("repair routes altitude-only and GPS-missing media to separate branches", asy
   expect((await s.repair(ctx(), dir, "database", "key")).exitCode).toBe(0);
   expect(existsSync(path.join(dir, "GoogleAltOK", "alt.jpg"))).toBe(true);
   expect(backend.values.get(b)?.GPSLongitude).toBe("121");
-});
-it("persists legacy config only on apply, preserving source on preview", async () => {
-  const d = tmp(),
-    legacy = path.join(d, "legacy.json"),
-    target = path.join(d, "new", "config.json");
-  writeFileSync(
-    legacy,
-    JSON.stringify({ kml_zip_path: path.join(d, "Archive.zip") }),
-  );
-  const store = new FileConfigStore({
-    legacyPath: legacy,
-    environment: {
-      platform: process.platform,
-      home: d,
-      cwd: d,
-      env: { XDG_CONFIG_HOME: path.join(d, "new") },
-    },
-  });
-  const value = await store.load();
-  expect(value.archive_path).toBe(d);
-  expect(existsSync(store.path)).toBe(false);
-  expect(existsSync(legacy)).toBe(true);
-  await store.load({ persistMigration: true });
-  expect(existsSync(store.path)).toBe(true);
-  expect(existsSync(legacy)).toBe(false);
-  expect(JSON.parse(readFileSync(store.path, "utf8"))).not.toHaveProperty(
-    "kml_zip_path",
-  );
-  expect(existsSync(target)).toBe(false);
 });
 it("verification mismatch leaves a file in place even with a failed-folder option", async () => {
   const d = tmp(),

@@ -29,7 +29,6 @@ export const PublicConfigSchema = z
   .object({
     log_level: LogLevelSchema,
     archive_path: z.string(),
-    archive_history: z.boolean(),
     kml_backup_dir_name: z.string(),
     google_api_key_configured: z.boolean(),
     "track_tag.Default": z.array(z.string()),

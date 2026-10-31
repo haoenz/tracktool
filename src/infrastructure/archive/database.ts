@@ -1,11 +1,12 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import { inflateSync } from "node:zlib";
-import { resolvePath } from "../paths.js";
 import { AppError } from "../../domain/errors.js";
 import { MAX_KML_BYTES } from "../../domain/trackdata.js";
+import { resolvePath } from "../paths.js";
+import { SCHEMA_VERSION } from "./schema.js";
 export function databasePath(input: string): string {
   if (!input) throw new AppError("USER_INPUT", "请先选择 SQLite 归档");
   const p = resolvePath(input);
@@ -19,7 +20,7 @@ export function databasePath(input: string): string {
     ? path.join(p, "archive.sqlite3")
     : p.endsWith(".sqlite3")
       ? p
-      : path.join(path.dirname(p), "archive.sqlite3");
+      : path.join(p, "archive.sqlite3");
 }
 /** Connection counters; the archive worker reuses one session per file. */
 export const databaseStats = { opens: 0 };
@@ -87,11 +88,7 @@ async function sharedScope<T>(
     nesting--;
   }
 }
-export function connect(
-  file: string,
-  write = false,
-  allowedSchemas = [2, 3, 4, 5, 6, 7, 8],
-): Database.Database {
+export function connect(file: string, write = false): Database.Database {
   let db: Database.Database;
   databaseStats.opens++;
   try {
@@ -99,7 +96,7 @@ export function connect(
   } catch (cause) {
     throw new AppError(
       "USER_INPUT",
-      `找不到或无法打开 SQLite 轨迹库：${file}；请显式执行 archive import-zip`,
+      `找不到或无法打开 SQLite 轨迹库：${file}；请检查路径或使用 archive init 创建归档`,
       { cause },
     );
   }
@@ -108,12 +105,12 @@ export function connect(
     db.function("tracktool_can_delete", { varargs: true }, () => 0);
     db.pragma("synchronous=FULL");
     const version = db.pragma("user_version", { simple: true });
-    if (!allowedSchemas.includes(version as number))
+    if (version !== SCHEMA_VERSION)
       throw new AppError(
         "USER_INPUT",
-        `不支持的数据库 schema ${String(version)}；需要 2–8；请先执行 archive migrate`,
+        `不支持的轨迹库格式：${String(version)}，当前格式为 ${SCHEMA_VERSION}`,
       );
-    // Concurrent first opens of an older DELETE-mode database can fail journal-mode
+    // Concurrent first opens of a DELETE-mode database can fail journal-mode
     // conversion immediately, before SQLite's normal BEGIN busy timeout applies.
     const deadline = Date.now() + 30_000;
     for (;;) {
@@ -138,10 +135,6 @@ export function connect(
 }
 export function schemaVersion(db: Database.Database): number {
   return db.pragma("user_version", { simple: true }) as number;
-}
-/** Only current active versions belong in catalogs, ordinary reads and exports. */
-export function activeEntries(db: Database.Database): string {
-  return schemaVersion(db) >= 3 ? "active_archive_entries" : "archive_entries";
 }
 export function transaction<T>(
   file: string,
@@ -236,11 +229,8 @@ export function readTransaction<T>(
     timeout: 30000,
   });
   try {
-    if (![2, 3, 4, 5, 6, 7, 8].includes(schemaVersion(db)))
-      throw new AppError(
-        "USER_INPUT",
-        "不支持的轨迹库 schema；请先执行 archive migrate",
-      );
+    if (schemaVersion(db) !== SCHEMA_VERSION)
+      throw new AppError("USER_INPUT", "轨迹库格式不受支持");
     db.pragma("query_only=ON");
     db.exec("BEGIN");
     return run(db);

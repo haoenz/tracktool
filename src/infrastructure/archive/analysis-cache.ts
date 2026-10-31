@@ -1,16 +1,16 @@
 import Database from "better-sqlite3";
 import { deflateSync, inflateSync } from "node:zlib";
 import { z } from "zod";
+import { AppError, checkCancelled } from "../../domain/errors.js";
 import {
   ANALYSIS_PARAMS,
   ANALYSIS_VERSION,
   type AnalysisParams,
 } from "../../domain/track-analysis.js";
-import { AppError, checkCancelled } from "../../domain/errors.js";
-import type { TrackAnalysis } from "../../shared/track-analysis.js";
 import type { XmlPort } from "../../services/ports.js";
+import type { TrackAnalysis } from "../../shared/track-analysis.js";
 import { PARSER_VERSION } from "../track-index.js";
-import { readTransaction, schemaVersion } from "./database.js";
+import { readTransaction } from "./database.js";
 import { downloadBytes, downloadReference } from "./download.js";
 import { canonical, hashJson } from "./identity.js";
 
@@ -84,7 +84,6 @@ export function writeAnalysis(
   analysis: TrackAnalysis,
   key: AnalysisCacheKey = CURRENT_ANALYSIS_KEY,
 ): void {
-  if (schemaVersion(db) < 5) return;
   const { samples, ...summary } = resultSchema.parse(analysis);
   const raw = Buffer.from(JSON.stringify(samples));
   if (raw.length > MAX_PROFILE_BYTES)
@@ -149,7 +148,7 @@ export class TrackAnalysisCache {
     // Ownership must be checked even on a hit or when another entry shares this content.
     const cached = readTransaction(file, (db) => {
       downloadReference(db, { entry_id: entryId, expected_sha256: sha256 });
-      if (schemaVersion(db) < 5) return undefined;
+
       try {
         const row = db
           .prepare(

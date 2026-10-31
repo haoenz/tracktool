@@ -1,8 +1,8 @@
 import type Database from "better-sqlite3";
 import type { XmlDocument } from "libxml2-wasm";
 import { analyzeTrack } from "../../domain/track-analysis.js";
-import type { TrackAnalysis } from "../../shared/track-analysis.js";
 import type { TrackData } from "../../domain/trackdata.js";
+import type { TrackAnalysis } from "../../shared/track-analysis.js";
 import { withDocument } from "../xml/document.js";
 import { readTrackData } from "../xml/trackdata.js";
 import {
@@ -10,7 +10,6 @@ import {
   writeAnalysis,
   type AnalysisCacheKey,
 } from "./analysis-cache.js";
-import { schemaVersion } from "./database.js";
 import { hashJson } from "./identity.js";
 
 /** True when this content has no reusable statistics yet. */
@@ -19,7 +18,6 @@ export function needsAnalysis(
   sha256: string,
   key: AnalysisCacheKey = CURRENT_ANALYSIS_KEY,
 ): boolean {
-  if (schemaVersion(db) < 5) return false;
   return !db
     .prepare(
       `SELECT 1 FROM track_analysis_cache

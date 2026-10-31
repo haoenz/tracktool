@@ -1,38 +1,37 @@
-import { TrackAnalysisCache } from "../infrastructure/archive/analysis-cache.js";
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { EditRequestSchema, EditApplySchema } from "../shared/track-edit.js";
-import { ArchiveRefSchema } from "../shared/archive-actions.js";
 import { AppError } from "../domain/errors.js";
 import {
   bindSegments,
   detectSegmentDrift,
   detectSegmentGaps,
 } from "../domain/presentation.js";
+import { TrackAnalysisCache } from "../infrastructure/archive/analysis-cache.js";
+import { ArchiveClient } from "../infrastructure/archive/client.js";
+import { readTransaction } from "../infrastructure/archive/database.js";
+import { downloadBytes } from "../infrastructure/archive/download.js";
 import { EditPreviews } from "../infrastructure/archive/edit-previews.js";
-import { TaskQueue } from "../infrastructure/task-queue.js";
+import { exportSelectedOriginals } from "../infrastructure/archive/selected-export.js";
+import {
+  inputGeometry,
+  operationDetail,
+  trackCatalog,
+  trackDetail,
+  trackHistory,
+  trackTimeline,
+  versionInputMeta,
+  type VersionInputMeta,
+} from "../infrastructure/archive/track-reader.js";
 import {
   archiveId,
   checkRef,
   currentEntry,
 } from "../infrastructure/archive/versions.js";
-import { readTransaction } from "../infrastructure/archive/database.js";
-import {
-  trackCatalog,
-  trackDetail,
-  trackHistory,
-  trackTimeline,
-  operationDetail,
-  versionInputMeta,
-  inputGeometry,
-  requireVersioned,
-  type VersionInputMeta,
-} from "../infrastructure/archive/track-reader.js";
-import { downloadBytes } from "../infrastructure/archive/download.js";
-import { exportSelectedOriginals } from "../infrastructure/archive/selected-export.js";
+import { TaskQueue } from "../infrastructure/task-queue.js";
 import { XmlWorkers } from "../infrastructure/xml/client.js";
-import { ArchiveClient } from "../infrastructure/archive/client.js";
+import { ArchiveRefSchema } from "../shared/archive-actions.js";
+import { EditApplySchema, EditRequestSchema } from "../shared/track-edit.js";
 
 const id = z.string().min(1).max(200),
   page = z.object({
@@ -156,7 +155,6 @@ export function trackRoutes(
       const p = z.object({ entryId: id, versionId: id }).parse(req.params),
         { file } = await get(),
         row = readTransaction(file, (db) => {
-          requireVersioned(db);
           return db
             .prepare(
               "SELECT sha256 FROM track_versions WHERE entry_id=? AND id=?",
@@ -175,7 +173,6 @@ export function trackRoutes(
     const p = z.object({ entryId: id }).parse(req.params),
       q = page.parse(req.query);
     return readTransaction((await get()).file, (db) => {
-      requireVersioned(db);
       currentEntry(db, p.entryId);
       const locations = db
         .prepare(
@@ -232,7 +229,6 @@ export function trackRoutes(
         .parse(req.query);
     const { file } = await get(),
       meta = readTransaction(file, (db) => {
-        requireVersioned(db);
         const e = currentEntry(db, p.entryId);
         return versionInputMeta(
           db,
@@ -273,7 +269,6 @@ export function trackRoutes(
       .parse(req.body);
     const { file } = await get(),
       meta = readTransaction(file, (db) => {
-        requireVersioned(db);
         if (archiveId(db) !== q.archive_id)
           throw new AppError("USER_INPUT", "轨迹库已切换");
         checkRef(db, q.target);

@@ -1,31 +1,33 @@
-import { XmlWorkers } from "../xml/client.js";
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { AppError, checkCancelled } from "../../domain/errors.js";
 import { memberName } from "../../domain/archive.js";
+import { AppError, checkCancelled } from "../../domain/errors.js";
+import { bindSegments } from "../../domain/presentation.js";
+import type {
+  SegmentEditResult,
+  SegmentInput,
+} from "../../domain/segment-edit.js";
 import {
   MAX_KML_BYTES,
   missingAltitudePoints,
 } from "../../domain/trackdata.js";
-import type {
-  SegmentInput,
-  SegmentEditResult,
-} from "../../domain/segment-edit.js";
-import { bindSegments } from "../../domain/presentation.js";
 import {
-  EditRequestSchema,
   EditApplySchema,
-  type EditRequest,
+  EditRequestSchema,
+  type AltitudePreview,
   type EditApply,
   type EditPreview,
+  type EditRequest,
   type EntrySnapshot,
-  type AltitudePreview,
 } from "../../shared/track-edit.js";
-import { readManifest } from "../xml/manifest.js";
 import { digest } from "../durable-files.js";
+import { XmlWorkers } from "../xml/client.js";
+import { readManifest } from "../xml/manifest.js";
 import { readTransaction } from "./database.js";
 import { canonical, hashJson } from "./identity.js";
+import { prepareSegmentEdit } from "./segment-editor.js";
+import { inputGeometry, versionInput } from "./track-reader.js";
 import {
   archiveId,
   checkRef,
@@ -33,13 +35,6 @@ import {
   type PublishRequest,
   type PublishResult,
 } from "./versions.js";
-import { prepareSegmentEdit } from "./segment-editor.js";
-import { prepareLegacyRegroup } from "./legacy-regroup.js";
-import {
-  inputGeometry,
-  requireVersioned,
-  versionInput,
-} from "./track-reader.js";
 
 type Artifact = {
   raw: Uint8Array;
@@ -146,7 +141,6 @@ export class EditPreviews {
       return this.get(file, id);
     }
     const before = readTransaction(file, (db) => {
-      requireVersioned(db);
       if (archiveId(db) !== request.archive_id)
         fail("SOURCE_CHANGED", "轨迹库已切换");
       return "target" in request
@@ -157,22 +151,7 @@ export class EditPreviews {
     let altitude: EditPreview["altitude"];
     const artifacts: Artifact[] = [],
       changes: EditPreview["changes"] = [];
-    if (request.operation.kind === "legacy_regroup") {
-      const prepared = await prepareLegacyRegroup(
-        file,
-        request.archive_id,
-        id,
-        request.operation,
-        signal,
-      );
-      publish = prepared.publish;
-      artifacts.push({
-        ...prepared.result,
-        path: request.operation.path,
-        state: "active",
-      });
-      changes.push(prepared.result.changes);
-    } else if (request.operation.kind === "restore_group") {
+    if (request.operation.kind === "restore_group") {
       const operationId = request.operation.operation_id;
       readTransaction(file, (db) => {
         if (
@@ -655,7 +634,6 @@ export class EditPreviews {
     )
       fail("PREVIEW_CHANGED", "预览清单校验失败");
     readTransaction(file, (db) => {
-      requireVersioned(db);
       if (archiveId(db) !== m.archive_id)
         fail("SOURCE_CHANGED", "轨迹库已切换");
     });
@@ -804,7 +782,6 @@ export class EditPreviews {
     checkCancelled(signal);
     // Archive receipt survives preview expiry, cleanup, restart and loss of task completion.
     const prior = readTransaction(file, (db) => {
-      requireVersioned(db);
       if (archiveId(db) !== request.archive_id)
         fail("SOURCE_CHANGED", "轨迹库已切换");
       const row = db

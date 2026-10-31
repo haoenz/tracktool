@@ -45,78 +45,11 @@
     "descriptions": ["<b>说明</b>"],
     "ids": []
   },
-  "gaps": ["2026-10-01T00:00:02.000001Z"],
   "content": {
     "description": "TrackTags:火车\nPosStartName:\nPosEndName:\n<b>说明</b>\n",
     "segments": [
       "100,26,0 100.1,26.1,0 100.00001,26.00001,0 101,27,0 101.00001,27.00001,0"
     ],
     "tag": "火车"
-  },
-  "Default": {
-    "names": ["普通行程"],
-    "coords": [],
-    "whens": [],
-    "lines": [],
-    "opaque": [],
-    "tags": [],
-    "descriptions": [],
-    "ids": []
-  },
-  "Default.Mobile": {
-    "names": [],
-    "coords": [],
-    "whens": [],
-    "lines": [],
-    "opaque": [],
-    "tags": [],
-    "descriptions": [],
-    "ids": []
-  },
-  "Train": {
-    "names": ["火车行程", "2026", "202610", "2026-10-01 轨迹"],
-    "coords": [],
-    "whens": [],
-    "lines": [
-      "100,26,0 100.1,26.1,0 100.00001,26.00001,0 101,27,0 101.00001,27.00001,0"
-    ],
-    "opaque": [],
-    "tags": [],
-    "descriptions": [
-      "TrackTags:火车\nPosStartName:\nPosEndName:\n<b>说明</b>\n"
-    ],
-    "ids": []
-  },
-  "Train.Mobile": {
-    "names": [],
-    "coords": [],
-    "whens": [],
-    "lines": [
-      "100,26,0 100.1,26.1,0 100.00001,26.00001,0 101,27,0 101.00001,27.00001,0"
-    ],
-    "opaque": [],
-    "tags": [],
-    "descriptions": [],
-    "ids": ["2026-10-01 轨迹"]
-  },
-  "Flight": {
-    "names": ["飞机行程"],
-    "coords": [],
-    "whens": [],
-    "lines": [],
-    "opaque": [],
-    "tags": [],
-    "descriptions": [],
-    "ids": []
-  },
-  "Flight.Mobile": {
-    "names": [],
-    "coords": [],
-    "whens": [],
-    "lines": [],
-    "opaque": [],
-    "tags": [],
-    "descriptions": [],
-    "ids": []
   }
 }

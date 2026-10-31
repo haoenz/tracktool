@@ -1,36 +1,20 @@
-import { SCHEMA_4 } from "../../dist/node/infrastructure/archive/schema-v4.js";
-import { afterEach, expect, it } from "vitest";
 import Database from "better-sqlite3";
+import { spawnSync } from "node:child_process";
 import {
-  mkdtempSync,
-  rmSync,
-  readFileSync,
-  writeFileSync,
   existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { afterEach, expect, it } from "vitest";
+import type { EntrySnapshot } from "../../dist/node/domain/track-version.js";
 import {
-  ArchiveWriter,
-  addEntry,
-} from "../../dist/node/infrastructure/archive/writer.js";
-import {
-  SCHEMA,
-  MIGRATE_1,
-} from "../../dist/node/infrastructure/archive/schema.js";
-import { SCHEMA_3 } from "../../dist/node/infrastructure/archive/schema-v3.js";
-import {
-  transaction,
   readTransaction,
+  transaction,
 } from "../../dist/node/infrastructure/archive/database.js";
-import {
-  VersionStore,
-  archiveId,
-  currentEntry,
-  publishVersions,
-  type PublishRequest,
-} from "../../dist/node/infrastructure/archive/versions.js";
 import {
   deleteEntry,
   deleteEntryInTransaction,
@@ -46,9 +30,18 @@ import {
   restoreBackup,
   verifyArchive,
 } from "../../dist/node/infrastructure/archive/full-backup.js";
-import { migrateArchive } from "../../dist/node/infrastructure/archive/migrate.js";
+import {
+  VersionStore,
+  archiveId,
+  currentEntry,
+  publishVersions,
+  type PublishRequest,
+} from "../../dist/node/infrastructure/archive/versions.js";
+import {
+  ArchiveWriter,
+  addEntry,
+} from "../../dist/node/infrastructure/archive/writer.js";
 import { digest } from "../../dist/node/infrastructure/durable-files.js";
-import type { EntrySnapshot } from "../../dist/node/domain/track-version.js";
 
 const dirs: string[] = [];
 const raw = (x = 121) =>
@@ -58,22 +51,12 @@ const raw = (x = 121) =>
 afterEach(() =>
   dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true })),
 );
-async function fixture(schema = 5) {
+async function fixture() {
   const dir = mkdtempSync(path.join(os.tmpdir(), "tracktool-delete-"));
   dirs.push(dir);
   const file = path.join(dir, "archive.sqlite3"),
     writer = new ArchiveWriter();
-  if (schema === 5) await writer.init(dir);
-  else {
-    const db = new Database(file);
-    db.exec(
-      schema === 4 ? SCHEMA_4 : schema === 3 ? SCHEMA_3 : SCHEMA + MIGRATE_1,
-    );
-    db.prepare(
-      "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'fixture')",
-    ).run();
-    db.close();
-  }
+  await writer.init(dir);
   const id = transaction(
     file,
     true,
@@ -136,7 +119,7 @@ function edit(
     ],
   };
 }
-it("rolls back replacement publication and legacy cleanup together on failure", async () => {
+it("rolls back replacement publication and source cleanup together on failure", async () => {
   const { file, id, archive } = await fixture();
   const deletion = request(file, id, "replace-cleanup");
   const before = snapshot(file);
@@ -180,41 +163,36 @@ it("rolls back replacement publication and legacy cleanup together on failure", 
   ).toEqual([{ version_no: 1 }, { version_no: 2 }]);
   expect(() => entry(file, id)).toThrow("找不到轨迹");
 });
-it.each([2, 3, 4, 5])(
-  "downloads schema %s with no recovery, database writes or target overwrite",
-  async (schema) => {
-    const { file, dir, id } = await fixture(schema);
-    const db = new Database(file);
-    db.pragma("journal_mode=DELETE");
-    db.prepare(
-      `INSERT INTO file_operations(id,operation,entry_id,sha256,source,target${schema >= 3 ? ",expected_generation" : ""}) VALUES ('pending','push',?,?,?,?${schema >= 3 ? ",1" : ""})`,
-    ).run(
-      id,
-      digest(raw()),
-      path.join(dir, "source.kml"),
-      path.join(dir, "Backup/a.kml"),
-    );
-    db.close();
-    const before = snapshot(file),
-      bytes = readFileSync(file);
-    expect(Buffer.from(downloadBytes(file, { name: "a" }).bytes)).toEqual(
-      raw(),
-    );
-    const target = downloadFile(file, { entry_id: id }, path.join(dir, "out"))
-      .paths[0]!;
-    expect(readFileSync(target)).toEqual(raw());
-    expect(() =>
-      downloadFile(file, { name: "a" }, path.join(dir, "out")),
-    ).toThrow("拒绝覆盖");
-    const blocked = path.join(dir, "blocked");
-    writeFileSync(blocked, "file");
-    expect(() => downloadFile(file, { name: "a" }, blocked)).toThrow();
-    expect(existsSync(path.join(dir, "Backup/a.kml"))).toBe(false);
-    expect(snapshot(file)).toEqual(before);
-    expect(readFileSync(file)).toEqual(bytes);
-    expect(existsSync(file + "-wal")).toBe(false);
-  },
-);
+it("downloads originals with no recovery, database writes or target overwrite", async () => {
+  const { file, dir, id } = await fixture();
+  const db = new Database(file);
+  db.pragma("journal_mode=DELETE");
+  db.prepare(
+    `INSERT INTO file_operations(id,operation,entry_id,sha256,source,target,expected_generation) VALUES ('pending','push',?,?,?,?,1)`,
+  ).run(
+    id,
+    digest(raw()),
+    path.join(dir, "source.kml"),
+    path.join(dir, "Backup/a.kml"),
+  );
+  db.close();
+  const before = snapshot(file),
+    bytes = readFileSync(file);
+  expect(Buffer.from(downloadBytes(file, { name: "a" }).bytes)).toEqual(raw());
+  const target = downloadFile(file, { entry_id: id }, path.join(dir, "out"))
+    .paths[0]!;
+  expect(readFileSync(target)).toEqual(raw());
+  expect(() =>
+    downloadFile(file, { name: "a" }, path.join(dir, "out")),
+  ).toThrow("拒绝覆盖");
+  const blocked = path.join(dir, "blocked");
+  writeFileSync(blocked, "file");
+  expect(() => downloadFile(file, { name: "a" }, blocked)).toThrow();
+  expect(existsSync(path.join(dir, "Backup/a.kml"))).toBe(false);
+  expect(snapshot(file)).toEqual(before);
+  expect(readFileSync(file)).toEqual(bytes);
+  expect(existsSync(file + "-wal")).toBe(false);
+});
 it("downloads exact current, historical and source-only versions without altering settings", async () => {
   const { file, store, archive, id } = await fixture(),
     original = entry(file, id);
@@ -473,7 +451,7 @@ it.each(["delete-history", "delete-before-commit"] as const)(
     readTransaction(file, verifyArchive);
   },
 );
-it("keeps ordinary SQL history deletion blocked and rejects new pop intents", async () => {
+it("keeps ordinary SQL history deletion blocked and rejects invalid file intents", async () => {
   const { file, id, store, archive } = await fixture();
   store.publish(edit(archive, entry(file, id)));
   const before = snapshot(file);
@@ -497,60 +475,10 @@ it("keeps ordinary SQL history deletion blocked and rejects new pop intents", as
     transaction(file, true, (db) =>
       db
         .prepare(
-          "INSERT INTO file_operations VALUES ('new','pop',?,?,NULL,'unused',1)",
+          "INSERT INTO file_operations VALUES ('new','invalid',?,?,NULL,'unused',1)",
         )
         .run(id, digest(raw())),
     ),
   ).toThrow("CHECK constraint failed");
   expect(snapshot(file)).toEqual(before);
-});
-it("explicitly migrates schema 3 preserving history and can roll back its new DDL", async () => {
-  const { file, id, store, archive } = await fixture(3);
-  store.publish(edit(archive, entry(file, id)));
-  const before = snapshot(file);
-  const { entry_id, version_id, presentation_id, generation, sha256 } = entry(
-    file,
-    id,
-  );
-  expect(() =>
-    deleteEntry(file, {
-      archive_id: archive,
-      request_key: "bad",
-      expected: { entry_id, version_id, presentation_id, generation, sha256 },
-    }),
-  ).toThrow("schema 4");
-  await expect(
-    migrateArchive(file, (p) => {
-      if (p === "migration-ddl") throw new Error("fault");
-    }),
-  ).rejects.toThrow("fault");
-  expect(snapshot(file)).toEqual(before);
-  const backup = await migrateArchive(file);
-  expect(snapshot(backup!)).toEqual(before);
-  const after = snapshot(file);
-  expect(after.schema).toBe(8);
-  for (const [table, contents] of Object.entries(before.tables))
-    if (table !== "archive_meta" && table !== "map_projects")
-      expect(after.tables[table], table).toEqual(contents);
-  expect(after.tables.map_projects).toBeUndefined();
-  expect(after.tables.track_deletions).toEqual([]);
-  deleteEntry(file, request(file, id));
-});
-it("requires legacy schema 3 pop recovery before migration and retains its withdrawn semantics", async () => {
-  const { file, dir, id, writer } = await fixture(3),
-    target = path.join(dir, "old-pop.kml");
-  transaction(file, true, (db) =>
-    db
-      .prepare("INSERT INTO file_operations VALUES ('old','pop',?,?,NULL,?,1)")
-      .run(id, digest(raw()), target),
-  );
-  await expect(migrateArchive(file)).rejects.toThrow(/recover|pending/i);
-  await writer.recover(file);
-  expect(readFileSync(target)).toEqual(raw());
-  expect(entry(file, id).state).toBe("withdrawn");
-  expect(rows(file, "SELECT * FROM track_versions")).toHaveLength(1);
-  await migrateArchive(file);
-  expect(entry(file, id).state).toBe("withdrawn");
-  deleteEntry(file, request(file, id));
-  expect(readFileSync(target)).toEqual(raw());
 });

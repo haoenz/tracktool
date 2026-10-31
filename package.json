@@ -16,7 +16,6 @@
     "README.md",
     "THIRD_PARTY_NOTICES.md",
     "docs/*.md",
-    "docs/history",
     "docs/validation",
     "docs/*.json"
   ],

@@ -1,18 +1,17 @@
-import { afterEach, it, expect, vi } from "vitest";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createHash } from "node:crypto";
-import sharp from "sharp";
-import Database from "better-sqlite3";
 import Pbf from "pbf";
+import sharp from "sharp";
+import { afterEach, expect, it, vi } from "vitest";
 import { Downloads } from "../../dist/node/infrastructure/maps/downloads.js";
-import { TileCache } from "../../dist/node/infrastructure/maps/tile-cache.js";
 import {
   MapResources,
   tileUrl,
-  pythonJson,
 } from "../../dist/node/infrastructure/maps/resources.js";
+import { TileCache } from "../../dist/node/infrastructure/maps/tile-cache.js";
 import { Transport } from "../../dist/node/infrastructure/maps/transport.js";
 import { vectorLabelVersion } from "../../dist/node/infrastructure/maps/vector-labels.js";
 const cleanup: (() => Promise<unknown>)[] = [];
@@ -98,7 +97,7 @@ it("shares cached single-name tiles between browsing and export while retaining 
     expect(displayed.data).not.toEqual(original);
     expect(displayed.mime).toBe("application/x-protobuf");
     expect(displayed.data.includes(Buffer.from("tracktool:name"))).toBe(true);
-    const key = hash(pythonJson([vectorLabelVersion, hash(original)]));
+    const key = hash(JSON.stringify([vectorLabelVersion, hash(original)]));
     expect(r.tiles.get(key)).toEqual(displayed.data);
     expect(
       (await r.displayTile("vector", 1, 0, 0, undefined, true)).data,
@@ -174,11 +173,9 @@ it("schedules exports without starving previews and enforces per-provider limits
   expect(order).toHaveLength(4);
   await d.close();
 });
-it("transactional disk LRU, replacement accounting, legacy import and reopen", async () => {
+it("transactional disk LRU, replacement accounting and reopen", async () => {
   const folder = await temporary();
-  await writeFile(path.join(folder, `${"a".repeat(64)}.tile`), "old");
   let cache = new TileCache(folder, 7);
-  expect(cache.get(`legacy:${"a".repeat(64)}`)?.toString()).toBe("old");
   cache.put("b", Buffer.from("1234"), 1);
   cache.put("c", Buffer.from("5678"), 2);
   expect(cache.get("b")).toBeUndefined();
@@ -188,7 +185,7 @@ it("transactional disk LRU, replacement accounting, legacy import and reopen", a
   expect(cache.get("c")?.toString()).toBe("xy");
   cache.close();
 });
-it("uses Python cache identities, validates tiles, preserves attribution and hides source credentials", async () => {
+it("uses cache identities, validates tiles, preserves attribution and hides source credentials", async () => {
   const folder = await temporary(),
     secret = "https://offline.example/planet?key=secret-value";
   const fetcher = vi.fn(async (url: string) =>
@@ -205,7 +202,7 @@ it("uses Python cache identities, validates tiles, preserves attribution and hid
     await r.prepare();
     r.tiles.put(
       hash(
-        pythonJson([
+        JSON.stringify([
           "tile-v2",
           "vector",
           "https://offline.example/1/0/0.pbf",
@@ -338,53 +335,24 @@ it("closes the tile database and cancels scheduled work even if recency cannot f
     vi.useRealTimers();
   }
 });
-it.each(["legacy", "current"])(
-  "discards malformed %s raster cache entries and fetches valid replacements",
-  async (kind) => {
-    const png = await sharp({
-      create: { width: 256, height: 256, channels: 3, background: "white" },
-    })
-      .png()
-      .toBuffer();
-    const fetcher = vi.fn(async () => png),
-      r = new MapResources(await temporary(), { env: {}, fetch: fetcher });
-    const source = "osm-standard",
-      preset = r.presets[source]!,
-      url = tileUrl(preset, 1, 0, 0);
-    const key = hash(
-      pythonJson(["tile-v2", source, url, preset.tile_size, preset]),
-    );
-    const oldKey = `legacy:${hash(url)}`;
-    try {
-      r.tiles.put(
-        kind === "legacy" ? oldKey : key,
-        Buffer.from("<html>upstream error</html>"),
-      );
-      expect((await r.tile(source, 1, 0, 0)).data).toEqual(png);
-      expect(fetcher).toHaveBeenCalledTimes(1);
-      expect(r.tiles.get(oldKey)).toBeUndefined();
-      expect((await r.tile(source, 1, 0, 0)).data).toEqual(png);
-      expect(fetcher).toHaveBeenCalledTimes(1);
-    } finally {
-      await r.close();
-    }
-  },
-);
-it("fully validates legacy raster pixels even when their headers are readable", async () => {
+it("discards malformed raster cache entries and fetches valid replacements", async () => {
   const png = await sharp({
     create: { width: 256, height: 256, channels: 3, background: "white" },
   })
     .png()
     .toBuffer();
-  // PNG metadata is intact, but the IDAT stream is truncated.
-  const broken = png.subarray(0, png.length - 30);
-  expect((await sharp(broken).metadata()).width).toBe(256);
   const fetcher = vi.fn(async () => png),
     r = new MapResources(await temporary(), { env: {}, fetch: fetcher });
   const source = "osm-standard",
-    url = tileUrl(r.presets[source]!, 1, 0, 0);
+    preset = r.presets[source]!,
+    url = tileUrl(preset, 1, 0, 0);
+  const key = hash(
+    JSON.stringify(["tile-v2", source, url, preset.tile_size, preset]),
+  );
   try {
-    r.tiles.put(`legacy:${hash(url)}`, broken);
+    r.tiles.put(key, Buffer.from("<html>upstream error</html>"));
+    expect((await r.tile(source, 1, 0, 0)).data).toEqual(png);
+    expect(fetcher).toHaveBeenCalledTimes(1);
     expect((await r.tile(source, 1, 0, 0)).data).toEqual(png);
     expect(fetcher).toHaveBeenCalledTimes(1);
   } finally {

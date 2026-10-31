@@ -1,14 +1,15 @@
-import { createHash, randomBytes } from "node:crypto";
-import { readFile, writeFile, rename, stat } from "node:fs/promises";
-import { gunzipSync, gzipSync } from "node:zlib";
-import path from "node:path";
-import { z } from "zod";
 import Database from "better-sqlite3";
+import { createHash, randomBytes } from "node:crypto";
+import { readFile, rename, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { gunzipSync, gzipSync } from "node:zlib";
+import { z } from "zod";
 import { AppError } from "../../domain/errors.js";
 import { OVERVIEW_TILING } from "../../domain/overview.js";
-import { PARSER_VERSION } from "../track-index.js";
 import type { OverviewCrs } from "../../shared/overview.js";
-import { FORMAT, Manifest, type SourceStamp, LIMITS } from "./types.js";
+import { SCHEMA_VERSION } from "../archive/schema.js";
+import { PARSER_VERSION } from "../track-index.js";
+import { FORMAT, LIMITS, Manifest, type SourceStamp } from "./types.js";
 
 export const digest = (bytes: string | Uint8Array) =>
   createHash("sha256").update(bytes).digest("hex");
@@ -20,11 +21,7 @@ export function openSource(source: string): Database.Database {
     fileMustExist: true,
     timeout: 1000,
   });
-  if (
-    ![2, 3, 4, 5, 6, 7, 8].includes(
-      db.pragma("user_version", { simple: true }) as number,
-    )
-  ) {
+  if (db.pragma("user_version", { simple: true }) !== SCHEMA_VERSION) {
     db.close();
     throw new AppError("USER_INPUT", "轨迹库版本不支持地图概览");
   }
@@ -88,7 +85,7 @@ const Coordinates = z.object({
   name: z.string(),
   tags: z.string(),
   date: z.string(),
-  distance_m: z.number().nonnegative().optional(),
+  distance_m: z.number().nonnegative(),
   start_time_us: z
     .string()
     .regex(/^-?\d+$/)

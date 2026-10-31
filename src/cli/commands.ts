@@ -1,13 +1,13 @@
-import { MEDIA_COMMANDS } from "./media-commands.js";
-import { DATA_COMMANDS } from "./data-commands.js";
-import { ZshCompletion, CompletionTags } from "./completion.js";
-import { BUSINESS_COMMANDS } from "./business-commands.js";
-import { TRACK_COMMANDS } from "./track-commands.js";
 import { Command, Flags } from "@oclif/core";
-import { FileConfigStore } from "../infrastructure/config-store.js";
-import { createContext } from "../services/context.js";
-import { getPublicConfig } from "../services/config.js";
 import { errorInfo } from "../domain/errors.js";
+import { FileConfigStore } from "../infrastructure/config-store.js";
+import { getPublicConfig } from "../services/config.js";
+import { createContext } from "../services/context.js";
+import { BUSINESS_COMMANDS } from "./business-commands.js";
+import { CompletionTags, ZshCompletion } from "./completion.js";
+import { DATA_COMMANDS } from "./data-commands.js";
+import { MEDIA_COMMANDS } from "./media-commands.js";
+import { TRACK_COMMANDS } from "./track-commands.js";
 
 class ConfigShow extends Command {
   static description = "查看配置；--public 输出网页使用的公开摘要";
@@ -21,9 +21,7 @@ class ConfigShow extends Command {
   async run(): Promise<void> {
     const { flags } = await this.parse(ConfigShow);
     try {
-      const config = await new FileConfigStore({ path: flags.config }).load({
-        persistMigration: !flags["dry-run"],
-      });
+      const config = await new FileConfigStore({ path: flags.config }).load();
       const ctx = createContext({
         config,
         mode: flags["dry-run"] ? "plan" : "apply",

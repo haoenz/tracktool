@@ -1,9 +1,9 @@
 import { XmlElement, type XmlDocument, type XmlNode } from "libxml2-wasm";
-import { withDocument, namespaces } from "./document.js";
-import { AppError } from "../../domain/errors.js";
 import type { Content } from "../../domain/archive.js";
-import { driftIndices, editTime, splitIndices } from "../../domain/kml-edit.js";
+import { AppError } from "../../domain/errors.js";
 import type { EditOperation, EditResult } from "../../domain/kml-edit.js";
+import { driftIndices, editTime, splitIndices } from "../../domain/kml-edit.js";
+import { namespaces, withDocument } from "./document.js";
 const ns = (doc: XmlDocument) => ({
   ...namespaces,
   kml: doc.root.namespaceUri || namespaces.kml,
@@ -220,7 +220,7 @@ export function executeEdit(
               old.parent!.addNsDeclaration(namespaces.gx, old.namespacePrefix);
             const fresh = old.appendElement("Track", old.namespacePrefix);
             old.remove();
-            // Keep the legacy order: all coordinates, then matching timestamps.
+            // Keep the KML element order: all coordinates, then matching timestamps.
             for (let j = start; j <= end; j++)
               fresh
                 .addElement("coord", fresh.namespacePrefix)

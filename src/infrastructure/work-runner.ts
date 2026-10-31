@@ -1,33 +1,31 @@
-import path from "node:path";
-import { lstat, readdir } from "node:fs/promises";
 import Database from "better-sqlite3";
+import { lstat, readdir } from "node:fs/promises";
+import path from "node:path";
 import { entryName, filenameDate } from "../domain/archive.js";
-import { activeEntries } from "./archive/database.js";
-import type { ImportItem } from "../shared/work.js";
-import { AppError, checkCancelled, errorInfo } from "../domain/errors.js";
 import { parseBool, resolveApiKey, tagMap } from "../domain/config.js";
-import type { ConfigStore } from "../services/ports.js";
-import type { WorkRunner } from "../services/work-ports.js";
-import type { WorkRequest, WorkOutput } from "../shared/work.js";
-import { fillEndpointLocations } from "./archive/endpoint-locations.js";
-import type { TaskEvent, BatchResult } from "../shared/contracts.js";
+import { AppError, checkCancelled, errorInfo } from "../domain/errors.js";
 import { createContext } from "../services/context.js";
 import { KmlService } from "../services/kml-service.js";
 import { MediaService } from "../services/media-service.js";
+import type { ConfigStore } from "../services/ports.js";
+import type { WorkRunner } from "../services/work-ports.js";
+import type { BatchResult, TaskEvent } from "../shared/contracts.js";
+import type { ImportItem, WorkOutput, WorkRequest } from "../shared/work.js";
 import { ArchiveClient } from "./archive/client.js";
+import { databasePath } from "./archive/database.js";
+import { EditPreviews } from "./archive/edit-previews.js";
+import { fillEndpointLocations } from "./archive/endpoint-locations.js";
 import { readZip } from "./archive/zip.js";
-import { XmlWorkers } from "./xml/client.js";
+import { GoogleElevation } from "./elevation.js";
+import { GoogleGeocode } from "./geocode.js";
 import { ImportPreviewCache } from "./import-preview-cache.js";
-import { dispatchMedia } from "./work-media.js";
 import { LocalKmlFiles } from "./kml-files.js";
 import { LocalMediaFiles } from "./media-files.js";
 import { ExifMetadata } from "./metadata.js";
-import { GoogleElevation } from "./elevation.js";
-import { GoogleGeocode } from "./geocode.js";
 import { WorkFiles } from "./work-files.js";
+import { dispatchMedia } from "./work-media.js";
 import { WorkRequestInspector } from "./work-request.js";
-import { EditPreviews } from "./archive/edit-previews.js";
-import { databasePath } from "./archive/database.js";
+import { XmlWorkers } from "./xml/client.js";
 class ScopedMediaFiles extends LocalMediaFiles {
   constructor(private readonly policy: WorkFiles) {
     super();
@@ -73,7 +71,7 @@ export class BusinessRunner implements WorkRunner {
     readonly files: WorkFiles,
     private readonly config: ConfigStore,
     private readonly envKey?: string,
-    private readonly defaultArchive?: string,
+    defaultArchive?: string,
     private readonly edits?: EditPreviews,
   ) {
     this.inspector = new WorkRequestInspector(
@@ -317,7 +315,7 @@ export class BusinessRunner implements WorkRunner {
           const existing = new Map(
             (
               db
-                .prepare(`SELECT path,sha256 FROM ${activeEntries(db)}`)
+                .prepare(`SELECT path,sha256 FROM active_archive_entries`)
                 .all() as { path: string; sha256: string }[]
             ).map((e) => [e.path, e.sha256]),
           );
@@ -469,9 +467,7 @@ export class BusinessRunner implements WorkRunner {
             try {
               for (const item of items) {
                 const entry = imported
-                  .prepare(
-                    `SELECT id FROM ${activeEntries(imported)} WHERE path=?`,
-                  )
+                  .prepare(`SELECT id FROM active_archive_entries WHERE path=?`)
                   .get(item.member) as { id: string } | undefined;
                 item.entryId = entry?.id;
               }
@@ -561,7 +557,7 @@ export class BusinessRunner implements WorkRunner {
               paths.add(path.join(target, category + suffix));
         } else
           output.data = await kml.archiveOperation(ctx, {
-            kind: kind as "status" | "recover" | "migrate",
+            kind: kind as "status" | "recover",
             database,
           });
       } else if (request.operation.startsWith("kml:")) {
@@ -578,7 +574,6 @@ export class BusinessRunner implements WorkRunner {
             [
               database,
               path.join(directory, "Archive.zip"),
-              path.join(directory, "archive.json"),
               ...["Default", "Train", "Flight"].flatMap((c) =>
                 [".kml", ".Mobile.kml"].map((ext) =>
                   path.join(directory, c + ext),

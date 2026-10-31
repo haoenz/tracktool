@@ -14,17 +14,17 @@ import { presentationDigest, hashJson } from "./identity.js";
 export const DISPLAY_VERSION = 1;
 export function resolveTrack(
   db: Database.Database,
-  track: { entry: string; sha256?: string } | TrackReference,
+  track: { entry: string } | TrackReference,
 ): TrackReference {
   const archive = (
     db.prepare("SELECT archive_id FROM archive_meta").get() as {
       archive_id: string;
     }
   ).archive_id;
-  const explicit = track as TrackReference;
-  if (explicit.entry_id) {
+  if ("entry_id" in track) {
+    const explicit = track;
     if (explicit.archive_id !== archive)
-      throw new AppError("USER_INPUT", "项目引用的轨迹库身份不同，需重新关联");
+      throw new AppError("USER_INPUT", "固定引用的轨迹库身份不符");
     const row = db
       .prepare(
         "SELECT v.sha256 FROM track_versions v JOIN track_presentations p ON p.version_id=v.id WHERE v.entry_id=? AND v.id=? AND p.id=?",
@@ -32,42 +32,8 @@ export function resolveTrack(
       .get(explicit.entry_id, explicit.version_id, explicit.presentation_id) as
       { sha256: string } | undefined;
     if (!row || row.sha256 !== track.sha256)
-      throw new AppError(
-        "USER_INPUT",
-        "项目固定版本缺失或校验失败，需重新关联",
-      );
+      throw new AppError("USER_INPUT", "固定版本缺失或校验失败");
     return explicit;
-  }
-  if (track.sha256) {
-    const rows = db
-      .prepare(
-        "SELECT v.entry_id,v.id AS version_id,p.id AS presentation_id,v.sha256,p.settings_json FROM track_versions v JOIN track_presentations p ON p.version_id=v.id WHERE v.path=? AND v.sha256=? AND v.version_no=1 AND p.rowid=(SELECT min(rowid) FROM track_presentations WHERE version_id=v.id)",
-      )
-      .all(track.entry, track.sha256) as {
-      entry_id: string;
-      version_id: string;
-      presentation_id: string;
-      sha256: string;
-      settings_json: string;
-    }[];
-    if (rows.length !== 1)
-      throw new AppError(
-        "USER_INPUT",
-        "旧项目无法唯一关联原始基线，需明确重新关联；不会跟随最新轨迹",
-      );
-    const { settings_json, ...row } = rows[0]!;
-    const settings = {
-      ...(JSON.parse(settings_json) as Presentation),
-      default_connect: false,
-      ignored: [],
-      connections: [],
-    };
-    return {
-      entry: track.entry,
-      archive_id: archive,
-      ...row,
-      override: { settings, sha256: presentationDigest(settings) },
-    };
   }
   const row = db
     .prepare(

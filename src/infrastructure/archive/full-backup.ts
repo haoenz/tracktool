@@ -1,5 +1,4 @@
 import Database from "better-sqlite3";
-import path from "node:path";
 import {
   linkSync,
   lstatSync,
@@ -8,17 +7,19 @@ import {
   rmSync,
   unlinkSync,
 } from "node:fs";
-import { AppError } from "../../domain/errors.js";
+import path from "node:path";
 import type { ArchiveResult } from "../../domain/archive.js";
+import { AppError } from "../../domain/errors.js";
 import { validatePresentation } from "../../domain/track-version.js";
-import { rawObject, schemaVersion, transaction } from "./database.js";
-import { presentationDigest } from "./identity.js";
 import {
   present,
   syncDirectory,
   syncFile,
   temporary,
 } from "../durable-files.js";
+import { rawObject, schemaVersion, transaction } from "./database.js";
+import { presentationDigest } from "./identity.js";
+import { SCHEMA_VERSION } from "./schema.js";
 
 export type BackupFault = (
   point: "backup-snapshot" | "backup-published" | "restore-published",
@@ -26,12 +27,12 @@ export type BackupFault = (
 export type ArchiveStamp = {
   archive_id: string;
   revision: number;
-  storage_revision: number | null;
+  storage_revision: number;
   schema: number;
 };
 export function verifyArchive(db: Database.Database): ArchiveStamp {
   const schema = schemaVersion(db);
-  if (![1, 2, 3, 4, 5, 6, 7, 8].includes(schema))
+  if (schema !== SCHEMA_VERSION)
     throw new AppError("USER_INPUT", `Unsupported backup schema ${schema}`);
   if (
     db.pragma("integrity_check", { simple: true }) !== "ok" ||
@@ -41,11 +42,11 @@ export function verifyArchive(db: Database.Database): ArchiveStamp {
   if (db.prepare("SELECT 1 FROM file_operations LIMIT 1").get())
     throw new AppError(
       "USER_INPUT",
-      "Pending file operations; run archive recover before backup, restore or migration",
+      "Pending file operations; run archive recover before backup or restore",
     );
   const meta = db
     .prepare(
-      `SELECT archive_id,revision,${schema >= 3 ? "storage_revision" : "NULL AS storage_revision"} FROM archive_meta WHERE singleton=1`,
+      `SELECT archive_id,revision,storage_revision FROM archive_meta WHERE singleton=1`,
     )
     .get() as Omit<ArchiveStamp, "schema"> | undefined;
   if (!meta) throw new AppError("USER_INPUT", "Archive metadata missing");
@@ -53,7 +54,7 @@ export function verifyArchive(db: Database.Database): ArchiveStamp {
     .prepare("SELECT sha256 FROM kml_objects")
     .iterate() as Iterable<{ sha256: string }>)
     rawObject(db, row.sha256);
-  if (schema >= 3) {
+  {
     if (
       db
         .prepare(
@@ -143,20 +144,19 @@ export async function fullBackup(
     published = true;
     syncDirectory(path.dirname(output));
     await fault("backup-published");
-    if (stamp.schema >= 3)
-      transaction(file, true, (db) => {
-        const current = db
-          .prepare("SELECT archive_id FROM archive_meta")
-          .get() as { archive_id: string };
-        if (current.archive_id !== stamp.archive_id || schemaVersion(db) < 3)
-          throw new AppError("USER_INPUT", "Archive changed while backing up");
-        db.prepare(
-          "INSERT INTO export_receipts VALUES (?,'full_backup',?,?) ON CONFLICT(target,kind) DO UPDATE SET revision=excluded.revision,storage_revision=excluded.storage_revision",
-        ).run(path.resolve(output), stamp.revision, stamp.storage_revision);
-      });
+    transaction(file, true, (db) => {
+      const current = db
+        .prepare("SELECT archive_id FROM archive_meta")
+        .get() as { archive_id: string };
+      if (current.archive_id !== stamp.archive_id)
+        throw new AppError("USER_INPUT", "Archive changed while backing up");
+      db.prepare(
+        "INSERT INTO export_receipts VALUES (?,'full_backup',?,?) ON CONFLICT(target,kind) DO UPDATE SET revision=excluded.revision,storage_revision=excluded.storage_revision",
+      ).run(path.resolve(output), stamp.revision, stamp.storage_revision);
+    });
     return {
       message:
-        "Full SQLite backup verified; includes original bytes, versions, provenance, presentations and projects",
+        "Full SQLite backup verified; includes original bytes, versions, provenance, presentations",
       paths: [output],
     };
   } catch (error) {

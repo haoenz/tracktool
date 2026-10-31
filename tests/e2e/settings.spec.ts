@@ -22,7 +22,7 @@ for (const width of [1280, 390]) {
   }, info) => {
     await page.setViewportSize({ width, height: 844 });
     await page.emulateMedia({ colorScheme: "dark" });
-    await page.goto("/settings");
+    await page.goto("/map?panel=settings");
     const choice = (name: string) =>
       page.getByRole("button", { name, exact: true });
     await expect(
@@ -107,7 +107,7 @@ test("entry visibility preference applies on refresh and to new tabs", async ({
     target
       .getByRole("complementary", { name: "地图控制面板" })
       .getByRole("button", { name: "切换当前列表可见性", exact: true });
-  await page.goto("/settings");
+  await page.goto("/map?panel=settings");
   const choice = page.getByRole("combobox", {
     name: "进入时轨迹",
     exact: true,
@@ -140,7 +140,7 @@ test("settings group map controls and server configuration writes require CLI", 
     requests: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("request", (r) => requests.push(r.url()));
-  await page.goto("/settings");
+  await page.goto("/map?panel=settings");
   await page.getByRole("button", { name: "地图设置", exact: true }).click();
   await expect(page.getByLabel("图源", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "返回设置", exact: true }).click();
@@ -249,7 +249,7 @@ test("bootstrap errors remain actionable without exposing server settings", asyn
       },
     }),
   );
-  await page.goto("/settings");
+  await page.goto("/map?panel=settings");
   await page.getByRole("button", { name: "地图设置", exact: true }).click();
   await expect(
     page.getByText("配置文件不是有效 JSON", { exact: true }),
@@ -265,7 +265,7 @@ test("layers retain filters and opacity when disabled and reloaded", async ({
   page,
   request,
 }) => {
-  await page.goto("/settings");
+  await page.goto("/map?panel=settings");
   await page.getByRole("button", { name: "地图设置", exact: true }).click();
   const layer = page.getByRole("group", { name: "电力图层", exact: true });
   await expect(layer.getByRole("switch")).not.toBeChecked();
@@ -330,7 +330,7 @@ test("railway modes share one layer and incompatible basemaps preserve its setti
   page,
 }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/settings");
+  await page.goto("/map?panel=settings");
   await page.getByRole("button", { name: "地图设置", exact: true }).click();
   const layer = page.getByRole("group", { name: "铁路图层", exact: true });
   await layer.getByRole("switch").check();
@@ -399,7 +399,7 @@ test("map content hides inherited controls and lists every feature category", as
     };
     await route.fulfill({ response, json: body });
   });
-  await page.goto("/settings");
+  await page.goto("/map?panel=settings");
   await page.getByRole("button", { name: "地图设置", exact: true }).click();
   await expect(
     page.getByRole("radiogroup", { name: "道路", exact: true }).first(),

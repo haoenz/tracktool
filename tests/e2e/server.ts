@@ -1,21 +1,20 @@
-import { mkdtemp, copyFile, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
-import { createApp } from "../../dist/node/server/app.js";
+import { transaction } from "../../dist/node/infrastructure/archive/database.js";
+import {
+  deleteEntry,
+  previewDeletion,
+} from "../../dist/node/infrastructure/archive/deletion.js";
+import { trackDetail } from "../../dist/node/infrastructure/archive/track-reader.js";
+import { VersionStore } from "../../dist/node/infrastructure/archive/versions.js";
+import { addEntry } from "../../dist/node/infrastructure/archive/writer.js";
 import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js";
 import { DisplayStore } from "../../dist/node/infrastructure/display-store.js";
 import { MapResources } from "../../dist/node/infrastructure/maps/resources.js";
-import { migrateArchive } from "../../dist/node/infrastructure/archive/migrate.js";
-import { randomUUID } from "node:crypto";
-import { transaction } from "../../dist/node/infrastructure/archive/database.js";
-import { addEntry } from "../../dist/node/infrastructure/archive/writer.js";
-import { VersionStore } from "../../dist/node/infrastructure/archive/versions.js";
-import { trackDetail } from "../../dist/node/infrastructure/archive/track-reader.js";
-import {
-  previewDeletion,
-  deleteEntry,
-} from "../../dist/node/infrastructure/archive/deletion.js";
+import { createApp } from "../../dist/node/server/app.js";
 const temporary = await mkdtemp(
   path.join(os.tmpdir(), "tracktool-m3-browser-"),
 );
@@ -24,7 +23,6 @@ await copyFile("tests/e2e/config.json", configPath);
 const display = new DisplayStore(path.join(temporary, "display.json"));
 const archive = path.join(temporary, "archive.sqlite3");
 await copyFile("tests/ts/fixtures/maps/archive.sqlite3", archive);
-await migrateArchive(archive);
 // A valid empty MVT layer: no external requests or misleading basemap fixtures.
 const tile = Buffer.from([26, 9, 10, 5, 119, 97, 116, 101, 114, 120, 2]);
 const raster = await sharp({

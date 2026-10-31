@@ -2,23 +2,16 @@ import type Database from "better-sqlite3";
 import { AppError } from "../../domain/errors.js";
 import {
   DeleteRequestSchema,
-  type DeleteRequest,
-  type DeletePreview,
-  type DeleteResult,
   type DeleteDependency,
+  type DeletePreview,
+  type DeleteRequest,
+  type DeleteResult,
 } from "../../shared/archive-actions.js";
-import { readTransaction, schemaVersion, transaction } from "./database.js";
-import { archiveId, checkRef, currentEntry } from "./versions.js";
+import { readTransaction, transaction } from "./database.js";
 import { selectEntry, type EntrySelector } from "./download.js";
 import { canonical, hashJson } from "./identity.js";
+import { archiveId, checkRef, currentEntry } from "./versions.js";
 
-function requireDeletionSchema(db: Database.Database): void {
-  if (schemaVersion(db) < 4)
-    throw new AppError(
-      "USER_INPUT",
-      "删除需要 schema 4；请先显式执行 archive migrate",
-    );
-}
 function dependencies(
   db: Database.Database,
   entryId: string,
@@ -49,7 +42,6 @@ function dependencies(
   return result;
 }
 function previewIn(db: Database.Database, entryId: string): DeletePreview {
-  requireDeletionSchema(db);
   const entry = currentEntry(db, entryId);
   const count = (sql: string) =>
     (db.prepare(sql).get(entryId) as { n: number }).n;
@@ -82,7 +74,6 @@ export function previewDeletion(
   selector: EntrySelector,
 ): DeletePreview {
   return readTransaction(file, (db) => {
-    requireDeletionSchema(db);
     return previewIn(db, selectEntry(db, selector).id);
   });
 }
@@ -98,7 +89,7 @@ export function deleteEntry(
     deleteEntryInTransaction(db, input, fault),
   );
 }
-/** Allow a checked migration to publish replacements and remove legacy entries atomically. */
+/** Delete dependent records under one checked transaction. */
 export function deleteEntryInTransaction(
   db: Database.Database,
   input: DeleteRequest,
@@ -110,7 +101,6 @@ export function deleteEntryInTransaction(
   const request = parsed.data,
     hash = hashJson(request);
   {
-    requireDeletionSchema(db);
     if (archiveId(db) !== request.archive_id)
       throw new AppError("USER_INPUT", "轨迹库已切换");
     const prior = db

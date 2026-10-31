@@ -117,7 +117,7 @@ describe("configuration and invocation context", () => {
     expect(parseBool("off")).toBe(false);
     expect(parseBool("invalid")).toBeUndefined();
     expect(normalizeScalar("log_level", "verbose")).toBe("VERBOSE");
-    expect(() => normalizeScalar("archive_history", "invalid")).toThrow();
+    expect(() => normalizeScalar("unknown-setting", "invalid")).toThrow();
     expect(() => normalizeScalar("constructor", "invalid")).toThrow();
     expect(parseTagSpec("+徒步,新标签,新标签").names).toEqual([
       "徒步",

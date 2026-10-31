@@ -1,7 +1,7 @@
 import { AppError, checkCancelled } from "../domain/errors.js";
 import type { ElevationPort } from "../services/kml-service.js";
 import { setTimeout as delay } from "node:timers/promises";
-// Python round(x, 2) uses ties-to-even. Exact binary halfway cases are odd eighths.
+// Rounding to two decimals uses ties-to-even. Exact binary halfway cases are odd eighths.
 function roundElevation(value: number): number {
   const eighths = value * 8;
   if (Number.isSafeInteger(eighths) && Math.abs(eighths % 2) === 1) {

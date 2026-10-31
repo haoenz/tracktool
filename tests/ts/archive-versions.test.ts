@@ -1,38 +1,19 @@
-import { afterEach, expect, it } from "vitest";
 import Database from "better-sqlite3";
-import { SCHEMA_3 } from "../../dist/node/infrastructure/archive/schema-v3.js";
-import { SCHEMA_6 } from "../../dist/node/infrastructure/archive/schema-v6.js";
-import {
-  mkdtempSync,
-  rmSync,
-  readFileSync,
-  existsSync,
-  readdirSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { afterEach, expect, it } from "vitest";
+import type {
+  EntrySnapshot,
+  Presentation,
+} from "../../dist/node/domain/track-version.js";
 import {
-  ArchiveWriter,
-  addEntry,
-} from "../../dist/node/infrastructure/archive/writer.js";
-import { ArchiveStore } from "../../dist/node/infrastructure/archive/store.js";
-import {
-  SCHEMA,
-  MIGRATE_1,
-} from "../../dist/node/infrastructure/archive/schema.js";
-import {
-  transaction,
   rawObject,
+  transaction,
 } from "../../dist/node/infrastructure/archive/database.js";
-import {
-  migrateArchive,
-  type MigrationFault,
-} from "../../dist/node/infrastructure/archive/migrate.js";
 import {
   fullBackup,
   restoreBackup,
-  verifyArchive,
 } from "../../dist/node/infrastructure/archive/full-backup.js";
 import {
   VersionStore,
@@ -40,12 +21,12 @@ import {
   currentEntry,
   type PublishRequest,
 } from "../../dist/node/infrastructure/archive/versions.js";
+import {
+  ArchiveWriter,
+  addEntry,
+} from "../../dist/node/infrastructure/archive/writer.js";
 import { digest } from "../../dist/node/infrastructure/durable-files.js";
 import { readManifest } from "../../dist/node/infrastructure/xml/manifest.js";
-import type {
-  EntrySnapshot,
-  Presentation,
-} from "../../dist/node/domain/track-version.js";
 
 const directories: string[] = [];
 function temporary() {
@@ -63,27 +44,6 @@ const kml = (coordinates = "120,30 121,31") =>
     `<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><LineString><coordinates>${coordinates}</coordinates></LineString></Placemark></Document></kml>`,
   );
 const raw = kml();
-function legacy(version = 2) {
-  const directory = temporary(),
-    file = path.join(directory, "archive.sqlite3"),
-    db = new Database(file);
-  db.pragma("foreign_keys=ON");
-  db.exec(SCHEMA);
-  if (version === 2) db.exec(MIGRATE_1);
-  else db.pragma("user_version=1");
-  db.exec("BEGIN");
-  db.prepare(
-    "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'legacy-fixture')",
-  ).run();
-  addEntry(db, "a.kml", raw, "Train");
-  addEntry(db, "bad.kml", Buffer.from("broken XML"), null);
-  db.prepare("INSERT INTO map_projects VALUES ('trip','{}','old-time')").run();
-  if (version === 2)
-    db.prepare("INSERT INTO export_receipts VALUES ('old.zip',2)").run();
-  db.exec("COMMIT");
-  db.close();
-  return { directory, file };
-}
 function rows(file: string, sql: string): unknown[] {
   const db = new Database(file, { readonly: true });
   try {
@@ -112,19 +72,11 @@ function logical(file: string): unknown {
     db.close();
   }
 }
-async function initialized(version = 5) {
+async function initialized() {
   const directory = temporary(),
     file = path.join(directory, "archive.sqlite3"),
     writer = new ArchiveWriter();
-  if (version === 5) await writer.init(directory);
-  else {
-    const db = new Database(file);
-    db.exec(SCHEMA_3);
-    db.prepare(
-      "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'schema3')",
-    ).run();
-    db.close();
-  }
+  await writer.init(directory);
   const entry = transaction(file, true, (db) => {
     const e = addEntry(db, "a.kml", raw, "Train");
     return currentEntry(db, e.id);
@@ -172,151 +124,6 @@ function settings(file: string, entry: EntrySnapshot): Presentation {
     ).settings_json,
   ) as Presentation;
 }
-it.each([1, 2])(
-  "migrates schema %s without changing raw bytes, entry identity or caches",
-  async (version) => {
-    const { file } = legacy(version),
-      original = logical(file);
-    const backup = await migrateArchive(file);
-    expect(logical(backup!)).toEqual(original);
-    expect(
-      rows(
-        file,
-        "SELECT id,path,sha256,category,filename_date FROM active_archive_entries ORDER BY path",
-      ),
-    ).toEqual(
-      rows(
-        backup!,
-        "SELECT id,path,sha256,category,filename_date FROM archive_entries ORDER BY path",
-      ),
-    );
-    expect(
-      rows(
-        file,
-        "SELECT sha256,codec,raw_size,payload FROM kml_objects ORDER BY sha256",
-      ),
-    ).toEqual(
-      rows(
-        backup!,
-        "SELECT sha256,codec,raw_size,payload FROM kml_objects ORDER BY sha256",
-      ),
-    );
-    expect(
-      rows(
-        file,
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='map_projects'",
-      ),
-    ).toEqual([]);
-    expect(
-      rows(
-        file,
-        "SELECT origin,manifest_status FROM track_versions ORDER BY path",
-      ),
-    ).toEqual([
-      { origin: "migration_baseline", manifest_status: "ready" },
-      { origin: "migration_baseline", manifest_status: "unavailable" },
-    ]);
-    expect(
-      rows(
-        file,
-        "SELECT json_extract(settings_json,'$.default_connect') AS connected FROM track_presentations",
-      ),
-    ).toEqual([{ connected: 0 }, { connected: 0 }]);
-    const db = new Database(file);
-    expect(verifyArchive(db)).toMatchObject({
-      schema: 8,
-      revision: 3,
-      storage_revision: 1,
-    });
-    db.close();
-    const migrated = logical(file);
-    expect(await migrateArchive(file)).toBeUndefined();
-    expect(logical(file)).toEqual(migrated);
-  },
-);
-it.each([
-  "migration-backup",
-  "migration-ddl",
-  "migration-baseline",
-  "migration-before-commit",
-] as Parameters<MigrationFault>[0][])(
-  "rolls back every durable migration phase: %s",
-  async (point) => {
-    const { file, directory } = legacy(),
-      before = logical(file);
-    await expect(
-      migrateArchive(file, (p) => {
-        if (p === point) throw new Error("injected failure");
-      }),
-    ).rejects.toThrow("injected failure");
-    expect(logical(file)).toEqual(before);
-    const backups = readdirSync(directory).filter((n) =>
-      n.includes(".schema2-"),
-    );
-    expect(backups).toHaveLength(1);
-    expect(logical(path.join(directory, backups[0]!))).toEqual(before);
-  },
-);
-it("rejects changes made while the migration backup was being prepared", async () => {
-  const { file } = legacy();
-  await expect(
-    migrateArchive(file, (p) => {
-      if (p === "migration-backup") {
-        const db = new Database(file);
-        db.prepare("UPDATE map_projects SET state='changed'").run();
-        db.close();
-      }
-    }),
-  ).rejects.toThrow("changed during migration backup");
-  expect(rows(file, "PRAGMA user_version")).toEqual([{ user_version: 2 }]);
-  expect(rows(file, "SELECT state FROM map_projects")).toEqual([
-    { state: "changed" },
-  ]);
-});
-it("backs up schema 6 projects, rolls back a failed drop, and preserves all track history on upgrade", async () => {
-  const file = path.join(temporary(), "archive.sqlite3");
-  const db = new Database(file);
-  db.exec(SCHEMA_6);
-  db.prepare(
-    "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'schema6')",
-  ).run();
-  db.prepare(
-    "INSERT INTO map_projects(name,state,updated_at) VALUES ('old','{}','2026-01-01')",
-  ).run();
-  db.close();
-  transaction(file, true, (db) =>
-    addEntry(db, "Default/a.kml", raw, "Default"),
-  );
-  const before = logical(file);
-  await expect(
-    migrateArchive(file, (point) => {
-      if (point === "migration-before-commit")
-        throw new Error("injected failure");
-    }),
-  ).rejects.toThrow("injected failure");
-  expect(logical(file)).toEqual(before);
-  const backup = (await migrateArchive(file))!;
-  expect(logical(backup)).toEqual(before);
-  expect(rows(file, "PRAGMA user_version")).toEqual([{ user_version: 8 }]);
-  expect(
-    rows(
-      file,
-      "SELECT name FROM sqlite_master WHERE name='map_projects' OR name LIKE 'project_%'",
-    ),
-  ).toEqual([]);
-  for (const table of [
-    "kml_objects",
-    "archive_entries",
-    "track_versions",
-    "track_presentations",
-    "track_operations",
-    "track_analysis_cache",
-    "track_endpoint_locations",
-  ])
-    expect(rows(file, `SELECT * FROM ${table}`)).toEqual(
-      rows(backup, `SELECT * FROM ${table}`),
-    );
-});
 it("locates mixed geometries without treating untimed lines as hand drawing or changing bytes", () => {
   const bytes = Buffer.from(
     `<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><!-- comment --><Placemark><MultiGeometry><gx:MultiTrack><gx:Track><when>2026-01-01T00:00:00Z</when><gx:coord>120 30</gx:coord><gx:coord>121 31</gx:coord></gx:Track></gx:MultiTrack><LineString><coordinates>121,31 122,32</coordinates></LineString></MultiGeometry></Placemark></Document></kml>`,
@@ -586,44 +393,6 @@ it("enforces immutable history and matching entry/version/presentation ownership
     expect(logical(file)).toEqual(before);
   }
 });
-it("legacy schema 3 pop recovery withdraws the active entry and retains every historical object", async () => {
-  const { file, directory, store, entry, archive, writer } =
-    await initialized(3);
-  const current = store.publish(change(archive, entry, "edit")).entries[0]!;
-  const crashing = new ArchiveWriter(undefined, (p) => {
-    if (p === "target-durable") throw new Error("crash");
-  });
-  transaction(file, true, (db) =>
-    db
-      .prepare(
-        "INSERT INTO file_operations VALUES ('legacy','pop',?,?,NULL,?,?)",
-      )
-      .run(
-        current.entry_id,
-        current.sha256,
-        path.join(directory, "out", "a.kml"),
-        current.generation,
-      ),
-  );
-  await expect(crashing.recover(file)).rejects.toThrow("crash");
-  expect(writer.status(file).pending).toBe(1);
-  expect(store.current(entry.entry_id).state).toBe("active");
-  await expect(
-    fullBackup(file, path.join(directory, "pending.sqlite3")),
-  ).rejects.toThrow("Pending");
-  await writer.recover(file);
-  expect(writer.status(file)).toMatchObject({ entries: 0, pending: 0 });
-  expect(store.current(entry.entry_id).state).toBe("withdrawn");
-  expect(store.history(entry.entry_id)).toHaveLength(2);
-  expect(Buffer.from(store.read(entry.version_id))).toEqual(raw);
-  expect(digest(readFileSync(path.join(directory, "out", "a.kml")))).toBe(
-    current.sha256,
-  );
-  expect(() => new ArchiveStore().readBytes(file, "a.kml")).toThrow(
-    "not found",
-  );
-  expect(rows(file, "SELECT * FROM kml_objects")).toHaveLength(2);
-});
 it("verifies full WAL snapshots and restores all logical tables into a new library", async () => {
   const { file, directory, store, entry, archive } = await initialized();
   store.publish(change(archive, entry, "edit"));
@@ -671,32 +440,6 @@ it.each(["backup-snapshot", "backup-published", "restore-published"] as const)(
     );
   },
 );
-
-it("recovers the original database after SIGKILL during a real migration transaction", async () => {
-  const { file } = legacy(),
-    before = logical(file);
-  const moduleUrl = new URL(
-    "../../dist/node/infrastructure/archive/migrate.js",
-    import.meta.url,
-  ).href;
-  const result = spawnSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `import {migrateArchive} from ${JSON.stringify(moduleUrl)}; await migrateArchive(process.argv[1], point => { if(point === 'migration-before-commit') process.kill(process.pid,'SIGKILL'); });`,
-      file,
-    ],
-    { encoding: "utf8", timeout: 10000 },
-  );
-  expect(result.error).toBeUndefined();
-  expect(result.signal, result.stderr).toBe("SIGKILL");
-  expect(new ArchiveWriter().status(file)).toMatchObject({
-    schema: 2,
-    entries: 2,
-  });
-  expect(logical(file)).toEqual(before);
-});
 
 it("retains source-only originals outside the active catalog", async () => {
   const { file, store, archive } = await initialized();

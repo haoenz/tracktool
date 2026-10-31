@@ -41,9 +41,8 @@ export type AdministrativeLocation = {
   sources: Record<string, string>;
   components: AddressComponent[];
   status: "complete" | "partial" | "zero_results";
-  resolution?: AdministrativeResolution;
-  raw_response?: GeocodeResponse;
-  raw_source?: "full_response" | "legacy_components";
+  resolution: AdministrativeResolution;
+  raw_response: GeocodeResponse;
 };
 export type EndpointLocation = {
   endpoint: "start" | "end";

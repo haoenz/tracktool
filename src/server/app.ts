@@ -1,22 +1,22 @@
-import { workRoutes, type WorkOptions } from "./work.js";
-import { ZodError } from "zod";
-import { mapRoutes, type MapOptions } from "./maps.js";
-import { overviewRoutes } from "./overview.js";
-import Fastify, { type FastifyInstance } from "fastify";
 import compress from "@fastify/compress";
 import staticFiles from "@fastify/static";
+import Fastify, { type FastifyInstance } from "fastify";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path, { sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ConfigStore } from "../services/ports.js";
-import { createContext } from "../services/context.js";
-import { getPublicConfig } from "../services/config.js";
+import { ZodError } from "zod";
 import { AppError, errorInfo } from "../domain/errors.js";
 import { EditError } from "../infrastructure/archive/edit-previews.js";
 import { DisplayStore } from "../infrastructure/display-store.js";
 import { userDataDir, userStateDir } from "../infrastructure/paths.js";
+import { getPublicConfig } from "../services/config.js";
+import { createContext } from "../services/context.js";
+import type { ConfigStore } from "../services/ports.js";
+import { mapRoutes, type MapOptions } from "./maps.js";
+import { overviewRoutes } from "./overview.js";
+import { workRoutes, type WorkOptions } from "./work.js";
 
 export async function createApp(options: {
   configStore: ConfigStore;
@@ -136,15 +136,7 @@ export async function createApp(options: {
       "__TRACKTOOL_TOKEN__",
       token,
     );
-  for (const route of [
-    "/",
-    "/map",
-    "/settings",
-    "/archive",
-    "/tracks",
-    "/media",
-    "/tasks",
-  ])
+  for (const route of ["/", "/map"])
     app.get(route, async (_request, reply) =>
       reply.type("text/html; charset=utf-8").send(await page()),
     );

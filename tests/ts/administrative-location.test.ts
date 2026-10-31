@@ -1,14 +1,11 @@
-import { expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import {
-  administrativeLocation,
-  reparseAdministrativeLocation,
-} from "../../dist/node/domain/administrative-location.js";
+import { expect, it } from "vitest";
+import { administrativeLocation } from "../../dist/node/domain/administrative-location.js";
 import { GoogleGeocode } from "../../dist/node/infrastructure/geocode.js";
 import type {
+  AddressComponent,
   GeocodeResponse,
   GeocodeResult,
-  AddressComponent,
 } from "../../dist/node/shared/endpoint-location.js";
 const component = (
   type: string,
@@ -52,7 +49,6 @@ it("selects a full localized Japanese hierarchy instead of dropping its sublocal
     city: "福冈市",
     district: "博多区",
     status: "complete",
-    raw_source: "full_response",
   });
   expect(result.raw_response).toEqual(response);
 });
@@ -190,18 +186,6 @@ it("explicit administrative evidence outranks a conflicting nearest street compo
     district: "西湖区",
     status: "complete",
   });
-});
-it("reparses legacy components without pretending they were the entire response", () => {
-  const old = administrativeLocation(fixture("jp").results);
-  delete old.raw_response;
-  delete old.resolution;
-  delete old.raw_source;
-  expect(reparseAdministrativeLocation(old)).toMatchObject({
-    district: "博多区",
-    raw_source: "legacy_components",
-    resolution: { reasons: expect.arrayContaining(["legacy_evidence_only"]) },
-  });
-  expect(reparseAdministrativeLocation(old).raw_response).toBeUndefined();
 });
 it("preserves the complete successful provider response including result metadata", async () => {
   const response = {

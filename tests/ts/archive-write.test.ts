@@ -1,48 +1,40 @@
-import { afterEach, expect, it } from "vitest";
+import { Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from "@zip.js/zip.js";
 import {
-  mkdtempSync,
-  writeFileSync,
-  readFileSync,
   existsSync,
   mkdirSync,
-  rmSync,
+  mkdtempSync,
+  readFileSync,
   readdirSync,
+  rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import os from "node:os";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
-import Database from "better-sqlite3";
-import { ZipWriter, Uint8ArrayWriter, Uint8ArrayReader } from "@zip.js/zip.js";
+import { fileURLToPath } from "node:url";
+import { afterEach, expect, it } from "vitest";
+import {
+  rawObject,
+  transaction,
+} from "../../dist/node/infrastructure/archive/database.js";
+import {
+  deleteEntry,
+  previewDeletion,
+} from "../../dist/node/infrastructure/archive/deletion.js";
+import { exportDisplay } from "../../dist/node/infrastructure/archive/display-export.js";
+import { readPackedExport } from "../../dist/node/infrastructure/archive/packed-export.js";
+import type { FaultPoint } from "../../dist/node/infrastructure/archive/writer.js";
 import {
   ArchiveWriter,
   addEntry,
 } from "../../dist/node/infrastructure/archive/writer.js";
-import type { FaultPoint } from "../../dist/node/infrastructure/archive/writer.js";
-import {
-  transaction,
-  rawObject,
-} from "../../dist/node/infrastructure/archive/database.js";
-import { SCHEMA_3 } from "../../dist/node/infrastructure/archive/schema-v3.js";
-import {
-  previewDeletion,
-  deleteEntry,
-} from "../../dist/node/infrastructure/archive/deletion.js";
-import {
-  SCHEMA,
-  MIGRATE_1,
-} from "../../dist/node/infrastructure/archive/schema.js";
 import { readZip } from "../../dist/node/infrastructure/archive/zip.js";
 import { digest } from "../../dist/node/infrastructure/durable-files.js";
-import { withDocument } from "../../dist/node/infrastructure/xml/document.js";
-import { exportDisplay } from "../../dist/node/infrastructure/archive/display-export.js";
-import expected from "./fixtures/m4/python.json";
 import {
-  EXPORT_FORMATS,
   COMPRESSION_PRESETS,
+  EXPORT_FORMATS,
   exportEncoding,
 } from "../../dist/node/shared/export-format.js";
-import { readPackedExport } from "../../dist/node/infrastructure/archive/packed-export.js";
 const fixture = (n: string) =>
   fileURLToPath(new URL(`./fixtures/m4/${n}`, import.meta.url));
 const raw = readFileSync(fixture("2026-10-01 轨迹.kml"));
@@ -56,18 +48,10 @@ afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   dirs.length = 0;
 });
-async function initialized(version = 5) {
+async function initialized() {
   const directory = tmp();
   const writer = new ArchiveWriter();
-  if (version === 5) await writer.init(directory);
-  else {
-    const db = new Database(path.join(directory, "archive.sqlite3"));
-    db.exec(version === 3 ? SCHEMA_3 : SCHEMA + MIGRATE_1);
-    db.prepare(
-      "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'legacy')",
-    ).run();
-    db.close();
-  }
+  await writer.init(directory);
   return { directory, writer, file: path.join(directory, "archive.sqlite3") };
 }
 async function zipBytes(names: [string, Uint8Array, number?][]) {
@@ -89,7 +73,7 @@ it.each(
 )(
   "publishes a verified $format / $compression snapshot and rolls back failed replacement",
   async (exportOptions) => {
-    const { directory, writer, file } = await initialized(2);
+    const { directory, writer, file } = await initialized();
     transaction(file, true, (db) =>
       addEntry(db, "Default/原件.kml", raw, "Default"),
     );
@@ -101,15 +85,19 @@ it.each(
       exportOptions,
     });
     expect(writer.status(file)).toMatchObject({
-      zip_target: output,
-      zip_fresh: true,
+      export_target: output,
+      export_fresh: true,
     });
     const names: string[] = [];
     await readPackedExport(
       output,
       (name, bytes) => {
         names.push(name);
-        expect(Buffer.from(bytes)).toEqual(raw);
+        expect(Buffer.from(bytes)).toEqual(
+          Buffer.from(
+            transaction(file, false, (db) => exportDisplay(db, name)),
+          ),
+        );
       },
       exportOptions,
     );
@@ -143,7 +131,7 @@ it.each(
   },
 );
 it.each(["stored", "deflate", "bzip2", "lzma", "zstd"])(
-  "imports Python %s ZIP, preserves all raw bytes and exports a verified roundtrip",
+  "imports %s ZIP, preserves all raw bytes and exports a verified roundtrip",
   async (codec) => {
     const d = tmp(),
       w = new ArchiveWriter();
@@ -178,7 +166,7 @@ it.each(["stored", "deflate", "bzip2", "lzma", "zstd"])(
       roundtrip[n] = digest(b);
     });
     expect(roundtrip).toEqual(original);
-    expect(w.status(file).zip_fresh).toBe(true);
+    expect(w.status(file).export_fresh).toBe(true);
   },
 );
 it.each([
@@ -227,7 +215,7 @@ it.each(["crc", "symlink", "non-kml", "invalid"])(
     expect(existsSync(path.join(d, "dest/archive.sqlite3"))).toBe(false);
   },
 );
-it("push deduplicates bytes/revisions, preserves conflicting backup sources, pop refuses overwrite", async () => {
+it("push deduplicates bytes/revisions, preserves conflicting backup sources, download refuses overwrite", async () => {
   const { directory: d, writer: w, file } = await initialized();
   const source = path.join(d, "2026-10-01 轨迹.kml");
   writeFileSync(source, raw);
@@ -377,8 +365,8 @@ it.each(["export-published", "before-export-commit"] as FaultPoint[])(
     expect(readFileSync(output)).toEqual(before);
     expect(w.status(file)).toMatchObject({
       revision: 2,
-      zip_revision: 1,
-      zip_fresh: false,
+      export_revision: 1,
+      export_fresh: false,
     });
   },
 );
@@ -401,8 +389,8 @@ it.each(["export-published", "before-export-commit"] as FaultPoint[])(
     expect(readFileSync(permanent)).toEqual(before);
     expect(writer.status(file)).toMatchObject({
       revision: 2,
-      zip_revision: 1,
-      zip_fresh: false,
+      export_revision: 1,
+      export_fresh: false,
     });
     expect(readdirSync(path.dirname(output))).toEqual([]);
   },
@@ -431,77 +419,6 @@ it("older export cannot replace a newer receipt for the same target", async () =
   release();
   await expect(old).rejects.toThrow("newer snapshot");
   expect(readFileSync(output)).toEqual(before);
-});
-it("schema upgrade is explicit, transactional and preserves existing raw bytes", async () => {
-  const directory = tmp(),
-    file = path.join(directory, "archive.sqlite3"),
-    w = new ArchiveWriter();
-  const db = new Database(file);
-  db.exec(SCHEMA);
-  db.exec(
-    "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'v1-fixture'); PRAGMA user_version=1; BEGIN",
-  );
-  addEntry(db, "a.kml", raw, "Train");
-  db.exec("COMMIT");
-  db.close();
-  expect(() => w.status(file)).toThrow("schema 1");
-  await w.migrate(file);
-  expect(w.status(file).entries).toBe(1);
-  transaction(file, false, (db) =>
-    expect(Buffer.from(rawObject(db, digest(raw)))).toEqual(raw),
-  );
-});
-it("all six legacy collections match Python semantic output", async () => {
-  const { directory: d, file, writer: w } = await initialized(2);
-  transaction(file, true, (db) =>
-    addEntry(db, "Train/2026-10/2026-10-01 轨迹.kml", raw, "Train"),
-  );
-  await w.execute({ kind: "rebuild", database: file, output: d });
-  for (const name of [
-    "Default",
-    "Default.Mobile",
-    "Train",
-    "Train.Mobile",
-    "Flight",
-    "Flight.Mobile",
-  ] as const) {
-    const bytes = readFileSync(path.join(d, `${name}.kml`));
-    withDocument(bytes, (doc) => {
-      const ns = { kml: "http://www.opengis.net/kml/2.2" };
-      expect(doc.find("//kml:name/text()", ns).map((n) => n.content)).toEqual(
-        expected[name].names,
-      );
-      expect(
-        doc.find("//kml:coordinates/text()", ns).map((n) => n.content),
-      ).toEqual(expected[name].lines);
-      expect(
-        doc.find("//kml:description/text()", ns).map((n) => n.content),
-      ).toEqual(expected[name].descriptions);
-    });
-  }
-  expect(w.status(file).views_revision).toBe(1);
-  expect(readdirSync(d).filter((n) => n.endsWith(".kml"))).toHaveLength(6);
-});
-it("legacy schema 2 pop intents recover with their original removal semantics", async () => {
-  const { directory, file, writer } = await initialized(2);
-  transaction(file, true, (db) => {
-    const e = addEntry(db, "Train/a.kml", raw, "Train");
-    db.prepare(
-      "INSERT INTO file_operations VALUES ('old-pop','pop',?,?,NULL,?)",
-    ).run(e.id, e.sha256, path.join(directory, "popped", "a.kml"));
-  });
-  const crash = new ArchiveWriter(undefined, (p) => {
-    if (p === "target-durable") throw new Error("injected");
-  });
-  await expect(crash.recover(file)).rejects.toThrow("injected");
-  expect(writer.status(file)).toMatchObject({ entries: 1, pending: 1 });
-  await writer.recover(file);
-  expect(writer.status(file)).toMatchObject({
-    entries: 0,
-    pending: 0,
-    revision: 2,
-  });
-  expect(readFileSync(path.join(directory, "popped", "a.kml"))).toEqual(raw);
 });
 it("a backup directory alias of the source directory never removes the source", async () => {
   const { directory, file, writer } = await initialized();
@@ -579,7 +496,7 @@ it("download preview checks target conflicts without recovery or mutation", asyn
     }),
   ).rejects.toThrow(/拒绝覆盖|overwrite/);
 });
-it("reads Python forced ZIP64 and CP437 names; validates directory CRC and duplicate names", async () => {
+it("reads forced ZIP64 and CP437 names; validates directory CRC and duplicate names", async () => {
   const names: string[] = [];
   await readZip(fixture("cp437.zip"), (name) => {
     names.push(name);
@@ -594,37 +511,6 @@ it("reads Python forced ZIP64 and CP437 names; validates directory CRC and dupli
     await expect(
       new ArchiveWriter().init(tmp(), fixture(name)),
     ).rejects.toThrow();
-});
-
-it("recovers an already committed schema 1 pop before explicit migration", async () => {
-  const directory = tmp(),
-    file = path.join(directory, "archive.sqlite3"),
-    target = path.join(directory, "old.kml"),
-    db = new Database(file);
-  db.exec(SCHEMA);
-  db.pragma("user_version=1");
-  db.prepare(
-    "INSERT INTO archive_meta(singleton,archive_id) VALUES (1,'schema1')",
-  ).run();
-  const e = addEntry(db, "a.kml", raw, "Train");
-  db.prepare("INSERT INTO file_operations VALUES ('old','pop',?,?,NULL,?)").run(
-    e.id,
-    e.sha256,
-    target,
-  );
-  db.close();
-  const writer = new ArchiveWriter();
-  await expect(
-    writer.execute({ kind: "migrate", database: file }),
-  ).rejects.toThrow(/recover/);
-  await writer.recover(file);
-  expect(readFileSync(target)).toEqual(raw);
-  await writer.execute({ kind: "migrate", database: file });
-  expect(writer.status(file)).toMatchObject({
-    entries: 0,
-    pending: 0,
-    revision: 3,
-  });
 });
 
 it.each(["push-entry-written", "push-before-commit"] as FaultPoint[])(
@@ -700,7 +586,7 @@ it("direct import rejects changed or malformed input without committing earlier 
 });
 
 it("selected ZIP and collections export only selected entries without marking full exports fresh", async () => {
-  const { directory, writer, file } = await initialized(2);
+  const { directory, writer, file } = await initialized();
   const selected = "Default/2026-10-01 selected.kml";
   const excluded = "Default/2026-10-02 excluded.kml";
   transaction(file, true, (db) => {
@@ -721,8 +607,8 @@ it("selected ZIP and collections export only selected entries without marking fu
   expect(names).toEqual([selected]);
   transaction(file, false, (db) => {
     expect(
-      db.prepare("SELECT zip_target FROM archive_meta").get(),
-    ).toMatchObject({ zip_target: null });
+      db.prepare("SELECT export_target FROM archive_meta").get(),
+    ).toMatchObject({ export_target: null });
   });
   const output = path.join(directory, "selected-collections");
   await writer.execute({
