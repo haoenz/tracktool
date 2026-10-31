@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { z } from "zod";
 import { AppError } from "../domain/errors.js";
+import { MAP_LABEL_FONTS } from "../shared/map-label.js";
 import { OVERVIEW_TILING } from "../domain/overview.js";
 import { MapService } from "../services/map-service.js";
 import { ArchiveClient } from "../infrastructure/archive/client.js";
@@ -253,7 +254,7 @@ export function mapRoutes(
   app.get<{ Params: { font: string; span: string } }>(
     "/glyphs/:font/:span",
     async (request, reply) => {
-      if (request.params.font !== "Noto Sans Regular")
+      if (!MAP_LABEL_FONTS.some((font) => font === request.params.font))
         throw new AppError("USER_INPUT", "无效地图字体");
       return reply
         .type("application/x-protobuf")
@@ -264,6 +265,7 @@ export function mapRoutes(
             request.params.span.replace(/\.pbf$/, ""),
             cancellation(request, reply),
             request.headers["x-tracktool-render"] === token,
+            request.params.font,
           ),
         );
     },

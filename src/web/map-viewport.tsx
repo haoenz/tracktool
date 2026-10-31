@@ -114,14 +114,14 @@ export const MapViewport = memo(
         map.map.setPaintProperty("track-points", "circle-radius", [
           "case",
           ["==", ["get", "segment_id"], "ux-located"],
-          7,
-          latest.current.state.style.width / 2,
+          7 * map.displayScale,
+          (latest.current.state.style.width / 2) * map.displayScale,
         ]);
         map.map.setPaintProperty("track-points", "circle-stroke-width", [
           "case",
           ["==", ["get", "segment_id"], "ux-located"],
-          2,
-          latest.current.state.style.outline === false ? 0 : 1,
+          2 * map.displayScale,
+          latest.current.state.style.outline === false ? 0 : map.displayScale,
         ]);
       }
     };
@@ -176,6 +176,10 @@ export const MapViewport = memo(
           ? (top + (rect ? rect.top - bounds.top : height - bottom) - height) /
             2
           : 0;
+      // Browsing sizes are screen pixels; print previews retain document pixels.
+      const displayScale = latest.current.print
+        ? 1
+        : (mobile ? 1.2 : 1) / scale;
       for (const map of [current.current, candidate.current]) {
         if (!map) continue;
         const { frame } = map.state;
@@ -183,7 +187,8 @@ export const MapViewport = memo(
         // A transformed export frame can clip its overflowing canvas on mobile.
         map.frame.style.zoom = mobile ? String(scale) : "";
         map.frame.style.transform = mobile ? "" : `scale(${scale})`;
-        layers.current.get(map)?.setScale(scale);
+        map.setDisplayScale(displayScale, latest.current.print ? 1 : scale);
+        layers.current.get(map)?.setScale(scale, displayScale);
         analysisLayers.current.get(map)?.setScale(scale);
         if (map === current.current) {
           holder.current.style.width = `${frame.width * scale}px`;
@@ -220,6 +225,7 @@ export const MapViewport = memo(
           else handler.enable();
         }
         map.map.touchZoomRotate.disableRotation();
+        highlight(map);
       }
     };
     const cancel = () => {
@@ -259,6 +265,7 @@ export const MapViewport = memo(
             latest.current.onOverviewError?.(message);
         },
       );
+      map.map.on("style.load", () => highlight(map));
       layer.current = new OverviewLayer(
         map.map,
         map.crs,

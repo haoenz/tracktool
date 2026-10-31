@@ -55,6 +55,11 @@ export class MapCanvas {
   private tracks: SelectedTrack[] = [];
   private endpoints: { start: Position; end: Position }[] = [];
   private displaySource: TrackGeoJSON = empty;
+  private visualScale = 1;
+  private labelZoomOffset = 0;
+  get displayScale() {
+    return this.visualScale;
+  }
 
   constructor(
     frame: HTMLElement,
@@ -116,6 +121,7 @@ export class MapCanvas {
       pixelRatio: devicePixelRatio,
     });
     this.map.touchZoomRotate.disableRotation();
+    this.map.on("style.load", () => this.updateDisplaySizes());
     const notify = () => {
       const blocked = ["base", "satellite", "tracks"].find((id) =>
         this.resources.blocked(id),
@@ -228,9 +234,75 @@ export class MapCanvas {
     this.onError?.("");
     if (this.exportPreview && !this.loadedFont)
       void this.ensureFont().catch(() => {});
-    this.map.setStyle(mapStyle(this.state, this.config, this.displayData), {
-      diff: false,
-    });
+    this.map.setStyle(
+      mapStyle(
+        this.state,
+        this.config,
+        this.displayData,
+        this.visualScale,
+        this.labelZoomOffset,
+      ),
+      {
+        diff: false,
+      },
+    );
+  }
+  /** Compensate CSS preview scaling without changing saved/exported sizes. */
+  setDisplayScale(scale: number, canvasScale = 1) {
+    const zoomOffset = Math.log2(canvasScale);
+    if (scale === this.visualScale && zoomOffset === this.labelZoomOffset)
+      return;
+    this.visualScale = scale;
+    this.labelZoomOffset = zoomOffset;
+    this.updateDisplaySizes();
+  }
+  private updateDisplaySizes() {
+    const style = mapStyle(
+      this.state,
+      this.config,
+      undefined,
+      this.visualScale,
+      this.labelZoomOffset,
+    );
+    for (const layer of style.layers) {
+      if (!this.map.getLayer(layer.id)) continue;
+      if (layer.type === "symbol") {
+        this.map.setLayerZoomRange(
+          layer.id,
+          layer.minzoom ?? 0,
+          layer.maxzoom ?? 24,
+        );
+        for (const key of [
+          "text-size",
+          "text-padding",
+          "symbol-spacing",
+        ] as const) {
+          const value = layer.layout?.[key];
+          if (value !== undefined)
+            this.map.setLayoutProperty(layer.id, key, value);
+        }
+        this.map.setPaintProperty(
+          layer.id,
+          "text-halo-width",
+          layer.paint?.["text-halo-width"],
+        );
+        this.map.setPaintProperty(
+          layer.id,
+          "text-opacity",
+          layer.paint?.["text-opacity"],
+        );
+      } else if (layer.id === "track-lines" || layer.id === "track-halo") {
+        if (layer.type === "line")
+          this.map.setPaintProperty(
+            layer.id,
+            "line-width",
+            layer.paint?.["line-width"],
+          );
+      } else if (layer.id === "track-points" && layer.type === "circle") {
+        for (const key of ["circle-radius", "circle-stroke-width"] as const)
+          this.map.setPaintProperty(layer.id, key, layer.paint?.[key]);
+      }
+    }
   }
   // In the editor the map extends beyond the export frame. Symmetric extra
   // space preserves the frame's center and logical-pixel scale. Export uses 0.
@@ -409,7 +481,15 @@ export class MapCanvas {
       this.crs = canvasCrs(state, this.config);
       this.displayData = displayGeometry(this.displaySource, this.crs);
       this.resources.clear();
-      this.map.setStyle(mapStyle(state, this.config, this.displayData));
+      this.map.setStyle(
+        mapStyle(
+          state,
+          this.config,
+          this.displayData,
+          this.visualScale,
+          this.labelZoomOffset,
+        ),
+      );
       this.resizing = true;
       try {
         this.map.jumpTo({
@@ -425,11 +505,15 @@ export class MapCanvas {
         "line-color",
         trackColor(state.style),
       );
-      this.map.setPaintProperty("track-lines", "line-width", state.style.width);
+      this.map.setPaintProperty(
+        "track-lines",
+        "line-width",
+        state.style.width * this.visualScale,
+      );
       this.map.setPaintProperty(
         "track-halo",
         "line-width",
-        state.style.width + 2,
+        (state.style.width + 2) * this.visualScale,
       );
       this.map.setPaintProperty(
         "track-halo",
@@ -444,12 +528,12 @@ export class MapCanvas {
       this.map.setPaintProperty(
         "track-points",
         "circle-radius",
-        state.style.width / 2,
+        (state.style.width / 2) * this.visualScale,
       );
       this.map.setPaintProperty(
         "track-points",
         "circle-stroke-width",
-        state.style.outline === false ? 0 : 1,
+        state.style.outline === false ? 0 : this.visualScale,
       );
     }
     if (

@@ -7,9 +7,11 @@ import sharp from "sharp";
 import opentype from "opentype.js";
 import { AppError, checkCancelled } from "../../domain/errors.js";
 import type { MapConfig, MapPreset } from "../../shared/map.js";
+import { MAP_LABEL_FONTS } from "../../shared/map-label.js";
 import { TileCache } from "./tile-cache.js";
 import { Downloads } from "./downloads.js";
 import { Transport } from "./transport.js";
+import { labelVectorTile, vectorLabelVersion } from "./vector-labels.js";
 import {
   rasterReprojectionVersion,
   reprojectGcjTile,
@@ -233,6 +235,7 @@ export class MapResources {
     return {
       renderer: "tracktool-map-ts-v1",
       raster_reprojection: rasterReprojectionVersion,
+      vector_labels: vectorLabelVersion,
       renderer_sha256: this.assets.renderer_sha256,
       playwright: "1.61.0",
       maplibre: this.assets.maplibre,
@@ -326,13 +329,16 @@ export class MapResources {
     span: string,
     signal?: AbortSignal,
     exporting = false,
+    font: string = MAP_LABEL_FONTS[0],
   ): Promise<Buffer> {
+    if (!MAP_LABEL_FONTS.some((allowed) => allowed === font))
+      throw new AppError("USER_INPUT", "无效地图字体");
     const m = /^(\d+)-(\d+)$/.exec(span),
       start = Number(m?.[1]),
       end = Number(m?.[2]);
     if (!m || start % 256 || end !== start + 255 || start < 0 || start > 65280)
       throw new AppError("USER_INPUT", "无效字体范围");
-    const url = `https://tiles.openfreemap.org/fonts/Noto%20Sans%20Regular/${span}.pbf`,
+    const url = `https://tiles.openfreemap.org/fonts/${encodeURIComponent(font)}/${span}.pbf`,
       key = hash(`glyph-v1:${url}`);
     return this.downloads.load(
       key,
@@ -350,7 +356,7 @@ export class MapResources {
       exporting,
     );
   }
-  /** All display consumers, including PNG export, use the WGS84 tile grid. */
+  /** Browsing and PNG export share label normalization and raster reprojection. */
   async displayTile(
     source: string,
     z: number,
@@ -367,6 +373,24 @@ export class MapResources {
       if (preset?.crs !== "gcj02" || preset.format === "vector")
         throw new AppError("USER_INPUT", "GCJ-02 画布不支持该图层");
       return this.tile(source, z, x, y, signal, exporting);
+    }
+    if (source === "vector") {
+      const original = await this.tile(source, z, x, y, signal, exporting);
+      checkCancelled(signal);
+      // Keep upstream tiles intact; rule changes only invalidate derived tiles.
+      const key = hash(pythonJson([vectorLabelVersion, hash(original.data)]));
+      const cached = this.tiles.get(key);
+      if (cached !== undefined) {
+        try {
+          await this.validate(source, cached, false);
+          return { ...original, data: cached };
+        } catch {
+          this.tiles.delete(key);
+        }
+      }
+      const data = labelVectorTile(original.data);
+      this.tiles.put(key, data);
+      return { ...original, data };
     }
     if (preset?.crs !== "gcj02" || preset.format === "vector")
       return this.tile(source, z, x, y, signal, exporting);

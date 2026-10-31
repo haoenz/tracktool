@@ -32,6 +32,7 @@ export class OverviewLayer {
   private visibility?: OverviewVisibility;
   private serial = 0;
   private scale = 1;
+  private displayScale = 1;
   private hoverTimer?: number;
   private hoverEvent?: MapMouseEvent;
   constructor(
@@ -84,9 +85,10 @@ export class OverviewLayer {
     if (this.map.isStyleLoaded()) this.install();
     this.paint();
   }
-  setScale(scale: number) {
-    if (scale === this.scale) return;
+  setScale(scale: number, displayScale = 1) {
+    if (scale === this.scale && displayScale === this.displayScale) return;
     this.scale = scale;
+    this.displayScale = displayScale;
     this.paint();
   }
   retry() {
@@ -234,8 +236,8 @@ export class OverviewLayer {
     this.map.setPaintProperty(`${id}-line`, "line-width", [
       "case",
       selected,
-      5,
-      2.5,
+      5 * this.displayScale,
+      2.5 * this.displayScale,
     ]);
     this.map.setPaintProperty(
       `${id}-line`,
@@ -252,8 +254,8 @@ export class OverviewLayer {
     this.map.setPaintProperty(`${id}-point`, "circle-radius", [
       "case",
       selected,
-      6,
-      3,
+      6 * this.displayScale,
+      3 * this.displayScale,
     ]);
     this.map.setPaintProperty(
       `${id}-point`,

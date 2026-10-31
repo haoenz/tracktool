@@ -6,6 +6,7 @@
     "resolveJsonModule": true
   },
   "include": [
+    "src/**/*.d.ts",
     "tests/ts/**/*.ts",
     "tests/e2e/**/*.ts",
     "*.config.ts",

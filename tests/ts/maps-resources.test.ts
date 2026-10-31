@@ -5,6 +5,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import Database from "better-sqlite3";
+import Pbf from "pbf";
 import { Downloads } from "../../dist/node/infrastructure/maps/downloads.js";
 import { TileCache } from "../../dist/node/infrastructure/maps/tile-cache.js";
 import {
@@ -13,6 +14,7 @@ import {
   pythonJson,
 } from "../../dist/node/infrastructure/maps/resources.js";
 import { Transport } from "../../dist/node/infrastructure/maps/transport.js";
+import { vectorLabelVersion } from "../../dist/node/infrastructure/maps/vector-labels.js";
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   await Promise.all(
@@ -27,7 +29,8 @@ async function temporary() {
   cleanup.push(() => rm(p, { recursive: true, force: true }));
   return p;
 }
-const hash = (s: string) => createHash("sha256").update(s).digest("hex");
+const hash = (s: string | Uint8Array) =>
+  createHash("sha256").update(s).digest("hex");
 const vector = {
   tiles: ["https://offline.example/{z}/{x}/{y}.pbf"],
   vector_layers: [
@@ -37,6 +40,89 @@ const vector = {
   ],
 };
 const tile = Buffer.from([26, 9, 10, 5, 119, 97, 116, 101, 114, 120, 2]);
+it("fetches and caches regular and bold glyphs independently and rejects unsupported fonts", async () => {
+  const folder = await temporary();
+  const fetcher = vi.fn(async (url: string) =>
+    Buffer.from([10, url.includes("Bold") ? 1 : 0]),
+  );
+  const resources = new MapResources(folder, { fetch: fetcher });
+  try {
+    expect(await resources.glyph("0-255")).toEqual(Buffer.from([10, 0]));
+    expect(
+      await resources.glyph("0-255", undefined, false, "Noto Sans Bold"),
+    ).toEqual(Buffer.from([10, 1]));
+    await resources.glyph("0-255", undefined, true, "Noto Sans Bold");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://tiles.openfreemap.org/fonts/Noto%20Sans%20Bold/0-255.pbf",
+    );
+    await expect(
+      resources.glyph("0-255", undefined, false, "../other"),
+    ).rejects.toThrow("无效地图字体");
+    await expect(
+      resources.glyph("1-256", undefined, false, "Noto Sans Bold"),
+    ).rejects.toThrow("无效字体范围");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  } finally {
+    await resources.close();
+  }
+});
+it("shares cached single-name tiles between browsing and export while retaining upstream bytes", async () => {
+  const feature = new Pbf();
+  feature.writePackedVarint(2, [0, 0, 1, 1, 2, 2]);
+  feature.writeVarintField(3, 1);
+  feature.writePackedVarint(4, [9, 20, 40]);
+  const layer = new Pbf();
+  layer.writeStringField(1, "place");
+  layer.writeVarintField(15, 2);
+  layer.writeBytesField(2, feature.finish());
+  for (const key of ["name", "name:zh", "name:zh-Hans"])
+    layer.writeStringField(3, key);
+  for (const name of ["London", "伦敦;倫敦", "伦敦"]) {
+    const value = new Pbf();
+    value.writeStringField(1, name);
+    layer.writeBytesField(4, value.finish());
+  }
+  const writer = new Pbf();
+  writer.writeBytesField(3, layer.finish());
+  const original = Buffer.from(writer.finish());
+  const fetcher = vi.fn(async (url: string) =>
+    url.endsWith(".pbf") ? original : Buffer.from(JSON.stringify(vector)),
+  );
+  const folder = await temporary();
+  let r = new MapResources(folder, { fetch: fetcher });
+  try {
+    await r.prepare();
+    expect((await r.tile("vector", 1, 0, 0)).data).toEqual(original);
+    const displayed = await r.displayTile("vector", 1, 0, 0);
+    expect(displayed.data).not.toEqual(original);
+    expect(displayed.mime).toBe("application/x-protobuf");
+    expect(displayed.data.includes(Buffer.from("tracktool:name"))).toBe(true);
+    const key = hash(pythonJson([vectorLabelVersion, hash(original)]));
+    expect(r.tiles.get(key)).toEqual(displayed.data);
+    expect(
+      (await r.displayTile("vector", 1, 0, 0, undefined, true)).data,
+    ).toEqual(displayed.data);
+    r.tiles.put(key, Buffer.from("broken derived tile"));
+    expect((await r.displayTile("vector", 1, 0, 0)).data).toEqual(
+      displayed.data,
+    );
+    expect((await r.tile("vector", 1, 0, 0)).data).toEqual(original);
+    await expect(
+      r.displayTile("vector", 1, 0, 0, undefined, false, "gcj02"),
+    ).rejects.toThrow("不支持");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await r.close();
+    r = new MapResources(folder, { fetch: fetcher });
+    await r.prepare();
+    expect((await r.displayTile("vector", 1, 0, 0)).data).toEqual(
+      displayed.data,
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  } finally {
+    await r.close();
+  }
+});
 it("deduplicates downloads, independently cancels waiters and drops obsolete queued work", async () => {
   const d = new Downloads(1, { custom: 1 });
   let release!: (b: Buffer) => void;

@@ -6,6 +6,7 @@ import sharp from "sharp";
 import type { MapState } from "../../src/shared/map-state.js";
 import { printDocument } from "../../src/shared/print.js";
 import type { Page } from "@playwright/test";
+import type { MapConfig } from "../../src/shared/map.js";
 async function call<T>(
   page: Page,
   url: string,
@@ -32,6 +33,115 @@ async function call<T>(
 
 test.beforeEach(async ({ request }) => {
   await resetDisplay(request);
+});
+
+test("map labels and tracks retain readable screen sizes across resizing and print mode", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.route("**/api/bootstrap", async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as {
+      config: MapConfig;
+      state: MapState;
+    };
+    body.config.vectorLayers!.place = { name: "String", class: "String" };
+    body.state.style.features.places = "all";
+    await route.fulfill({ response, json: body });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/map");
+  await page.waitForFunction(() =>
+    window.renderer?.map.getLayer("place-country"),
+  );
+  const sizes = () =>
+    page.evaluate(() => {
+      const r = window.renderer!;
+      const scale =
+        r.mapElement.getBoundingClientRect().width / r.mapElement.clientWidth;
+      const width = Number(r.map.getPaintProperty("track-lines", "line-width"));
+      const text = Number(
+        r.map.getLayoutProperty("place-country", "text-size"),
+      );
+      const styleLayers = r.map.getStyle().layers;
+      const countryMaxZoom = styleLayers.find(
+        (layer) => layer.id === "place-country",
+      )!.maxzoom!;
+      const stateMinZoom = styleLayers.find(
+        (layer) => layer.id === "place-state",
+      )!.minzoom!;
+      const overview = r.map
+        .getStyle()
+        .layers.find(
+          (layer) =>
+            layer.id.startsWith("overview-") && layer.id.endsWith("-line"),
+        );
+      const overviewWidth = overview
+        ? r.map.getPaintProperty(overview.id, "line-width")
+        : undefined;
+      return {
+        width,
+        text,
+        screenWidth: width * scale,
+        screenText: text * scale,
+        savedWidth: r.state.style.width,
+        countryMaxZoom,
+        stateMinZoom,
+        screenCountryMaxZoom: countryMaxZoom + Math.log2(scale),
+        screenStateMinZoom: stateMinZoom + Math.log2(scale),
+        overviewWidth:
+          overviewWidth === undefined
+            ? undefined
+            : Number(
+                Array.isArray(overviewWidth)
+                  ? overviewWidth.at(-1)
+                  : overviewWidth,
+              ) * scale,
+        displayScale: r.displayScale,
+      };
+    });
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 390, height: 600 },
+    { width: 844, height: 390 },
+    { width: 1280, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const multiplier = viewport.width <= 700 ? 1.2 : 1;
+    await expect
+      .poll(async () => (await sizes()).screenWidth)
+      .toBeCloseTo(3 * multiplier, 1);
+    expect((await sizes()).screenText).toBeCloseTo(22 * multiplier, 1);
+    expect((await sizes()).savedWidth).toBe(3);
+    expect((await sizes()).screenCountryMaxZoom).toBeCloseTo(4.5, 2);
+    expect((await sizes()).screenStateMinZoom).toBeCloseTo(4, 2);
+  }
+  await expect
+    .poll(async () => (await sizes()).overviewWidth)
+    .toBeCloseTo(3, 1);
+  await page.evaluate(() => window.renderer!.retryResources());
+  await page.waitForFunction(
+    () =>
+      window.renderer?.map.getLayer("track-lines") &&
+      window.renderer.map.getLayer("place-country"),
+  );
+  await expect
+    .poll(async () => (await sizes()).screenText)
+    .toBeCloseTo(26.4, 1);
+  expect((await sizes()).screenCountryMaxZoom).toBeCloseTo(4.5, 2);
+  await tool(page, "出图");
+  await expect.poll(async () => (await sizes()).displayScale).toBe(1);
+  expect((await sizes()).width).toBe(3);
+  expect((await sizes()).text).toBe(22);
+  expect((await sizes()).countryMaxZoom).toBe(4.5);
+  expect((await sizes()).stateMinZoom).toBe(4);
+  await tool(page, "返回浏览");
+  await expect
+    .poll(async () => (await sizes()).screenWidth)
+    .toBeCloseTo(3.6, 1);
+  expect((await sizes()).screenText).toBeCloseTo(26.4, 1);
+  expect((await sizes()).screenCountryMaxZoom).toBeCloseTo(4.5, 2);
 });
 
 test("missing tiles, missing fonts and unsupported title glyphs block print export", async ({

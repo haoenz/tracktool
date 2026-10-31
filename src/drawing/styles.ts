@@ -1,6 +1,12 @@
 import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, MapPreset, TrackGeoJSON } from "../shared/map.js";
+import {
+  MAP_LABEL_FONTS,
+  MAP_LABEL_PROPERTY,
+  MAP_LABEL_ORDER_PROPERTY,
+} from "../shared/map-label.js";
 import { trackColor } from "./track-style.js";
+import { labelZoom } from "./label-zoom.js";
 import type {
   StyleSpecification,
   SourceSpecification,
@@ -15,13 +21,7 @@ import {
 } from "./layers.js";
 export const basemapPreset = presetFor;
 const empty: TrackGeoJSON = { type: "FeatureCollection", features: [] };
-const name = [
-  "coalesce",
-  ["get", "name:zh"],
-  ["get", "name"],
-  ["get", "name:latin"],
-  "",
-];
+const name = ["coalesce", ["get", MAP_LABEL_PROPERTY], ""];
 const major = [
   "in",
   ["get", "class"],
@@ -71,6 +71,8 @@ export function mapStyle(
   state: MapState,
   config: MapConfig,
   data?: TrackGeoJSON,
+  displayScale = 1,
+  labelZoomOffset = 0,
 ): StyleSpecification {
   const preset = presetFor(state, config),
     raster = !!preset,
@@ -88,6 +90,13 @@ export function mapStyle(
         park: "#31443a",
         aeroway: "#556a6f",
         text: "#f1f0e8",
+        secondaryText: "#bac4c8",
+        regionText: "#c8bdd5",
+        oceanText: "#8ec9e6",
+        seaText: "#94cce2",
+        lakeText: "#8dcbd6",
+        parkText: "#a6ceab",
+        peakText: "#d5bd98",
         halo: "#18242c",
       }
     : {
@@ -101,6 +110,13 @@ export function mapStyle(
         park: "#cfe0bb",
         aeroway: "#d8d0c4",
         text: "#273b43",
+        secondaryText: "#5f686d",
+        regionText: "#6c617a",
+        oceanText: "#2b607f",
+        seaText: "#346f8b",
+        lakeText: "#276878",
+        parkText: "#426d47",
+        peakText: "#7b5b35",
         halo: "#faf8f2",
       };
   const sources: Record<string, SourceSpecification> = {
@@ -274,6 +290,12 @@ export function mapStyle(
       { filter: major },
     );
   }
+  const rank = ["number", ["get", "rank"], 100];
+  const placeOrder = [
+    "+",
+    ["*", ["max", 0, rank], 2],
+    ["number", ["get", MAP_LABEL_ORDER_PROPERTY], 0],
+  ];
   const symbol = (
     id: string,
     layer: string,
@@ -281,28 +303,50 @@ export function mapStyle(
     filter: unknown,
     field: unknown = name,
     layout: Record<string, unknown> = {},
-  ) =>
+    paint: Record<string, unknown> = {},
+    maxzoom?: number,
+  ) => {
+    const zoom = labelZoom(minzoom, maxzoom, labelZoomOffset);
     labels.push({
       id,
       type: "symbol",
       source: "base",
       "source-layer": layer,
-      minzoom,
+      minzoom: zoom.minzoom,
+      ...(zoom.maxzoom === undefined ? {} : { maxzoom: zoom.maxzoom }),
       ...(filter ? { filter } : {}),
       layout: {
         "text-field": field,
-        "text-font": ["Noto Sans Regular"],
-        "text-size": 12,
-        "text-padding": 5,
+        "text-font": [MAP_LABEL_FONTS[0]],
+        "text-padding": 5 * displayScale,
         "text-max-width": 10,
+        // A data-driven key also sorts across tile boundaries. Equal ranks
+        // must not fall back to camera-dependent tile loading order.
+        ...(layer === "place"
+          ? {
+              "symbol-sort-key": placeOrder,
+              "symbol-z-order": "source",
+              "symbol-placement": "point",
+              "text-anchor": "center",
+              "text-allow-overlap": false,
+              "text-ignore-placement": false,
+            }
+          : {}),
         ...layout,
+        "text-size": Number(layout["text-size"] ?? 12) * displayScale,
+        ...(typeof layout["symbol-spacing"] === "number"
+          ? { "symbol-spacing": layout["symbol-spacing"] * displayScale }
+          : {}),
       },
       paint: {
         "text-color": p.text,
         "text-halo-color": p.halo,
-        "text-halo-width": 1.5,
+        "text-halo-width": 1.5 * displayScale,
+        "text-opacity": zoom.opacity,
+        ...paint,
       },
     });
+  };
   if (f.places !== "none") {
     symbol(
       "place-country",
@@ -310,29 +354,96 @@ export function mapStyle(
       0,
       ["==", ["get", "class"], "country"],
       name,
-      { "text-size": 16 },
+      {
+        "text-size": 22,
+        "text-font": [MAP_LABEL_FONTS[1]],
+        "text-letter-spacing": 0.08,
+      },
+      {},
+      4.5,
+    );
+    const majorCity = [
+      "any",
+      ["<=", rank, 3],
+      ["in", ["get", "capital"], ["literal", [2, 4]]],
+    ];
+    symbol(
+      "place-state",
+      "place",
+      4,
+      ["in", ["get", "class"], ["literal", ["state", "province", "region"]]],
+      name,
+      {
+        "text-size": 20,
+        "text-font": [MAP_LABEL_FONTS[1]],
+        "text-letter-spacing": 0.1,
+      },
+      { "text-color": p.regionText },
+      7,
+    );
+    symbol(
+      "place-city-major",
+      "place",
+      6.5,
+      ["all", ["==", ["get", "class"], "city"], majorCity],
+      name,
+      {
+        "text-size": 18,
+        "text-font": [MAP_LABEL_FONTS[1]],
+      },
+      {},
+      9.5,
     );
     symbol(
       "place-city",
       "place",
-      3,
-      ["in", ["get", "class"], ["literal", ["city", "state"]]],
+      9,
+      ["all", ["==", ["get", "class"], "city"], ["!", majorCity]],
       name,
       { "text-size": 15 },
+      {},
+      12,
     );
-    if (f.places === "all")
+    if (f.places === "all") {
+      symbol(
+        "place-town",
+        "place",
+        11.5,
+        ["==", ["get", "class"], "town"],
+        name,
+        {
+          "text-size": 13,
+        },
+        {},
+        14,
+      );
       symbol(
         "place-local",
         "place",
-        9,
+        13.5,
         [
           "in",
           ["get", "class"],
-          ["literal", ["town", "village", "hamlet", "suburb", "neighbourhood"]],
+          ["literal", ["village", "hamlet", "isolated_dwelling"]],
         ],
         name,
         { "text-size": 12 },
+        { "text-color": p.secondaryText },
       );
+      symbol(
+        "place-neighbourhood",
+        "place",
+        13.5,
+        [
+          "in",
+          ["get", "class"],
+          ["literal", ["borough", "suburb", "quarter", "neighbourhood"]],
+        ],
+        name,
+        { "text-size": 11 },
+        { "text-color": p.secondaryText },
+      );
+    }
   }
   if (f.road_names !== "none")
     symbol(
@@ -342,13 +453,18 @@ export function mapStyle(
       f.road_names === "major" ? major : roadClasses,
       name,
       { "symbol-placement": "line", "symbol-spacing": 300, "text-size": 11 },
+      { "text-color": p.secondaryText },
     );
   if (f.poi !== "none")
-    symbol("poi", "poi", f.poi === "major" ? 12 : 14, [
-      "<=",
-      ["coalesce", ["get", "rank"], 100],
-      f.poi === "major" ? 3 : 15,
-    ]);
+    symbol(
+      "poi",
+      "poi",
+      f.poi === "major" ? 12 : 14,
+      ["<=", ["coalesce", ["get", "rank"], 100], f.poi === "major" ? 3 : 15],
+      name,
+      { "text-size": 11.5 },
+      { "text-color": p.secondaryText },
+    );
   if (f.housenumbers !== "none")
     symbol(
       "housenumbers",
@@ -357,6 +473,7 @@ export function mapStyle(
       null,
       ["to-string", ["get", "housenumber"]],
       { "text-size": 10 },
+      { "text-color": p.secondaryText },
     );
   if (f.peaks !== "none")
     symbol(
@@ -376,17 +493,73 @@ export function mapStyle(
             ],
           ]
         : name,
+      {},
+      { "text-color": p.peakText },
     );
-  if (f.water_names !== "none")
-    symbol("water-names", "water_name", 4, null, name, { "text-size": 13 });
+  if (f.water_names !== "none") {
+    symbol(
+      "water-ocean",
+      "water_name",
+      0,
+      ["==", ["get", "class"], "ocean"],
+      name,
+      { "text-size": 17, "text-letter-spacing": 0.18 },
+      { "text-color": p.oceanText },
+      6.5,
+    );
+    symbol(
+      "water-sea",
+      "water_name",
+      6,
+      ["in", ["get", "class"], ["literal", ["sea", "bay", "strait"]]],
+      name,
+      { "text-size": 15, "text-letter-spacing": 0.1 },
+      { "text-color": p.seaText },
+      10.5,
+    );
+    // OpenMapTiles groups reservoirs with lakes; unknown water classes retain
+    // the inland-water style rather than disappearing from custom sources.
+    symbol(
+      "water-names",
+      "water_name",
+      4,
+      [
+        "!",
+        [
+          "in",
+          ["get", "class"],
+          ["literal", ["ocean", "sea", "bay", "strait"]],
+        ],
+      ],
+      name,
+      { "text-size": 12.5, "text-letter-spacing": 0.03 },
+      { "text-color": p.lakeText },
+    );
+  }
   if (f.park !== "none")
-    symbol("park-names", "park", 13, ["has", "name"], name, {
-      "text-size": 11,
-    });
+    symbol(
+      "park-names",
+      "park",
+      13,
+      ["has", "name"],
+      name,
+      {
+        "text-size": 11,
+      },
+      { "text-color": p.parkText },
+    );
   if (f.aerodrome !== "none")
-    symbol("aerodrome", "aerodrome_label", 10, ["has", "name"], name, {
-      "text-size": 11,
-    });
+    symbol(
+      "aerodrome",
+      "aerodrome_label",
+      10,
+      ["has", "name"],
+      name,
+      {
+        "text-size": 11,
+      },
+      { "text-color": p.secondaryText },
+    );
   const annotations: Layer[] = [];
   for (const o of activeOverlays(state, config)) {
     if (o.format === "vector") {
@@ -415,7 +588,9 @@ export function mapStyle(
     layers: [
       ...base,
       ...geometry,
-      ...labels,
+      // MapLibre places symbols from the last layer backwards. Give major
+      // places precedence over local details when their collision boxes meet.
+      ...labels.toReversed(),
       ...annotations,
       ...themes,
       {
@@ -427,7 +602,7 @@ export function mapStyle(
         paint: {
           "line-color": p.halo,
           "line-opacity": state.style.outline === false ? 0 : 0.8,
-          "line-width": state.style.width + 2,
+          "line-width": (state.style.width + 2) * displayScale,
         },
       },
       {
@@ -438,7 +613,7 @@ export function mapStyle(
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": trackColor(state.style),
-          "line-width": state.style.width,
+          "line-width": state.style.width * displayScale,
         },
       },
       {
@@ -448,9 +623,10 @@ export function mapStyle(
         filter: ["==", ["geometry-type"], "Point"],
         paint: {
           "circle-color": trackColor(state.style),
-          "circle-radius": state.style.width / 2,
+          "circle-radius": (state.style.width / 2) * displayScale,
           "circle-stroke-color": p.halo,
-          "circle-stroke-width": state.style.outline === false ? 0 : 1,
+          "circle-stroke-width":
+            state.style.outline === false ? 0 : displayScale,
         },
       },
     ],
