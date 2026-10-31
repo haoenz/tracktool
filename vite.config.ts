@@ -2,6 +2,7 @@ import { defineConfig, type Plugin, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 const backend = process.env.TRACKTOOL_DEV_BACKEND ?? "http://127.0.0.1:8766";
 const webRoot = resolve("src/web");
@@ -65,11 +66,18 @@ function injectDevelopmentToken(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   root: webRoot,
   plugins: [react(), tailwindcss(), injectDevelopmentToken()],
   resolve: { alias: { "@": webRoot } },
   server: {
+    https:
+      command === "serve" && process.env.TRACKTOOL_DEV_SSL_CERT
+        ? {
+            cert: readFileSync(process.env.TRACKTOOL_DEV_SSL_CERT),
+            key: readFileSync(process.env.TRACKTOOL_DEV_SSL_KEY!),
+          }
+        : undefined,
     host: "0.0.0.0",
     port: 8765,
     strictPort: true,
@@ -97,4 +105,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

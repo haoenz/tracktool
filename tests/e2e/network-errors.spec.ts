@@ -1,9 +1,46 @@
 import { test, expect } from "@playwright/test";
 import { resetDisplay } from "./display-reset.js";
 import type {} from "../../src/drawing/globals.js";
+import { tool } from "./map-tools.js";
 
 test.beforeEach(async ({ request }) => {
   await resetDisplay(request);
+});
+
+test("an archive connection failure can be retried without reloading the map", async ({
+  page,
+}) => {
+  await page.route("**/api/archive", (route) => route.abort("failed"));
+  await page.goto("/map");
+  const error = page.locator(".map-errors");
+  await expect(error).toContainText("轨迹库读取失败：无法连接服务器");
+  await expect(error).not.toContainText("Failed to fetch");
+  await page.unroute("**/api/archive");
+  await error.getByRole("button", { name: "重试读取轨迹库" }).click();
+  await expect(error).toBeHidden();
+  await tool(page, "轨迹库");
+  await expect(page.getByLabel("筛选轨迹", { exact: true })).toBeVisible();
+});
+
+test("dismissing an archive error keeps its panel retry and reconnect recovers the catalog", async ({
+  page,
+}) => {
+  await page.route("**/api/archive", (route) => route.abort("failed"));
+  await page.goto("/map");
+  const error = page.locator(".map-errors");
+  await error.getByRole("button", { name: "关闭错误提示" }).click();
+  await expect(error).toBeHidden();
+  await tool(page, "轨迹库");
+  const status = page.locator(".track-list-status");
+  await expect(status).toContainText("轨迹库读取失败");
+  await expect(
+    status.getByRole("button", { name: "重试读取轨迹库" }),
+  ).toBeVisible();
+  await page.unroute("**/api/archive");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByLabel("筛选轨迹", { exact: true })).toBeVisible();
+  await expect(error).toBeHidden();
+  await expect(status).toHaveCount(0);
 });
 
 test("a transient tile failure is logged, retried and does not prevent readiness", async ({

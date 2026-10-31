@@ -522,15 +522,18 @@ function Editor({ initial }: { initial: Bootstrap }) {
   const openArchive = async (path = initial.initialArchive) => {
     const sequence = ++operations.current;
     setBusy(true);
-    setError("");
+    setError((previous) =>
+      previous === `轨迹库读取失败：${catalogError}` ? "" : previous,
+    );
     setCatalogError("");
     try {
       const data = await api<Catalog>("/api/archive", { path });
       if (sequence !== operations.current) return;
       setCatalog(data);
     } catch (e) {
+      if (sequence !== operations.current) return;
       const text = message(e);
-      setError(text);
+      setError(`轨迹库读取失败：${text}`);
       setCatalogError(text);
     } finally {
       if (sequence === operations.current) setBusy(false);
@@ -543,6 +546,13 @@ function Editor({ initial }: { initial: Bootstrap }) {
       sourceSequence.current++;
     };
   }, []);
+  useEffect(() => {
+    if (!catalogError) return;
+    // Reconnect only retries this read; user mutations are never replayed.
+    const retry = () => void openArchive();
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [catalogError]);
   useEffect(() => {
     const prevent = (e: BeforeUnloadEvent) => {
       if (hasDraft) {
@@ -1525,6 +1535,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
                   ) : catalogError ? (
                     <div className="track-list-status" role="alert">
                       轨迹库读取失败：{catalogError}
+                      <Button size="sm" onClick={() => void openArchive()}>
+                        重试读取轨迹库
+                      </Button>
                     </div>
                   ) : (
                     <PanelLoading>正在读取轨迹库…</PanelLoading>
@@ -1863,6 +1876,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
           </aside>
           <MapViewport
             ref={viewport}
+            geolocation
             state={viewportState}
             config={config}
             tracks={editMap?.tracks ?? inspection?.tracks ?? emptyTracks}
@@ -2056,9 +2070,27 @@ function Editor({ initial }: { initial: Bootstrap }) {
 
         <div className="map-errors" hidden={!error}>
           {error && (
-            <div role="alert" className="map-error">
-              {error}
-            </div>
+            <>
+              <div role="alert" className="map-error">
+                {error}
+              </div>
+              <div className="map-actions">
+                {catalogError &&
+                  error === `轨迹库读取失败：${catalogError}` && (
+                    <Button size="sm" onClick={() => void openArchive()}>
+                      重试读取轨迹库
+                    </Button>
+                  )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label="关闭错误提示"
+                  onClick={() => setError("")}
+                >
+                  关闭
+                </Button>
+              </div>
+            </>
           )}
         </div>
       </div>

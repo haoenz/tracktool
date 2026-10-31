@@ -4,12 +4,14 @@ import {
   copyFile,
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:net";
+import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -67,7 +69,8 @@ const { values } = parseArgs({ options: {
 const token = process.env.TRACKTOOL_DEV_TOKEN!;
 const server = createServer(async (req, res) => {
   if (req.url === "/api/version") {
-    res.writeHead(req.headers["x-tracktool-token"] === token ? 200 : 403, { "Content-Type": "application/json" });
+    const allowed = req.headers["x-tracktool-token"] === token && req.headers.host === values.host + ":" + values.port && (!req.headers.origin || req.headers.origin === "http://" + req.headers.host);
+    res.writeHead(allowed ? 200 : 403, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ version, pid: process.pid }));
   } else {
     const file = req.url === "/static/vendor/probe.txt" ? "static/vendor/probe.txt" : req.url === "/render" ? "render.html" : "index.html";
@@ -253,3 +256,155 @@ it("isolates development builds, preserves the last good backend, recovers crash
     await rm(root, { recursive: true, force: true });
   }
 }, 120000);
+
+it("serves trusted HTTPS with default certificates and proxies HTTPS origins to the HTTP backend", async () => {
+  const { root } = await fixture();
+  const data = join(root, "data");
+  const certificates = join(data, "tracktool-tls");
+  await mkdir(certificates, { recursive: true });
+  // These public test credentials never use the developer's CA or private key.
+  const cert = await readFile("tests/ts/fixtures/https/test-cert.pem");
+  await writeFile(join(certificates, "tracktool.pem"), cert);
+  await copyFile(
+    "tests/ts/fixtures/https/test-key.pem",
+    join(certificates, "tracktool-key.pem"),
+  );
+  const port = await freePort();
+  let backendPort = await freePort();
+  while (backendPort === port) backendPort = await freePort();
+  const child = spawn(
+    process.execPath,
+    [
+      "scripts/dev.ts",
+      "--ssl",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--backend-port",
+      String(backendPort),
+    ],
+    {
+      cwd: root,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        XDG_DATA_HOME: data,
+        NO_PROXY: "127.0.0.1,localhost",
+      },
+    },
+  );
+  let output = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk;
+  });
+  const exited = new Promise<number | null>((done) => child.once("exit", done));
+  const url = `https://127.0.0.1:${port}`;
+  const request = (path: string, token?: string) =>
+    new Promise<{ status: number; text: string }>((done, reject) => {
+      const req = httpsRequest(
+        url + path,
+        {
+          ca: cert,
+          method: token ? "POST" : "GET",
+          headers: token ? { "x-tracktool-token": token, origin: url } : {},
+        },
+        (response) => {
+          let text = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => {
+            text += chunk;
+          });
+          response.on("error", reject);
+          response.on("end", () =>
+            done({ status: response.statusCode!, text }),
+          );
+        },
+      );
+      req.setTimeout(2000, () => req.destroy(new Error("HTTPS 请求超时")));
+      req.on("error", reject);
+      req.end();
+    });
+  try {
+    await expect
+      .poll(
+        async () => {
+          try {
+            return (await request("/")).status;
+          } catch {
+            return 0;
+          }
+        },
+        { timeout: 30000, message: "HTTPS 开发服务应正常启动" },
+      )
+      .toBe(200);
+    const html = (await request("/")).text;
+    const token = html.match(/name="tracktool-token" content="([^"]+)"/)?.[1];
+    expect(token).toMatch(/^[a-f0-9]{64}$/);
+    const response = await request("/api/version", token);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.text).version).toBe("one");
+    expect((await request("/api/version", "wrong")).status).toBe(403);
+    expect((await request("/static/vendor/probe.txt")).text).toBe(
+      "isolated resource",
+    );
+    expect((await request("/render")).text).toContain("render fixture");
+    expect(
+      (await request(`/@fs/${certificates}/tracktool-key.pem`)).status,
+    ).toBe(403);
+    expect((await fetch(`http://127.0.0.1:${backendPort}/`)).status).toBe(200);
+    child.kill("SIGINT");
+    expect(await exited).toBe(130);
+    expect(await readdir(join(root, ".dev"))).toEqual([]);
+  } catch (error) {
+    throw new Error(`HTTPS 开发服务验证失败：\n${output}`, { cause: error });
+  } finally {
+    child.kill("SIGTERM");
+    const force = setTimeout(() => child.kill("SIGKILL"), 6000);
+    await exited;
+    clearTimeout(force);
+    await rm(root, { recursive: true, force: true });
+  }
+}, 60000);
+
+it.each([
+  { args: ["--ssl-cert", "missing.pem"], message: "必须同时提供" },
+  { args: ["--ssl"], message: "无法读取 HTTPS 证书或私钥" },
+  {
+    args: ["--ssl-cert", "invalid.pem", "--ssl-key", "invalid.pem"],
+    message: "HTTPS 证书或私钥无效",
+  },
+])(
+  "rejects invalid HTTPS configuration before building: $message",
+  async ({ args, message }) => {
+    const root = await mkdtemp(join(tmpdir(), "tracktool-dev-invalid-"));
+    await writeFile(join(root, "invalid.pem"), "invalid test certificate");
+    try {
+      const child = spawn(
+        process.execPath,
+        [resolve("scripts/dev.ts"), ...args],
+        {
+          cwd: root,
+          env: { ...process.env, XDG_DATA_HOME: root },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let output = "";
+      child.stdout.on("data", (chunk) => {
+        output += chunk;
+      });
+      child.stderr.on("data", (chunk) => {
+        output += chunk;
+      });
+      expect(await new Promise((done) => child.once("exit", done))).toBe(1);
+      expect(output).toContain(message);
+      expect(output).not.toContain("正在构建");
+      expect(await readdir(root)).not.toContain(".dev");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);

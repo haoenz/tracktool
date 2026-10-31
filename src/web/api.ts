@@ -20,6 +20,11 @@ export async function request(
     },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
+  }).catch((error: unknown) => {
+    if (signal?.aborted) throw error;
+    throw new Error("无法连接服务器，请检查网络连接及服务是否仍在运行。", {
+      cause: error,
+    });
   });
   if (!response.ok) {
     let message = `请求失败（${response.status}）`;
@@ -52,20 +57,8 @@ export async function requestWorkTask(
   return parsed.data;
 }
 export async function readConfig(signal?: AbortSignal) {
-  const token =
-    document.querySelector<HTMLMetaElement>('meta[name="tracktool-token"]')
-      ?.content ?? "";
-  const response = await fetch("/api/config", {
-    headers: { "X-Tracktool-Token": token },
-    signal,
-  });
+  const response = await request("/api/config", undefined, signal);
   const body: unknown = await response.json();
-  if (!response.ok) {
-    const parsed = ErrorResponseSchema.safeParse(body);
-    throw new Error(
-      parsed.success ? parsed.data.error.message : "读取配置失败",
-    );
-  }
   return ConfigResponseSchema.parse(body).data;
 }
 

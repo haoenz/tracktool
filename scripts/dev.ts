@@ -1,9 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { createSecureContext } from "node:tls";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
 
@@ -12,6 +14,9 @@ const { values } = parseArgs({
     host: { type: "string", default: "0.0.0.0" },
     port: { type: "string", default: "8765" },
     "backend-port": { type: "string", default: "8766" },
+    ssl: { type: "boolean" },
+    "ssl-cert": { type: "string" },
+    "ssl-key": { type: "string" },
     config: { type: "string" },
     archive: { type: "string" },
     cache: { type: "string" },
@@ -25,11 +30,13 @@ const backendUrl = `http://127.0.0.1:${backendPort}`;
 const token = randomBytes(32).toString("hex");
 const controller = new AbortController();
 const { signal } = controller;
-const env = {
+const env: NodeJS.ProcessEnv = {
   ...process.env,
   NODE_ENV: "development",
   TRACKTOOL_DEV_TOKEN: token,
   TRACKTOOL_DEV_BACKEND: backendUrl,
+  TRACKTOOL_DEV_SSL_CERT: undefined,
+  TRACKTOOL_DEV_SSL_KEY: undefined,
 };
 type ManagedProcess = {
   child: ChildProcess;
@@ -156,6 +163,38 @@ let backend: ManagedProcess | undefined;
 let vite: ManagedProcess | undefined;
 let retries = 0;
 try {
+  if (!!values["ssl-cert"] !== !!values["ssl-key"])
+    throw new Error("--ssl-cert 和 --ssl-key 必须同时提供");
+  if (values.ssl || values["ssl-cert"]) {
+    const directory = join(
+      process.env.XDG_DATA_HOME || join(homedir(), ".local/share"),
+      "tracktool-tls",
+    );
+    const certPath = resolve(
+      values["ssl-cert"] ?? join(directory, "tracktool.pem"),
+    );
+    const keyPath = resolve(
+      values["ssl-key"] ?? join(directory, "tracktool-key.pem"),
+    );
+    let cert: Buffer, key: Buffer;
+    try {
+      [cert, key] = await Promise.all([readFile(certPath), readFile(keyPath)]);
+    } catch {
+      throw new Error(
+        `无法读取 HTTPS 证书或私钥：\n${certPath}\n${keyPath}\n请先准备证书，或通过 --ssl-cert 和 --ssl-key 指定已有证书。详见 README 的局域网 HTTPS 说明。`,
+      );
+    }
+    try {
+      createSecureContext({ cert, key });
+    } catch {
+      throw new Error(
+        "HTTPS 证书或私钥无效，请检查 PEM 格式及证书与私钥是否匹配",
+      );
+    }
+    env.TRACKTOOL_DEV_SSL_CERT = certPath;
+    env.TRACKTOOL_DEV_SSL_KEY = keyPath;
+    process.stdout.write(`HTTPS 证书：${certPath}\n`);
+  }
   if (port === backendPort) throw new Error("网页和后台必须使用不同端口");
   await checkPort(values.host, port);
   await checkPort("127.0.0.1", backendPort);

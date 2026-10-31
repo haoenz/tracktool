@@ -22,6 +22,7 @@ import { trackColor } from "../drawing/track-style.js";
 import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, SelectedTrack } from "../shared/map.js";
 import { displayCoordinate } from "../shared/coordinates.js";
+import { MapLocationButton } from "./map-location-button.js";
 export interface Viewport {
   fit(tracks?: SelectedTrack[]): void;
   stage(state: MapState, overview?: OverviewStatus): Promise<boolean>;
@@ -38,6 +39,7 @@ type Props = {
   print?: boolean;
   cameraLocked?: boolean;
   guides?: boolean;
+  geolocation?: boolean;
   overview?: OverviewStatus;
   overviewSelected?: string;
   overviewVisibility?: OverviewVisibility;
@@ -60,6 +62,9 @@ export const MapViewport = memo(
     const stage = useRef<HTMLDivElement>(null),
       holder = useRef<HTMLDivElement>(null),
       credit = useRef<HTMLDivElement>(null),
+      locationControl = useRef<HTMLDivElement>(null),
+      locationMarker = useRef<HTMLDivElement>(null),
+      location = useRef<[number, number] | undefined>(undefined),
       current = useRef<MapCanvas | undefined>(undefined),
       candidate = useRef<MapCanvas | undefined>(undefined),
       serial = useRef(0),
@@ -68,6 +73,28 @@ export const MapViewport = memo(
     const layers = useRef(new Map<MapCanvas, OverviewLayer>());
     const analysisLayers = useRef(new Map<MapCanvas, AnalysisLayer>());
     latest.current = props;
+    const updateLocation = () => {
+      const marker = locationMarker.current;
+      const map = current.current;
+      if (!marker) return;
+      if (!map || !location.current || !stage.current) {
+        marker.hidden = true;
+        return;
+      }
+      const coordinate = displayCoordinate(location.current, map.crs);
+      coordinate[0] +=
+        360 * Math.round((map.map.getCenter().lng - coordinate[0]) / 360);
+      const point = map.map.project(coordinate);
+      const canvas = map.mapElement.getBoundingClientRect();
+      const bounds = stage.current.getBoundingClientRect();
+      const scale = canvas.width / map.mapElement.clientWidth;
+      const x = canvas.left - bounds.left + point.x * scale;
+      const y = canvas.top - bounds.top + point.y * scale;
+      marker.hidden = x < 0 || y < 0 || x > bounds.width || y > bounds.height;
+      // Canvas focus can scroll the clipped stage. Absolute positioning uses
+      // its content coordinates, while projection above uses screen pixels.
+      marker.style.transform = `translate(${x + stage.current.scrollLeft}px, ${y + stage.current.scrollTop}px) translate(-50%, -50%)`;
+    };
     const highlight = (map: MapCanvas) => {
       const selected = latest.current.highlightSegment;
       const entry = latest.current.highlightEntry;
@@ -150,6 +177,14 @@ export const MapViewport = memo(
       const { width, height } = bounds;
       const mobile = width <= 700;
       const panel = document.getElementById("map-panel");
+      if (locationControl.current) {
+        const panelTop =
+          mobile && panel && panel.offsetParent !== null
+            ? panel.getBoundingClientRect().top
+            : bounds.bottom;
+        locationControl.current.style.bottom = `${Math.max(32, bounds.bottom - panelTop + 8)}px`;
+        locationControl.current.hidden = panelTop - bounds.top < 120;
+      }
       const rect =
         latest.current.print && panel?.offsetParent !== null
           ? panel?.getBoundingClientRect()
@@ -227,6 +262,7 @@ export const MapViewport = memo(
         map.map.touchZoomRotate.disableRotation();
         highlight(map);
       }
+      updateLocation();
     };
     const cancel = () => {
       serial.current++;
@@ -266,6 +302,9 @@ export const MapViewport = memo(
         },
       );
       map.map.on("style.load", () => highlight(map));
+      map.map.on("render", () => {
+        if (current.current === map) updateLocation();
+      });
       layer.current = new OverviewLayer(
         map.map,
         map.crs,
@@ -498,6 +537,7 @@ export const MapViewport = memo(
       <div
         className={`map-stage${props.print ? " print" : ""}`}
         ref={stage}
+        onScroll={updateLocation}
         data-locked={props.cameraLocked || undefined}
         aria-label="地图预览"
       >
@@ -507,6 +547,38 @@ export const MapViewport = memo(
           ref={holder}
         />
         <div className="viewport-credit" ref={credit} />
+        {props.geolocation && !props.print && (
+          <div
+            ref={locationMarker}
+            className="map-location-marker"
+            role="img"
+            aria-label="定位位置"
+            title="最近一次 GPS 定位的位置"
+            hidden
+          />
+        )}
+        {props.geolocation && !props.print && (
+          <div className="map-location-control" ref={locationControl}>
+            <MapLocationButton
+              disabled={!!props.cameraLocked}
+              onLocate={(position) => {
+                const map = current.current;
+                if (!map || latest.current.cameraLocked) return;
+                location.current = position;
+                updateLocation();
+                const center = displayCoordinate(position, map.crs);
+                const scale =
+                  map.mapElement.getBoundingClientRect().width /
+                  map.mapElement.clientWidth;
+                map.map.fitBounds([center, center], {
+                  padding: fitPadding(map),
+                  maxZoom: Math.min(20, 15 - Math.log2(scale || 1)),
+                  duration: 0,
+                });
+              }}
+            />
+          </div>
+        )}
         {resourceError && (
           <div className="map-resource-error" role="alert">
             {resourceError}

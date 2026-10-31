@@ -108,6 +108,26 @@ pnpm run dev
 
 `pnpm run` 不带脚本名时只会列出可用脚本，启动开发环境请使用 `pnpm run dev`。`pnpm start` 仍用于启动构建后的常规服务。
 
+局域网 HTTPS（例如在手机上使用 GPS 定位）可直接运行：
+
+```sh
+pnpm dev:ssl
+```
+
+首次使用前，将服务证书和对应私钥放在 `~/.local/share/tracktool-tls/tracktool.pem` 和 `~/.local/share/tracktool-tls/tracktool-key.pem`；设置了 `XDG_DATA_HOME` 时，目录改为 `$XDG_DATA_HOME/tracktool-tls/`。已有证书只要未过期、覆盖访问的 IP 或域名即可复用；也可在已安装 mkcert 的电脑上签发（将下面的两个 IP 替换成实际地址）：
+
+```sh
+mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/tracktool-tls"
+mkcert \
+  -cert-file "${XDG_DATA_HOME:-$HOME/.local/share}/tracktool-tls/tracktool.pem" \
+  -key-file "${XDG_DATA_HOME:-$HOME/.local/share}/tracktool-tls/tracktool-key.pem" \
+  localhost 127.0.0.1 ::1 192.168.31.100 10.10.10.100
+```
+
+mkcert 首次使用需执行 `mkcert -install`。手机也需要安装并信任 `mkcert -CAROOT` 所示目录中的 `rootCA.pem`；若之前已信任同一 CA，无需重复安装。不要传输 `rootCA-key.pem` 或服务私钥。访问 `https://192.168.31.100:8765/map` 或 `https://10.10.10.100:8765/map`，允许浏览器定位即可。证书不绑定端口，两个地址可共用同一张证书。
+
+证书位于其他目录时，可运行 `pnpm dev:ssl --ssl-cert /路径/dev.pem --ssl-key /路径/dev-key.pem`。其余 `pnpm dev` 参数仍可使用。HTTPS 直接由开发服务器提供，无需安装反向代理；修改证书后重新启动开发服务。证书和私钥应放在仓库之外，证书缺失或不匹配时会在构建前提示并退出。
+
 ```sh
 pnpm check
 pnpm test:e2e
