@@ -41,7 +41,8 @@ export class DisplayStore {
 
   save(style: MapStyle): Promise<void> {
     const bytes = Buffer.from(
-      JSON.stringify({ schema, style }, null, 2) + "\n",
+      JSON.stringify({ schema, style: MapStyleSchema.parse(style) }, null, 2) +
+        "\n",
     );
     const write = async () => {
       await mkdir(path.dirname(this.path), { recursive: true });

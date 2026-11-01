@@ -64,9 +64,6 @@ parentPort!.on(
         case "catalog":
           result = store.catalog(m.path);
           break;
-        case "selection":
-          result = await store.selection(m.path, m.entries!);
-          break;
         case "stats":
           result = {
             ...store.stats,

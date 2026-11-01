@@ -11,15 +11,10 @@ import {
   validateTrackOrder,
 } from "../../domain/media-track.js";
 import type { TrackData } from "../../domain/trackdata.js";
-import {
-  MAX_KML_BYTES,
-  MAX_POINTS,
-  pointCount,
-} from "../../domain/trackdata.js";
+import { pointCount } from "../../domain/trackdata.js";
 import type { XmlPort } from "../../services/ports.js";
-import type { Catalog, Selection } from "../../shared/map.js";
+import type { Catalog } from "../../shared/map.js";
 import { XmlWorkers } from "../xml/client.js";
-import { displayed, readPresentation, resolveTrack } from "./presentation.js";
 
 import { deserialize, PARSER_VERSION, serialize } from "../track-index.js";
 import {
@@ -29,7 +24,7 @@ import {
   snapshot,
   transaction,
 } from "./database.js";
-// RAM cache is separate from the unchanged 2m-point selection/input limit.
+// Bound cached geometry independently of input limits.
 const CACHE_POINTS = 500_000;
 type IndexRow = {
   status: string;
@@ -183,83 +178,6 @@ export class ArchiveStore {
     });
     if (error || !data) throw new AppError("USER_INPUT", `${source}: ${error}`);
     return data;
-  }
-  async selection(input: string, entries: string[]): Promise<Selection> {
-    if (entries.length > 200 || new Set(entries).size !== entries.length)
-      throw new AppError("USER_INPUT", "每次最多选择 200 条不同的完整归档路径");
-    const archive = databasePath(input);
-    return snapshot(archive, async (db) => {
-      const result: Selection = { archive, tracks: [], errors: [] };
-      let selected = 0;
-      for (const entry of entries)
-        try {
-          const ref = resolveTrack(db, { entry });
-          const row = db
-            .prepare("SELECT sha256,raw_size FROM kml_objects WHERE sha256=?")
-            .get(ref.sha256) as
-            { sha256: string; raw_size: number } | undefined;
-          if (!row)
-            throw new AppError(
-              "USER_INPUT",
-              `KML entry not found: ${entry}; use a complete archive member path`,
-            );
-          if (row.raw_size > MAX_KML_BYTES)
-            throw new AppError(
-              "USER_INPUT",
-              "KML entry exceeds the 128 MiB read limit",
-            );
-          const key = JSON.stringify([archive, row.sha256, PARSER_VERSION]);
-          let hit = this.cache.get(key);
-          if (!hit) {
-            const data = await this.read(db, archive, entry, row.sha256),
-              points = pointCount(data);
-            if (points > MAX_POINTS)
-              throw new AppError(
-                "USER_INPUT",
-                "单条轨迹超过 200 万点，请先拆分后再选择",
-              );
-            hit = { data, points };
-            this.cache.set(key, hit);
-          } else this.stats.memoryHits++;
-          selected += hit.points;
-          if (selected > MAX_POINTS)
-            throw new AppError(
-              "USER_INPUT",
-              "本次选择超过 200 万点，请减少所选轨迹",
-            );
-          result.tracks.push({
-            entry,
-            sha256: row.sha256,
-            ...(() => {
-              const presentation = readPresentation(db, ref);
-              const display = displayed(
-                hit.data,
-                presentation.segments,
-                presentation.settings,
-              );
-              selected += display.view.connections.length * 2;
-              if (selected > MAX_POINTS)
-                throw new AppError(
-                  "USER_INPUT",
-                  "包含连接线后超过 200 万点，请减少所选轨迹",
-                );
-              return {
-                geojson: display.geojson(),
-                points: pointCount(display.data),
-                presentation: {
-                  settings: presentation.settings,
-                  segments: presentation.segments,
-                  current: presentation.current,
-                },
-              };
-            })(),
-          });
-        } catch (error) {
-          if (!(error instanceof AppError)) throw error;
-          result.errors.push({ entry, error: error.message });
-        }
-      return result;
-    });
   }
   async nearest(
     input: string,

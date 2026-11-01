@@ -1,4 +1,4 @@
-import type { PrintDocument } from "../shared/print.js";
+import { printDocument, type PrintDocument } from "../shared/print.js";
 
 export interface StoredPrint {
   id: string;
@@ -67,7 +67,7 @@ export async function savePrint(
     id,
     archive: document.archive,
     updatedAt: Date.now(),
-    document,
+    document: printDocument(document, document.archive, document.tracks),
   };
   // Commit the write and eviction atomically; request success alone does not
   // mean that IndexedDB has committed (quota errors can still abort it).

@@ -4,7 +4,7 @@ import type { TrackMatch } from "../../services/media-ports.js";
 import type { ArchiveRequest, ArchiveResult } from "../../domain/archive.js";
 import { Worker } from "node:worker_threads";
 import type { MapStore } from "../../services/map-service.js";
-import type { Catalog, Selection } from "../../shared/map.js";
+import type { Catalog } from "../../shared/map.js";
 import type { ErrorInfo } from "../../shared/contracts.js";
 import { AppError, checkCancelled } from "../../domain/errors.js";
 type Request = {
@@ -14,7 +14,6 @@ type Request = {
   tolerance?: number;
   request?: ArchiveRequest;
   path?: string;
-  entries?: string[];
   name?: string;
   sha256?: string;
 };
@@ -156,9 +155,6 @@ export class ArchiveClient implements MapStore {
       { op: "track-data", path, name },
       signal,
     );
-  }
-  selection(path: string, entries: string[], signal?: AbortSignal) {
-    return this.call<Selection>({ op: "selection", path, entries }, signal);
   }
   stats() {
     return this.call<{

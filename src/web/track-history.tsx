@@ -169,7 +169,7 @@ export function TrackHistory({
     }
   }
   return (
-    <div className="work-main track-history">
+    <div className="track-history">
       {(error || history.error) && (
         <Alert type="error" title={error || history.error!.message} />
       )}

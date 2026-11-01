@@ -1,6 +1,6 @@
+import { addEntry } from "../../dist/node/infrastructure/archive/writer.js";
+import { pointCount } from "../../dist/node/domain/trackdata.js";
 import { mkdtemp, copyFile, rm, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
-import { deflateSync } from "node:zlib";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -16,17 +16,8 @@ for (let i = 0; i < 25; i++) {
   const raw = Buffer.from(
       `<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><name>${i}</name><Placemark><gx:Track>${"<gx:coord>104 30 0</gx:coord>".repeat(100_000)}</gx:Track></Placemark></Document></kml>`,
     ),
-    digest = createHash("sha256").update(raw).digest("hex"),
     entry = `Default/${i}.kml`;
-  db.prepare("INSERT INTO kml_objects VALUES (?,?,?,?)").run(
-    digest,
-    "zlib",
-    raw.length,
-    deflateSync(raw),
-  );
-  db.prepare(
-    "INSERT INTO archive_entries(id,path,sha256,category) VALUES (?,?,?,?)",
-  ).run(`lifecycle-${i}`, entry, digest, "Default");
+  db.transaction(() => addEntry(db, entry, raw, "Default"))();
   rows.push(entry);
 }
 db.close();
@@ -49,8 +40,8 @@ const ping = (async () => {
 try {
   for (let i = 0; i < rows.length; i++) {
     {
-      const result = await client.selection(archive, [rows[i]]);
-      if (result.tracks[0]?.points !== 100_000) throw new Error("Lost points");
+      const result = await client.readTrackData(archive, rows[i]);
+      if (pointCount(result.data) !== 100_000) throw new Error("Lost points");
     }
     global.gc?.();
     await new Promise((r) => setTimeout(r, 25));

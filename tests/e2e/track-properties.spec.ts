@@ -5,13 +5,13 @@ import type {} from "../../src/drawing/globals.js";
 test("visibility has no processing or export side effects", async ({
   page,
 }) => {
-  const selectionRequests: string[] = [];
+  const processingRequests: string[] = [];
   page.on("request", (r) => {
     if (
-      r.url().includes("/api/selection") ||
-      r.url().includes("selection-copy")
+      r.url().includes("/api/work/preview") ||
+      (r.method() === "POST" && new URL(r.url()).pathname === "/api/print")
     )
-      selectionRequests.push(r.url());
+      processingRequests.push(r.url());
   });
   await page.goto("/map");
   await tool(page, "轨迹库");
@@ -31,7 +31,7 @@ test("visibility has no processing or export side effects", async ({
   await page
     .getByRole("button", { name: "切换当前列表可见性", exact: true })
     .click();
-  expect(selectionRequests).toEqual([]);
+  expect(processingRequests).toEqual([]);
   await expect(page.getByRole("button", { name: /处理已选轨迹/ })).toHaveCount(
     0,
   );
@@ -42,7 +42,7 @@ test("visibility has no processing or export side effects", async ({
     .getByRole("button", { name: "切换当前列表可见性", exact: true })
     .click();
   await tool(page, "出图");
-  expect(selectionRequests).toEqual([]);
+  expect(processingRequests).toEqual([]);
 });
 
 test("single-track panel previews and saves tag, split and cleanup with history", async ({

@@ -15,12 +15,6 @@ import { mapStyle, basemapPreset } from "./styles.js";
 import { displayCoordinate, displayGeometry } from "./coordinates.js";
 import { activeOverlays, canvasCrs, effectiveFeatures } from "./layers.js";
 import { compositionPadding, trackBounds } from "./viewport.js";
-import {
-  projectTrackColor,
-  trackColor,
-  trackEndpoints,
-  trackSegmentFeatures,
-} from "./track-style.js";
 /* Shared deterministic map renderer: fixed CSS-pixel frame, output DPR only. */
 export { frames };
 const empty: TrackGeoJSON = { type: "FeatureCollection", features: [] };
@@ -36,8 +30,7 @@ export class MapCanvas {
   get errors() {
     return this.resources.errors();
   }
-  data: TrackGeoJSON;
-  displayData?: TrackGeoJSON;
+  displayData: TrackGeoJSON = empty;
   loadedFont: boolean;
   exportPreview: boolean;
   printPreview: boolean;
@@ -52,9 +45,7 @@ export class MapCanvas {
   fontReady: Promise<void>;
   private fontLoading = false;
   private textWidths = new Map<string, number>();
-  private tracks: SelectedTrack[] = [];
-  private endpoints: { start: Position; end: Position }[] = [];
-  private displaySource: TrackGeoJSON = empty;
+  data: TrackGeoJSON = empty;
   private visualScale = 1;
   private labelZoomOffset = 0;
   get displayScale() {
@@ -80,7 +71,6 @@ export class MapCanvas {
     this.crs = canvasCrs(state, config);
     this.onCamera = onCamera;
     this.onError = onError;
-    this.data = empty;
     this.loadedFont = false;
     // Export always starts in fixed-frame mode. The editor can explicitly
     // switch to viewport-wide browsing without modifying the saved state.
@@ -417,8 +407,6 @@ export class MapCanvas {
       );
   }
   setTracks(tracks: SelectedTrack[]) {
-    this.tracks = tracks;
-    this.endpoints = tracks.flatMap((track) => trackEndpoints(track) ?? []);
     this.data = {
       type: "FeatureCollection",
       features: tracks.flatMap((track) =>
@@ -427,25 +415,11 @@ export class MapCanvas {
           properties: {
             ...feature.properties,
             project_entry: track.entry,
-            project_color: projectTrackColor(track.entry, this.state.style),
           },
         })),
       ),
     };
-    this.displaySource = {
-      type: "FeatureCollection",
-      features: tracks.flatMap((track) =>
-        trackSegmentFeatures(track).map((feature) => ({
-          ...feature,
-          properties: {
-            ...feature.properties,
-            project_entry: track.entry,
-            project_color: projectTrackColor(track.entry, this.state.style),
-          },
-        })),
-      ),
-    };
-    this.displayData = displayGeometry(this.displaySource, this.crs);
+    this.displayData = displayGeometry(this.data, this.crs);
     const apply = () =>
       (this.map.getSource("tracks") as GeoJSONSource | undefined)?.setData(
         this.displayData!,
@@ -458,11 +432,6 @@ export class MapCanvas {
   apply(state: MapState) {
     const old = this.state;
     this.state = state;
-    if (
-      old.style.color_mode !== state.style.color_mode ||
-      old.style.color !== state.style.color
-    )
-      this.setTracks(this.tracks);
     if (
       old.style.basemap !== state.style.basemap ||
       old.style.appearance !== state.style.appearance ||
@@ -479,7 +448,7 @@ export class MapCanvas {
     ) {
       this.preset = basemapPreset(state, this.config);
       this.crs = canvasCrs(state, this.config);
-      this.displayData = displayGeometry(this.displaySource, this.crs);
+      this.displayData = displayGeometry(this.data, this.crs);
       this.resources.clear();
       this.map.setStyle(
         mapStyle(
@@ -499,42 +468,6 @@ export class MapCanvas {
       } finally {
         this.resizing = false;
       }
-    } else if (this.map.getLayer("track-lines")) {
-      this.map.setPaintProperty(
-        "track-lines",
-        "line-color",
-        trackColor(state.style),
-      );
-      this.map.setPaintProperty(
-        "track-lines",
-        "line-width",
-        state.style.width * this.visualScale,
-      );
-      this.map.setPaintProperty(
-        "track-halo",
-        "line-width",
-        (state.style.width + 2) * this.visualScale,
-      );
-      this.map.setPaintProperty(
-        "track-halo",
-        "line-opacity",
-        state.style.outline === false ? 0 : 0.8,
-      );
-      this.map.setPaintProperty(
-        "track-points",
-        "circle-color",
-        trackColor(state.style),
-      );
-      this.map.setPaintProperty(
-        "track-points",
-        "circle-radius",
-        (state.style.width / 2) * this.visualScale,
-      );
-      this.map.setPaintProperty(
-        "track-points",
-        "circle-stroke-width",
-        state.style.outline === false ? 0 : this.visualScale,
-      );
     }
     if (
       old.frame.width !== state.frame.width ||
@@ -560,7 +493,7 @@ export class MapCanvas {
           },
           this.crs,
         )
-      : this.displayData || this.data;
+      : this.displayData;
     for (const f of geometry.features) {
       if (f.geometry.type === "MultiLineString")
         for (const segment of f.geometry.coordinates)
@@ -588,7 +521,6 @@ export class MapCanvas {
     const w = browsing ? this.surroundSize![0] : this.state.frame.width;
     const h = browsing ? this.surroundSize![1] : this.state.frame.height;
     const scale = browsing ? this.surroundSize![2] : 1;
-    const unit = 1 / scale;
     const offsetX = (w - this.state.frame.width) / 2;
     const offsetY = (h - this.state.frame.height) / 2;
     const dpr = devicePixelRatio * scale;
@@ -613,38 +545,6 @@ export class MapCanvas {
     ctx.fillStyle = dark ? "#f0eee5" : "#273b43";
     ctx.strokeStyle = dark ? "#202c33" : "#faf8f2";
     ctx.lineJoin = "round";
-    ctx.lineWidth = 3 * unit;
-    if (this.state.style.endpoints) {
-      ctx.font = `${12 * unit}px ${this.fontFamily()}`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
-      for (const endpoints of this.endpoints) {
-        for (const kind of ["start", "end"] as const) {
-          const coordinate = displayCoordinate(endpoints[kind], this.crs);
-          // Match the world copy closest to the camera at the date line.
-          coordinate[0] +=
-            360 * Math.round((this.map.getCenter().lng - coordinate[0]) / 360);
-          const point = this.map.project(coordinate);
-          const x = point.x - this.surround.x + offsetX;
-          const y = point.y - this.surround.y + offsetY;
-          if (x < 0 || y < 0 || x > w || y > h) continue;
-          ctx.save();
-          ctx.fillStyle = kind === "start" ? "#15803d" : "#c2410c";
-          ctx.strokeStyle = "#fff";
-          ctx.lineWidth = 2 * unit;
-          ctx.beginPath();
-          if (kind === "start") ctx.arc(x, y, 6 * unit, 0, 2 * Math.PI);
-          else ctx.rect(x - 5 * unit, y - 5 * unit, 10 * unit, 10 * unit);
-          ctx.fill();
-          ctx.stroke();
-          const label = kind === "start" ? "起" : "终";
-          ctx.lineWidth = 3 * unit;
-          ctx.strokeText(label, x, y - 9 * unit);
-          ctx.fillText(label, x, y - 9 * unit);
-          ctx.restore();
-        }
-      }
-    }
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     if ((this.exportPreview || this.printPreview) && this.state.title) {

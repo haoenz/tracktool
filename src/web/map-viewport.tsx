@@ -18,13 +18,13 @@ import type { OverviewStatus } from "../shared/overview.js";
 import type { AnalysisSample } from "../shared/track-analysis.js";
 import { MapCanvas } from "../drawing/core.js";
 import { compositionPadding } from "../drawing/viewport.js";
-import { trackColor } from "../drawing/track-style.js";
+import { DETAIL_TRACK_STYLE } from "../drawing/track-style.js";
 import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, SelectedTrack } from "../shared/map.js";
 import { displayCoordinate } from "../shared/coordinates.js";
 import { MapLocationButton } from "./map-location-button.js";
 export interface Viewport {
-  fit(tracks?: SelectedTrack[]): void;
+  fit(tracks?: SelectedTrack[], avoidPanel?: boolean): void;
   stage(state: MapState, overview?: OverviewStatus): Promise<boolean>;
   fitOverview(bounds: [number, number, number, number]): void;
   retryOverview(): void;
@@ -52,7 +52,6 @@ type Props = {
   onError: (message: string) => void;
   onInitialized?: () => void;
   onPointPick?: (position: [number, number]) => void;
-  exposeRenderer?: boolean;
   highlightSegment?: string;
   highlightEntry?: string;
   analysisOverlay?: AnalysisOverlay;
@@ -132,7 +131,7 @@ export const MapViewport = memo(
           color.push(
             selected !== undefined || entry !== undefined
               ? "#64748b"
-              : trackColor(latest.current.state.style),
+              : DETAIL_TRACK_STYLE.color,
           );
           map.map.setPaintProperty(layer!, property!, color);
         }
@@ -142,13 +141,13 @@ export const MapViewport = memo(
           "case",
           ["==", ["get", "segment_id"], "ux-located"],
           7 * map.displayScale,
-          (latest.current.state.style.width / 2) * map.displayScale,
+          (DETAIL_TRACK_STYLE.width / 2) * map.displayScale,
         ]);
         map.map.setPaintProperty("track-points", "circle-stroke-width", [
           "case",
           ["==", ["get", "segment_id"], "ux-located"],
           2 * map.displayScale,
-          latest.current.state.style.outline === false ? 0 : map.displayScale,
+          map.displayScale,
         ]);
       }
     };
@@ -344,7 +343,7 @@ export const MapViewport = memo(
     useEffect(() => {
       const map = create(latest.current.state);
       current.current = map;
-      if (latest.current.exposeRenderer !== false) window.renderer = map;
+      window.renderer = map;
       const initialized = () => {
         if (!map.destroyed && current.current === map)
           latest.current.onInitialized?.();
@@ -390,7 +389,7 @@ export const MapViewport = memo(
         destroy(current.current);
         holder.current?.replaceChildren();
         current.current = undefined;
-        if (latest.current.exposeRenderer !== false) delete window.renderer;
+        delete window.renderer;
       };
     }, [props.config]); // Stable bootstrap resources own the renderer lifetime.
     useEffect(() => {
@@ -429,6 +428,7 @@ export const MapViewport = memo(
     }, [props.analysisOverlay]);
     const fitPadding = (
       map: MapCanvas,
+      avoidPanel = true,
     ): Required<PaddingOptions> | undefined => {
       if (latest.current.print)
         return compositionPadding(
@@ -446,7 +446,7 @@ export const MapViewport = memo(
       const top = bounds.top + margin;
       let bottom = bounds.bottom - margin;
       const panel = document.getElementById("map-panel");
-      if (panel && panel.offsetParent !== null) {
+      if (avoidPanel && panel && panel.offsetParent !== null) {
         const rect = panel.getBoundingClientRect();
         if (bounds.width <= 700) {
           if (rect.top - margin > top + 32) bottom = rect.top - margin;
@@ -455,7 +455,7 @@ export const MapViewport = memo(
         }
       }
       // MapLibre fits the oversized logical canvas. Convert the visible,
-      // unobscured screen rectangle back into that canvas's coordinate space.
+      // target screen rectangle back into that canvas's coordinate space.
       return {
         left: Math.max(0, (left - canvas.left) / scale),
         right: Math.max(0, (canvas.right - right) / scale),
@@ -488,10 +488,10 @@ export const MapViewport = memo(
           { padding, maxZoom: 15, duration: 0 },
         );
       },
-      fit: (tracks) => {
+      fit: (tracks, avoidPanel = true) => {
         const map = current.current;
         if (!map) return;
-        const padding = fitPadding(map);
+        const padding = fitPadding(map, avoidPanel);
         if (padding) map.fit(tracks, padding);
       },
       cancel,

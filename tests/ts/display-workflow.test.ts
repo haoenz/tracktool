@@ -25,7 +25,11 @@ import {
   archiveId,
 } from "../../dist/node/infrastructure/archive/versions.js";
 import { trackDetail } from "../../dist/node/infrastructure/archive/track-reader.js";
-import { resolveTrack } from "../../dist/node/infrastructure/archive/presentation.js";
+import {
+  resolveTrack,
+  readPresentation,
+  displayed,
+} from "../../dist/node/infrastructure/archive/presentation.js";
 import { exportDisplay } from "../../dist/node/infrastructure/archive/display-export.js";
 import { readZip } from "../../dist/node/infrastructure/archive/zip.js";
 import { XmlWorkers } from "../../dist/node/infrastructure/xml/client.js";
@@ -99,12 +103,23 @@ async function fixture() {
     versions,
     ref,
     set,
+    display: async (entry = name) => {
+      const { data } = await store.readTrackData(file, entry);
+      return readTransaction(file, (db) => {
+        const presentation = readPresentation(db, resolveTrack(db, { entry }));
+        return displayed(
+          data,
+          presentation.segments,
+          presentation.settings,
+        ).geojson();
+      });
+    },
   };
 }
 const lines = (track: {
-  geojson: { features: { geometry: { type: string; coordinates: unknown } }[] };
+  features: { geometry: { type: string; coordinates: unknown } }[];
 }) =>
-  track.geojson.features
+  track.features
     .filter((f) => f.geometry.type === "MultiLineString")
     .flatMap((f) => f.geometry.coordinates as number[][][]);
 const meta = (file: string) =>
@@ -116,26 +131,20 @@ const meta = (file: string) =>
         .get() as { revision: number; storage_revision: number },
   );
 
-it("uses presentation snapshots with a warm raw cache and never bypasses ignored middle segments", async () => {
+it("uses presentation snapshots with a warm raw index and never bypasses ignored middle segments", async () => {
   const f = await fixture();
-  expect(
-    lines((await f.store.selection(f.file, [f.name])).tracks[0]!),
-  ).toHaveLength(5);
+  expect(lines(await f.display())).toHaveLength(5);
   const xmlCount = f.store.stats.xml,
     sha = f.ref().sha256;
   const d = trackDetail(f.file, f.id),
     settings = { ...d.settings, ignored: [d.settings.order[1]!] };
   f.set(settings);
-  expect(
-    lines((await f.store.selection(f.file, [f.name])).tracks[0]!),
-  ).toHaveLength(2);
+  expect(lines(await f.display())).toHaveLength(2);
   settings.connections = [
     { from: settings.order[0]!, to: settings.order[2]!, connect: true },
   ];
   f.set(settings);
-  expect(
-    lines((await f.store.selection(f.file, [f.name])).tracks[0]!),
-  ).toHaveLength(3);
+  expect(lines(await f.display())).toHaveLength(3);
   expect(f.store.stats.xml).toBe(xmlCount);
   expect(f.ref().sha256).toBe(sha);
   expect(Buffer.from(f.store.readBytes(f.file, f.name))).toEqual(raw);
@@ -168,8 +177,8 @@ it("exports mixed geometry losslessly and reimports generated edges without inve
       (db) => addEntry(db, name, exported, "Default").id,
     );
   expect(trackDetail(f.file, id).segments).toHaveLength(2);
-  const first = (await f.client.selection(f.file, [f.name])).tracks[0]!,
-    second = (await f.client.selection(f.file, [name])).tracks[0]!;
+  const first = await f.display(),
+    second = await f.display(name);
   expect(lines(second)).toEqual(lines(first));
   const again = readTransaction(f.file, (db) => exportDisplay(db, name));
   const imported = (
@@ -295,9 +304,14 @@ it("media matching reads timed original samples even when their segment is hidde
     "ExifIFD:OffsetTimeOriginal": "+00:00",
   })!;
   expect(await f.store.nearest(f.file, time, false, 60)).toBeDefined();
-  expect((await f.client.selection(f.file, [f.name])).tracks[0]!.points).toBe(
-    0,
-  );
+  const hits = f.store.stats.memoryHits;
+  expect(await f.store.nearest(f.file, time, false, 60)).toBeDefined();
+  expect(f.store.stats.memoryHits).toBeGreaterThan(hits);
+  expect(
+    (await f.display()).features.every(
+      (feature) => feature.geometry.coordinates.length === 0,
+    ),
+  ).toBe(true);
 });
 it("CLI display export has a read-only dry run and refuses to overwrite targets", async () => {
   const f = await fixture(),

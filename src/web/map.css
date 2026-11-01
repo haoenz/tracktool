@@ -135,38 +135,9 @@
   font-size: 13px;
   color: var(--muted-foreground);
 }
-.inspection-banner {
-  position: absolute;
-  z-index: 6;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 64px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-radius: 12px;
-  background: var(--background);
-  box-shadow: 0 5px 30px #19332a30;
-  max-width: calc(100% - 56px);
-  width: max-content;
-}
-.inspection-banner span {
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.map-controls .work-main {
+.map-controls :is(.track-editor, .track-history) {
   margin: 0;
   padding: 0;
-}
-.map-controls .work-main > .ui-typography:first-child {
-  display: none;
-}
-.map-controls .work-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
 }
 .map-controls .ui-card {
   margin-bottom: 16px;
@@ -174,7 +145,7 @@
 .map-controls [data-slot="card-content"] {
   padding: 14px;
 }
-.map-controls .work-main .ui-typography {
+.map-controls :is(.track-editor, .track-history) .ui-typography {
   font-size: 13px;
 }
 .map-controls .settings-panel .ui-descriptions {
@@ -1105,9 +1076,6 @@ button.settings-layer-toggle:focus-visible {
   .map-stage {
     min-height: 0;
   }
-  .inspection-banner {
-    bottom: 30px;
-  }
 }
 
 .map-stage .map-frame {
@@ -1184,10 +1152,6 @@ button.settings-layer-toggle:focus-visible {
   min-height: 44px;
   padding: 0;
   flex-shrink: 0;
-}
-.inspection-banner .panel-header {
-  flex-basis: 100%;
-  padding: 0;
 }
 
 .list-visibility-toolbar {

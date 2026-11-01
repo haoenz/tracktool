@@ -342,10 +342,10 @@ it("HTTP archive init, push, backup, download and delete call the shared service
   });
   expect(
     (
-      await call<{ catalog: { entries: unknown[] } }>("/api/work/catalog", {
-        archive,
+      await call<{ entries: unknown[] }>("/api/archive", {
+        path: archive,
       })
-    ).catalog.entries,
+    ).entries,
   ).toHaveLength(1);
   const backup = await run({ operation: "archive:backup", archive });
   expect(backup.output?.temporary).toBe(true);
@@ -362,15 +362,15 @@ it("HTTP archive init, push, backup, download and delete call the shared service
     await readFile(source),
   );
   const catalog = () =>
-    call<{ catalog: { entries: unknown[] } }>("/api/work/catalog", { archive });
-  expect((await catalog()).catalog.entries).toHaveLength(1);
+    call<{ entries: unknown[] }>("/api/archive", { path: archive });
+  expect((await catalog()).entries).toHaveLength(1);
   const removed = await run({
     operation: "archive:delete",
     archive,
     options: { name: "2026-10-01 轨迹.kml" },
   });
   expect(removed.output?.paths).toEqual([]);
-  expect((await catalog()).catalog.entries).toHaveLength(0);
+  expect((await catalog()).entries).toHaveLength(0);
   expect(await readFile(downloaded.output!.paths[0]!)).toEqual(
     await readFile(source),
   );
@@ -501,7 +501,9 @@ it("HTTP rejects stale file/config previews, unknown paths, symlink aliases and 
     "变化",
   );
   expect(existsSync(source + "_original")).toBe(false);
-  await expect(call("/api/work/files?path=/etc")).rejects.toThrow("开放");
+  await expect(
+    new WorkFiles(path.join(dir, "state"), [dir]).resolve("/etc"),
+  ).rejects.toThrow("开放");
   await symlink(source, path.join(dir, "alias.jpg"));
   await expect(
     call("/api/work/preview", {
@@ -516,7 +518,9 @@ it("HTTP rejects stale file/config previews, unknown paths, symlink aliases and 
   });
   expect(upload.status).toBe(403);
   await expect(
-    call("/api/work/files?path=" + encodeURIComponent(path.join(dir, "state"))),
+    new WorkFiles(path.join(dir, "state"), [dir]).resolve(
+      path.join(dir, "state"),
+    ),
   ).rejects.toThrow("任务数据库");
 });
 it("partial media failures remain itemized while independent files finish", async () => {
@@ -807,8 +811,8 @@ it("web import defaults to no Backup and rejects a mixed invalid batch without i
   await writeFile(good, bytes);
   await writeFile(bad, "<kml>");
   const catalog = () =>
-    call<{ catalog: { entries: unknown[] } }>("/api/work/catalog", { archive });
-  const before = (await catalog()).catalog.entries.length;
+    call<{ entries: unknown[] }>("/api/archive", { path: archive });
+  const before = (await catalog()).entries.length;
   const mixed = await call<WorkTask>("/api/work/preview", {
     operation: "archive:push",
     archive,
@@ -820,7 +824,7 @@ it("web import defaults to no Backup and rejects a mixed invalid batch without i
     import_items: [{ status: "new" }, { status: "invalid" }],
   });
   await expect(call(`/api/work/tasks/${mixed.id}/apply`, {})).rejects.toThrow();
-  expect((await catalog()).catalog.entries).toHaveLength(before);
+  expect((await catalog()).entries).toHaveLength(before);
   for (let attempt = 0; attempt < 2; attempt++) {
     const queued = await call<WorkTask>("/api/work/preview", {
       operation: "archive:push",
@@ -840,7 +844,7 @@ it("web import defaults to no Backup and rejects a mixed invalid batch without i
     const done = await settled(apply.id);
     expect(done.status, JSON.stringify(done.error)).toBe("succeeded");
     expect(done.output?.committed).toBe(true);
-    expect((await catalog()).catalog.entries).toHaveLength(before + 1);
+    expect((await catalog()).entries).toHaveLength(before + 1);
     expect(await readFile(good)).toEqual(bytes);
     await expect(stat(path.join(archive, "Backup"))).rejects.toThrow();
   }
@@ -1111,10 +1115,10 @@ it("batch preview catches internal name conflicts without writing and rechecks a
   );
   const catalog = async () =>
     (
-      await call<{ catalog: { entries: unknown[] } }>("/api/work/catalog", {
-        archive,
+      await call<{ entries: unknown[] }>("/api/archive", {
+        path: archive,
       })
-    ).catalog.entries;
+    ).entries;
   const before = await catalog();
   const preview = async (inputs: string[]) =>
     settled(

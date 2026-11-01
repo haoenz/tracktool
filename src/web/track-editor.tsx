@@ -535,7 +535,7 @@ function TrackEditor({
       );
       setImportKml(kml);
       setDrawing(result.coordinates.map(([x, y]) => [x, y]));
-      workspace.fit?.(
+      workspace.fit(
         editTracks({
           segments: [
             {
@@ -551,7 +551,7 @@ function TrackEditor({
   function locateSegment(id: string) {
     const segment = geometry.data?.segments.find((s) => s.segment_id === id);
     if (segment)
-      workspace.fit?.(editTracks({ segments: [segment], connections: [] }));
+      workspace.fit(editTracks({ segments: [segment], connections: [] }));
   }
   const pendingLocate = useRef(false);
   function locateTrack() {
@@ -559,12 +559,12 @@ function TrackEditor({
       pendingLocate.current = true;
       return;
     }
-    workspace.fit?.(editTracks(geometry.data));
+    workspace.fit(editTracks(geometry.data));
   }
   useEffect(() => {
     if (!pendingLocate.current || !geometry.data) return;
     pendingLocate.current = false;
-    workspace.fit?.(editTracks(geometry.data));
+    workspace.fit(editTracks(geometry.data));
   }, [geometry.data, workspace.fit]);
   useEffect(() => {
     setLocatedAltitude(undefined);
@@ -577,7 +577,7 @@ function TrackEditor({
     longitude: number;
     latitude: number;
   }) {
-    workspace.fit?.(
+    workspace.fit(
       editTracks({
         segments: [
           {
@@ -599,7 +599,7 @@ function TrackEditor({
       .find((s) => s.segment_id === segmentId)
       ?.coordinates.slice(start, end);
     if (coordinates?.length)
-      workspace.fit?.(
+      workspace.fit(
         editTracks({
           segments: [{ segment_id: segmentId, coordinates }],
           connections: [],
@@ -969,7 +969,7 @@ function TrackEditor({
     ],
   };
   return (
-    <div className="work-main track-editor">
+    <div className="track-editor">
       {[
         error,
         task.data?.error?.message,
@@ -1044,7 +1044,7 @@ function TrackEditor({
                   (s) => s.segment_id === id,
                 );
                 if (segment && !settings.ignored.includes(id))
-                  workspace.fit?.(
+                  workspace.fit(
                     editTracks({ segments: [segment], connections: [] }),
                   );
               }}

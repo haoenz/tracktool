@@ -44,6 +44,8 @@ const pythonAbsent = ["python", "python3", "uv"].every(
 if (process.platform !== "win32")
   assert.ok(pythonAbsent, "Python must be absent from isolated runtime PATH");
 process.env.XDG_CONFIG_HOME = path.join(consumer, "isolated-config");
+process.env.XDG_STATE_HOME = path.join(consumer, "isolated-state");
+process.env.XDG_DATA_HOME = path.join(consumer, "isolated-data");
 delete process.env.TRACKTOOL_EXIFTOOL;
 const cli = path.join(root, "dist/node/cli/main.js"),
   config = path.join(consumer, "config.json");
@@ -118,7 +120,11 @@ const resources = new MapResources(path.join(consumer, "cache"), {
 const app = await createApp({
   token: "package-test-token",
   configStore: new FileConfigStore({ path: config }),
-  maps: { initialArchive: archive, resources: () => resources },
+  maps: {
+    initialArchive: archive,
+    cache: path.join(consumer, "cache"),
+    resources: () => resources,
+  },
   work: { stateDir: path.join(consumer, "state"), roots: [consumer], archive },
 });
 const origin = await app.listen({ host: "127.0.0.1", port: 0 });
@@ -139,28 +145,39 @@ try {
   for (const route of ["/map", "/map?panel=library", "/map?panel=settings"])
     assert.equal((await fetch(origin + route)).status, 200);
   const { state } = await (await api("/api/bootstrap")).json();
-  const selected = await timed("cold_selection", async () =>
-    (
-      await api("/api/selection", { archive, entries: ["Train/same.kml"] })
-    ).json(),
+  const catalog = await timed("archive_catalog", async () =>
+    (await api("/api/archive", { path: archive })).json(),
   );
-  assert.equal(selected.errors.length, 0);
-  await timed("cached_selection", () =>
-    api("/api/selection", { archive, entries: ["Train/same.kml"] }),
+  const track = catalog.entries.find(
+    (entry) => entry.entry === "Train/same.kml",
   );
-  state.archive = archive;
-  state.title = "独立安装验收";
-  state.tracks = selected.tracks.map((t) => ({
-    entry: t.entry,
-    sha256: t.sha256,
-  }));
-  await api("/api/projects/save", { name: "release-project", state });
-  const loaded = await (
-    await api("/api/projects/load", { archive, name: "release-project" })
-  ).json();
-  assert.equal(loaded.state.title, state.title);
+  assert.ok(track);
+  await timed("overview_ready", async () => {
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      const overview = await (await api("/api/overview")).json();
+      if (overview.version && !overview.updating) return;
+      if (overview.state === "error") throw new Error(overview.error);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    throw new Error("轨迹概览准备超时");
+  });
+  const document = {
+    ...state,
+    format: "tracktool-print",
+    version: 1,
+    archive,
+    title: "独立安装验收",
+    tracks: [{ entry: track.entry, sha256: track.sha256 }],
+  };
+  const savedDocument = path.join(consumer, "map.json");
+  await writeFile(savedDocument, JSON.stringify(document));
+  const restored = JSON.parse(await readFile(savedDocument, "utf8"));
+  assert.deepEqual(restored, document);
   await timed("independent_png", async () => {
-    const { job } = await (await api("/api/export", state)).json();
+    const { job } = await (
+      await api("/api/print", { document: restored })
+    ).json();
     for (let i = 0; i < 180; i++) {
       report = await (await api(`/api/jobs/${job}`)).json();
       if (report.status === "failed") throw new Error(report.error);
@@ -187,7 +204,21 @@ run("config", "set", "archive_path", dataArchive, "--config", config);
 await timed("push", async () => run("kml", "push", source, "--config", config));
 run("archive", "backup", "--config", config);
 run("archive", "rebuild", "--config", config);
-run("kml", "pop", path.basename(source), "--config", config);
+const downloads = path.join(consumer, "downloads");
+await mkdir(downloads);
+run(
+  "kml",
+  "download",
+  path.basename(source),
+  "--output",
+  downloads,
+  "--config",
+  config,
+);
+assert.deepEqual(
+  await readFile(path.join(downloads, path.basename(source))),
+  original,
+);
 assert.deepEqual(await readFile(source), original);
 const recovered = path.join(consumer, "restored");
 run("archive", "import-zip", path.join(dataArchive, "Archive.zip"), recovered);

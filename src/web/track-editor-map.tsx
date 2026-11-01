@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Spin } from "./components/controls.js";
+import { useEffect, useMemo, useRef } from "react";
 import { useWorkspace } from "./workspace.js";
-import { useTheme } from "./theme.js";
-import { api } from "./api.js";
-import { MapViewport, type Viewport } from "./map-viewport.js";
 import type { EditGeometry } from "../shared/track-edit.js";
-import type { MapState } from "../shared/map-state.js";
-import type { MapConfig, SelectedTrack, Feature } from "../shared/map.js";
+import type { SelectedTrack, Feature } from "../shared/map.js";
+function unwrap(points: [number, number][]): [number, number][] {
+  return points.reduce<[number, number][]>((out, [x, y]) => {
+    const previous = out.at(-1);
+    out.push([previous ? x + 360 * Math.round((previous[0] - x) / 360) : x, y]);
+    return out;
+  }, []);
+}
+
 export function TrackEditorMap({
   geometry,
   onPick,
@@ -26,151 +28,6 @@ export function TrackEditorMap({
   segmentColors?: Record<string, string>;
 }) {
   const workspace = useWorkspace();
-  if (workspace.editMap)
-    return (
-      <WorkspaceEditMap
-        geometry={geometry}
-        onPick={onPick}
-        selectedSegment={selectedSegment}
-        active={active}
-        readOnly={readOnly}
-        autoFit={autoFit}
-        segmentColors={segmentColors}
-      />
-    );
-  return (
-    <StandaloneEditorMap
-      geometry={geometry}
-      onPick={onPick}
-      selectedSegment={selectedSegment}
-    />
-  );
-}
-function StandaloneEditorMap({
-  geometry,
-  onPick,
-  selectedSegment,
-}: {
-  geometry: EditGeometry;
-  onPick?: (p: [number, number]) => void;
-  selectedSegment?: string;
-}) {
-  const bootstrap = useQuery({
-    queryKey: ["work-map-bootstrap"],
-    queryFn: ({ signal }) =>
-      api<{ state: MapState; config: MapConfig }>(
-        "/api/bootstrap",
-        undefined,
-        signal,
-      ),
-  });
-  if (bootstrap.error)
-    return <Alert type="error" title={bootstrap.error?.message} />;
-  if (!bootstrap.data) return <Spin />;
-  return (
-    <EditorMap
-      {...bootstrap.data}
-      geometry={geometry}
-      onPick={onPick}
-      selectedSegment={selectedSegment}
-    />
-  );
-}
-function EditorMap({
-  state: initial,
-  config,
-  geometry,
-  onPick,
-  selectedSegment,
-}: {
-  state: MapState;
-  config: MapConfig;
-  geometry: EditGeometry;
-  onPick?: (p: [number, number]) => void;
-  selectedSegment?: string;
-}) {
-  const [state, setState] = useState({ ...initial, title: "" }),
-    [error, setError] = useState(""),
-    [ready, setReady] = useState(false);
-  const { appearance } = useTheme();
-  const themedState = useMemo(
-    () => ({ ...state, style: { ...state.style, appearance } }),
-    [state, appearance],
-  );
-  const ref = useRef<Viewport>(null);
-  const tracks = useMemo(() => editTracks(geometry), [geometry]);
-  // Do not refit on each drawn point: users keep their working view.
-  const initialTracks = useRef(tracks);
-  useEffect(() => {
-    let active = true;
-    void ref.current
-      ?.ready()
-      .then(async () => {
-        if (active) {
-          if (initialTracks.current.some((track) => track.points > 0))
-            ref.current?.fit(initialTracks.current);
-          await ref.current?.ready();
-          if (active) setReady(true);
-        }
-      })
-      .catch((e) => setError(String(e)));
-    return () => {
-      active = false;
-    };
-  }, []);
-  return (
-    <section aria-label="段编辑地图" data-status={ready ? "ready" : "loading"}>
-      <Button
-        disabled={!tracks.some((track) => track.points > 0)}
-        onClick={() => ref.current?.fit(tracks)}
-      >
-        定位轨迹
-      </Button>
-      <p>蓝色为当前选中段或正在补绘的线。</p>
-      {!ready && !error && <p role="status">正在定位轨迹…</p>}
-      {error && <Alert type="error" title={error} />}
-      <div className="work-map">
-        <MapViewport
-          ref={ref}
-          state={themedState}
-          config={config}
-          tracks={tracks}
-          onCamera={(camera) => setState((s) => ({ ...s, camera }))}
-          onError={setError}
-          onPointPick={ready ? onPick : undefined}
-          exposeRenderer={false}
-          highlightSegment={selectedSegment ?? ""}
-        />
-      </div>
-    </section>
-  );
-}
-function unwrap(points: [number, number][]): [number, number][] {
-  return points.reduce<[number, number][]>((out, [x, y]) => {
-    const previous = out.at(-1);
-    out.push([previous ? x + 360 * Math.round((previous[0] - x) / 360) : x, y]);
-    return out;
-  }, []);
-}
-
-function WorkspaceEditMap({
-  geometry,
-  onPick,
-  selectedSegment,
-  active,
-  readOnly,
-  autoFit,
-  segmentColors,
-}: {
-  geometry: EditGeometry;
-  onPick?: (p: [number, number]) => void;
-  selectedSegment?: string;
-  active: boolean;
-  readOnly: boolean;
-  autoFit: boolean;
-  segmentColors?: Record<string, string>;
-}) {
-  const workspace = useWorkspace();
   const tracks = useMemo(
     () => editTracks(geometry, segmentColors),
     [geometry, segmentColors],
@@ -182,12 +39,12 @@ function WorkspaceEditMap({
   fitRef.current = workspace.fit;
   useEffect(() => {
     if (active && autoFit && tracks.some((t) => t.points > 0))
-      fitRef.current?.(tracks);
+      fitRef.current(tracks);
   }, [active, autoFit, tracks]);
 
   useEffect(() => {
     if (!active) return;
-    setMap?.((old) => {
+    setMap((old) => {
       if (old && old.segment === selectedSegment) {
         // One serialization per state change instead of two: reuse the
         // previous push's signature rather than re-encoding its tracks.
@@ -210,7 +67,7 @@ function WorkspaceEditMap({
   }, [active, tracks, selectedSegment, setMap]);
   useEffect(
     () => () => {
-      if (active) setMap?.(undefined);
+      if (active) setMap(undefined);
     },
     [active, setMap],
   );

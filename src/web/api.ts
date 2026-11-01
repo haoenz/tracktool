@@ -22,7 +22,8 @@ export async function request(
     signal,
   }).catch((error: unknown) => {
     if (signal?.aborted) throw error;
-    throw new Error("无法连接服务器，请检查网络连接及服务是否仍在运行。", {
+    // Preserve fetch's error category so writes can treat a lost reply as uncertain.
+    throw new TypeError("无法连接服务器，请检查网络连接及服务是否仍在运行。", {
       cause: error,
     });
   });

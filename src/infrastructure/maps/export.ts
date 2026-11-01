@@ -78,7 +78,7 @@ export class Exports {
         status: "queued",
         created: Date.now(),
         phase: "preparing",
-        fileName: mapExportFileName(document.title || "tracktool-map", "png"),
+        fileName: mapExportFileName(document.title),
         document: structuredClone(document),
         visible,
         overview,

@@ -65,11 +65,7 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
   page.on("request", (r) => requests.push(r.url()));
   await loaded(page);
   expect(requests.some((u) => u.includes("/api/overview/tiles/"))).toBe(true);
-  expect(
-    requests.some(
-      (u) => u.endsWith("/api/selection") || u.includes("/geometry?"),
-    ),
-  ).toBe(false);
+  expect(requests.some((u) => u.includes("/geometry"))).toBe(false);
   await expect(
     page.getByRole("button", { name: "隐藏 索引未命中", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");

@@ -34,11 +34,6 @@ export const MapStyleSchema = z
       .refine((id) => id === "vector" || presets[id]?.kind === "basemap"),
     // Vector tiles carry no palette; light/dark stays independent of the source.
     appearance: z.enum(["light", "dark"]),
-    color_mode: z.enum(["uniform", "track", "category"]).optional(),
-    outline: z.boolean().optional(),
-    endpoints: z.boolean().optional(),
-    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-    width: number(0.5, 12),
     features,
     overlays: z.array(
       z
@@ -47,7 +42,7 @@ export const MapStyleSchema = z
           enabled: z.boolean(),
           opacity: number(0.1, 1),
         })
-        .passthrough(),
+        .strip(),
     ),
     power: z
       .object({
@@ -59,9 +54,9 @@ export const MapStyleSchema = z
         ]),
         facilities: z.enum(["none", "substations", "generation", "all"]),
       })
-      .passthrough(),
+      .strip(),
   })
-  .passthrough();
+  .strip();
 export type MapStyle = z.infer<typeof MapStyleSchema>;
 
 export const MapCameraSchema = z
@@ -69,7 +64,7 @@ export const MapCameraSchema = z
     center: z.tuple([number(-180, 180), number(-85, 85)]),
     zoom: number(0, 18),
   })
-  .passthrough();
+  .strip();
 
 export const MapFrameSchema = z
   .object({
@@ -77,7 +72,7 @@ export const MapFrameSchema = z
     width: z.number(),
     height: z.number(),
   })
-  .passthrough();
+  .strip();
 export type MapFrame = z.infer<typeof MapFrameSchema>;
 
 export const MapOutputSchema = z
@@ -85,7 +80,7 @@ export const MapOutputSchema = z
     width: number(256, 4096).int(),
     height: number(256, 4096).int(),
   })
-  .passthrough();
+  .strip();
 export type MapOutput = z.infer<typeof MapOutputSchema>;
 
 const frameCheck = (
@@ -111,7 +106,7 @@ export const MapStateSchema = z
     output: MapOutputSchema,
     title: MapTitleSchema,
   })
-  .passthrough()
+  .strip()
   .superRefine((value, ctx) => {
     frameCheck(value, ctx);
     const seen = new Set<string>();
@@ -135,8 +130,6 @@ export function defaultMapState(): MapState {
     style: {
       basemap: "vector",
       appearance: "light",
-      color: "#e05240",
-      width: 3,
       features: { ...catalog.defaults },
       overlays: [],
       power: { min_voltage: 0, facilities: "all" },

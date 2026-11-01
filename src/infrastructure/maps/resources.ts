@@ -269,17 +269,11 @@ export class MapResources {
         "maxzoom",
         "crs",
         "imagery",
-        "has_text",
-        "overlay_only",
         "attribution",
         "kind",
         "format",
         "content",
         "minzoom",
-        "scheme",
-        "addressing",
-        "coverage",
-        "content_note",
       ] as const;
       return {
         ...Object.fromEntries(keys.map((k) => [k, s[k]])),
@@ -297,7 +291,6 @@ export class MapResources {
       ),
       attribution: credit,
       customVectorAttribution: this.env.TRACKTOOL_MAP_VECTOR_ATTRIBUTION ?? "",
-      cacheTime: Math.floor(Date.now() / 1000),
     };
   }
   async glyph(

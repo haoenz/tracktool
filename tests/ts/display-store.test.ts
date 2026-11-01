@@ -51,3 +51,23 @@ test("clear removes the persisted style", async () => {
   await display.clear();
   expect(await display.load()).toBeUndefined();
 });
+
+test("unsupported track settings disappear on both load and save", async () => {
+  const display = await store();
+  const style = defaultMapState().style;
+  const unsupported = {
+    ...style,
+    color_mode: "track",
+    color: "#ffffff",
+    width: 12,
+    outline: false,
+    endpoints: true,
+  };
+  await writeFile(
+    display.path,
+    JSON.stringify({ schema: 1, style: unsupported }),
+  );
+  expect(await display.load()).toEqual(style);
+  await display.save(unsupported);
+  expect(JSON.parse(await readFile(display.path, "utf8")).style).toEqual(style);
+});

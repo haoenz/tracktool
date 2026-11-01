@@ -1,3 +1,4 @@
+import type { ArchiveAction as ArchiveActionKind } from "./work-page.js";
 import { useQuery } from "@tanstack/react-query";
 import {
   FileOutput,
@@ -94,7 +95,6 @@ type Bootstrap = {
   config: MapConfig;
   state: MapState;
   initialArchive: string;
-  directory: string;
 };
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export default function MapPage() {
@@ -289,7 +289,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
   // The composition mask belongs to the print panel, so a reload restores the
   // same view instead of a full screen map without a frame.
   const printMode = panel === "print";
-  const [archiveAction, setArchiveAction] = useState<Operation>();
+  const [archiveAction, setArchiveAction] = useState<ArchiveActionKind>();
   const [downloadingTrack, setDownloadingTrack] = useState(false);
   const [libraryList, setLibraryList] = useSessionState(
     `tracktool.library-list:${initial.initialArchive}`,
@@ -320,12 +320,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
   }, [panel]);
   const [exportEntries, setExportEntries] = useState<string[]>();
   const [exportKind, setExportKind] = useState<"zip" | "kml" | "png">();
-  const [inspection, setInspection] = useState<{
-    id: string;
-    tracks: SelectedTrack[];
-    camera: MapState["camera"];
-  }>();
-  const inspectionSequence = useRef(0);
   const openPanel = (next: Panel, task?: string) => {
     if (next === "library" && task === "imported") setLibraryList(true);
     if (task === "imported") {
@@ -360,23 +354,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
     setCatalog(next);
     if (!options?.quiet) setNotice("轨迹库已刷新；当前地图选择和构图已保留。");
   };
-  const inspect = async (id: string) => {
-    const sequence = ++inspectionSequence.current;
-    const result = await api<{ tracks: SelectedTrack[] }>(
-      `/api/work/tasks/${id}/geometry`,
-      {},
-    );
-    if (sequence !== inspectionSequence.current) return;
-    setInspection({
-      id,
-      tracks: result.tracks,
-      camera: stateRef.current.camera,
-    });
-    setParams({ panel: "none" });
-  };
-  useEffect(() => {
-    if (inspection) viewport.current?.fit(inspection.tracks);
-  }, [inspection?.id]);
   const viewport = useRef<Viewport>(null),
     operations = useRef(0),
     sourceSequence = useRef(0),
@@ -489,20 +466,18 @@ function Editor({ initial }: { initial: Bootstrap }) {
     previousDetail.current = detailOpen;
   }, [detailOpen, panel]);
   const fitted = useRef(!!rememberedCamera(initial.initialArchive));
-  const browsing = !inspection;
   useEffect(() => {
     if (
       !starting &&
       !fitted.current &&
       overview.query.data?.bounds &&
       overview.query.data.version &&
-      browsing &&
       !printMode
     ) {
       fitted.current = true;
       viewport.current?.fitOverview(overview.query.data.bounds);
     }
-  }, [starting, overview.query.data, browsing, printMode]);
+  }, [starting, overview.query.data, printMode]);
   const change = (edit: (next: MapState) => void) => {
     setState((prev) => {
       const next = structuredClone(prev);
@@ -593,18 +568,13 @@ function Editor({ initial }: { initial: Bootstrap }) {
       if (sequence !== sourceSequence.current) return;
       const targetCrs = canvasCrs(next, config);
       let prepared: OverviewStatus | undefined;
-      if (browsing) {
-        const deadline = Date.now() + 120000;
-        while (sequence === sourceSequence.current) {
-          prepared = await api<OverviewStatus>(
-            `/api/overview?crs=${targetCrs}`,
-          );
-          if (prepared.version || prepared.state === "unconfigured") break;
-          if (prepared.state === "error") throw new Error(prepared.error);
-          if (Date.now() > deadline)
-            throw new Error("轨迹概览准备超时，请重试");
-          await new Promise((r) => setTimeout(r, 500));
-        }
+      const deadline = Date.now() + 120000;
+      while (sequence === sourceSequence.current) {
+        prepared = await api<OverviewStatus>(`/api/overview?crs=${targetCrs}`);
+        if (prepared.version || prepared.state === "unconfigured") break;
+        if (prepared.state === "error") throw new Error(prepared.error);
+        if (Date.now() > deadline) throw new Error("轨迹概览准备超时，请重试");
+        await new Promise((r) => setTimeout(r, 500));
       }
       if (sequence !== sourceSequence.current) return;
       const staged = await viewport.current?.stage(next, prepared);
@@ -646,12 +616,11 @@ function Editor({ initial }: { initial: Bootstrap }) {
     toast.success(notice, { id: "workspace-notice", duration: 4000 });
     setNotice("");
   }, [notice]);
-  const overviewError = browsing
-    ? overview.tileError ||
-      (!overview.query.data?.version
-        ? (overview.query.error?.message ?? overview.query.data?.error ?? "")
-        : "")
-    : "";
+  const overviewError =
+    overview.tileError ||
+    (!overview.query.data?.version
+      ? (overview.query.error?.message ?? overview.query.data?.error ?? "")
+      : "");
   const listLoading =
     overview.list.isFetching || (overview.list.isPending && !overviewError);
   const loadingText = exporting
@@ -660,8 +629,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
       ? "正在准备新底图…"
       : busy
         ? activity
-        : browsing &&
-            !overviewError &&
+        : !overviewError &&
             (overview.query.isPending ||
               overview.query.data?.state === "building" ||
               overview.query.data?.updating ||
@@ -742,9 +710,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
       setVisibilityBusy(false);
     }
   }
-  const fitTracks = (selected: SelectedTrack[]) => {
+  const fitTracks = (selected: SelectedTrack[], avoidPanel = true) => {
     try {
-      viewport.current?.fit(selected);
+      viewport.current?.fit(selected, avoidPanel);
     } catch (error) {
       setError(message(error));
     }
@@ -846,7 +814,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
     error: () => {},
   });
   viewportHandlers.current.pick = (hits) => {
-    if (!hits.length || editMap || !browsing) return;
+    if (!hits.length || editMap) return;
     if (
       hasDraft &&
       (hits.length !== 1 || hits[0]?.id !== overview.id) &&
@@ -867,10 +835,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
     setEditing(false);
   };
   viewportHandlers.current.camera = (camera) => {
-    if (inspection) {
-      setInspection((old) => (old ? { ...old, camera } : old));
-      return;
-    }
     const previous = stateRef.current.camera;
     if (
       previous.zoom === camera.zoom &&
@@ -910,11 +874,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
     (sample?: import("../shared/track-analysis.js").AnalysisSample) =>
       viewport.current?.setAnalysisSample(sample),
     [],
-  );
-  const viewportState = useMemo(
-    () =>
-      inspection ? { ...state, camera: inspection.camera, title: "" } : state,
-    [inspection, state],
   );
   const titleError = mapTitleError(state.title);
   const visibleTracks = useMemo<PrintTrack[]>(() => {
@@ -1209,12 +1168,10 @@ function Editor({ initial }: { initial: Bootstrap }) {
     <WorkspaceContext.Provider
       value={{
         archive: catalog?.archive ?? initial.initialArchive,
-        selected: [],
         draft: reportDraft,
         editMap: setEditMap,
         fit: fitTracks,
         open: openPanel,
-        inspect,
         showTracks: (ids) => {
           openPanel("library", "imported");
           setImportedScope(ids);
@@ -1729,6 +1686,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                   onLocate={() =>
                     fitTracks(
                       editMap ? editMap.tracks : [overview.selectedTrack!],
+                      false,
                     )
                   }
                   locateDisabled={
@@ -1868,21 +1826,19 @@ function Editor({ initial }: { initial: Bootstrap }) {
           <MapViewport
             ref={viewport}
             geolocation
-            state={viewportState}
+            state={state}
             config={config}
-            tracks={editMap?.tracks ?? inspection?.tracks ?? emptyTracks}
+            tracks={editMap?.tracks ?? emptyTracks}
             overview={overview.query.data}
             overviewSelected={panel === "library" ? overview.id : ""}
             overviewVisibility={browseVisibility}
-            hideOverview={!!editMap || !!inspection}
+            hideOverview={!!editMap}
             analysisOverlay={
               panel === "library" &&
               detailOpen &&
               !editing &&
               !archiveAction &&
-              browsing &&
               !editMap &&
-              !inspection &&
               analysisOverlay?.key ===
                 (overview.selected
                   ? overview.selected.id + overview.selected.sha256
@@ -2024,27 +1980,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
             </div>
           )}
         </Modal>
-        {inspection && (
-          <div
-            className="inspection-banner"
-            role="region"
-            aria-label="轨迹结果地图"
-          >
-            <PanelHeader
-              title={`结果检查 · ${inspection.tracks.length} 条轨迹`}
-              backLabel="返回原地图"
-              onBack={() => {
-                inspectionSequence.current++;
-                setInspection(undefined);
-                openPanel("library");
-              }}
-            />
-            <span>临时显示，尚未入库</span>
-            <Button onClick={() => fitTracks(inspection.tracks)}>
-              定位结果
-            </Button>
-          </div>
-        )}
         {showLoading && loadingText && (
           <div className="map-status" role="status">
             <Spin decorative /> {loadingText}

@@ -166,18 +166,6 @@ export const WorkTaskSchema = TaskSchema.extend({
   cancelRequested: z.boolean(),
 });
 export type WorkTask = z.infer<typeof WorkTaskSchema>;
-export interface FileEntry {
-  name: string;
-  path: string;
-  directory: boolean;
-  size: number;
-}
-export interface FileListing {
-  path: string;
-  parent: string;
-  roots: string[];
-  entries: FileEntry[];
-}
 export interface UploadResult {
   id: string;
   directory: string;

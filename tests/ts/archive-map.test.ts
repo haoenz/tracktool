@@ -1,3 +1,11 @@
+import { readTransaction } from "../../dist/node/infrastructure/archive/database.js";
+import {
+  resolveTrack,
+  readPresentation,
+  displayed,
+} from "../../dist/node/infrastructure/archive/presentation.js";
+import { geojson } from "../../dist/node/domain/geometry.js";
+import { pointCount } from "../../dist/node/domain/trackdata.js";
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
@@ -47,7 +55,7 @@ it("snapshot survives concurrent deletion and index creation cannot resurrect th
       return pending;
     },
   });
-  const reading = store.selection(archive, ["Train/same.kml"]);
+  const reading = store.readTrackData(archive, "Train/same.kml");
   await begun;
   const writer = new Database(archive);
   writer.pragma("foreign_keys=ON");
@@ -66,7 +74,7 @@ it("snapshot survives concurrent deletion and index creation cannot resurrect th
     readTrackData,
   );
   finish({ name: tracks.name, placemarks: 1, coordinateNodes: 6, tracks });
-  expect((await reading).tracks).toHaveLength(1);
+  expect((await reading).data).toEqual(tracks);
   const check = new Database(archive);
   expect(
     check.prepare("SELECT 1 FROM kml_index WHERE sha256=?").get(sha256),
@@ -75,25 +83,6 @@ it("snapshot survives concurrent deletion and index creation cannot resurrect th
     check.prepare("SELECT 1 FROM kml_objects WHERE sha256=?").get(sha256),
   ).toBeUndefined();
   check.close();
-});
-it("enforces 200-member and raw 128 MiB limits even on index hits", async () => {
-  await expect(
-    client.selection(
-      archive,
-      Array.from({ length: 201 }, (_, i) => String(i)),
-    ),
-  ).rejects.toThrow("200");
-  const db = new Database(archive);
-  // Deliberately corrupt a temporary fixture to test the read-size guard.
-  db.exec("DROP TRIGGER object_no_update");
-  db.prepare(
-    "UPDATE kml_objects SET raw_size=? WHERE sha256=(SELECT sha256 FROM active_archive_entries WHERE path=?)",
-  ).run(128 * 1024 * 1024 + 1, first);
-  db.close();
-  expect((await client.selection(archive, [first])).errors[0]!.error).toContain(
-    "128 MiB",
-  );
-  expect((await client.stats()).indexHits).toBe(0);
 });
 it("coordinate comments, zero altitude, time mismatches and invalid aligned times preserve coordinate and timestamp semantics", () => {
   const xml = (geometry: string) =>
@@ -138,21 +127,19 @@ it.each([
 ])("rejects invalid timestamps %s", (value) =>
   expect(() => timestamp(value)).toThrow(),
 );
-it("reads the exact complete paths, uses persisted/memory indices and rejects partial names", async () => {
+it("reads exact complete paths, reuses persisted indices and rejects partial names", async () => {
   expect((await client.catalog(directory)).entries).toHaveLength(5);
-  const selected = await client.selection(archive, [
-    first,
-    "Train/same.kml",
-    "same.kml",
-  ]);
-  expect(selected.tracks).toHaveLength(2);
-  expect(selected.errors).toHaveLength(1);
+  await client.readTrackData(archive, first);
+  await client.readTrackData(archive, "Train/same.kml");
+  await expect(client.readTrackData(archive, "same.kml")).rejects.toThrow(
+    "not found",
+  );
   expect(await client.stats()).toMatchObject({ xml: 2, indexHits: 0 });
-  await client.selection(archive, [first]);
-  expect(await client.stats()).toMatchObject({ xml: 2, memoryHits: 1 });
+  await client.readTrackData(archive, first);
+  expect(await client.stats()).toMatchObject({ xml: 2, indexHits: 1 });
   await client.close();
   client = new ArchiveClient();
-  await client.selection(archive, ["Train/same.kml"]);
+  await client.readTrackData(archive, "Train/same.kml");
   expect(await client.stats()).toMatchObject({ xml: 0, indexHits: 1 });
   const db = new Database(archive);
   expect(
@@ -171,13 +158,14 @@ it("reads the exact complete paths, uses persisted/memory indices and rejects pa
 it("reuses one database connection across archive reads", async () => {
   // Cold index writes use independent connections so a concurrent writer
   // cannot force an old read snapshot to upgrade. Warm reads still reuse one.
-  await client.selection(archive, [first, "Train/same.kml"]);
+  await client.readTrackData(archive, first);
+  await client.readTrackData(archive, "Train/same.kml");
   await client.close();
   client = new ArchiveClient();
   const before = (await client.stats()).opens;
   await client.catalog(directory);
-  await client.selection(archive, [first]);
-  await client.selection(archive, ["Train/same.kml"]);
+  await client.readTrackData(archive, first);
+  await client.readTrackData(archive, "Train/same.kml");
   expect((await client.stats()).opens - before).toBe(1);
 });
 it("rebuilds corrupt disposable indices without altering originals, rejects bad/polar members and preserves segments/dateline", async () => {
@@ -189,16 +177,23 @@ it("rebuilds corrupt disposable indices without altering originals, rejects bad/
     PARSER_VERSION,
   );
   db.close();
-  const result = await client.selection(archive, [
-    first,
-    "Default/invalid.kml",
-    "Default/polar.kml",
-    "Flight/dateline.kml",
-  ]);
-  expect(result.tracks).toHaveLength(2);
-  expect(result.errors).toHaveLength(2);
+  await client.readTrackData(archive, first);
+  await expect(
+    client.readTrackData(archive, "Default/invalid.kml"),
+  ).rejects.toThrow();
+  const polar = await client.readTrackData(archive, "Default/polar.kml");
+  expect(() => geojson(polar.data)).toThrow();
+  const result = await client.readTrackData(archive, "Flight/dateline.kml");
   expect(
-    result.tracks[1]!.geojson.features.map((f) => f.geometry.coordinates),
+    readTransaction(archive, (db) => {
+      const view = readPresentation(
+        db,
+        resolveTrack(db, { entry: "Flight/dateline.kml" }),
+      );
+      return displayed(result.data, view.segments, view.settings)
+        .geojson()
+        .features.map((f) => f.geometry.coordinates);
+    }),
   ).toEqual([
     [
       [
@@ -234,7 +229,7 @@ it("rejects unknown schemas without upgrading or creating missing files", async 
 });
 it("cancellation releases the worker and queued requests resume", async () => {
   const controller = new AbortController();
-  const cancelled = client.selection(archive, [first], controller.signal);
+  const cancelled = client.readTrackData(archive, first, controller.signal);
   controller.abort();
   await expect(cancelled).rejects.toThrow("取消");
   expect((await client.catalog(archive)).entries).toHaveLength(5);
@@ -255,9 +250,8 @@ it("rebuilds old parser errors for empty time slots and preserves raw data and s
     'Invalid timestamp ""',
   );
   db.close();
-  const selected = await client.selection(archive, [entry]);
-  expect(selected.errors).toEqual([]);
-  expect(selected.tracks[0]!.points).toBe(2);
+  const selected = await client.readTrackData(archive, entry);
+  expect(pointCount(selected.data)).toBe(2);
   const after = new Database(archive);
   try {
     const rows = after
@@ -287,7 +281,7 @@ it("rebuilds old parser errors for empty time slots and preserves raw data and s
     after.close();
   }
 });
-it("tracks larger than the RAM cache remain selectable and reopen from the persistent index", async () => {
+it("large tracks reopen from the persistent index without reparsing", async () => {
   const raw = Buffer.from(
     '<kml xmlns="http://www.opengis.net/kml/2.2"><Placemark><LineString><coordinates>' +
       "104,30,0 ".repeat(500_001) +
@@ -298,9 +292,8 @@ it("tracks larger than the RAM cache remain selectable and reopen from the persi
   db.transaction(() => addEntry(db, entry, raw, "Default"))();
   db.close();
   for (let i = 0; i < 2; i++) {
-    const selected = await client.selection(archive, [entry]);
-    expect(selected.errors).toEqual([]);
-    expect(selected.tracks[0]!.points).toBe(500_001);
+    const selected = await client.readTrackData(archive, entry);
+    expect(pointCount(selected.data)).toBe(500_001);
   }
   expect(await client.stats()).toMatchObject({
     xml: 1,
@@ -308,3 +301,14 @@ it("tracks larger than the RAM cache remain selectable and reopen from the persi
     memoryHits: 0,
   });
 }, 30_000);
+
+it("bounds raw object reads before parsing", async () => {
+  const db = new Database(archive);
+  db.exec("DROP TRIGGER object_no_update");
+  db.prepare(
+    "UPDATE kml_objects SET raw_size=? WHERE sha256=(SELECT sha256 FROM active_archive_entries WHERE path=?)",
+  ).run(128 * 1024 * 1024 + 1, first);
+  db.close();
+  await expect(client.readBytes(archive, first)).rejects.toThrow("128 MiB");
+  expect((await client.stats()).xml).toBe(0);
+});

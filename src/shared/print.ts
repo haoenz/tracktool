@@ -1,6 +1,11 @@
 import type { Catalog } from "./map.js";
 import { z } from "zod";
-import { MapStateSchema, MapTitleSchema, type MapState } from "./map-state.js";
+import {
+  MapStateSchema,
+  MapStyleSchema,
+  MapTitleSchema,
+  type MapState,
+} from "./map-state.js";
 
 export const PrintTrackSchema = z
   .object({
@@ -35,25 +40,29 @@ export function printDocument(
     version: 1,
     archive,
     title: state.title,
-    camera: state.camera,
-    frame: state.frame,
-    output: state.output,
-    style: state.style,
-    tracks,
+    camera: { center: state.camera.center, zoom: state.camera.zoom },
+    frame: {
+      ratio: state.frame.ratio,
+      width: state.frame.width,
+      height: state.frame.height,
+    },
+    output: { width: state.output.width, height: state.output.height },
+    style: MapStyleSchema.parse(state.style),
+    tracks: tracks.map(({ entry, sha256 }) => ({ entry, sha256 })),
   };
 }
 
-export function mapExportFileName(name: string, kind: "png" | "kml") {
+export function mapExportFileName(name: string) {
   const stem = name
     .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, "-")
     .replace(/[. ]+$/g, "")
     .trim();
-  return `${[...stem].slice(0, 100).join("") || (kind === "png" ? "tracktool-map" : "tracktool-display")}.${kind}`;
+  return `${[...stem].slice(0, 100).join("") || "tracktool-map"}.png`;
 }
 
 export interface MapExport {
   id: string;
-  kind: "png" | "kml";
+  kind: "png";
   status: "queued" | "rendering" | "done" | "failed";
   phase: "preparing" | "resources" | "rendering" | "done" | "failed";
   created: number;

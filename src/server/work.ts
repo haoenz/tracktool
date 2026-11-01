@@ -1,27 +1,21 @@
+import { lstat } from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
 import { createReadStream } from "node:fs";
-import { lstat } from "node:fs/promises";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { z } from "zod";
 import { publicConfig } from "../domain/config.js";
 import { AppError } from "../domain/errors.js";
-import { geojson } from "../domain/geometry.js";
-import { MAX_POINTS, pointCount } from "../domain/trackdata.js";
-import { ArchiveClient } from "../infrastructure/archive/client.js";
 import { EditPreviews } from "../infrastructure/archive/edit-previews.js";
 import { ExportCleanup } from "../infrastructure/export-cleanup.js";
-import { LocalKmlFiles } from "../infrastructure/kml-files.js";
 import { userStateDir } from "../infrastructure/paths.js";
 import { TaskQueue } from "../infrastructure/task-queue.js";
 import { SqliteTasks } from "../infrastructure/task-store.js";
 import { UploadCleanup } from "../infrastructure/upload-cleanup.js";
 import { WorkFiles } from "../infrastructure/work-files.js";
 import { BusinessRunner } from "../infrastructure/work-runner.js";
-import { XmlWorkers } from "../infrastructure/xml/client.js";
 import type { ConfigStore } from "../services/ports.js";
 import { exportEncoding } from "../shared/export-format.js";
-import type { SelectedTrack } from "../shared/map.js";
 import { WorkRequestSchema } from "../shared/work.js";
 import { trackRoutes } from "./tracks.js";
 export interface WorkOptions {
@@ -143,11 +137,6 @@ export function workRoutes(
       options?.archive ?? String((await configStore.load()).archive_path ?? ""),
     config: publicConfig(await configStore.load(), envKey),
   }));
-  app.get("/api/work/files", async (request) =>
-    (await get()).files.list(
-      z.object({ path: z.string().optional() }).parse(request.query).path,
-    ),
-  );
   app.addContentTypeParser(
     "application/octet-stream",
     (_request, payload, done) => done(null, payload),
@@ -260,82 +249,6 @@ export function workRoutes(
       .strict()
       .parse(request.body);
     return (await get()).exports.complete(taskId(request.params), index);
-  });
-  app.post("/api/work/tasks/:id/geometry", async (request, reply) => {
-    const { queue, files } = await get(),
-      task = queue.store.read(taskId(request.params));
-    if (!task || ["queued", "running"].includes(task.status))
-      throw new AppError("USER_INPUT", "请等待任务完成");
-    const candidates =
-      task.mode === "apply" ? (task.output?.paths ?? []) : task.request.inputs;
-    const inputs: string[] = [];
-    for (const p of candidates) {
-      const source = await files.resolve(p);
-      if ((await lstat(source)).isDirectory())
-        inputs.push(
-          ...(await files.regularPaths(source)).filter((n) =>
-            n.toLowerCase().endsWith(".kml"),
-          ),
-        );
-      else if (source.toLowerCase().endsWith(".kml")) inputs.push(source);
-    }
-    if (!inputs.length || inputs.length > 200)
-      throw new AppError("USER_INPUT", "请选择 1–200 个 KML 结果查看地图");
-    const xml = new XmlWorkers(),
-      reader = new LocalKmlFiles(),
-      tracks: SelectedTrack[] = [],
-      cancel = new AbortController();
-    let total = 0;
-    reply.raw.once("close", () => {
-      if (!reply.raw.writableFinished) cancel.abort();
-    });
-    try {
-      for (const file of [...new Set(inputs)]) {
-        const source = await reader.read(file),
-          data = (
-            await xml.run(
-              source.bytes,
-              { kind: "tracks", source: file },
-              cancel.signal,
-            )
-          ).tracks!,
-          points = pointCount(data);
-        total += points;
-        if (total > MAX_POINTS)
-          throw new AppError("USER_INPUT", "地图检查超过 200 万点，请缩小范围");
-        tracks.push({
-          entry: file,
-          sha256: source.sha256,
-          points,
-          geojson: geojson(data),
-        });
-      }
-      return { tracks };
-    } finally {
-      await xml.close();
-    }
-  });
-  app.post("/api/work/catalog", async (request) => {
-    const { archive } = z.object({ archive: z.string() }).parse(request.body),
-      { files } = await get(),
-      file = await files.resolve(archive);
-    const client = new ArchiveClient();
-    try {
-      return {
-        catalog: await client.catalog(file),
-        status: (
-          await client.execute({
-            kind: "status",
-            database:
-              path.basename(file) === "archive.sqlite3"
-                ? file
-                : path.join(file, "archive.sqlite3"),
-          })
-        ).status,
-      };
-    } finally {
-      await client.close();
-    }
   });
   app.post("/api/work/settings", async () => {
     throw new AppError("FORBIDDEN", "服务配置只能通过后台配置或 CLI 修改");

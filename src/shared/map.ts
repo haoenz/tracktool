@@ -1,5 +1,3 @@
-import { z } from "zod";
-import type { Presentation, SegmentManifest } from "./track-edit.js";
 export type Position = [number, number];
 export type Geometry =
   | { type: "MultiLineString"; coordinates: Position[][] }
@@ -18,16 +16,6 @@ export interface SelectedTrack {
   sha256: string;
   points: number;
   geojson: TrackGeoJSON;
-  presentation?: {
-    settings: Presentation;
-    segments: SegmentManifest[];
-    current: boolean;
-  };
-}
-export interface Selection {
-  archive: string;
-  tracks: SelectedTrack[];
-  errors: { entry: string; error: string }[];
 }
 export interface Catalog {
   archive: string;
@@ -50,16 +38,10 @@ export interface MapPreset {
   minzoom: number;
   crs: string;
   imagery: boolean;
-  has_text: boolean;
-  overlay_only: boolean;
   attribution: string;
   kind: string;
   format: string;
   content: string[];
-  scheme: string;
-  addressing: string;
-  coverage: string;
-  content_note: string;
   available: boolean;
   category: string;
 }
@@ -71,14 +53,4 @@ export interface MapConfig {
   vectorLayers: Record<string, Record<string, string>>;
   attribution: string;
   customVectorAttribution: string;
-  cacheTime: number;
 }
-export const SelectionRequest = z
-  .object({
-    archive: z.string().min(1).max(4096),
-    entries: z.array(z.string().min(1).max(4096)).max(200),
-  })
-  .refine(
-    (v) => new Set(v.entries).size === v.entries.length,
-    "选择中有重复归档路径",
-  );

@@ -65,6 +65,8 @@ Python 调用方只需用自己的 `subprocess.run([...], check=True, capture_ou
 | `GET /api/work/tasks/:id/download?index=0`   | 下载该任务登记的结果文件；临时导出已下载或已清理后需重新导出                                                               |
 | `POST /api/work/tasks/:id/download-complete` | 浏览器完整接收临时导出后提交 `{index}`，幂等记录下载完成并删除该文件                                                       |
 
+地图样式仅包含底图、深浅配色、地图要素、叠加层和电力图层设置；轨迹样式不提供自定义配置。样式与出图文档按当前字段解析，未支持的字段不会保留到保存或导出结果中。
+
 `archive:push` 支持 `options.importFiles: [{path, tag?, name?}]`：每个 `path` 必须唯一且属于本次 `inputs`，名称必须为不含路径分隔符的 KML 文件名，`tag` 必须是配置中已有的活动标签。逐文件标签会写入该文件的 `TrackTags`（网页上传场景即其暂存副本），并据此推导 `Default`、`Train` 或 `Flight` 分类；未指定时沿用文件原有标签。校验和实际导入使用同一设置。提交成功后，若 `auto_fill_locations` 未关闭且已配置 Google API key，会自动补全本批新入库轨迹的起终点行政区；该步骤不阻塞提交结果，失败只记录任务日志。导入结果的 `import_items` 包含 `entryId`，可直接打开轨迹详情。同一个入库预览重复调用 `apply` 会返回原提交任务，便于网络中断后查询结果。
 
 网页 ZIP／聚合 KML 导出的 `output.temporary` 为 `true`。客户端应在完整接收文件后调用 `download-complete`，不能在仅收到响应头时确认。任务的 `downloadedFiles` 记录已确认的文件索引，`exportsCleaned` 表示整批临时文件已清理；未确认的结果保留最多 24 小时，下载中的文件暂缓清理，服务重启后继续清理到期结果。该机制不处理 CLI 输出或非临时文件。

@@ -97,3 +97,37 @@ describe("print documents", () => {
     await exports.close();
   });
 });
+
+it("drops unsupported settings throughout print import and export", () => {
+  const state = defaultMapState();
+  const extended = {
+    ...state,
+    style: {
+      ...state.style,
+      color_mode: "category",
+      endpoints: true,
+      width: 12,
+      power: { ...state.style.power, unused: true },
+      overlays: [
+        { id: "amap-labels", enabled: false, opacity: 1, unused: true },
+      ],
+    },
+    camera: { ...state.camera, unused: true },
+  };
+  const value = printDocument(extended, "archive", []);
+  expect(value.style).toEqual({
+    ...state.style,
+    overlays: [{ id: "amap-labels", enabled: false, opacity: 1 }],
+  });
+  expect(value.camera).toEqual(state.camera);
+  expect(PrintDocumentSchema.parse({ ...value, unused: true }).camera).toEqual(
+    state.camera,
+  );
+});
+
+it("keeps an unfinished title editable until document validation", () => {
+  const state = { ...defaultMapState(), title: "字".repeat(61) };
+  const value = printDocument(state, "archive", []);
+  expect(value.title).toBe(state.title);
+  expect(PrintDocumentSchema.safeParse(value).success).toBe(false);
+});

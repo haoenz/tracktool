@@ -62,16 +62,10 @@ const preset = (id: string, content: string[] = []): MapPreset => ({
   minzoom: 0,
   crs: "wgs84",
   imagery: false,
-  has_text: true,
-  overlay_only: false,
   attribution: "",
   kind: "basemap",
   format: "raster",
   content,
-  scheme: "xyz",
-  addressing: "",
-  coverage: "",
-  content_note: "",
   available: true,
   category: "base",
 });
@@ -95,7 +89,6 @@ const config = (basemaps: MapPreset[] = []): MapConfig => ({
   ),
   attribution: "credit",
   customVectorAttribution: "",
-  cacheTime: 0,
 });
 const styleWith = (
   edit: (state: MapState) => void,
@@ -359,7 +352,7 @@ describe("map content controls", () => {
           Number((layer.paint as Record<string, unknown>)["line-width"]) * 4,
         );
       } else if (layer.id === "track-points" && scaled.type === "circle") {
-        expect(scaled.paint?.["circle-radius"]).toBe(state.style.width * 2);
+        expect(scaled.paint?.["circle-radius"]).toBe(6);
         expect(scaled.paint?.["circle-stroke-width"]).toBe(4);
       } else expect(scaled).toEqual(layer);
     }

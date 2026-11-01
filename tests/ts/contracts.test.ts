@@ -25,11 +25,10 @@ describe("shared contracts", () => {
   const document = printDocument(state, "archive.sqlite3", [
     { entry: "Train/a.kml", sha256: "a".repeat(64) },
   ]);
-  it("accepts a print document and preserves extension fields", () => {
+  it("accepts a print document and discards unsupported extension fields", () => {
     expect(
-      PrintDocumentSchema.parse({ ...document, extension: { future: true } })
-        .extension,
-    ).toEqual({ future: true });
+      PrintDocumentSchema.parse({ ...document, extension: { future: true } }),
+    ).toEqual(document);
     expect(MapStateSchema.parse(state).camera).toEqual(state.camera);
   });
   it.each([

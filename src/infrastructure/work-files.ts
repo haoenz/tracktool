@@ -18,7 +18,7 @@ import {
   exportEncoding,
   type ExportOptions,
 } from "../shared/export-format.js";
-import type { FileListing, UploadResult } from "../shared/work.js";
+import type { UploadResult } from "../shared/work.js";
 const inside = (root: string, file: string) => {
   const relative = path.relative(root, file);
   return (
@@ -112,39 +112,6 @@ export class WorkFiles {
     )
       throw new AppError("FORBIDDEN", "任务数据库不属于可操作文件");
     return canonical;
-  }
-  async list(value?: string): Promise<FileListing> {
-    const folder = await this.resolve(value || this.roots[0]!);
-    const entries = await readdir(folder, { withFileTypes: true });
-    const result: FileListing = {
-      path: folder,
-      parent: path.dirname(folder),
-      roots: this.roots,
-      entries: [],
-    };
-    for (const item of entries.slice(0, 2000)) {
-      if (
-        item.name.startsWith(".") ||
-        item.isSymbolicLink() ||
-        (!item.isFile() && !item.isDirectory())
-      )
-        continue;
-      const file = path.join(folder, item.name);
-      if (inside(this.stateDir, file) && !inside(this.uploads, file)) continue;
-      const info = await stat(file);
-      result.entries.push({
-        name: item.name,
-        path: file,
-        directory: item.isDirectory(),
-        size: info.size,
-      });
-    }
-    result.entries.sort(
-      (a, b) =>
-        Number(b.directory) - Number(a.directory) ||
-        a.name.localeCompare(b.name),
-    );
-    return result;
   }
   async upload(
     name: string,

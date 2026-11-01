@@ -84,7 +84,6 @@ test("map labels and tracks retain readable screen sizes across resizing and pri
         text,
         screenWidth: width * scale,
         screenText: text * scale,
-        savedWidth: r.state.style.width,
         countryMaxZoom,
         stateMinZoom,
         screenCountryMaxZoom: countryMaxZoom + Math.log2(scale),
@@ -113,7 +112,6 @@ test("map labels and tracks retain readable screen sizes across resizing and pri
       .poll(async () => (await sizes()).screenWidth)
       .toBeCloseTo(3 * multiplier, 1);
     expect((await sizes()).screenText).toBeCloseTo(22 * multiplier, 1);
-    expect((await sizes()).savedWidth).toBe(3);
     expect((await sizes()).screenCountryMaxZoom).toBeCloseTo(4.5, 2);
     expect((await sizes()).screenStateMinZoom).toBeCloseTo(4, 2);
   }
@@ -296,13 +294,13 @@ test("browse display style survives a reload", async ({ page }) => {
     )
     .toBe("major");
 });
-test("failed source retains the current map; a later source wins and camera/style changes avoid selection API", async ({
+test("failed source retains the current map; a later source wins and camera/style changes avoid loading detailed geometry", async ({
   page,
 }) => {
   test.setTimeout(60_000);
-  let selections = 0;
+  let geometryRequests = 0;
   page.on("request", (r) => {
-    if (r.url().endsWith("/api/selection")) selections++;
+    if (r.url().includes("/geometry")) geometryRequests++;
   });
   await page.goto("/map");
   await tool(page, "地图样式");
@@ -335,7 +333,7 @@ test("failed source retains the current map; a later source wins and camera/styl
     })
     .toBe("esri-satellite");
   await expect(page.getByLabel("标题", { exact: true })).not.toBeVisible();
-  expect(selections).toBe(0);
+  expect(geometryRequests).toBe(0);
 });
 test("map icons directly toggle panels on desktop and mobile", async ({
   page,

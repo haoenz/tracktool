@@ -1,5 +1,4 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { readdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { z } from "zod";
@@ -11,7 +10,6 @@ import { ArchiveClient } from "../infrastructure/archive/client.js";
 import { MapResources } from "../infrastructure/maps/resources.js";
 import { Exports, type VisibleTrack } from "../infrastructure/maps/export.js";
 import { DisplayStore } from "../infrastructure/display-store.js";
-import { resolvePath } from "../infrastructure/paths.js";
 import {
   defaultMapState,
   MapStyleSchema,
@@ -20,7 +18,7 @@ import {
   type MapStyle,
 } from "../shared/map-state.js";
 import { PrintDocumentSchema, resolvePrintTracks } from "../shared/print.js";
-import { SelectionRequest, type MapConfig } from "../shared/map.js";
+import type { MapConfig } from "../shared/map.js";
 import type { OverviewCrs, OverviewStatus } from "../shared/overview.js";
 import { canvasCrs, reconcileOverlays } from "../drawing/layers.js";
 export interface MapOptions {
@@ -110,7 +108,6 @@ export function mapRoutes(
       state,
       initialArchive:
         options.initialArchive ?? (await options.archiveDefault?.()) ?? "",
-      directory: process.cwd(),
     };
   });
   app.post("/api/display", async (request) => {
@@ -126,44 +123,9 @@ export function mapRoutes(
     await options.display.save(state.style);
     return { style: state.style };
   });
-  app.get("/api/browse", async (request) => {
-    const query = z
-        .object({ path: z.string().max(4096).optional() })
-        .parse(request.query),
-      folder = resolvePath(query.path ?? process.cwd());
-    let entries;
-    try {
-      entries = await readdir(folder, { withFileTypes: true });
-    } catch (cause) {
-      throw new AppError("USER_INPUT", "无法读取服务端目录", { cause });
-    }
-    const dirs = entries
-      .filter((e) => !e.name.startsWith("."))
-      .sort((a, b) =>
-        a.name.toLocaleLowerCase().localeCompare(b.name.toLocaleLowerCase()),
-      );
-    return {
-      path: folder,
-      parent: path.dirname(folder),
-      directories: dirs
-        .filter((e) => e.isDirectory())
-        .map((e) => ({ name: e.name, path: path.join(folder, e.name) })),
-      archives: dirs
-        .filter((e) => e.isFile() && e.name === "archive.sqlite3")
-        .map((e) => ({ name: e.name, path: path.join(folder, e.name) })),
-    };
-  });
   app.post("/api/archive", async (request) =>
     service.catalog(location.parse(request.body).path),
   );
-  app.post("/api/selection", async (request, reply) => {
-    const b = SelectionRequest.parse(request.body);
-    return service.selection(
-      b.archive,
-      b.entries,
-      cancellation(request, reply),
-    );
-  });
   app.post("/api/print/check-title", async (request) => {
     const { title } = z
       .object({ title: z.string().max(1000) })
