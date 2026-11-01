@@ -18,7 +18,6 @@ import type { OverviewStatus } from "../shared/overview.js";
 import type { AnalysisSample } from "../shared/track-analysis.js";
 import { MapCanvas } from "../drawing/core.js";
 import { compositionPadding } from "../drawing/viewport.js";
-import { DETAIL_TRACK_STYLE } from "../drawing/track-style.js";
 import type { MapState } from "../shared/map-state.js";
 import type { MapConfig, SelectedTrack } from "../shared/map.js";
 import { displayCoordinate } from "../shared/coordinates.js";
@@ -131,7 +130,7 @@ export const MapViewport = memo(
           color.push(
             selected !== undefined || entry !== undefined
               ? "#64748b"
-              : DETAIL_TRACK_STYLE.color,
+              : map.state.style.tracks.current.color,
           );
           map.map.setPaintProperty(layer!, property!, color);
         }
@@ -141,13 +140,7 @@ export const MapViewport = memo(
           "case",
           ["==", ["get", "segment_id"], "ux-located"],
           7 * map.displayScale,
-          (DETAIL_TRACK_STYLE.width / 2) * map.displayScale,
-        ]);
-        map.map.setPaintProperty("track-points", "circle-stroke-width", [
-          "case",
-          ["==", ["get", "segment_id"], "ux-located"],
-          2 * map.displayScale,
-          map.displayScale,
+          (map.state.style.tracks.current.width / 2) * map.displayScale,
         ]);
       }
     };
@@ -161,6 +154,7 @@ export const MapViewport = memo(
           latest.current.overviewVisibility,
           !!latest.current.analysisOverlay &&
             latest.current.analysisOverlay.metric !== "original",
+          map.state.style.tracks,
         );
     const destroy = (map?: MapCanvas) => {
       if (!map) return;
@@ -416,6 +410,7 @@ export const MapViewport = memo(
       if (current.current) updateOverview(current.current);
       if (candidate.current) updateOverview(candidate.current);
     }, [
+      props.state.style.tracks,
       props.overview,
       props.overviewSelected,
       props.hideOverview,

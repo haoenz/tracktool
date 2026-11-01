@@ -6,6 +6,295 @@ test.beforeEach(async ({ request }) => {
   await resetDisplay(request);
 });
 
+for (const width of [1280, 390]) {
+  test(`track styles preview, persist and reset independently at ${width}px`, async ({
+    page,
+    request,
+  }, info) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/map?panel=settings");
+    await pickAppearance(page, "深色");
+    await page.getByRole("button", { name: "轨迹样式", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "轨迹样式", exact: true }),
+    ).toBeFocused();
+    await expect(page.getByLabel("选中轨迹颜色", { exact: true })).toHaveValue(
+      "#ffd700",
+    );
+    await expect(page.getByLabel("未分类颜色", { exact: true })).toHaveCount(0);
+    await expect(
+      page.getByLabel("未分类不透明度", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("group", { name: "当前轨迹常用颜色" }),
+    ).toHaveCount(0);
+    const number = (name: string) =>
+      page.getByRole("spinbutton", { name, exact: true });
+    await page
+      .getByRole("slider", { name: "全部轨迹线宽滑块" })
+      .press("ArrowRight");
+    await expect(number("全部轨迹线宽")).toHaveValue("3");
+    await number("全部轨迹线宽").fill("6.5");
+    await number("全部轨迹线宽").blur();
+    await page.getByLabel("普通行程颜色", { exact: true }).fill("#9333ea");
+    await number("普通行程不透明度").fill("25");
+    await number("普通行程不透明度").blur();
+    await page.getByLabel("选中轨迹颜色", { exact: true }).fill("#1677ff");
+    await number("选中轨迹线宽").fill("7");
+    await number("选中轨迹线宽").blur();
+    await expect(
+      page.getByRole("switch", { name: "描边", exact: true }),
+    ).toHaveCount(0);
+    const saved = async () => {
+      const response = await request.get("/api/bootstrap", {
+        headers: { "X-Tracktool-Token": "e2e" },
+      });
+      return (await response.json()).state.style;
+    };
+    await expect.poll(saved).toMatchObject({
+      appearance: "dark",
+      tracks: {
+        width: 6.5,
+        categories: { Default: { color: "#9333ea", opacity: 0.25 } },
+        current: { color: "#1677ff", width: 7 },
+      },
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const renderer = window.renderer!;
+          const map = renderer.map;
+          const overview = map
+            .getStyle()
+            .layers.find(
+              (layer) =>
+                layer.id.startsWith("overview-") && layer.id.endsWith("-line"),
+            );
+          return {
+            detailWidth:
+              Number(map.getPaintProperty("track-lines", "line-width")) /
+              renderer.displayScale,
+            haloLayers: map
+              .getStyle()
+              .layers.filter(
+                (item) =>
+                  item.id === "track-halo" ||
+                  (item.id.startsWith("overview-") &&
+                    item.id.endsWith("-halo")),
+              ).length,
+            overviewWidth: overview
+              ? Number(
+                  (
+                    map.getPaintProperty(overview.id, "line-width") as unknown[]
+                  ).at(-1),
+                ) / renderer.displayScale
+              : undefined,
+            overviewColor: overview
+              ? map.getPaintProperty(overview.id, "line-color")
+              : undefined,
+          };
+        }),
+      )
+      .toMatchObject({
+        detailWidth: 7,
+        overviewWidth: 6.5,
+        haloLayers: 0,
+        overviewColor: [
+          "case",
+          expect.any(Array),
+          "#1677ff",
+          [
+            "match",
+            ["get", "kind"],
+            "Default",
+            "#9333ea",
+            "Train",
+            expect.any(String),
+            "Flight",
+            expect.any(String),
+            expect.any(String),
+          ],
+        ],
+      });
+    await page.reload();
+    await page.getByRole("button", { name: "轨迹样式", exact: true }).click();
+    await expect(number("全部轨迹线宽")).toHaveValue("6.5");
+    await expect(page.getByLabel("选中轨迹颜色", { exact: true })).toHaveValue(
+      "#1677ff",
+    );
+    await expect(
+      page.getByRole("switch", { name: "描边", exact: true }),
+    ).toHaveCount(0);
+    await page.locator(".settings-panel").evaluate((panel) => {
+      const controls = panel.closest(".map-controls");
+      if (controls) controls.scrollTop = 0;
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    const panel = page.locator(".settings-panel");
+    expect(
+      await panel.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({ path: info.outputPath("track-styles.png") });
+    await page
+      .getByRole("button", { name: "恢复默认样式", exact: true })
+      .click();
+    await expect.poll(saved).toMatchObject({
+      appearance: "dark",
+      tracks: {
+        width: 2.5,
+        current: { width: 3, color: "#ffd700" },
+      },
+    });
+    await page.getByRole("button", { name: "返回设置", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "轨迹样式", exact: true }),
+    ).toBeFocused();
+    expect(errors).toEqual([]);
+  });
+}
+
+test("track style save failures can be retried from the style panel", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=settings");
+  await page.route("**/api/display", (route) =>
+    route.fulfill({
+      status: 500,
+      json: { error: { message: "测试保存失败" } },
+    }),
+  );
+  await page.getByRole("button", { name: "轨迹样式", exact: true }).click();
+  await page.getByLabel("选中轨迹颜色", { exact: true }).fill("#1677ff");
+  await expect(page.getByRole("alert")).toContainText("显示样式保存失败");
+  await page.unroute("**/api/display");
+  const saved = page.waitForResponse(
+    (response) => response.url().endsWith("/api/display") && response.ok(),
+  );
+  await page.getByRole("button", { name: "重试保存", exact: true }).click();
+  await saved;
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("selected track stays highlighted while previewing its color in settings", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=library");
+  await page
+    .getByRole("button", {
+      name: "查看 Default/2026-10-01 中文.kml",
+      exact: true,
+    })
+    .click();
+  const paint = () =>
+    page.evaluate(() => {
+      const renderer = window.renderer!;
+      const map = renderer.map;
+      const layer = map
+        .getStyle()
+        .layers.find(
+          (item) =>
+            item.id.startsWith("overview-") && item.id.endsWith("-line"),
+        );
+      if (!layer) return;
+      return {
+        color: map.getPaintProperty(layer.id, "line-color"),
+      };
+    });
+  await expect.poll(paint).toMatchObject({
+    color: [
+      "case",
+      ["==", ["get", "trackId"], expect.stringMatching(/.+/)],
+      "#ffd700",
+      expect.any(Array),
+    ],
+  });
+  const before = await paint();
+  await tool(page, "设置");
+  await page.getByRole("button", { name: "轨迹样式", exact: true }).click();
+  await expect.poll(paint).toEqual(before);
+  await page.getByLabel("选中轨迹颜色", { exact: true }).fill("#9333ea");
+  const previousColor = before!.color as unknown[];
+  await expect.poll(paint).toEqual({
+    color: ["case", previousColor[1], "#9333ea", previousColor[3]],
+  });
+});
+
+test("editing keeps operation colors without track outlines", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=settings");
+  await page.getByRole("button", { name: "轨迹样式", exact: true }).click();
+  await page.getByLabel("选中轨迹颜色", { exact: true }).fill("#9333ea");
+  const width = page.getByRole("spinbutton", {
+    name: "选中轨迹线宽",
+    exact: true,
+  });
+  await width.fill("7");
+  await width.blur();
+  await tool(page, "轨迹库");
+  await page
+    .getByRole("button", {
+      name: "查看 Default/2026-10-01 中文.kml",
+      exact: true,
+    })
+    .click();
+  await page.getByRole("button", { name: "编辑轨迹", exact: true }).click();
+  await page.getByRole("button", { name: "断开轨迹", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "段编辑地图" }),
+  ).toHaveAttribute("data-status", "ready");
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("heading", { name: "断开轨迹", exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const renderer = window.renderer!;
+        const map = renderer.map;
+        const layer = map
+          .getStyle()
+          .layers.find(
+            (item) =>
+              item.id.startsWith("overview-") && item.id.endsWith("-line"),
+          );
+        if (!layer) return;
+        const source = layer.id.slice(0, -5);
+        return {
+          line: map.getPaintProperty(layer.id, "line-opacity"),
+          haloLayers: map
+            .getStyle()
+            .layers.filter((item) => item.id.endsWith("-halo")).length,
+          point: map.getPaintProperty(`${source}-point`, "circle-opacity"),
+          stroke: map.getPaintProperty(
+            `${source}-point`,
+            "circle-stroke-width",
+          ),
+          detailWidth:
+            Number(map.getPaintProperty("track-lines", "line-width")) /
+            renderer.displayScale,
+          detailColor: map.getPaintProperty("track-lines", "line-color"),
+        };
+      }),
+    )
+    .toMatchObject({
+      line: 0,
+      haloLayers: 0,
+      point: 0,
+      stroke: 0,
+      detailWidth: 7,
+      detailColor: expect.arrayContaining(["#dc2626", "#16a34a", "#ea580c"]),
+    });
+});
+
 async function expectAppearance(page: Page, appearance: "light" | "dark") {
   await expect(page.locator("html")).toHaveClass(
     appearance === "dark" ? "dark" : "",
@@ -108,6 +397,10 @@ test("entry visibility preference applies on refresh and to new tabs", async ({
       .getByRole("complementary", { name: "地图控制面板" })
       .getByRole("button", { name: "切换当前列表可见性", exact: true });
   await page.goto("/map?panel=settings");
+  await expect(
+    page.getByRole("combobox", { name: "进入时轨迹", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "轨迹样式", exact: true }).click();
   const choice = page.getByRole("combobox", {
     name: "进入时轨迹",
     exact: true,
@@ -116,6 +409,7 @@ test("entry visibility preference applies on refresh and to new tabs", async ({
   await choice.click();
   await page.getByRole("option", { name: "全部隐藏", exact: true }).click();
   await page.reload();
+  await page.getByRole("button", { name: "轨迹样式", exact: true }).click();
   await expect(
     page.getByRole("combobox", { name: "进入时轨迹", exact: true }),
   ).toHaveText("全部隐藏");
@@ -150,7 +444,7 @@ test("settings group map controls and server configuration writes require CLI", 
   });
   await expect(mapSettings).toBeFocused();
   await expect(page.locator(".settings-panel").getByRole("button")).toHaveCount(
-    1,
+    2,
   );
   await expect(page.getByLabel("图源", { exact: true })).toHaveCount(0);
   await mapSettings.press("Enter");

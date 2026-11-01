@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { MAP_CATALOG as catalog } from "./map-catalog.js";
+import {
+  defaultTrackAppearance,
+  TrackAppearanceSchema,
+} from "./track-style.js";
 
 const number = (min: number, max: number) =>
   z.number().finite().min(min).max(max);
@@ -29,6 +33,7 @@ export const MapTitleSchema = z
 
 export const MapStyleSchema = z
   .object({
+    tracks: TrackAppearanceSchema.default(defaultTrackAppearance),
     basemap: z
       .string()
       .refine((id) => id === "vector" || presets[id]?.kind === "basemap"),
@@ -128,6 +133,7 @@ export type MapState = z.infer<typeof MapStateSchema>;
 export function defaultMapState(): MapState {
   return {
     style: {
+      tracks: defaultTrackAppearance(),
       basemap: "vector",
       appearance: "light",
       features: { ...catalog.defaults },

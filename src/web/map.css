@@ -250,6 +250,19 @@
 .settings-subgroup .settings-feature {
   padding-left: 6px;
 }
+.settings-track-fields {
+  display: grid;
+  gap: 12px;
+  margin-left: 10px;
+}
+.settings-track-fields label {
+  margin: 0;
+}
+.settings-track-column-label {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 400;
+}
 .settings-content-row {
   min-width: 0;
   margin-top: 12px;

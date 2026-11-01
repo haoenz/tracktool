@@ -5,17 +5,24 @@ import type {
 } from "maplibre-gl";
 import type { OverviewStatus, OverviewVisibility } from "../shared/overview.js";
 
-import { TRACK_STYLES } from "../shared/track-style.js";
+import {
+  defaultTrackAppearance,
+  TRACK_STYLES,
+  type TrackAppearance,
+} from "../shared/track-style.js";
 
-const categoryPaint = (key: "color" | "opacity"): ExpressionSpecification => [
+const categoryPaint = (
+  style: TrackAppearance,
+  key: "color" | "opacity",
+): ExpressionSpecification => [
   "match",
   ["get", "kind"],
   "Default",
-  TRACK_STYLES.Default[key],
+  style.categories.Default[key],
   "Train",
-  TRACK_STYLES.Train[key],
+  style.categories.Train[key],
   "Flight",
-  TRACK_STYLES.Flight[key],
+  style.categories.Flight[key],
   TRACK_STYLES.Unknown[key],
 ];
 
@@ -27,6 +34,7 @@ export class OverviewLayer {
   private current?: string;
   private pending?: string;
   private selected = "";
+  private style = defaultTrackAppearance();
   private analysisSelected = false;
   private hidden = false;
   private visibility?: OverviewVisibility;
@@ -76,7 +84,9 @@ export class OverviewLayer {
     hidden: boolean,
     visibility?: OverviewVisibility,
     analysisSelected = false,
+    style = this.style,
   ) {
+    this.style = style;
     this.selected = selected;
     this.analysisSelected = analysisSelected;
     this.hidden = hidden;
@@ -161,7 +171,7 @@ export class OverviewLayer {
           "line-opacity": 0.9,
         },
       },
-      this.map.getLayer("track-halo") ? "track-halo" : undefined,
+      this.map.getLayer("track-lines") ? "track-lines" : undefined,
     );
     this.map.addLayer(
       {
@@ -181,7 +191,7 @@ export class OverviewLayer {
           "circle-stroke-width": 0,
         },
       },
-      this.map.getLayer("track-halo") ? "track-halo" : undefined,
+      this.map.getLayer("track-lines") ? "track-lines" : undefined,
     );
     this.onLoading(true);
   }
@@ -205,6 +215,11 @@ export class OverviewLayer {
   private paint() {
     const id = this.current;
     if (!id || !this.map.getLayer(`${id}-line`)) return;
+    const selected: ExpressionSpecification = [
+      "==",
+      ["get", "trackId"],
+      this.selected,
+    ];
     for (const role of ["line", "point"]) {
       const filter: ExpressionSpecification = ["==", ["get", "role"], role];
       const visibility = this.visibility;
@@ -221,46 +236,43 @@ export class OverviewLayer {
           : ["all", filter, visibility.all ? ["!", member] : member],
       );
     }
-    const selected: ExpressionSpecification = [
-      "==",
-      ["get", "trackId"],
-      this.selected,
-    ];
-    this.map.setPaintProperty(
-      `${id}-line`,
-      "line-color",
-      this.analysisSelected
-        ? ["case", selected, "#94a3b8", categoryPaint("color")]
-        : categoryPaint("color"),
-    );
+    this.map.setPaintProperty(`${id}-line`, "line-color", [
+      "case",
+      selected,
+      this.analysisSelected ? "#94a3b8" : this.style.current.color,
+      categoryPaint(this.style, "color"),
+    ]);
     this.map.setPaintProperty(`${id}-line`, "line-width", [
       "case",
       selected,
-      5 * this.displayScale,
-      2.5 * this.displayScale,
+      this.style.current.width * this.displayScale,
+      this.style.width * this.displayScale,
     ]);
     this.map.setPaintProperty(
       `${id}-line`,
       "line-opacity",
-      this.hidden ? 0 : ["case", selected, 1, categoryPaint("opacity")],
+      this.hidden
+        ? 0
+        : ["case", selected, 1, categoryPaint(this.style, "opacity")],
     );
-    this.map.setPaintProperty(
-      `${id}-point`,
-      "circle-color",
-      this.analysisSelected
-        ? ["case", selected, "#94a3b8", categoryPaint("color")]
-        : categoryPaint("color"),
-    );
+    this.map.setPaintProperty(`${id}-point`, "circle-color", [
+      "case",
+      selected,
+      this.analysisSelected ? "#94a3b8" : this.style.current.color,
+      categoryPaint(this.style, "color"),
+    ]);
     this.map.setPaintProperty(`${id}-point`, "circle-radius", [
       "case",
       selected,
-      6 * this.displayScale,
-      3 * this.displayScale,
+      Math.max(3, this.style.current.width) * this.displayScale,
+      Math.max(3, this.style.width) * this.displayScale,
     ]);
     this.map.setPaintProperty(
       `${id}-point`,
       "circle-opacity",
-      this.hidden ? 0 : ["case", selected, 1, categoryPaint("opacity")],
+      this.hidden
+        ? 0
+        : ["case", selected, 1, categoryPaint(this.style, "opacity")],
     );
   }
   private hits(event: MapMouseEvent) {

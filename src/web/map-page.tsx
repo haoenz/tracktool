@@ -1,3 +1,4 @@
+import { TrackStyleSettings } from "./track-style-settings.js";
 import type { ArchiveAction as ArchiveActionKind } from "./work-page.js";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -57,7 +58,12 @@ import { MapContentSettings } from "./map-content-settings.js";
 import { MapViewport, type Viewport } from "./map-viewport.js";
 import "./map.css";
 import type { OverviewHit, OverviewVisibility } from "./overview-layer.js";
-import { rememberCamera, rememberedCamera, useOverview } from "./overview.js";
+import {
+  rememberCamera,
+  rememberedCamera,
+  useOverview,
+  type OverviewListScope,
+} from "./overview.js";
 import { PrintPanel } from "./print-panel.js";
 import {
   rememberedPrintDraft,
@@ -237,8 +243,12 @@ function Editor({ initial }: { initial: Bootstrap }) {
   }, [appearance]);
   const browseVisibility = libraryVisibility;
   const setBrowseVisibility = setLibraryVisibility;
-  const filter = browseFilter;
-  const setFilter = setBrowseFilter;
+  const [mapScope, setMapScope] = useState<OverviewListScope>();
+  const filter = mapScope?.search ?? browseFilter;
+  const setFilter = (search: string) => {
+    if (mapScope) setMapScope({ ...mapScope, search, offset: 0 });
+    else setBrowseFilter(search);
+  };
   const browseKind = useMemo(
     () =>
       Array.isArray(savedBrowseKind)
@@ -248,13 +258,16 @@ function Editor({ initial }: { initial: Bootstrap }) {
           : [savedBrowseKind],
     [savedBrowseKind],
   );
-  const kind = browseKind;
-  const setKind = setBrowseKind;
+  const kind = mapScope?.kind ?? browseKind;
   const dates =
-    browseDates.sort === "name"
+    mapScope?.dates ??
+    (browseDates.sort === "name"
       ? { ...browseDates, sort: "date-desc" as const }
-      : browseDates;
-  const setDates = setBrowseDates;
+      : browseDates);
+  const setDates = (dates: OverviewListScope["dates"]) => {
+    if (mapScope) setMapScope({ ...mapScope, dates, offset: 0 });
+    else setBrowseDates(dates);
+  };
   const [importedScope, setImportedScope] = useState<string[]>();
   const [filterDraft, setFilterDraft] = useState<{
     kind: string[];
@@ -269,10 +282,22 @@ function Editor({ initial }: { initial: Bootstrap }) {
   );
   function applyListFilters() {
     if (!filterDraft || invalidDateRange) return;
-    setKind(filterDraft.kind);
-    overview.setCandidates(filterDraft.candidates);
-    setDates({ ...dates, from: filterDraft.from, to: filterDraft.to });
-    overview.setOffset(0);
+    if (mapScope) {
+      if (!filterDraft.candidates.length) setMapScope(undefined);
+      else
+        setMapScope({
+          ...mapScope,
+          kind: filterDraft.kind,
+          candidates: filterDraft.candidates,
+          dates: { ...dates, from: filterDraft.from, to: filterDraft.to },
+          offset: 0,
+        });
+    } else {
+      setBrowseKind(filterDraft.kind);
+      overview.setCandidates(filterDraft.candidates);
+      setDates({ ...dates, from: filterDraft.from, to: filterDraft.to });
+      overview.setOffset(0);
+    }
     setFilterDraft(undefined);
   }
   const setState = (update: MapState | ((prev: MapState) => MapState)) => {
@@ -323,10 +348,11 @@ function Editor({ initial }: { initial: Bootstrap }) {
   const openPanel = (next: Panel, task?: string) => {
     if (next === "library" && task === "imported") setLibraryList(true);
     if (task === "imported") {
+      setMapScope(undefined);
       setArchiveAction(undefined);
-      setFilter("");
-      setKind([]);
-      setDates({ from: "", to: "", sort: "date-desc" });
+      setBrowseFilter("");
+      setBrowseKind([]);
+      setBrowseDates({ from: "", to: "", sort: "date-desc" });
       setDetailOpen(false);
     }
     setDetailAction(undefined);
@@ -402,6 +428,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
     browseKind,
     true,
     browseDates,
+    mapScope,
   );
   const overview = browseOverview;
   const retryOverview = async () => {
@@ -447,11 +474,20 @@ function Editor({ initial }: { initial: Bootstrap }) {
   );
   const listVisible =
     panel === "library" && !(overview.id && detailOpen) && !archiveAction;
-  const scrollKey = `${panel}:${panel === "library" && detailOpen && overview.id ? overview.id : "list"}:${panel === "library" ? (archiveAction ?? (libraryList ? "list" : "home")) : ""}:${panel === "library" && editing}`;
+  const listScrollKey = JSON.stringify([
+    mapScope ? "map" : "browse",
+    filter,
+    kind,
+    dates,
+    overview.candidates,
+    overview.offset,
+  ]);
+  const scrollKey = `${panel}:${panel === "library" && detailOpen && overview.id ? overview.id : listScrollKey}:${panel === "library" ? (archiveAction ?? "list") : ""}:${panel === "library" && editing}`;
   useLayoutEffect(() => {
     const el = controls.current;
-    if (el) el.scrollTop = scrollPositions.current.get(scrollKey) ?? 0;
-  }, [scrollKey]);
+    if (el && (!listVisible || !overview.list.isFetching))
+      el.scrollTop = scrollPositions.current.get(scrollKey) ?? 0;
+  }, [scrollKey, listVisible, overview.list.isFetching]);
   const previousDetail = useRef(false);
   useLayoutEffect(() => {
     if (panel !== "library") return;
@@ -802,6 +838,13 @@ function Editor({ initial }: { initial: Bootstrap }) {
     overview.list.isFetching ||
     ((overview.list.data?.total ?? 0) > visible.length &&
       visibilityRows.isPending);
+  function clearSelection() {
+    // Editing owns map clicks and Escape; never discard its draft implicitly.
+    if (editing || editMap || hasDraft || busy) return;
+    overview.setId("");
+    setDetailOpen(false);
+    setDetailAction(undefined);
+  }
   // Map events fire after this render. Keep stable wrappers so MapViewport can
   // bail out of panel-driven re-renders while still seeing the latest state.
   const viewportHandlers = useRef<{
@@ -814,18 +857,27 @@ function Editor({ initial }: { initial: Bootstrap }) {
     error: () => {},
   });
   viewportHandlers.current.pick = (hits) => {
-    if (!hits.length || editMap) return;
+    if (editMap || editing || busy) return;
+    if (!hits.length) {
+      clearSelection();
+      return;
+    }
     if (
       hasDraft &&
       (hits.length !== 1 || hits[0]?.id !== overview.id) &&
       !window.confirm("当前轨迹有编辑草稿，切换轨迹将放弃草稿。是否继续？")
     )
       return;
-    setFilter("");
-    setKind([]);
-    setDates({ ...dates, from: "", to: "" });
     setFilterDraft(undefined);
-    overview.pick(hits.map((h) => h.id));
+    if (hits.length > 1)
+      setMapScope({
+        search: "",
+        kind: [],
+        dates: { from: "", to: "", sort: dates.sort },
+        candidates: hits.map((hit) => hit.id),
+        offset: 0,
+      });
+    overview.setId(hits.length === 1 ? hits[0]!.id : "");
     setDetailOpen(hits.length === 1);
     setMenuExpanded(true);
     setLibraryList(true);
@@ -1030,19 +1082,21 @@ function Editor({ initial }: { initial: Bootstrap }) {
     return () => clearTimeout(timer);
   }, [printValue, draftsLoaded]);
   useEffect(() => {
-    if (!printMode) return;
     const keydown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (
         event.defaultPrevented ||
-        document.querySelector('[role="dialog"], [role="listbox"]')
+        document.querySelector(
+          '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]',
+        )
       )
         return;
       if (panel === "print") setParams({ panel: "none" });
+      else clearSelection();
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [printMode, panel]);
+  });
   const refreshPrintDrafts = useCallback(async () => {
     if (!catalog) return;
     try {
@@ -1250,6 +1304,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                 }
                 openPanel("library");
                 setDetailOpen(false);
+                setMapScope(undefined);
                 overview.setCandidates([]);
                 setArchiveAction("archive:push");
               }}
@@ -1308,9 +1363,16 @@ function Editor({ initial }: { initial: Bootstrap }) {
           <aside
             id="map-panel"
             ref={controls}
-            onScroll={(e) =>
-              scrollPositions.current.set(scrollKey, e.currentTarget.scrollTop)
-            }
+            onScroll={(e) => {
+              if (
+                e.currentTarget.offsetParent &&
+                (!listVisible || !listLoading)
+              )
+                scrollPositions.current.set(
+                  scrollKey,
+                  e.currentTarget.scrollTop,
+                );
+            }}
             className={`map-controls${panel === "library" && overview.id && detailOpen && !editing && !archiveAction ? " track-detail-panel" : ""}${listVisible ? " track-list-panel" : ""}${panel && panel === "settings" ? " wide" : ""}`}
             hidden={!panel}
             aria-label="地图控制面板"
@@ -1461,6 +1523,13 @@ function Editor({ initial }: { initial: Bootstrap }) {
               }
             >
               <div className="track-list-content">
+                {mapScope && (
+                  <PanelHeader
+                    title="此处的轨迹"
+                    backLabel="返回筛选结果"
+                    onBack={() => setMapScope(undefined)}
+                  />
+                )}
                 {overview.query.data?.summary?.entries === 0 && (
                   <p>
                     轨迹库为空，可以导入 KML 开始浏览。
@@ -1492,6 +1561,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                   ))}
                 {catalog && (
                   <LibraryList
+                    scrollKey={listScrollKey}
                     toolbar={{
                       batchMode,
                       batchBusy: batchSelecting || batchPending,
@@ -1542,7 +1612,10 @@ function Editor({ initial }: { initial: Bootstrap }) {
                     onRetry={() => void overview.list.refetch()}
                     total={overview.list.data?.total}
                     offset={overview.offset}
-                    onOffset={overview.setOffset}
+                    onOffset={(offset) => {
+                      if (mapScope) setMapScope({ ...mapScope, offset });
+                      else overview.setOffset(offset);
+                    }}
                     onOpen={(entry) => {
                       if (
                         entry.id !== overview.id &&
@@ -1582,19 +1655,23 @@ function Editor({ initial }: { initial: Bootstrap }) {
             </section>
             {panel === "settings" && (
               <section>
-                <Settings>
-                  {displaySaveState === "error" && (
-                    <p className="settings-error" role="alert">
-                      地图样式保存失败
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setDisplayRetry((n) => n + 1)}
-                      >
-                        重试保存
-                      </Button>
-                    </p>
-                  )}
+                <Settings
+                  tracks={<TrackStyleSettings state={state} change={change} />}
+                  status={
+                    displaySaveState === "error" && (
+                      <p className="settings-error" role="alert">
+                        显示样式保存失败
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setDisplayRetry((n) => n + 1)}
+                        >
+                          重试保存
+                        </Button>
+                      </p>
+                    )
+                  }
+                >
                   <BasemapPicker
                     config={config}
                     crs={crs}
@@ -1830,7 +1907,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
             config={config}
             tracks={editMap?.tracks ?? emptyTracks}
             overview={overview.query.data}
-            overviewSelected={panel === "library" ? overview.id : ""}
+            overviewSelected={printMode ? "" : overview.id}
             overviewVisibility={browseVisibility}
             hideOverview={!!editMap}
             analysisOverlay={

@@ -35,7 +35,14 @@ try {
     () => {},
     (id) => renderer.resources.errors(id).length > 0,
   );
-  layer.update(payload.overview, "", false, visibility, false);
+  layer.update(
+    payload.overview,
+    "",
+    false,
+    visibility,
+    false,
+    payload.document.style.tracks,
+  );
   window.renderer = renderer;
   const report = await renderer.ready();
   if (layer.hasErrors) throw new Error("轨迹概览加载失败，请重试");

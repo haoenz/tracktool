@@ -20,6 +20,8 @@ async function store() {
 test("display style round-trips and serializes queued writes", async () => {
   const display = await store();
   const first = defaultMapState().style;
+  first.tracks.width = 7;
+  first.tracks.categories.Train = { color: "#123456", opacity: 0.65 };
   const second = {
     ...first,
     features: { ...first.features, places: "all" },
@@ -61,6 +63,10 @@ test("unsupported track settings disappear on both load and save", async () => {
     color: "#ffffff",
     width: 12,
     outline: false,
+    tracks: {
+      ...style.tracks,
+      current: { ...style.tracks.current, outline: true },
+    },
     endpoints: true,
   };
   await writeFile(

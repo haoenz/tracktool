@@ -21,6 +21,13 @@ export interface OverviewDetail {
   entry: OverviewEntry;
   geometry: TrackGeoJSON;
 }
+export interface OverviewListScope {
+  search: string;
+  kind: string[];
+  dates: { from: string; to: string; sort: string };
+  candidates: string[];
+  offset: number;
+}
 export function rememberedCamera(
   archive: string,
 ): MapState["camera"] | undefined {
@@ -63,11 +70,14 @@ export function useOverview(
     to: "",
     sort: "date-desc",
   },
+  mapScope?: OverviewListScope,
 ) {
   const [version, setVersion] = useState<string>();
   const [id, setId] = useState("");
-  const [candidates, setCandidates] = useState<string[]>([]);
-  const [offset, setOffset] = useState(0);
+  const [browseCandidates, setCandidates] = useState<string[]>([]);
+  const [browseOffset, setOffset] = useState(0);
+  const candidates = mapScope?.candidates ?? browseCandidates;
+  const offset = mapScope?.offset ?? browseOffset;
   const [queryText, setQueryText] = useState(search);
   const [tileError, setTileError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -96,8 +106,12 @@ export function useOverview(
   }, [search]);
   useEffect(
     () => setOffset(0),
-    [kind, version, dates.from, dates.to, dates.sort, candidates],
+    [kind, version, dates.from, dates.to, dates.sort, browseCandidates],
   );
+  // A temporary map scope must not reset the original list's filters or page.
+  const listSearch = mapScope?.search ?? queryText;
+  const listKind = mapScope?.kind ?? kind;
+  const listDates = mapScope?.dates ?? dates;
   const listVersion = version ?? query.data?.version;
   // Candidate selections are paged and "select all" walks every page; fetch
   // the whole candidate set once and slice locally instead of per page.
@@ -159,10 +173,10 @@ export function useOverview(
     queryKey: [
       "overview-entries",
       listVersion,
-      queryText,
-      kind,
+      listSearch,
+      listKind,
       offset,
-      dates,
+      listDates,
       candidates,
     ],
     enabled: active && !!listVersion,
@@ -170,9 +184,9 @@ export function useOverview(
       fetchEntries(
         {
           version: listVersion!,
-          q: queryText,
-          kinds: JSON.stringify(kind),
-          ...dates,
+          q: listSearch,
+          kinds: JSON.stringify(listKind),
+          ...listDates,
           offset: String(offset),
           limit: "50",
         },
@@ -268,11 +282,6 @@ export function useOverview(
     published: useCallback((next: string) => {
       setVersion(next);
       setTileError("");
-    }, []),
-    pick: useCallback((ids: string[]) => {
-      setOffset(0);
-      setCandidates(ids.length > 1 ? ids : []);
-      setId(ids.length === 1 ? ids[0]! : "");
     }, []),
     retry: async () => {
       setTileError("");

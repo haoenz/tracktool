@@ -5,7 +5,6 @@ import {
   MAP_LABEL_PROPERTY,
   MAP_LABEL_ORDER_PROPERTY,
 } from "../shared/map-label.js";
-import { DETAIL_TRACK_STYLE } from "./track-style.js";
 import { labelZoom } from "./label-zoom.js";
 import type {
   StyleSpecification,
@@ -594,28 +593,14 @@ export function mapStyle(
       ...annotations,
       ...themes,
       {
-        id: "track-halo",
-        type: "line",
-        source: "tracks",
-        filter: ["==", ["geometry-type"], "LineString"],
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": p.halo,
-          "line-opacity": DETAIL_TRACK_STYLE.haloOpacity,
-          "line-width":
-            (DETAIL_TRACK_STYLE.width + DETAIL_TRACK_STYLE.haloWidth) *
-            displayScale,
-        },
-      },
-      {
         id: "track-lines",
         type: "line",
         source: "tracks",
         filter: ["==", ["geometry-type"], "LineString"],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": DETAIL_TRACK_STYLE.color,
-          "line-width": DETAIL_TRACK_STYLE.width * displayScale,
+          "line-color": state.style.tracks.current.color,
+          "line-width": state.style.tracks.current.width * displayScale,
         },
       },
       {
@@ -624,10 +609,10 @@ export function mapStyle(
         source: "tracks",
         filter: ["==", ["geometry-type"], "Point"],
         paint: {
-          "circle-color": DETAIL_TRACK_STYLE.color,
-          "circle-radius": (DETAIL_TRACK_STYLE.width / 2) * displayScale,
-          "circle-stroke-color": p.halo,
-          "circle-stroke-width": displayScale,
+          "circle-color": state.style.tracks.current.color,
+          "circle-radius":
+            (state.style.tracks.current.width / 2) * displayScale,
+          "circle-stroke-width": 0,
         },
       },
     ],

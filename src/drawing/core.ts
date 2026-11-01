@@ -281,7 +281,7 @@ export class MapCanvas {
           "text-opacity",
           layer.paint?.["text-opacity"],
         );
-      } else if (layer.id === "track-lines" || layer.id === "track-halo") {
+      } else if (layer.id === "track-lines") {
         if (layer.type === "line")
           this.map.setPaintProperty(
             layer.id,
@@ -467,6 +467,22 @@ export class MapCanvas {
         });
       } finally {
         this.resizing = false;
+      }
+    }
+    // Appearance edits only change paint; keep overview tiles and sources live.
+    if (
+      JSON.stringify(old.style.tracks) !== JSON.stringify(state.style.tracks)
+    ) {
+      for (const layer of mapStyle(
+        state,
+        this.config,
+        undefined,
+        this.visualScale,
+      ).layers) {
+        if (!layer.id.startsWith("track-") || !this.map.getLayer(layer.id))
+          continue;
+        for (const [key, value] of Object.entries(layer.paint ?? {}))
+          this.map.setPaintProperty(layer.id, key, value);
       }
     }
     if (

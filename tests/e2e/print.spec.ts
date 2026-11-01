@@ -410,6 +410,9 @@ for (const basemap of ["vector", "amap-satellite"]) {
     value.title = "取景一致性";
     value.camera = { center: [103, 29], zoom: 6 };
     value.style = { ...value.style, basemap, appearance: "dark" };
+    value.style.tracks.width = 7;
+    value.style.tracks.categories.Default = { color: "#9333ea", opacity: 0.85 };
+    value.style.tracks.categories.Train = { color: "#1677ff", opacity: 0.75 };
     value.output = { width: 1000, height: 750 };
     await importJson(page, value);
     await expect

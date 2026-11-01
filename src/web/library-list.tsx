@@ -1,4 +1,10 @@
-import { Fragment, useMemo, type ComponentProps } from "react";
+import {
+  Fragment,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type ComponentProps,
+} from "react";
 import type { OverviewEntry } from "../shared/overview.js";
 import type { OverviewVisibility } from "./overview-layer.js";
 import { Button, Checkbox, Pagination } from "./components/controls.js";
@@ -7,6 +13,7 @@ import { LibraryToolbar, type ListVisibility } from "./library-toolbar.js";
 import { TrackListRow } from "./track-list-row.js";
 
 export function LibraryList({
+  scrollKey,
   toolbar,
   entries,
   matchingEntries,
@@ -30,6 +37,7 @@ export function LibraryList({
   exportDisabled,
   onExport,
 }: {
+  scrollKey: string;
   toolbar: Omit<
     ComponentProps<typeof LibraryToolbar>,
     | "batchAllSelected"
@@ -62,6 +70,13 @@ export function LibraryList({
   exportDisabled: boolean;
   onExport: () => void;
 }) {
+  const listElement = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    if (!loading && listElement.current)
+      listElement.current.scrollTop =
+        scrollPositions.current.get(scrollKey) ?? 0;
+  }, [scrollKey, loading]);
   const {
     rows,
     selectedOnPage,
@@ -148,7 +163,18 @@ export function LibraryList({
         visibilityLabel={visibilityLabel}
         onSelectAll={() => toolbar.onSelectAll(!batchAllSelected)}
       />
-      <div className="map-track-list" aria-busy={loading}>
+      <div
+        ref={listElement}
+        className="map-track-list"
+        aria-busy={loading}
+        onScroll={(event) => {
+          if (!loading && event.currentTarget.offsetParent)
+            scrollPositions.current.set(
+              scrollKey,
+              event.currentTarget.scrollTop,
+            );
+        }}
+      >
         {loading ? (
           <PanelLoading>正在读取轨迹列表…</PanelLoading>
         ) : total === 0 ? (

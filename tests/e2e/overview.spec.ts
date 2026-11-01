@@ -25,7 +25,7 @@ async function loaded(page: Page) {
         ?.layers.some(
           (l) =>
             l.id.startsWith("overview-") &&
-            l.type === "line" &&
+            l.id.endsWith("-line") &&
             m.getPaintProperty(l.id, "line-opacity") !== 0 &&
             JSON.stringify(m.getFilter(l.id)).startsWith('["=="'),
         )
@@ -41,7 +41,7 @@ async function overviewSource(page: Page) {
           ?.layers.find(
             (l) =>
               l.id.startsWith("overview-") &&
-              l.type === "line" &&
+              l.id.endsWith("-line") &&
               window.renderer!.map.getPaintProperty(l.id, "line-opacity") !==
                 0 &&
               JSON.stringify(window.renderer!.map.getFilter(l.id)).startsWith(
@@ -50,6 +50,203 @@ async function overviewSource(page: Page) {
           ) as { source: string } | undefined
       )?.source,
   );
+}
+
+async function selectedTrackId(page: Page) {
+  return page.evaluate(() => {
+    const map = window.renderer!.map;
+    const layer = map
+      .getStyle()
+      .layers.find(
+        (layer) =>
+          layer.id.startsWith("overview-") && layer.id.endsWith("-line"),
+      );
+    if (!layer) return undefined;
+    const color = map.getPaintProperty(layer.id, "line-color") as unknown[];
+    return (color[1] as unknown[])[2];
+  });
+}
+
+async function clickMapAt(page: Page, coordinate: [number, number]) {
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const menu = page.locator(".app-icon");
+  if ((await menu.getAttribute("aria-expanded")) === "true") await menu.click();
+  await expect(page.locator("#map-panel")).toBeHidden();
+  await page.evaluate((center) => {
+    window.renderer!.map.jumpTo({ center, zoom: 8 });
+  }, coordinate);
+  await page.waitForFunction(() => window.renderer!.map.areTilesLoaded());
+  const point = await page.evaluate((coordinate) => {
+    const renderer = window.renderer!;
+    const p = renderer.map.project(coordinate);
+    const rect = renderer.mapElement.getBoundingClientRect();
+    return {
+      x: rect.left + (p.x * rect.width) / renderer.mapElement.clientWidth,
+      y: rect.top + (p.y * rect.height) / renderer.mapElement.clientHeight,
+    };
+  }, coordinate);
+  await page.mouse.click(point.x, point.y);
+}
+
+for (const width of [1280, 390]) {
+  test(`selection survives panels and clears explicitly at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await loaded(page);
+    const row = page.getByRole("button", {
+      name: "查看 Train/same.kml",
+      exact: true,
+    });
+    await row.click();
+    await expect.poll(() => selectedTrackId(page)).toBeTruthy();
+    const id = await selectedTrackId(page);
+    await page.getByRole("button", { name: "返回列表", exact: true }).click();
+    await expect(row).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "收起菜单", exact: true }).click();
+    await expect.poll(() => selectedTrackId(page)).toBe(id);
+    await tool(page, "设置");
+    await expect.poll(() => selectedTrackId(page)).toBe(id);
+    await tool(page, "导出轨迹");
+    await expect.poll(() => selectedTrackId(page)).toBe(id);
+    await tool(page, "出图");
+    await expect.poll(() => selectedTrackId(page)).toBe("");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => selectedTrackId(page)).toBe(id);
+    await tool(page, "轨迹库");
+    await page.getByRole("button", { name: "筛选", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect.poll(() => selectedTrackId(page)).toBe(id);
+    await page.keyboard.press("Escape");
+    await expect.poll(() => selectedTrackId(page)).toBe("");
+    await expect(row).toHaveAttribute("aria-pressed", "false");
+    await row.click();
+    await expect.poll(() => selectedTrackId(page)).toBe(id);
+    await clickMapAt(page, [0, 0]);
+    await expect.poll(() => selectedTrackId(page)).toBe("");
+    await tool(page, "轨迹库");
+    await expect(page.getByRole("region", { name: "轨迹详情" })).toBeHidden();
+    await expect(row).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test(`map detail preserves search, categories and dates at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await loaded(page);
+    await page
+      .getByRole("button", { name: "切换当前列表可见性", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "显示 原始中文", exact: true })
+      .click();
+    await filterTracks(page, "same");
+    await page.getByRole("button", { name: "筛选", exact: true }).click();
+    await page.getByRole("combobox", { name: "轨迹分类", exact: true }).click();
+    await page.getByRole("option", { name: "Train", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.getByLabel("起始日期").fill("2099-01-01");
+    await page.getByRole("button", { name: "应用", exact: true }).click();
+    await expect(page.getByText("无匹配", { exact: true })).toBeVisible();
+    await clickMapAt(page, [101, 27]);
+    await expect(page.getByRole("region", { name: "轨迹详情" })).toBeVisible();
+    await expect(page.locator(".track-detail-heading")).toHaveText("原始中文");
+    await page.getByRole("button", { name: "返回列表", exact: true }).click();
+    await expect(page.getByLabel("筛选轨迹", { exact: true })).toHaveValue(
+      "same",
+    );
+    await expect(page.getByText("无匹配", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "筛选", exact: true }).click();
+    await expect(page.getByLabel("起始日期")).toHaveValue("2099-01-01");
+    await expect(
+      page.getByRole("button", { name: "移除 Train", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await expect(page.getByLabel("筛选轨迹", { exact: true })).toHaveValue(
+      "same",
+    );
+    await expect.poll(() => selectedTrackId(page)).toBe("");
+  });
+
+  test(`map candidates restore the original page and scroll at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.route("**/api/overview/entries?*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.has("ids")) return route.continue();
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      url.searchParams.set("offset", "0");
+      url.searchParams.set("q", "");
+      const response = await route.fetch({ url: url.toString() });
+      const body = await response.json();
+      const entries = Array.from({ length: 120 }, (_, index) => ({
+        ...body.entries[0],
+        id: `scroll-${index}`,
+        name: `行程 ${index}`,
+        entry: `scroll/${index}.kml`,
+      }));
+      await route.fulfill({
+        response,
+        json: {
+          ...body,
+          total: entries.length,
+          entries: entries.slice(offset, offset + 50),
+        },
+      });
+    });
+    await loaded(page);
+    const filtered = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/overview/entries?") &&
+        new URL(response.url()).searchParams.get("q") === "行程",
+    );
+    await filterTracks(page, "行程");
+    await filtered;
+    await expect(page.locator(".map-track-list")).toHaveAttribute(
+      "aria-busy",
+      "false",
+    );
+    await page.getByRole("button", { name: "下一页", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "查看 scroll/50.kml", exact: true }),
+    ).toBeVisible();
+    const scroller = page.locator(
+      width > 700 ? ".map-track-list" : ".map-controls",
+    );
+    await scroller.evaluate((element) => {
+      element.scrollTop = 480;
+    });
+    await expect
+      .poll(() => scroller.evaluate((element) => element.scrollTop))
+      .toBe(480);
+    await clickMapAt(page, [101, 27]);
+    await expect(
+      page.getByRole("heading", { name: "此处的轨迹", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByLabel("筛选轨迹", { exact: true })).toHaveValue("");
+    await page.screenshot({
+      path: test.info().outputPath("map-candidates.png"),
+    });
+    await page
+      .getByRole("button", { name: "查看 Train/same.kml", exact: true })
+      .click();
+    await page.getByRole("button", { name: "返回列表", exact: true }).click();
+    await page
+      .getByRole("button", { name: "返回筛选结果", exact: true })
+      .click();
+    await expect(page.getByLabel("筛选轨迹", { exact: true })).toHaveValue(
+      "行程",
+    );
+    await expect(
+      page.getByRole("spinbutton", { name: "跳转页码" }),
+    ).toHaveValue("2");
+    await expect
+      .poll(() => scroller.evaluate((element) => element.scrollTop))
+      .toBe(480);
+  });
 }
 
 test.beforeEach(async ({ request }) => {
@@ -170,7 +367,7 @@ test("style reload restores the overview; export preview excludes it; mobile pan
       ?.layers.some(
         (l) =>
           l.id.startsWith("overview-") &&
-          l.type === "line" &&
+          l.id.endsWith("-line") &&
           window.renderer!.map.getPaintProperty(l.id, "line-opacity") !== 0 &&
           JSON.stringify(window.renderer!.map.getFilter(l.id)).startsWith(
             '["=="',
@@ -342,7 +539,16 @@ test("clicking overlapping tracks offers all candidates and keeps list selection
   await filters.getByRole("button", { name: "应用", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "筛选", exact: true }),
-  ).toHaveAttribute("title", "筛选");
+  ).toHaveAttribute("title", "筛选：已设置");
+  await expect(page.getByLabel("筛选轨迹", { exact: true })).toHaveValue(
+    "no-such-track",
+  );
+  await expect(page.getByText("无匹配", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "筛选", exact: true }).click();
+  await expect(page.getByLabel("起始日期")).toHaveValue("2099-01-01");
+  await filters.getByRole("button", { name: "重置", exact: true }).click();
+  await filters.getByRole("button", { name: "应用", exact: true }).click();
+  await filterTracks(page, "");
   await expect(
     page.getByRole("button", {
       name: "查看 Default/2026-10-01 中文.kml",
@@ -384,7 +590,7 @@ test("GCJ02 basemap switches the canvas and overview together", async ({
   ).toHaveText("未知");
 });
 
-test("category colors and alpha match original KML while selection preserves category color", async ({
+test("default category colors and alpha match original KML while selection uses the current style", async ({
   page,
 }, info) => {
   await loaded(page);
@@ -405,15 +611,20 @@ test("category colors and alpha match original KML while selection preserves cat
     };
   }, source);
   expect(paint.color).toEqual([
-    "match",
-    ["get", "kind"],
-    "Default",
-    "#ff5722",
-    "Train",
-    "#383041",
-    "Flight",
-    "#00adb5",
-    "#69796f",
+    "case",
+    ["==", ["get", "trackId"], ""],
+    "#ffd700",
+    [
+      "match",
+      ["get", "kind"],
+      "Default",
+      "#ff5722",
+      "Train",
+      "#383041",
+      "Flight",
+      "#00adb5",
+      "#69796f",
+    ],
   ]);
   expect(paint.point).toEqual(paint.color);
   expect(JSON.stringify(paint.opacity)).toContain(String(26 / 255));
@@ -429,7 +640,12 @@ test("category colors and alpha match original KML while selection preserves cat
         window.renderer!.map.getPaintProperty(source + "-line", "line-color"),
       source,
     ),
-  ).toEqual(paint.color);
+  ).toEqual([
+    "case",
+    ["==", ["get", "trackId"], expect.any(String)],
+    "#ffd700",
+    (paint.color as unknown[])[3],
+  ]);
   await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
   await page.getByRole("button", { name: "收起菜单", exact: true }).click();
   await page.waitForFunction(() => window.renderer!.map.areTilesLoaded());
@@ -558,7 +774,7 @@ test("browse eye buttons filter map lines and points, survive searches and style
         const l = m
           .getStyle()
           ?.layers.find(
-            (l) => l.id.startsWith("overview-") && l.type === "line",
+            (l) => l.id.startsWith("overview-") && l.id.endsWith("-line"),
           );
         return l && m.getFilter(l.id);
       }),
@@ -597,7 +813,7 @@ test("browse eye buttons filter map lines and points, survive searches and style
         const l = m
           .getStyle()
           ?.layers.find(
-            (l) => l.id.startsWith("overview-") && l.type === "line",
+            (l) => l.id.startsWith("overview-") && l.id.endsWith("-line"),
           );
         return l && JSON.stringify(m.getFilter(l.id));
       }),

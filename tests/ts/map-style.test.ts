@@ -103,6 +103,30 @@ beforeAll(() => vi.stubGlobal("location", { origin: "http://localhost" }));
 afterAll(() => vi.unstubAllGlobals());
 
 describe("map content controls", () => {
+  it("renders custom detail styles at browser and document scales without outlines", () => {
+    const state = defaultMapState();
+    state.style.tracks.current = { color: "#123abc", width: 7 };
+    for (const scale of [1, 4]) {
+      const style = mapStyle(state, config(), undefined, scale);
+      expect(styleSpec.validateStyleMin(style)).toEqual([]);
+      expect(
+        style.layers.find((layer) => layer.id === "track-lines")?.paint,
+      ).toMatchObject({
+        "line-color": "#123abc",
+        "line-width": 7 * scale,
+      });
+      expect(style.layers.some((layer) => layer.id === "track-halo")).toBe(
+        false,
+      );
+      expect(
+        style.layers.find((layer) => layer.id === "track-points")?.paint,
+      ).toMatchObject({
+        "circle-color": "#123abc",
+        "circle-radius": 3.5 * scale,
+        "circle-stroke-width": 0,
+      });
+    }
+  });
   it("prioritizes important places across tiles with stable ties and fixed anchors", () => {
     const state = defaultMapState();
     state.style.features.places = "all";
@@ -347,13 +371,13 @@ describe("map content controls", () => {
         expect(scaled.paint?.["text-halo-width"]).toBe(
           Number(layer.paint?.["text-halo-width"]) * 4,
         );
-      } else if (layer.id === "track-lines" || layer.id === "track-halo") {
+      } else if (layer.id === "track-lines") {
         expect((scaled.paint as Record<string, unknown>)["line-width"]).toBe(
           Number((layer.paint as Record<string, unknown>)["line-width"]) * 4,
         );
       } else if (layer.id === "track-points" && scaled.type === "circle") {
         expect(scaled.paint?.["circle-radius"]).toBe(6);
-        expect(scaled.paint?.["circle-stroke-width"]).toBe(4);
+        expect(scaled.paint?.["circle-stroke-width"]).toBe(0);
       } else expect(scaled).toEqual(layer);
     }
     expect(state).toEqual(snapshot);
@@ -482,7 +506,6 @@ describe("map content controls", () => {
     expect(style.layers.map((layer) => layer.id)).toEqual([
       "background",
       "satellite",
-      "track-halo",
       "track-lines",
       "track-points",
     ]);
