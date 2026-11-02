@@ -498,7 +498,10 @@ export function ImportPanel() {
         stage: "queued",
         progress: 0,
       }));
-      current.current = [...current.current, ...added];
+      current.current = [
+        ...current.current.filter((row) => !completed(row)),
+        ...added,
+      ];
       publish();
       void check(added.map((row) => row.id));
     } catch (error) {

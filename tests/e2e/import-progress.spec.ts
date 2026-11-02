@@ -72,6 +72,37 @@ test("upload checks the whole batch and applies only after confirmation", async 
       page.locator(".import-actions").getByRole("status"),
     ).toHaveText("共2个文件，已导入2个。", { timeout: 20000 });
     expect(applies).toHaveLength(1);
+
+    const input = page.getByLabel("上传输入文件");
+    const summary = page.locator(".import-actions").getByRole("status");
+    const viewImported = page.getByRole("button", {
+      name: "查看已导入轨迹",
+      exact: true,
+    });
+    await input.setInputFiles([]);
+    await expect(summary).toHaveText("共2个文件，已导入2个。");
+    await expect(viewImported).toBeVisible();
+
+    await input.setInputFiles({
+      name,
+      mimeType: "application/octet-stream",
+      buffer,
+    });
+    await expect(summary).toHaveText("共1个文件，跳过重复1个。");
+    await expect(page.getByRole("article")).toHaveCount(1);
+    await expect(viewImported).toHaveCount(0);
+
+    await input.setInputFiles({
+      name: name.replace("进度", "下一批"),
+      mimeType: "application/octet-stream",
+      buffer,
+    });
+    await expect(row).toHaveCount(0);
+    await expect(summary).toHaveText("共1个文件，待导入1个。");
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await expect(summary).toHaveText("共1个文件，已导入1个。");
+    expect(applies).toHaveLength(2);
   } finally {
     releaseUpload();
     releasePreview();
