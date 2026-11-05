@@ -12,7 +12,6 @@ import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import assert from "node:assert/strict";
-import sharp from "sharp";
 const consumer = path.resolve(process.argv[2]),
   evidenceDir = path.resolve(process.argv[3] || "sandbox/release-check"),
   root = path.join(consumer, "node_modules/tracktool");
@@ -24,7 +23,7 @@ const originalEnv = { ...process.env },
   isolated = path.join(consumer, "node-runtime-bin");
 if (process.platform !== "win32") {
   await mkdir(isolated, { recursive: true });
-  for (const name of ["node", "perl", "ffmpeg", "ldd", "grep", "sed"]) {
+  for (const name of ["node", "ldd", "grep", "sed"]) {
     const target =
       name === "node"
         ? process.execPath
@@ -46,7 +45,6 @@ if (process.platform !== "win32")
 process.env.XDG_CONFIG_HOME = path.join(consumer, "isolated-config");
 process.env.XDG_STATE_HOME = path.join(consumer, "isolated-state");
 process.env.XDG_DATA_HOME = path.join(consumer, "isolated-data");
-delete process.env.TRACKTOOL_EXIFTOOL;
 const cli = path.join(root, "dist/node/cli/main.js"),
   config = path.join(consumer, "config.json");
 await writeFile(config, "{}");
@@ -233,58 +231,6 @@ const publicApi = spawnSync(
   { cwd: consumer, encoding: "utf8" },
 );
 assert.equal(publicApi.status, 0, publicApi.stderr);
-const photo = path.join(consumer, "照片.jpg");
-await sharp({ create: { width: 8, height: 8, channels: 3, background: "red" } })
-  .jpeg()
-  .toFile(photo);
-run(
-  "exif",
-  "set",
-  photo,
-  "--make",
-  "SONY",
-  "-t",
-  "IPTC:City=杭州",
-  "-t",
-  "ExifIFD:DateTimeOriginal=2024:05:01 00:30:00",
-  "--config",
-  config,
-);
-const backup = await readFile(photo + "_original");
-run("exif", "shift-time", photo, "--by", "-1h", "--config", config);
-assert.deepEqual(await readFile(photo + "_original"), backup);
-assert.ok(
-  run("exif", "info", photo, "--config", config).includes(
-    "2024-04-30T23:30:00+08:00",
-  ),
-);
-const video = path.join(consumer, "clip.mov");
-const make = spawnSync(process.env.TRACKTOOL_FFMPEG || "ffmpeg", [
-  "-nostdin",
-  "-n",
-  "-f",
-  "lavfi",
-  "-i",
-  "color=c=blue:s=16x16:r=1",
-  "-t",
-  "1",
-  "-c:v",
-  "mpeg4",
-  "-metadata",
-  "creation_time=2024-05-01T12:00:00Z",
-  video,
-]);
-assert.equal(make.status, 0, String(make.stderr));
-run("exif", "to-mp4", video, "--config", config);
-run(
-  "exif",
-  "to-mp4",
-  path.join(consumer, "clip.mp4"),
-  "--timezone-policy",
-  "keep",
-  "--config",
-  config,
-);
 const listing = await readdir(root);
 assert.ok(!listing.includes("tracktool"));
 assert.ok(!listing.includes("pyproject.toml"));
@@ -298,8 +244,6 @@ const result = {
   public_api: true,
   archive_zip_recovery: true,
   original_bytes: true,
-  media_first_backup: true,
-  real_ffmpeg: true,
   png_dimensions: [1920, 1440],
   png_bytes: png.length,
   chromium: report.report.chromium,

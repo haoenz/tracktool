@@ -4,7 +4,6 @@ import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import assert from "node:assert/strict";
-import sharp from "sharp";
 if (process.platform !== "linux")
   throw new Error(
     "This PTY harness requires Linux util-linux script; other platforms need their native terminal verification.",
@@ -20,13 +19,10 @@ const env = {
   XDG_CONFIG_HOME: path.join(dir, "config"),
   XDG_CACHE_HOME: path.join(dir, "cache"),
 };
-const jpg = await sharp({
-  create: { width: 8, height: 8, channels: 3, background: "red" },
-})
-  .jpeg()
-  .toBuffer();
+const kml =
+  '<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>终端轨迹</name><Placemark><LineString><coordinates>120,30,10 120.01,30.01,20</coordinates></LineString></Placemark></Document></kml>';
 for (let i = 0; i < 24; i++)
-  await writeFile(path.join(dir, `中文${i}.jpg`), jpg);
+  await writeFile(path.join(dir, `中文${i}.kml`), kml);
 function session(command) {
   const child = spawn("script", ["-qefc", command, "/dev/null"], {
     cwd: dir,
@@ -67,7 +63,7 @@ let active;
 try {
   for (const cancel of [false, true]) {
     active = session(
-      `stty cols 52; exec ${quote(process.execPath)} ${quote(cli)} --dry-run exif show-missing ${quote(dir)} GPSAltitude`,
+      `stty cols 52; exec ${quote(process.execPath)} ${quote(cli)} --dry-run kml set-tag ${quote(path.join(dir, "*.kml"))} --tag 徒步 --create-tag`,
     );
     await active.until(/\d+\/24/);
     if (cancel) active.child.stdin.write("\x03");

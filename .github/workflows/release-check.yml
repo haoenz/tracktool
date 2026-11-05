@@ -22,15 +22,9 @@ jobs:
         with:
           version: 12.10.1
           run_install: false
-      - name: Install external tools (Linux)
+      - name: Install terminal test shell (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg perl zsh
-      - name: Install external tools (macOS)
-        if: runner.os == 'macOS'
-        run: brew install ffmpeg
-      - name: Install external tools (Windows)
-        if: runner.os == 'Windows'
-        run: choco install ffmpeg --no-progress -y
+        run: sudo apt-get update && sudo apt-get install -y zsh
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm cli setup chromium --with-deps

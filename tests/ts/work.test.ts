@@ -14,7 +14,6 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import sharp from "sharp";
 import { afterEach, expect, it, vi } from "vitest";
 import { AppError } from "../../dist/node/domain/errors.js";
 import { FileConfigStore } from "../../dist/node/infrastructure/config-store.js";
@@ -54,7 +53,7 @@ async function until<T>(
   }
   throw new Error("Timed out waiting for task");
 }
-const body = (operation = "exif:set"): WorkRequest =>
+const body = (operation = "kml:set-tag"): WorkRequest =>
   WorkRequestSchema.parse({ operation, inputs: [], options: {} });
 function fake(overrides: Partial<WorkRunner> = {}): WorkRunner {
   return {
@@ -272,15 +271,11 @@ async function server(host = "127.0.0.1") {
     );
   return { dir, archive, config, app, address, call, settled };
 }
-it("HTTP media upload → preview → execute → download survives page reload semantics and cleans staging", async () => {
+it("HTTP track upload → preview → execute → download survives page reload semantics and cleans staging", async () => {
   const { address, call, settled } = await server();
-  const bytes = await sharp({
-    create: { width: 8, height: 8, channels: 3, background: "red" },
-  })
-    .jpeg()
-    .toBuffer();
+  const bytes = await readFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml");
   const response = await fetch(
-    address + "/api/work/uploads?name=" + encodeURIComponent("中文.jpg"),
+    address + "/api/work/uploads?name=" + encodeURIComponent("中文.kml"),
     {
       method: "POST",
       headers: {
@@ -293,9 +288,9 @@ it("HTTP media upload → preview → execute → download survives page reload 
   expect(response.status).toBe(200);
   const uploaded = (await response.json()) as { id: string; files: string[] };
   const task = await call<WorkTask>("/api/work/preview", {
-    operation: "exif:set",
+    operation: "kml:set-tag",
     inputs: uploaded.files,
-    options: { tags: { "IPTC:City": "杭州" } },
+    options: { tag: "骑行", create: true },
   });
   const preview = await settled(task.id);
   expect(preview.status, JSON.stringify(preview.error)).toBe("succeeded");
@@ -311,7 +306,6 @@ it("HTTP media upload → preview → execute → download survives page reload 
   expect(download.status).toBe(200);
   expect(download.headers.get("content-disposition")).toContain("attachment");
   expect(Buffer.from(await download.arrayBuffer())).not.toEqual(bytes);
-  expect(await readFile(uploaded.files[0]! + "_original")).toEqual(bytes);
   expect((await call<WorkTask>(`/api/work/tasks/${apply.id}`)).id).toBe(
     apply.id,
   );
@@ -484,16 +478,12 @@ it.each([
 );
 it("HTTP rejects stale file/config previews, unknown paths, symlink aliases and unauthenticated uploads", async () => {
   const { dir, config, address, call, settled } = await server(),
-    source = path.join(dir, "a.jpg");
-  await sharp({
-    create: { width: 8, height: 8, channels: 3, background: "red" },
-  })
-    .jpeg()
-    .toFile(source);
+    source = path.join(dir, "a.kml");
+  await copyFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml", source);
   const p = await call<WorkTask>("/api/work/preview", {
-    operation: "exif:set",
+    operation: "kml:set-tag",
     inputs: [source],
-    options: { make: "SONY" },
+    options: { tag: "骑行", create: true },
   });
   expect((await settled(p.id)).status).toBe("succeeded");
   await new FileConfigStore({ path: config }).set("log_level", "DEBUG");
@@ -504,14 +494,14 @@ it("HTTP rejects stale file/config previews, unknown paths, symlink aliases and 
   await expect(
     new WorkFiles(path.join(dir, "state"), [dir]).resolve("/etc"),
   ).rejects.toThrow("开放");
-  await symlink(source, path.join(dir, "alias.jpg"));
+  await symlink(source, path.join(dir, "alias.kml"));
   await expect(
     call("/api/work/preview", {
-      operation: "exif:set",
-      inputs: [path.join(dir, "alias.jpg")],
+      operation: "kml:set-tag",
+      inputs: [path.join(dir, "alias.kml")],
     }),
   ).rejects.toThrow("符号链接");
-  const upload = await fetch(address + "/api/work/uploads?name=x.jpg", {
+  const upload = await fetch(address + "/api/work/uploads?name=x.kml", {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },
     body: "bytes",
@@ -523,26 +513,21 @@ it("HTTP rejects stale file/config previews, unknown paths, symlink aliases and 
     ),
   ).rejects.toThrow("任务数据库");
 });
-it("partial media failures remain itemized while independent files finish", async () => {
+it("partial track failures remain itemized while independent files finish", async () => {
   const { dir, call, settled } = await server(),
-    good = path.join(dir, "good.jpg"),
-    bad = path.join(dir, "bad.jpg");
-  await sharp({
-    create: { width: 8, height: 8, channels: 3, background: "red" },
-  })
-    .jpeg()
-    .toFile(good);
+    good = path.join(dir, "good.kml"),
+    bad = path.join(dir, "bad.kml");
+  await copyFile("tests/ts/fixtures/m4/2026-10-01 轨迹.kml", good);
   await writeFile(bad, "");
   const task = await call<WorkTask>("/api/work/preview", {
-      operation: "exif:show-missing",
+      operation: "kml:type",
       inputs: [good, bad],
-      options: { parallel: true },
     }),
     result = await settled(task.id);
   expect(result.status).toBe("partial");
-  expect(result.result?.items.map((i) => i.status)).toEqual([
-    "skipped",
-    "failed",
+  expect(result.result?.items).toEqual([
+    expect.objectContaining({ path: bad, status: "failed" }),
+    expect.objectContaining({ path: good, status: "succeeded" }),
   ]);
   await expect(call(`/api/work/tasks/${task.id}/apply`, {})).rejects.toThrow();
 });
@@ -569,17 +554,18 @@ it("fingerprints detect same-size edits with preserved mtimes and output collisi
     changed,
   );
 });
-it("schema rejects arbitrary operations, injected tag arguments and unbounded selections", () => {
+it("schema rejects removed media operations, arbitrary options and unbounded selections", () => {
   expect(() => WorkRequestSchema.parse({ operation: "shell:exec" })).toThrow();
+  expect(() => WorkRequestSchema.parse({ operation: "exif:set" })).toThrow();
   expect(() =>
     WorkRequestSchema.parse({
-      operation: "exif:set",
+      operation: "kml:set-tag",
       options: { tags: { "-execute": "1" } },
     }),
   ).toThrow();
   expect(() =>
     WorkRequestSchema.parse({
-      operation: "exif:set",
+      operation: "kml:set-tag",
       inputs: Array(501).fill("/a"),
     }),
   ).toThrow();
@@ -597,7 +583,7 @@ it("a killed worker is not replayed and another process can recover its lease", 
       "../../dist/node/infrastructure/task-queue.js",
       import.meta.url,
     ).href;
-  const script = `import {SqliteTasks} from ${JSON.stringify(storeModule)};import {TaskQueue} from ${JSON.stringify(queueModule)};const q=new TaskQueue(new SqliteTasks(${JSON.stringify(file)}),{normalize:async r=>r,fingerprint:async()=>"x",run:async()=>{console.log("RUNNING");await new Promise(r=>setTimeout(r,60000));return {output:{paths:[]}};}});q.start();const a=await q.preview({operation:"exif:set",inputs:[],options:{}});console.log(a.id);setInterval(()=>{},1000);`;
+  const script = `import {SqliteTasks} from ${JSON.stringify(storeModule)};import {TaskQueue} from ${JSON.stringify(queueModule)};const q=new TaskQueue(new SqliteTasks(${JSON.stringify(file)}),{normalize:async r=>r,fingerprint:async()=>"x",run:async()=>{console.log("RUNNING");await new Promise(r=>setTimeout(r,60000));return {output:{paths:[]}};}});q.start();const a=await q.preview({operation:"kml:set-tag",inputs:[],options:{}});console.log(a.id);setInterval(()=>{},1000);`;
   const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -653,54 +639,6 @@ it("LAN-bound HTTP accepts local-network uploads while keeping task API token ch
   );
   expect((await fetch(base + "/api/work/bootstrap")).status).toBe(403);
 });
-it("apply preserves successful files and exposes per-file failures if an external write fails", async () => {
-  const { dir, call, settled } = await server(),
-    good = path.join(dir, "good.jpg"),
-    bad = path.join(dir, "bad.jpg");
-  await sharp({
-    create: { width: 8, height: 8, channels: 3, background: "red" },
-  })
-    .jpeg()
-    .toFile(good);
-  await writeFile(bad, "");
-  const preview = await call<WorkTask>("/api/work/preview", {
-    operation: "exif:set",
-    inputs: [good, bad],
-    options: { tags: { "IPTC:City": "City" }, parallel: true },
-  });
-  expect((await settled(preview.id)).status).toBe("succeeded");
-  const apply = await call<WorkTask>(`/api/work/tasks/${preview.id}/apply`, {}),
-    result = await settled(apply.id);
-  expect(result.status).toBe("partial");
-  expect(result.result?.items.map((i) => i.status)).toEqual([
-    "succeeded",
-    "failed",
-  ]);
-  expect(result.output?.paths).toEqual([good]);
-  expect(existsSync(good + "_original")).toBe(true);
-  expect(await readFile(bad, "utf8")).toBe("");
-});
-it("web grouping cannot follow a destination folder symlink outside the opened root", async () => {
-  const { dir, call, settled } = await server(),
-    outside = await tmp(),
-    input = path.join(dir, "media");
-  await mkdir(input);
-  await writeFile(path.join(input, "a.jpg"), "photo");
-  await writeFile(path.join(input, "b.mov"), "video");
-  await symlink(
-    outside,
-    path.join(input, "IMG"),
-    process.platform === "win32" ? "junction" : "dir",
-  );
-  const task = await call<WorkTask>("/api/work/preview", {
-    operation: "exif:group",
-    inputs: [input],
-  });
-  const result = await settled(task.id);
-  expect(["partial", "failed"]).toContain(result.status);
-  expect(existsSync(path.join(outside, "a.jpg"))).toBe(false);
-  await expect(call(`/api/work/tasks/${task.id}/apply`, {})).rejects.toThrow();
-});
 it("completed task and its events remain readable after closing and reopening the HTTP server", async () => {
   const { dir, archive, config, app, call, settled } = await server();
   const task = await call<WorkTask>("/api/work/preview", {
@@ -734,7 +672,6 @@ it("web settings reject every server configuration write while CLI configuration
     "kml_backup_dir_name",
     "google_api_key",
     "track_tag.Default",
-    "output_filters",
   ]) {
     await expect(
       call("/api/work/settings", { key, value: "changed" }),

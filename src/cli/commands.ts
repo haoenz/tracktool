@@ -6,7 +6,7 @@ import { createContext } from "../services/context.js";
 import { BUSINESS_COMMANDS } from "./business-commands.js";
 import { CompletionTags, ZshCompletion } from "./completion.js";
 import { DATA_COMMANDS } from "./data-commands.js";
-import { MEDIA_COMMANDS } from "./media-commands.js";
+import { UTILITY_COMMANDS } from "./utility-commands.js";
 import { TRACK_COMMANDS } from "./track-commands.js";
 
 class ConfigShow extends Command {
@@ -47,7 +47,7 @@ export const COMMANDS: Record<string, Command.Class> = {
   "config:show": ConfigShow,
   ...BUSINESS_COMMANDS,
   ...TRACK_COMMANDS,
-  ...MEDIA_COMMANDS,
+  ...UTILITY_COMMANDS,
   ...DATA_COMMANDS,
   completion: ZshCompletion,
   "completion:tags": CompletionTags,

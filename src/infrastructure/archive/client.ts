@@ -1,6 +1,4 @@
-import type { MediaTime } from "../../domain/media-time.js";
 import type { TrackData } from "../../domain/trackdata.js";
-import type { TrackMatch } from "../../services/media-ports.js";
 import type { ArchiveRequest, ArchiveResult } from "../../domain/archive.js";
 import { Worker } from "node:worker_threads";
 import type { MapStore } from "../../services/map-service.js";
@@ -9,9 +7,6 @@ import type { ErrorInfo } from "../../shared/contracts.js";
 import { AppError, checkCancelled } from "../../domain/errors.js";
 type Request = {
   op: string;
-  time?: MediaTime;
-  multiday?: boolean;
-  tolerance?: number;
   request?: ArchiveRequest;
   path?: string;
   name?: string;
@@ -128,18 +123,6 @@ export class ArchiveClient implements MapStore {
   }
   execute(request: ArchiveRequest, signal?: AbortSignal) {
     return this.call<ArchiveResult>({ op: "write", request }, signal);
-  }
-  nearest(
-    path: string,
-    time: MediaTime,
-    multiday: boolean,
-    tolerance: number,
-    signal: AbortSignal,
-  ) {
-    return this.call<TrackMatch | undefined>(
-      { op: "nearest", path, time, multiday, tolerance },
-      signal,
-    );
   }
   catalog(path: string) {
     return this.call<Catalog>({ op: "catalog", path });

@@ -99,7 +99,7 @@ it("maps Chinese locality types, preserves provenance, handles municipalities an
     ]).status,
   ).toBe("partial");
 });
-it("shares the Google request implementation while preserving the existing media result shape", async () => {
+it("resolves endpoint administrative locations with the requested coordinates and language", async () => {
   const request = vi
     .fn<typeof fetch>()
     .mockResolvedValue(

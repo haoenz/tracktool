@@ -202,9 +202,6 @@ importers:
       cmdk:
         specifier: 1.1.1
         version: 1.1.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      exiftool-vendored:
-        specifier: 39.0.1
-        version: 39.0.1
       fastify:
         specifier: 5.12.7
         version: 5.12.7
@@ -803,9 +800,6 @@ packages:
 
   '@oxc-project/types@0.153.0':
     resolution: {integrity: sha512-jSNrRIyvPVLL5E1z/tS5zLAprosGz/FuI1PWwEOz59j3E4TTTzSpqKb/RDGqJhhW0QHYISGXxq582wGx6T11Tw==}
-
-  '@photostructure/tz-lookup@11.7.0':
-    resolution: {integrity: sha512-QbKHXvleluMIlAHf2JiQTJNU5rLQBeQhLobyRqgXZ6NNGKqNikaRkjYviJ4nMU7Y75QE7bBYM8xjiFGjAukyhw==}
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
@@ -1733,9 +1727,6 @@ packages:
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
-  '@types/luxon@3.7.6':
-    resolution: {integrity: sha512-6KSjliQAXK8ZLgFQO4B7iE4Rpf/B3rItzCFuXezBY/XIAGxOdLd7vRNK9/StRPwiS/yJsVbB7HKpW46B8tcEuQ==}
-
   '@types/mapbox__point-geometry@0.1.4':
     resolution: {integrity: sha512-mUWlSxAmYLfwnRBmgYV86tgYmMIICX4kza8YnE/eIlywGe2XoOxlpVnXWwir92xRLjwyarqwpu2EJKD2pk0IUA==}
 
@@ -1997,10 +1988,6 @@ packages:
   bare-url@2.5.5:
     resolution: {integrity: sha512-iM9qJCruvpt2rPaLsrumVDru9pogI7PHziHIa9kTNRFt8C8HuSa+kI9kFezK+NvHEFnnz71rKGZ1EAilq/3V/Q==}
 
-  batch-cluster@19.5.0:
-    resolution: {integrity: sha512-iI7wS1ljoQGV2+y9LUx8VBFsfMX9VLT/aeN4P07NZYWcD3dC6SZMMJLJlmoibJ4zsnpLODXVCfndTJJNTes5PA==}
-    engines: {node: '>=22'}
-
   better-sqlite3@13.0.3:
     resolution: {integrity: sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==}
     engines: {node: '>=22'}
@@ -2223,19 +2210,6 @@ packages:
   events-universal@1.0.1:
     resolution: {integrity: sha512-LUd5euvbMLpwOF8m6ivPCbhQeSiYVNb8Vs0fQ8QjXo0JTkEHpz8pxdQf0gStltaPpw0Cca8b39KxvK9cfKRiAw==}
 
-  exiftool-vendored.exe@13.59.3:
-    resolution: {integrity: sha512-F5hpk1yVGZSDHjSKsyumyniY56IM3zawKOejOqtyT2r476fvWrUxpBmWT7Ena104TGPt/2+448Q/vrVt+yOzwQ==}
-    os: [win32]
-
-  exiftool-vendored.pl@13.59.3:
-    resolution: {integrity: sha512-QmYq2JKCXRK9Uo3E3nHb0gQ6Xce2HK7wPtrHF5r+IYWyiM5WkOhiT3BesLI9lvJvPAbzjqFxQlrjXv+/cuSX/Q==}
-    os: ['!win32']
-    hasBin: true
-
-  exiftool-vendored@39.0.1:
-    resolution: {integrity: sha512-4eliBi259idYXoVZcIsN8qZVXA3qljlAeLzVS85nvp1uQhe1lpNcXyUUT0jGvAOWwXDZm3UUrvvw21VQ0L2OeQ==}
-    engines: {node: '>=22'}
-
   expect-type@1.4.0:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
     engines: {node: '>=12.0.0'}
@@ -2377,10 +2351,6 @@ packages:
   hasown@2.0.4:
     resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
     engines: {node: '>= 0.4'}
-
-  he@1.2.0:
-    resolution: {integrity: sha512-F/1DnUGPopORZi0ni+CvrCgHQ5FyEAHRLSApuYWMmrbSwoN2Mn/7k+Gl38gJnR7yyDZk6WLXwiGod1JOWNDKGw==}
-    hasBin: true
 
   hookified@1.15.1:
     resolution: {integrity: sha512-MvG/clsADq1GPM2KGo2nyfaWVyn9naPiXrqIe4jYjXNZQt238kWyOGrsyc/DmRAQ+Re6yeo6yX/yoNCG5KAEVg==}
@@ -2723,10 +2693,6 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
-
-  luxon@3.7.2:
-    resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
-    engines: {node: '>=12'}
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -3863,8 +3829,6 @@ snapshots:
 
   '@oxc-project/types@0.153.0': {}
 
-  '@photostructure/tz-lookup@11.7.0': {}
-
   '@pinojs/redact@0.4.0': {}
 
   '@playwright/test@1.61.0':
@@ -4773,8 +4737,6 @@ snapshots:
 
   '@types/json-schema@7.0.15': {}
 
-  '@types/luxon@3.7.6': {}
-
   '@types/mapbox__point-geometry@0.1.4': {}
 
   '@types/mapbox__vector-tile@1.3.4':
@@ -5026,8 +4988,6 @@ snapshots:
     dependencies:
       bare-path: 3.1.2
 
-  batch-cluster@19.5.0: {}
-
   better-sqlite3@13.0.3:
     dependencies:
       node-addon-api: 8.9.2
@@ -5262,23 +5222,6 @@ snapshots:
     transitivePeerDependencies:
       - bare-abort-controller
 
-  exiftool-vendored.exe@13.59.3:
-    optional: true
-
-  exiftool-vendored.pl@13.59.3:
-    optional: true
-
-  exiftool-vendored@39.0.1:
-    dependencies:
-      '@photostructure/tz-lookup': 11.7.0
-      '@types/luxon': 3.7.6
-      batch-cluster: 19.5.0
-      he: 1.2.0
-      luxon: 3.7.2
-    optionalDependencies:
-      exiftool-vendored.exe: 13.59.3
-      exiftool-vendored.pl: 13.59.3
-
   expect-type@1.4.0: {}
 
   fast-decode-uri-component@1.0.1: {}
@@ -5418,8 +5361,6 @@ snapshots:
   hasown@2.0.4:
     dependencies:
       function-bind: 1.1.2
-
-  he@1.2.0: {}
 
   hookified@1.15.1: {}
 
@@ -5680,8 +5621,6 @@ snapshots:
       react: 19.3.0
     optionalDependencies:
       '@types/react': 19.3.0
-
-  luxon@3.7.2: {}
 
   magic-string@0.30.21:
     dependencies:

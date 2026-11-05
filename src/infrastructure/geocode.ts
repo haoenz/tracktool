@@ -3,7 +3,7 @@ import type {
   GeocodeResponse,
   GeocodeResult,
 } from "../shared/endpoint-location.js";
-import type { GeocodePort, Location } from "../services/media-ports.js";
+import type { GeocodePort, Location } from "../services/geocode-ports.js";
 import { AppError, checkCancelled } from "../domain/errors.js";
 import { setTimeout as delay } from "node:timers/promises";
 export class GoogleGeocode implements GeocodePort {

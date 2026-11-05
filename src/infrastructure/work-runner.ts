@@ -6,7 +6,6 @@ import { parseBool, resolveApiKey, tagMap } from "../domain/config.js";
 import { AppError, checkCancelled, errorInfo } from "../domain/errors.js";
 import { createContext } from "../services/context.js";
 import { KmlService } from "../services/kml-service.js";
-import { MediaService } from "../services/media-service.js";
 import type { ConfigStore } from "../services/ports.js";
 import type { WorkRunner } from "../services/work-ports.js";
 import type { BatchResult, TaskEvent } from "../shared/contracts.js";
@@ -20,41 +19,9 @@ import { GoogleElevation } from "./elevation.js";
 import { GoogleGeocode } from "./geocode.js";
 import { ImportPreviewCache } from "./import-preview-cache.js";
 import { LocalKmlFiles } from "./kml-files.js";
-import { LocalMediaFiles } from "./media-files.js";
-import { ExifMetadata } from "./metadata.js";
 import { WorkFiles } from "./work-files.js";
-import { dispatchMedia } from "./work-media.js";
 import { WorkRequestInspector } from "./work-request.js";
 import { XmlWorkers } from "./xml/client.js";
-class ScopedMediaFiles extends LocalMediaFiles {
-  constructor(private readonly policy: WorkFiles) {
-    super();
-  }
-  async preflight(...args: Parameters<LocalMediaFiles["preflight"]>) {
-    for (const plan of args[0])
-      for (const action of plan) {
-        await this.policy.resolve(action.file, false);
-        if ("output" in action) await this.policy.resolve(action.output, false);
-      }
-    return super.preflight(...args);
-  }
-  async moveFolder(file: string, folder: string, plan: boolean) {
-    await this.policy.resolve(
-      path.join(path.dirname(file), folder, path.basename(file)),
-      false,
-    );
-    return super.moveFolder(file, folder, plan);
-  }
-  async mkdir(file: string) {
-    await this.policy.resolve(file, false);
-    return super.mkdir(file);
-  }
-  async renameDirectory(source: string, target: string) {
-    await this.policy.resolve(source);
-    await this.policy.resolve(target, false);
-    return super.renameDirectory(source, target);
-  }
-}
 class ScopedKmlFiles extends LocalKmlFiles {
   constructor(private readonly policy: WorkFiles) {
     super();
@@ -228,13 +195,6 @@ export class BusinessRunner implements WorkRunner {
     const config = await this.config.load(),
       xml = new XmlWorkers(),
       archive = new ArchiveClient(),
-      backend = new ExifMetadata(
-        undefined,
-        30_000,
-        String(config.output_filters || ""),
-        (message) => report({ type: "log", level: "WARNING", message }),
-      ),
-      mediaFiles = new ScopedMediaFiles(this.files),
       elevation = new GoogleElevation();
     const ctx = createContext({ config, mode, signal, report, xml }),
       kml = new KmlService(
@@ -242,13 +202,6 @@ export class BusinessRunner implements WorkRunner {
         xml,
         archive,
         elevation,
-      ),
-      media = new MediaService(
-        backend,
-        mediaFiles,
-        elevation,
-        new GoogleGeocode(),
-        archive,
       );
     const o = request.options,
       input = request.inputs,
@@ -261,25 +214,6 @@ export class BusinessRunner implements WorkRunner {
       key = resolveApiKey(config, this.envKey),
       output: WorkOutput = { paths: [] };
     let result: BatchResult | undefined;
-    const mediaOptions = {
-      overwrite: o.overwrite,
-      parallel: o.parallel,
-      failedFolder: o.failedFolder,
-      force: o.force,
-      verify: o.verify,
-      multiday: o.multiday,
-      maxSeconds: o.maxSeconds,
-      maxDistance: o.maxDistance,
-    };
-    const conversion = {
-      ...mediaOptions,
-      output: request.output,
-      offset: o.offset,
-      policy: o.policy,
-      source: o.source,
-      make: o.make,
-      model: o.model,
-    };
     const paths = new Set<string>();
     const kmlInputs = async () => {
       const values: string[] = [];
@@ -296,7 +230,6 @@ export class BusinessRunner implements WorkRunner {
       }
       return values.sort();
     };
-    const mediaInput = input.length === 1 ? first : input;
     try {
       checkCancelled(signal);
       report({
@@ -638,56 +571,7 @@ export class BusinessRunner implements WorkRunner {
           if (rows.length) output.data = rows;
         }
       } else {
-        const dispatched = await dispatchMedia(
-          {
-            ctx,
-            signal,
-            media,
-            mediaFiles,
-            backend,
-            kml,
-            key,
-            database,
-            mediaInput,
-            first,
-            mediaOptions,
-            conversion,
-          },
-          request,
-        );
-        result = dispatched.result;
-        if (dispatched.data !== undefined) output.data = dispatched.data;
-        // Preserve business action previews as structured data for the confirmation screen.
-        const mediaResult = result as
-          (BatchResult & { plans?: unknown }) | undefined;
-        if (mediaResult?.plans) output.data = mediaResult.plans;
-        if (result)
-          for (const item of result.items)
-            if (item.status !== "failed") paths.add(item.path);
-        if (mediaResult?.plans && Array.isArray(mediaResult.plans))
-          for (const plan of mediaResult.plans)
-            if (Array.isArray(plan))
-              for (const action of plan)
-                if (
-                  action &&
-                  typeof action === "object" &&
-                  "output" in action &&
-                  typeof action.output === "string"
-                )
-                  paths.add(action.output);
-        if (
-          request.operation === "exif:repair" ||
-          request.operation === "exif:repair-vid"
-        )
-          for (const item of result?.items ?? [])
-            if (item.status !== "failed")
-              paths.add(
-                path.join(
-                  path.dirname(item.path),
-                  "GoogleAltOK",
-                  path.basename(item.path),
-                ),
-              );
+        throw new AppError("USER_INPUT", "不支持的轨迹操作");
       }
       if (mode === "plan" && request.operation.startsWith("kml:"))
         for (const target of paths) {
@@ -731,7 +615,6 @@ export class BusinessRunner implements WorkRunner {
           : undefined,
       };
     } finally {
-      await backend.close();
       await archive.close();
       await xml.close();
     }

@@ -41,7 +41,6 @@ import {
   readObject,
   objectPath,
 } from "../../dist/node/infrastructure/overview/files.js";
-import { parseMediaTime } from "../../dist/node/domain/media-time.js";
 import type {
   Presentation,
   VersionRef,
@@ -310,18 +309,14 @@ it("overview display caches include settings identity while raw coordinate cache
   expect((await readObject(root, key)).segments).toHaveLength(5);
   expect(statSync(objectPath(root, f.ref().sha256)).mtimeMs).toBe(mtime);
 });
-it("media matching reads timed original samples even when their segment is hidden", async () => {
+it("reading original track data retains timed samples even when their segment is hidden", async () => {
   const f = await fixture(),
     d = trackDetail(f.file, f.id);
   f.set({ ...d.settings, ignored: d.settings.order });
-  const time = parseMediaTime({
-    "ExifIFD:DateTimeOriginal": "2026:10:14 00:01:00",
-    "ExifIFD:OffsetTimeOriginal": "+00:00",
-  })!;
-  expect(await f.store.nearest(f.file, time, false, 60)).toBeDefined();
-  const hits = f.store.stats.memoryHits;
-  expect(await f.store.nearest(f.file, time, false, 60)).toBeDefined();
-  expect(f.store.stats.memoryHits).toBeGreaterThan(hits);
+  const data = await f.store.readTrackData(f.file, d.entry.path);
+  expect(
+    data.data.tracks.some((t) => t.segments.some((s) => s.time_us?.length)),
+  ).toBe(true);
   expect(
     (await f.display()).features.every(
       (feature) => feature.geometry.coordinates.length === 0,

@@ -2,14 +2,6 @@ import type Database from "better-sqlite3";
 import path from "node:path";
 import { AppError } from "../../domain/errors.js";
 import { LruStore } from "../../domain/lru.js";
-import type { MediaTime } from "../../domain/media-time.js";
-import { formatWall } from "../../domain/media-time.js";
-import type { NearestPoint } from "../../domain/media-track.js";
-import {
-  betterMatch,
-  nearestPoint,
-  validateTrackOrder,
-} from "../../domain/media-track.js";
 import type { TrackData } from "../../domain/trackdata.js";
 import { pointCount } from "../../domain/trackdata.js";
 import type { XmlPort } from "../../services/ports.js";
@@ -39,7 +31,6 @@ export class ArchiveStore {
     CACHE_POINTS,
     (value) => value.points,
   );
-  private mediaValidated = new WeakSet<TrackData>();
   readonly stats = { xml: 0, indexHits: 0, memoryHits: 0 };
   readBytes(input: string, entry: string): Uint8Array {
     return transaction(databasePath(input), false, (db) => {
@@ -178,59 +169,5 @@ export class ArchiveStore {
     });
     if (error || !data) throw new AppError("USER_INPUT", `${source}: ${error}`);
     return data;
-  }
-  async nearest(
-    input: string,
-    time: MediaTime,
-    multiday: boolean,
-    tolerance: number,
-  ): Promise<NearestPoint | undefined> {
-    const archive = databasePath(input);
-    const dates = [0, ...(multiday ? [-1, 1] : [])].map((day) =>
-      formatWall(time.wall + BigInt(day) * 86_400_000_000n, "-").slice(0, 10),
-    );
-    return snapshot(archive, async (db) => {
-      const entries = db
-        .prepare(`SELECT path,sha256 FROM active_archive_entries ORDER BY path`)
-        .all() as { path: string; sha256: string }[];
-      let best: NearestPoint | undefined;
-      for (const entry of entries) {
-        const parts = entry.path.split("/"),
-          name = parts.at(-1)!;
-        if (
-          parts.length >= 3 &&
-          /^\d{4}-\d{2}$/.test(parts[1]!) &&
-          !dates.some((date) => date.startsWith(parts[1]!))
-        )
-          continue;
-        if (!dates.some((date) => name.includes(date))) continue;
-        try {
-          const key = JSON.stringify([archive, entry.sha256, PARSER_VERSION]);
-          let hit = this.cache.get(key);
-          if (!hit) {
-            const data = await this.read(db, archive, entry.path, entry.sha256),
-              points = pointCount(data);
-            hit = { data, points };
-            this.cache.set(key, hit);
-          } else this.stats.memoryHits++;
-          if (!this.mediaValidated.has(hit.data)) {
-            validateTrackOrder(hit.data, name);
-            this.mediaValidated.add(hit.data);
-          }
-          const candidate = nearestPoint(
-            hit.data,
-            name,
-            time.instant,
-            tolerance,
-            false,
-          );
-          if (candidate && betterMatch(candidate, best)) best = candidate;
-        } catch (error) {
-          if (!(error instanceof AppError) || error.code !== "USER_INPUT")
-            throw error;
-        }
-      }
-      return best;
-    });
   }
 }

@@ -23,7 +23,7 @@ tracktool-map --no-browser
 
 TAR.XZ 导出需要安装 XZ Utils（`xz` 命令）并加入 PATH；ZIP 导出和仅打包的 TAR 不需要它。
 
-ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL` 可覆盖。ffmpeg 单独安装并加入 PATH，或指定 `TRACKTOOL_FFMPEG`。本轮不安装或修改用户机器上的外部工具。原生 SQLite/Sharp/LZMA 必须有匹配操作系统/CPU 的预编译包；如果安装器退回源码编译，可能需要平台编译工具或 Python/node-gyp。Linux x86_64 的预编译安装和运行已验证无需 Python；不能把这一结果外推到未测平台。
+媒体处理已迁至独立 mediatool，tracktool 不再依赖 ExifTool、Perl 或 ffmpeg；原有 `exif` 脚本需要调整，见[拆分说明](media-tool.md)。原生 SQLite/Sharp/LZMA 必须有匹配操作系统/CPU 的预编译包；如果安装器退回源码编译，可能需要平台编译工具或 Python/node-gyp。Linux x86_64 的预编译安装和运行已验证无需 Python；不能把这一结果外推到未测平台。
 
 ## 配置与数据
 
@@ -35,11 +35,11 @@ Linux 配置位于 `$XDG_CONFIG_HOME/tracktool/config.json`（默认 `~/.config/
 
 ## 更新与恢复
 
-更新前停止 CLI 和网页写入，使用 `archive full-backup` 保存完整 SQLite 备份，另行备份配置、出图 JSON 和重要媒体原件。更新后重新安装依赖、构建并准备 Chromium。
+更新前停止 CLI 和网页写入，使用 `archive full-backup` 保存完整 SQLite 备份，另行备份配置和出图 JSON。更新后重新安装依赖、构建并准备 Chromium。
 
-使用 `archive restore-backup` 将完整备份恢复到新目录或空目录，再切换 `archive_path`。备份保留轨迹原件、版本历史、展示设置及端点行政区结果。配置、媒体和瓦片不包含在数据库备份中。
+使用 `archive restore-backup` 将完整备份恢复到新目录或空目录，再切换 `archive_path`。备份保留轨迹原件、版本历史、展示设置及端点行政区结果。配置和瓦片不包含在数据库备份中。
 
-不要单独复制正在写入的 SQLite 主文件；使用在线完整备份以包含 WAL 中已提交的数据。应用更新或恢复数据库不会撤销已经写入外部媒体的元数据。
+不要单独复制正在写入的 SQLite 主文件；使用在线完整备份以包含 WAL 中已提交的数据。
 
 ## 从 schema 9 升级到 schema 10
 

@@ -2,18 +2,14 @@
 
 业务命令如下；程序接口见 [API](api.md)，安装与 Chromium 见 [安装说明](install-upgrade.md)。
 
+照片和视频处理已迁至独立的 mediatool CLI，迁移方法见[媒体工具拆分说明](media-tool.md)。tracktool 不再提供 `exif` 命令。
+
 ## 快速上手
 
 ```bash
 # 新建空归档；已有 ZIP 请改用 archive import-zip
 tracktool archive init ~/tracks
 tracktool config set archive_path ~/tracks
-
-# 按轨迹给照片写入 GPS（已有 GPS 的跳过；失败文件移入 TrackPosFailed）
-tracktool exif geotag ./photos --overwrite --failed-folder TrackPosFailed
-
-# 一键修复缺失 GPSPosition/GPSAltitude 的媒体
-tracktool exif repair ./VID
 
 # 归档新轨迹（一次可给多条：SQLite 批量事务入库；默认保留原件、不创建 Backup；任一文件校验失败则整批不入库）
 tracktool kml push ./2024-05-01\ 徒步.kml ./2024-05-02\ 徒步.kml
@@ -113,7 +109,7 @@ operation 还支持 prune（segment_id 和半开 ranges）、draw（after_segmen
 
 通用文件比较与去重交给 [fclones](https://github.com/pkolaczk/fclones)。fclones 独立使用，不是 tracktool 的运行依赖；可从[官方 Releases](https://github.com/pkolaczk/fclones/releases) 下载，或参照[安装说明](https://github.com/pkolaczk/fclones#installation)安装。
 
-下面的目录比较按**文件内容是否在另一目录存在**判断，忽略文件名、目录层级和副本数量。只修改 EXIF 也会造成内容差异；它不是按照片画面判断相似，也不检查目录结构是否相同。
+下面的目录比较按**文件内容是否在另一目录存在**判断，忽略文件名、目录层级和副本数量。只修改 KML 标签也会造成内容差异；它不判断轨迹几何是否相似，也不检查目录结构是否相同。
 
 以下命令已在 Linux、fclones 0.35.0 上验证。把示例路径换成实际绝对路径，任务缓存和报告都放在待比较目录之外：
 
@@ -139,62 +135,10 @@ XDG_CACHE_HOME="/path/to/compare-task-001" fclones group \
 
 ```bash
 fclones group --hidden --no-ignore --min 0 --hash-fn blake3 \
-  "/path/to/photos"
+  "/path/to/tracks"
 ```
 
 以上 `group` 命令只扫描和报告，启用 `--cache` 时另写缓存，不删除或改写输入文件。macOS、Windows 的缓存目录配置不同，`XDG_CACHE_HOME` 这段示例只适用于 Linux。
-
-## 轨迹时间匹配
-
-`exif geotag` 先按轨迹文件名中的日期筛选（`--multiday` 扩展到前后一天），再用轨迹首末时间加上允许误差排除不可能匹配的轨迹。剩余轨迹全部参与比较，选择与拍摄时刻时间差最小的实际记录点；`--max-time-diff` 默认为 60 秒，包含边界，也适用于轨迹中间断录的情况。
-
-时间差相同，优先选覆盖拍摄时刻的轨迹，再按轨迹文件名、点的时间、纬度、经度和海拔升序决定，不依赖归档读取顺序。同一轨迹内两个点距离相同时保留原规则，选较晚的点。每条轨迹加载时建立一次时间索引供整批照片复用，并检查时间顺序；时间倒退的轨迹会提示并跳过，相同时间戳允许保留。这会增加少量索引内存，减少重复整理时间列表的计算；首次读取和解析 KML 仍然需要进行。
-
-## 视频拍摄时区
-
-`exif to-mp4` 和 `exif repair-vid` 使用同一套拍摄时区规则：
-
-| 情况                                       | 默认行为（`--timezone-policy auto`）                                |
-| ------------------------------------------ | ------------------------------------------------------------------- |
-| 有有效拍摄时间，但没有显式时区             | 保持年月日时分秒，补 `+08:00`，或 `--offset-time` 指定的时区        |
-| 已有显式时区，包括 `Z`、`+00:00`、`-00:00` | 保留文件不处理，提示用户选择 `keep` 或 `force`；退出码为 3          |
-| 没有有效拍摄时间，或多个拍摄时间相互矛盾   | 保留文件并报告原因；矛盾时可用 `--time-source TAG` 明确选择时间来源 |
-
-```bash
-# 没有显式时区时补 +08:00；已有时区则跳过并提醒
-tracktool exif to-mp4 ./videos
-
-# 没有显式时区时补 +09:00；此参数单独使用不会覆盖已有时区
-tracktool exif to-mp4 ./videos --offset-time +09:00
-
-# 沿用已存储的时区及其表达的绝对时刻；缺时区仍使用默认值
-tracktool exif to-mp4 ./videos --timezone-policy keep
-
-# 保持钟面时间，强制替换为默认的 +08:00
-tracktool exif to-mp4 ./videos --timezone-policy force
-
-# 保持钟面时间，强制替换为 +09:00
-tracktool exif to-mp4 ./videos --timezone-policy force --offset-time +09:00
-
-# 时间字段相互矛盾时，明确采用其中一个
-tracktool exif to-mp4 ./video.mp4 --timezone-policy keep --time-source XMP-exif:DateTimeOriginal
-```
-
-`force` 用来纠正误标：`12:00+00:00` 强制设为 `+08:00` 后是 `12:00+08:00`，不是保持同一时刻的 `20:00+08:00`。`keep` 信任已存储的偏移，即使它是零；不要仅凭偏移为零就判断它是误标。
-
-转换读取 XMP、Keys、UserData、EXIF、H264 拍摄时间和 QuickTime 创建时间，保留时区是否显式记录的信息。QuickTime 整数时间本身不存独立的时区偏移；尽管规范按 UTC 解释，本工具在**没有显式时区可用时**按指定的拍摄时区解释它的钟面值。这是处理约定，不能自动判断相机原本是否正确使用了 UTC；若确定文件中的值是真正的 UTC，请用 `--offset-time +00:00`。
-
-写入时，XMP/Keys 拍摄时间包含时区，QuickTime 创建时间及轨道/媒体创建时间规范化为 UTC，表达同一个时刻。明确的字符串拍摄时间优先；QuickTime 整数时间与它的 UTC 值或当地钟面值一致时可兼容读取，否则要求选择来源。`--time-source` 支持 `XMP-exif:DateTimeOriginal`、`Keys:CreationDate`、`UserData:DateTimeOriginal`、`ExifIFD:DateTimeOriginal`、`H264:DateTimeOriginal`、`XMP-xmp:CreateDate`、`QuickTime:CreateDate`、`Track1:TrackCreateDate`；它不会替代已有时区所需的 `keep`/`force` 选择。
-
-`shift-time` 和 `to-mp4` 先读取整批文件并检查操作计划，再执行无冲突的文件。已有目标（包括目录和符号链接）、多个文件争用同一路径、改名目标也是另一个源文件、备份路径被目录或符号链接占用，都会在修改元数据前报错。冲突文件保留原状，其他文件继续，命令以 3 退出；`--dry-run` 使用同样的检查。已有普通 `_original` 备份继续保留，`--overwrite` 不允许覆盖其他同名媒体文件。
-
-时间平移改名不增加临时视频副本。实际改名和新转换输出通过硬链接创建新名字后移除旧名字，目标若已存在就拒绝覆盖；文件系统不支持硬链接时会报错，不退回会覆盖文件的操作。预检查不能保证后续磁盘操作一定成功：如果元数据已修改、随后改名失败，文件保留在原路径，但已写入的元数据不会自动回滚。转换仍使用原有的临时输出与首次备份机制。
-
-`to-mp4` 中待选择时区策略的文件同样不移动、不创建备份，其余文件继续。`repair-vid` 涉及整个 `VID` 目录改名，因此先检查目录内所有文件的时区和输出冲突；只要有文件尚不能处理，本次目录编排就以 3 退出，目录保持原状。重跑时，已有的普通输出文件按已完成转换跳过，目录和符号链接仍报冲突。补齐策略或解决冲突后可重新运行。
-
-重复运行时，`auto` 会跳过已补好时区的文件，`keep` 保持原时刻，`force` 使用同一目标时区也不会累积偏移。转换保留首次创建的 `_original` 备份；已有备份不会被重复运行覆盖。
-
-`exif shift-time --by` 接受按 `d/h/m/s` 顺序组合的整数时长，例如 `+1h30m`、`-2d`、`90m`、`0s`。可以省略某些单位，开头最多一个 `+` 或 `-`，不能含空白、小数、重复单位或其他字符。参数会在扫描及读取媒体文件之前校验，错误输入以 1 退出；空目录和预演同样检查。不传 `--by` 时仍可单独使用 `--offset-time`。
 
 ## 预演
 
@@ -212,22 +156,20 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 | --- | --------------------------------------------------------------------------------------------------- |
 | 0   | 全部成功                                                                                            |
 | 1   | 用户输入错误（路径不存在、通配符无匹配、坐标无法解析、配置或 KML 格式错误，以及命令或选项拼写错误） |
-| 2   | 外部工具或 API 失败（exiftool 报错、Google 拒绝请求或超额）                                         |
+| 2   | 外部工具或 API 失败（Google 拒绝请求或超额）                                         |
 | 3   | 部分失败：逐文件隔离后仍有文件未处理完                                                              |
 
 命令名、选项拼写错误、缺必填参数都退 1；2 表示外部依赖失败。
 
 表里的「KML 格式错误」只对单文件命令成立：批量命令（`kml push`、`kml set-tag`）把读不出来的那个文件当作它自己的失败，其余照常处理，命令整体退 3。1 保留给「整批还没开始」的情形——路径不存在、通配符无匹配、`--type` 或 `--tag` 取值非法（类别名不在 Default/Train/Flight 里，活动名不在词表里）。
 
-批量命令遇到单个坏文件不会中止整批：该文件计入失败清单，其余文件照常处理，命令以 3 退出，日志里给出 `N file(s) failed` 汇总。指定 `--failed-folder` 后，会在处理前检查失败目录及同名目标。真实执行会提前创建目录，并创建、删除一个空临时文件检查写入能力，因此没有失败时也可能留下空目录；预演只做只读检查。任一失败目录不可用时，停用本批次的自动整理并提示，主任务继续；同名目标只影响对应文件的整理，保留双方。执行中移动失败会同时记录处理原因和整理错误，并继续后续文件；只在实际移动成功后报告移动位置。修复编排不会把留在原处的失败文件归入成功目录。
-
-`kml push` 与修复编排（`repair`）都把整个文件列表交给批量入口，因此一次 Google 高程请求可覆盖最多 512 个坐标；`exif geotag` 按拍摄时间窗只加载解析归档里相关月份的轨迹（±1 天 multiday 跨月也覆盖）。入库时 SQLite 对整批执行一个事务，源文件移动通过短期日志恢复；ZIP/集合另行导出。
+批量文件编辑会记录逐文件处理结果，存在失败时以 3 退出。轨迹入库先整批校验，在 SQLite 事务中提交；显式移动源文件时通过短期日志恢复。ZIP 和集合 KML 按需另行导出。
 
 ## 配置
 
-配置文件放在各平台自己的用户配置目录里，文件名统一是 `config.json`：Windows 用 `%APPDATA%\tracktool\`（Roaming，变量缺席时退回 `~\AppData\Roaming\tracktool\`），macOS 用 `~/Library/Application Support/tracktool/`，其余系统用 `$XDG_CONFIG_HOME/tracktool/`（取值未设或**不是绝对路径**时退回 `~/.config/tracktool/`——XDG 规范要求忽略相对值）。放在用户目录而不是项目里，是因为设置对工具是全局的：从照片文件夹里跑和从项目根跑必须读到同一份。
+配置文件放在各平台自己的用户配置目录里，文件名统一是 `config.json`：Windows 用 `%APPDATA%\tracktool\`（Roaming，变量缺席时退回 `~\AppData\Roaming\tracktool\`），macOS 用 `~/Library/Application Support/tracktool/`，其余系统用 `$XDG_CONFIG_HOME/tracktool/`（取值未设或**不是绝对路径**时退回 `~/.config/tracktool/`——XDG 规范要求忽略相对值）。放在用户目录而不是项目里，是因为设置对工具是全局的：从轨迹文件夹里跑和从项目根跑必须读到同一份。
 
-字段：`log_level`、`archive_path`、`auto_fill_locations`、`kml_backup_dir_name`、`output_filters`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向包含 `archive.sqlite3` 的**归档目录**；新库通过 `archive init` 创建，ZIP 通过 `archive import-zip` 导入。路径打错不会静默建立新库。显式指定 `--config` 时只使用该文件。版本历史自动保存。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
+字段：`log_level`、`archive_path`、`auto_fill_locations`、`kml_backup_dir_name`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向包含 `archive.sqlite3` 的**归档目录**；新库通过 `archive init` 创建，ZIP 通过 `archive import-zip` 导入。路径打错不会静默建立新库。显式指定 `--config` 时只使用该文件。版本历史自动保存。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
 
 `track_tag.<类别>` 是活动词表：KML 里的 `TrackTags` 存的是 2bulu 的活动名（徒步、地铁），归档类别（集合文件名 `Train.kml`、ZIP 条目前缀 `Train/`、`kml push --type` 的取值域）由这张表查出来。用 `tracktool config set` 增删：
 

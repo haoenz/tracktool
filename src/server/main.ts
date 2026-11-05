@@ -24,7 +24,7 @@ try {
   });
   if (values.help)
     process.stdout.write(
-      "tracktool-map [--host 127.0.0.1] [--port 8765] [--config PATH]\n地图、归档、媒体与持久化任务。支持 --archive PATH --cache PATH --state-dir PATH --files-root PATH（可重复）--refresh-basemap --no-browser。\n",
+      "tracktool-map [--host 127.0.0.1] [--port 8765] [--config PATH]\n地图、轨迹归档与持久化任务。支持 --archive PATH --cache PATH --state-dir PATH --files-root PATH（可重复）--refresh-basemap --no-browser。\n",
     );
   else {
     setGlobalProxyFromEnv({

@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-KML 轨迹归档、地图编辑与照片/视频地理标记工具。CLI 和网页共用同一套业务服务，单一 SQLite 轨迹库为权威数据源，网页地图瓦片和概览缓存是可重建的派生数据。
+KML 轨迹归档、地图编辑与出图工具。CLI 和网页共用同一套业务服务，单一 SQLite 轨迹库为权威数据源，网页地图瓦片和概览缓存是可重建的派生数据。
 
 - 运行时：Node.js 26.x（本项目固定 26.11.1），pnpm 12.10.1，ESM。
 - 语言/框架：TypeScript、React 19、Fastify、MapLibre GL、Tailwind CSS 4、shadcn/ui、oclif、better-sqlite3、Vitest、Playwright。
@@ -30,7 +30,8 @@ pnpm cli <命令>      # 运行 dist/node/cli/main.js，需先 build
 - 修改 `src/` 后若要用 `pnpm cli`、`pnpm start` 或 `pnpm test:e2e`，先 `pnpm build`；E2E 直接导入 `dist/node/...`。
 - `pnpm dev` 用于网页开发：浏览器访问 `http://127.0.0.1:8765`，后台在 8766。
 - 开发构建位于 `.dev/`，与 `dist/` 隔离；运行期间可执行 `pnpm check`。后台、共享代码和渲染资源完整构建成功后才替换后台，编译失败保留旧版本。开发验证使用临时配置、归档和状态目录。
-- 视频转封装需要系统 ffmpeg；Unix 下 ExifTool 需要 Perl；PNG 导出需要 `pnpm cli setup chromium`。
+- 媒体处理位于同级独立项目 `../mediatool`，只读本项目的轨迹库；没有共享源码或运行时依赖。
+- PNG 导出需要 `pnpm cli setup chromium`。
 - 仓库只允许 better-sqlite3 和 sharp 的安装构建脚本（见 `pnpm-workspace.yaml`），不要随意放开其他依赖的 build 脚本。
 
 ## 目录与依赖边界

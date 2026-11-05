@@ -12,7 +12,6 @@ export const DEFAULTS: ConfigData = {
   archive_path: "",
   auto_fill_locations: true,
   kml_backup_dir_name: "Backup",
-  output_filters: "",
   google_api_key: "",
   "track_tag.Default": [
     "默认",

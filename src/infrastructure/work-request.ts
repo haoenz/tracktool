@@ -11,8 +11,7 @@ import { databasePath } from "./archive/database.js";
 import type { WorkFiles } from "./work-files.js";
 
 const archiveNeeded = (op: string) =>
-  op.startsWith("archive:") ||
-  ["kml:merge", "exif:geotag", "exif:repair", "exif:repair-vid"].includes(op);
+  op.startsWith("archive:") || op === "kml:merge";
 
 /** Validation, path resolution and fingerprints for work requests. */
 export class WorkRequestInspector {
@@ -80,17 +79,10 @@ export class WorkRequestInspector {
       value.output = await this.files.resolve(value.output, false);
     if (
       (value.operation.startsWith("kml:") ||
-        value.operation.startsWith("exif:") ||
         ["archive:push", "archive:import-zip"].includes(value.operation)) &&
       !value.inputs.length
     )
       throw new AppError("USER_INPUT", "请选择输入文件或目录");
-    if (
-      ["exif:group", "exif:repair-vid"].includes(value.operation) &&
-      (value.inputs.length !== 1 ||
-        !(await lstat(value.inputs[0]!)).isDirectory())
-    )
-      throw new AppError("USER_INPUT", "此操作需要选择一个媒体目录");
     if (value.operation === "kml:merge" && !value.output)
       throw new AppError("USER_INPUT", "合并轨迹需要指定输出文件");
     if (["archive:download", "archive:delete"].includes(value.operation)) {
@@ -135,11 +127,6 @@ export class WorkRequestInspector {
       !value.options.points?.length
     )
       throw new AppError("USER_INPUT", "请输入处理点或启用自动检测");
-    if (
-      value.operation === "exif:shift-altitude" &&
-      value.options.delta === undefined
-    )
-      throw new AppError("USER_INPUT", "请输入海拔偏移量");
     if (value.operation === "archive:push") value.options.keep = true;
     if (value.operation === "kml:merge" && value.options.keep === false) {
       const backupName = String(
@@ -172,12 +159,6 @@ export class WorkRequestInspector {
       if ((await lstat(input)).isDirectory()) {
         add(input, true);
         for (const file of await this.files.regularPaths(input)) add(file);
-        if (request.operation === "exif:repair-vid")
-          for (const folder of ["VID", "VID_original"]) {
-            const child = path.join(input, folder);
-            add(child, true);
-            for (const file of await this.files.regularPaths(child)) add(file);
-          }
       } else add(input);
     }
     if (request.output) {

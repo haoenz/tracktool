@@ -61,7 +61,6 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
-    "exiftool-vendored": "39.0.1",
     "fastify": "5.12.7",
     "gcoord": "1.0.7",
     "geographiclib-geodesic": "2.2.0",
@@ -106,7 +105,7 @@
     "vite": "8.3.4",
     "vitest": "5.0.4"
   },
-  "description": "KML 轨迹归档、地图与照片/视频地理数据工具",
+  "description": "KML 轨迹归档、地图编辑与出图工具",
   "exports": {
     ".": {
       "types": "./dist/node/api.d.ts",

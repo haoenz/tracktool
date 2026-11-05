@@ -8,7 +8,7 @@ The application retains the notices supplied with redistributed map resources. A
 
 `resources/maps/data/assets.json` records original resource URLs and SHA-256 values. These files are included in the production package; the release verifier checks their hashes. Resource relocation does not change their bytes or licences.
 
-Node dependencies retain their own licences in installed packages, including libxml2-wasm/libxml2, SQLite/better-sqlite3, Sharp/libvips, React/Radix UI, Playwright/Chromium and exiftool-vendored/ExifTool. Track overview tiles use geojson-vt 4.0.3 (ISC) and vt-pbf 3.1.3 (MIT), with their respective licences retained in the installed packages. TAR export uses tar-stream (MIT), with its licence retained in the installed package. External XZ Utils, ffmpeg and Perl are installed separately and retain their own notices. Basemap sources retain provider attribution on the interactive map and exported images; availability and use terms depend on the selected provider.
+Node dependencies retain their own licences in installed packages, including libxml2-wasm/libxml2, SQLite/better-sqlite3, Sharp/libvips, React/Radix UI, Playwright/Chromium. Track overview tiles use geojson-vt 4.0.3 (ISC) and vt-pbf 3.1.3 (MIT), with their respective licences retained in the installed packages. TAR export uses tar-stream (MIT), with its licence retained in the installed package. External XZ Utils is installed separately and retains its own notices. Basemap sources retain provider attribution on the interactive map and exported images; availability and use terms depend on the selected provider.
 
 ## shadcn/ui
 

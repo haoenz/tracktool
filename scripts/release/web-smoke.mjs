@@ -1,19 +1,14 @@
-/** Validate the installed web workflow with Python and system ExifTool absent from PATH. */
+/** Validate the installed track workflow and restart with Python absent from PATH. */
 import { mkdir, writeFile, symlink, readFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import path from "node:path";
 import assert from "node:assert/strict";
-import sharp from "sharp";
 const evidenceDir = path.resolve(process.argv[3] || "sandbox/release-check");
 const consumer = path.resolve(process.argv[2]);
 const bin = path.join(consumer, "runtime-bin");
 await mkdir(bin, { recursive: true });
-for (const [name, target] of [
-  ["node", process.execPath],
-  ["perl", "/usr/bin/perl"],
-  ["ffmpeg", "/usr/bin/ffmpeg"],
-]) {
+for (const [name, target] of [["node", process.execPath]]) {
   try {
     await symlink(target, path.join(bin, name));
   } catch (e) {
@@ -25,8 +20,7 @@ const env = {
   PATH: bin,
   XDG_CONFIG_HOME: path.join(consumer, "config"),
 };
-delete env.TRACKTOOL_EXIFTOOL;
-for (const name of ["python", "python3", "uv", "exiftool"])
+for (const name of ["python", "python3", "uv"])
   assert.equal(spawnSync(name, ["--version"], { env }).error?.code, "ENOENT");
 const main = path.join(
   consumer,
@@ -121,20 +115,18 @@ async function done(id) {
 }
 try {
   await start();
-  const jpg = await sharp({
-    create: { width: 8, height: 8, channels: 3, background: "red" },
-  })
-    .jpeg()
-    .toBuffer();
+  const kml = Buffer.from(
+    '<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>网页轨迹</name><Placemark><LineString><coordinates>120,30,10 120.01,30.01,20</coordinates></LineString></Placemark></Document></kml>',
+  );
   const uploadResponse = await fetch(
-    address + "/api/work/uploads?name=" + encodeURIComponent("网页照片.jpg"),
+    address + "/api/work/uploads?name=" + encodeURIComponent("网页轨迹.kml"),
     {
       method: "POST",
       headers: {
         "x-tracktool-token": token,
         "content-type": "application/octet-stream",
       },
-      body: jpg,
+      body: kml,
     },
   );
   assert.equal(uploadResponse.status, 200);
@@ -142,9 +134,9 @@ try {
   const preview = await done(
     (
       await api("/preview", {
-        operation: "exif:set",
+        operation: "kml:set-tag",
         inputs: uploaded.files,
-        options: { tags: { "IPTC:City": "杭州" } },
+        options: { tag: "骑行", create: true },
       })
     ).id,
   );
@@ -157,7 +149,7 @@ try {
     { headers: { "x-tracktool-token": token } },
   );
   assert.equal(response.status, 200);
-  assert.ok((await response.arrayBuffer()).byteLength > jpg.byteLength);
+  assert.ok((await response.arrayBuffer()).byteLength > kml.byteLength);
   await stop();
   await start();
   assert.equal((await api("/tasks/" + result.id)).status, "succeeded");
@@ -174,9 +166,8 @@ try {
     package: "tracktool@" + version,
     node: process.version,
     python_on_path: false,
-    system_exiftool_on_path: false,
     production_spa: true,
-    uploaded_media_preview_apply_download: true,
+    uploaded_track_preview_apply_download: true,
     persisted_after_process_restart: true,
     upload_cleanup: true,
   };

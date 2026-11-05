@@ -1,4 +1,3 @@
-import type { MediaTime } from "../../domain/media-time.js";
 import { ArchiveWriter } from "./writer.js";
 import type { ArchiveRequest } from "../../domain/archive.js";
 import { parentPort } from "node:worker_threads";
@@ -20,9 +19,6 @@ parentPort!.on(
   async (m: {
     id: number;
     op: string;
-    time?: MediaTime;
-    multiday?: boolean;
-    tolerance?: number;
     request?: ArchiveRequest;
     path: string;
     entries?: string[];
@@ -52,14 +48,6 @@ parentPort!.on(
           break;
         case "write":
           result = await writer.execute(m.request!, controller?.signal);
-          break;
-        case "nearest":
-          result = await store.nearest(
-            m.path,
-            m.time!,
-            m.multiday!,
-            m.tolerance!,
-          );
           break;
         case "catalog":
           result = store.catalog(m.path);
