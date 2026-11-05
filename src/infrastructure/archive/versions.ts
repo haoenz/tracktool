@@ -1,3 +1,4 @@
+import { annotatedSettings } from "./gap-annotations.js";
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { deflateSync } from "node:zlib";
@@ -223,12 +224,26 @@ export function insertPresentation(
       .all(entry.version_id) as { segment_id: string }[]
   ).map((s) => s.segment_id);
   const value = validatePresentation(settings, ids);
+  // Insert annotations before sealing the immutable snapshot.
+  for (const gap of value.gaps)
+    db.prepare("INSERT INTO track_gap_annotations VALUES (?,?,?,?,?)").run(
+      entry.presentation_id,
+      entry.version_id,
+      gap.from,
+      gap.to,
+      gap.reason,
+    );
+  const stored = {
+    schema: value.schema,
+    order: value.order,
+    ignored: value.ignored,
+  };
   db.prepare("INSERT INTO track_presentations VALUES (?,?,?,?,?,?)").run(
     entry.presentation_id,
     entry.version_id,
     operation,
     created,
-    canonical(value),
+    canonical(stored),
     presentationDigest(value),
   );
 }
@@ -571,10 +586,9 @@ export function publishVersions(
       const settings = output.settings ??
         imported ?? {
           schema: 1,
-          default_connect: true,
           order: manifest!.segments.map((s) => s.segment_id),
           ignored: [],
-          connections: [],
+          gaps: [],
         };
       insertPresentation(db, entry, operation, created, settings);
     }
@@ -779,7 +793,7 @@ export class VersionStore {
         ]),
       );
       const settings = validatePresentation(
-        JSON.parse(target.settings_json),
+        annotatedSettings(db, targetPresentation, target.settings_json),
         segments.map((s) => s.segment_id),
       );
       return publishVersions(db, {
@@ -816,7 +830,7 @@ export class VersionStore {
               ...settings,
               order: settings.order.map((id) => ids.get(id)!),
               ignored: settings.ignored.map((id) => ids.get(id)!),
-              connections: settings.connections.map((e) => ({
+              gaps: settings.gaps.map((e) => ({
                 ...e,
                 from: ids.get(e.from)!,
                 to: ids.get(e.to)!,

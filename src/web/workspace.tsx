@@ -14,6 +14,8 @@ export interface EditMap {
   signature?: string;
 }
 export interface Workspace {
+  hiddenTunnelEntries: string[];
+  setTunnelVisible: (entry: string, visible: boolean) => void;
   editMap: Dispatch<SetStateAction<EditMap | undefined>>;
   fit: (tracks: SelectedTrack[]) => void;
   archive: string;

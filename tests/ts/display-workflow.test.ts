@@ -91,6 +91,13 @@ async function fixture() {
       inputs: [versions.current(id)],
       outputs: [{ kind: "presentation", entry_id: id, settings }],
     });
+  const initial = trackDetail(file, id).settings;
+  set({
+    ...initial,
+    gaps: initial.order
+      .slice(1)
+      .map((to, i) => ({ from: initial.order[i]!, to, reason: "tunnel" })),
+  });
   return {
     dir,
     file,
@@ -140,8 +147,12 @@ it("uses presentation snapshots with a warm raw index and never bypasses ignored
     settings = { ...d.settings, ignored: [d.settings.order[1]!] };
   f.set(settings);
   expect(lines(await f.display())).toHaveLength(2);
-  settings.connections = [
-    { from: settings.order[0]!, to: settings.order[2]!, connect: true },
+  settings.gaps = [
+    {
+      from: settings.order[0]!,
+      to: settings.order[2]!,
+      reason: "tunnel" as const,
+    },
   ];
   f.set(settings);
   expect(lines(await f.display())).toHaveLength(3);
@@ -155,8 +166,12 @@ it("exports mixed geometry losslessly and reimports generated edges without inve
   const settings = {
     ...d.settings,
     ignored: [d.settings.order[1]!],
-    connections: [
-      { from: d.settings.order[0]!, to: d.settings.order[2]!, connect: true },
+    gaps: [
+      {
+        from: d.settings.order[0]!,
+        to: d.settings.order[2]!,
+        reason: "tunnel" as const,
+      },
     ],
   };
   f.set(settings);
@@ -334,7 +349,157 @@ it("CLI display export has a read-only dry run and refuses to overwrite targets"
   expect(existsSync(out)).toBe(false);
   const written = spawnSync(process.execPath, args, { encoding: "utf8" });
   expect(written.status, written.stderr).toBe(0);
-  expect(readFileSync(out, "utf8")).toContain("tracktool:display:1");
+  expect(readFileSync(out, "utf8")).toContain("tracktool:display:2");
   expect(spawnSync(process.execPath, args).status).not.toBe(0);
   expect(meta(f.file)).toEqual(before);
+});
+
+it("stores annotations only in SQL, seals snapshots and rejects invalid cross-version endpoints atomically", async () => {
+  const f = await fixture();
+  const detail = trackDetail(f.file, f.id);
+  const [a, b, c] = detail.settings.order as [string, string, string];
+  f.set({
+    ...detail.settings,
+    gaps: [
+      { from: a, to: b, reason: "tunnel" },
+      { from: b, to: c, reason: "other" },
+    ],
+  });
+  const ref = f.ref();
+  readTransaction(f.file, (db) => {
+    const stored = db
+      .prepare("SELECT settings_json FROM track_presentations WHERE id=?")
+      .get(ref.presentation_id) as { settings_json: string };
+    expect(JSON.parse(stored.settings_json)).not.toHaveProperty("gaps");
+    expect(
+      db
+        .prepare(
+          "SELECT reason FROM track_gap_annotations WHERE presentation_id=? ORDER BY reason",
+        )
+        .all(ref.presentation_id),
+    ).toEqual([{ reason: "other" }, { reason: "tunnel" }]);
+  });
+  const before = meta(f.file);
+  for (const sql of [
+    "UPDATE track_gap_annotations SET reason='other' WHERE presentation_id=?",
+    "DELETE FROM track_gap_annotations WHERE presentation_id=?",
+    "INSERT INTO track_gap_annotations SELECT presentation_id,version_id,to_segment_id,from_segment_id,reason FROM track_gap_annotations WHERE presentation_id=?",
+  ])
+    expect(() =>
+      transaction(f.file, true, (db) =>
+        db.prepare(sql).run(ref.presentation_id),
+      ),
+    ).toThrow();
+  expect(() =>
+    transaction(f.file, true, (db) =>
+      db
+        .prepare("INSERT INTO track_gap_annotations VALUES (?,?,?,?,?)")
+        .run("new-snapshot", "wrong-version", a, b, "tunnel"),
+    ),
+  ).toThrow(/FOREIGN KEY/);
+  expect(meta(f.file)).toEqual(before);
+  expect(
+    trackDetail(
+      f.file,
+      f.id,
+      detail.entry.version_id,
+      detail.entry.presentation_id,
+    ).settings,
+  ).toEqual(detail.settings);
+});
+it("export visibility changes only tunnel geometry and retains annotation metadata", async () => {
+  const f = await fixture();
+  const d = trackDetail(f.file, f.id);
+  const [a, b, c] = d.settings.order as [string, string, string];
+  f.set({
+    ...d.settings,
+    gaps: [
+      { from: a, to: b, reason: "tunnel" },
+      { from: b, to: c, reason: "other" },
+    ],
+  });
+  const before = meta(f.file);
+  const shown = readTransaction(f.file, (db) => exportDisplay(db, f.name));
+  const hidden = readTransaction(f.file, (db) =>
+    exportDisplay(db, f.name, undefined, false),
+  );
+  expect(Buffer.from(shown).toString()).toContain("<name>连接线</name>");
+  expect(Buffer.from(hidden).toString()).not.toContain("<name>连接线</name>");
+  expect(Buffer.from(hidden).toString()).toContain("tunnel");
+  expect(Buffer.from(hidden).toString()).toContain("other");
+  expect(meta(f.file)).toEqual(before);
+});
+
+it("backs up, restores and verifies annotations as part of the immutable snapshot digest", async () => {
+  const f = await fixture();
+  const { fullBackup, restoreBackup } =
+    await import("../../dist/node/infrastructure/archive/full-backup.js");
+  const { default: Database } = await import("better-sqlite3");
+  const backup = path.join(f.dir, "full.sqlite3");
+  await fullBackup(f.file, backup);
+  const restored = path.join(f.dir, "restored");
+  await restoreBackup(backup, restored);
+  expect(
+    trackDetail(path.join(restored, "archive.sqlite3"), f.id).settings,
+  ).toEqual(trackDetail(f.file, f.id).settings);
+  const db = new Database(backup);
+  try {
+    db.exec(
+      "DROP TRIGGER gap_annotation_no_update; UPDATE track_gap_annotations SET reason='other'",
+    );
+  } finally {
+    db.close();
+  }
+  await expect(
+    restoreBackup(backup, path.join(f.dir, "corrupt")),
+  ).rejects.toThrow("Presentation digest mismatch");
+});
+
+it("retains tunnel identity in overview caches for both coordinate systems without classifying unknown gaps", async () => {
+  const { overviewFeatures } =
+    await import("../../dist/node/domain/overview.js");
+  for (const crs of ["wgs84", "gcj02"] as const) {
+    const features = overviewFeatures(
+      "journey",
+      [
+        [
+          [179, 30],
+          [-179, 30],
+        ],
+        [
+          [120, 30],
+          [120.001, 30],
+        ],
+      ],
+      crs,
+      "Train",
+      [0],
+    );
+    expect(
+      features
+        .filter((feature) => feature.properties.segmentId === "journey:0")
+        .every((feature) => feature.properties.gapReason === "tunnel"),
+    ).toBe(true);
+    expect(
+      features
+        .filter((feature) => feature.properties.segmentId === "journey:1")
+        .every((feature) => feature.properties.gapReason === undefined),
+    ).toBe(true);
+  }
+  const f = await fixture();
+  const root = path.join(f.dir, "tunnel-overview");
+  const stamp = readStamp(f.file);
+  const manifest = await buildOverview(
+    {
+      source: f.file,
+      root,
+      crs: "wgs84",
+      stamp,
+      fingerprint: fingerprint(stamp, "wgs84"),
+      budget: 64 * 1024 ** 2,
+    },
+    () => {},
+  );
+  const object = await readObject(root, manifest.entries[0]!.display_key!);
+  expect(object.tunnel_segments).toEqual([3, 4]);
 });

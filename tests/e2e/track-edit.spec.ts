@@ -60,19 +60,21 @@ for (const width of [1280, 390])
         name: "在片段 1与片段 2之间补绘轨迹",
         exact: true,
       });
-      const connection = page.getByRole("button", { name: /^片段 1与片段 2/ });
-      const originalConnection = await connection.getAttribute("aria-pressed");
-      await connection.click();
+      const connection = page.getByRole("combobox", {
+        name: "片段 1与片段 2的中断原因",
+      });
+      const classify = async (label: string) => {
+        await connection.click();
+        await page.getByRole("option", { name: label, exact: true }).click();
+      };
+      await classify("隧道");
       await expect(insert).toBeDisabled();
-      await connection.click();
+      await classify("未分类");
       await expect(insert).toBeEnabled();
-      await connection.click();
+      await classify("其他中断");
       await page.getByRole("button", { name: "返回详情", exact: true }).click();
       await page.getByRole("button", { name: "分段管理", exact: true }).click();
-      await expect(connection).toHaveAttribute(
-        "aria-pressed",
-        originalConnection!,
-      );
+      await expect(connection).toContainText("未分类");
       await expect(insert).toBeEnabled();
       await page
         .getByRole("button", {
@@ -115,39 +117,54 @@ for (const width of [1280, 390])
         exact: true,
       });
       await expect(displaySave).toBeDisabled();
-      await display
-        .getByRole("button", { name: "全部断开", exact: true })
-        .click();
-      await expect(
-        display.getByRole("button", {
-          name: "片段 1与片段 4未连接",
-          exact: true,
-        }),
-      ).toBeVisible();
-      await expect(
-        display.getByRole("button", { name: /拖动|上移|下移/ }),
-      ).toHaveCount(0);
+      const annotation = display.getByRole("combobox", {
+        name: "片段 1与片段 4的中断原因",
+      });
+      await expect(annotation).toContainText("未分类");
+      await annotation.click();
+      await page.getByRole("option", { name: "隧道", exact: true }).click();
       await expect(
         display.getByRole("button", { name: /之间补绘轨迹/ }).first(),
       ).toBeDisabled();
       await display.getByRole("button", { name: "取消", exact: true }).click();
       await expect(displaySave).toBeDisabled();
-      await expect(
-        display.getByRole("button", { name: /之间补绘轨迹/ }).first(),
-      ).toBeEnabled();
-
-      await expect(
-        display.getByRole("button", {
-          name: "片段 1与片段 4已连接",
-          exact: true,
-        }),
-      ).toBeVisible();
-      await display
-        .getByRole("button", { name: "全部断开", exact: true })
-        .click();
-      await display
-        .getByRole("button", { name: "全部连接", exact: true })
-        .click();
+      await expect(annotation).toContainText("未分类");
+      await annotation.click();
+      await page.getByRole("option", { name: "隧道", exact: true }).click();
+      await save(page);
+      const snapshot = await call<{
+        entry: { generation: number };
+        settings: unknown;
+      }>(page, `/api/tracks/${fixture.id}`);
+      const tunnelSwitch = display.getByRole("checkbox", {
+        name: "显示本行程的隧道连接线",
+      });
+      await tunnelSwitch.uncheck();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            (id) =>
+              JSON.stringify(
+                window.renderer!.map.getFilter("track-lines"),
+              ).includes(id),
+            fixture.id,
+          ),
+        )
+        .toBe(true);
+      await expect(displaySave).toBeDisabled();
+      expect(await call(page, `/api/tracks/${fixture.id}`)).toEqual(snapshot);
+      await tunnelSwitch.check();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            (id) =>
+              JSON.stringify(
+                window.renderer!.map.getFilter("track-lines"),
+              ).includes(id),
+            fixture.id,
+          ),
+        )
+        .toBe(false);
       await expect(displaySave).toBeDisabled();
 
       await page
@@ -173,7 +190,7 @@ for (const width of [1280, 390])
       );
       await expect(
         timeline.getByRole("button", { name: /调整显示/ }),
-      ).toHaveCount(2);
+      ).toHaveCount(3);
       const oldest = timeline
         .getByRole("listitem")
         .last()

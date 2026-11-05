@@ -111,10 +111,10 @@ function insert(
     insertVersion(db, entry, op, created, raw, manifest, "imported", 1);
     insertPresentation(db, entry, op, created, {
       schema: 1,
-      default_connect: false,
+
       order: manifest.segments.map((s) => s.segment_id),
       ignored: [],
-      connections: [],
+      gaps: [],
     });
     publishEntry(db, entry, null, op);
   })();

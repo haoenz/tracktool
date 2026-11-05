@@ -46,20 +46,13 @@ export function resolvedEdges(
   settings: Presentation,
   ids: string[],
 ): { from: string; to: string }[] {
-  const value = validatePresentation(settings, ids),
-    ignored = new Set(value.ignored),
-    edges = new Map<string, { from: string; to: string; connect: boolean }>();
-  const put = (e: { from: string; to: string; connect: boolean }) =>
-    edges.set(JSON.stringify([e.from, e.to]), e);
-  for (let i = 1; i < value.order.length; i++)
-    put({
-      from: value.order[i - 1]!,
-      to: value.order[i]!,
-      connect: value.default_connect,
-    });
-  value.connections.forEach(put);
-  return [...edges.values()]
-    .filter((e) => e.connect && !ignored.has(e.from) && !ignored.has(e.to))
+  const value = validatePresentation(settings, ids);
+  const ignored = new Set(value.ignored);
+  return value.gaps
+    .filter(
+      (e) =>
+        e.reason === "tunnel" && !ignored.has(e.from) && !ignored.has(e.to),
+    )
     .map(({ from, to }) => ({ from, to }));
 }
 function point(s: TrackSegment, i: number): [number, number] {
@@ -68,11 +61,13 @@ function point(s: TrackSegment, i: number): [number, number] {
 export function evaluatePresentation(
   segments: BoundSegment[],
   settings: Presentation,
+  showTunnels = true,
 ) {
-  const edges = resolvedEdges(
-      settings,
-      segments.map((s) => s.segment_id),
-    ),
+  const resolved = resolvedEdges(
+    settings,
+    segments.map((s) => s.segment_id),
+  );
+  const edges = showTunnels ? resolved : [],
     byId = new Map(segments.map((s) => [s.segment_id, s])),
     ignored = new Set(settings.ignored);
   const visible = settings.order

@@ -469,7 +469,7 @@ export class MapCanvas {
         this.resizing = false;
       }
     }
-    // Appearance edits only change paint; keep overview tiles and sources live.
+    // Update track appearance and tunnel filters without rebuilding tile sources.
     if (
       JSON.stringify(old.style.tracks) !== JSON.stringify(state.style.tracks)
     ) {
@@ -481,6 +481,7 @@ export class MapCanvas {
       ).layers) {
         if (!layer.id.startsWith("track-") || !this.map.getLayer(layer.id))
           continue;
+        if ("filter" in layer) this.map.setFilter(layer.id, layer.filter);
         for (const [key, value] of Object.entries(layer.paint ?? {}))
           this.map.setPaintProperty(layer.id, key, value);
       }

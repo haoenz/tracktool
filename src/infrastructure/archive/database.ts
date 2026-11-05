@@ -108,7 +108,7 @@ export function connect(file: string, write = false): Database.Database {
     if (version !== SCHEMA_VERSION)
       throw new AppError(
         "USER_INPUT",
-        `不支持的轨迹库格式：${String(version)}，当前格式为 ${SCHEMA_VERSION}`,
+        `不支持的轨迹库格式：${String(version)}，当前格式为 ${SCHEMA_VERSION}；请按安装升级文档先升级归档，不能仅修改版本号`,
       );
     // Concurrent first opens of a DELETE-mode database can fail journal-mode
     // conversion immediately, before SQLite's normal BEGIN busy timeout applies.

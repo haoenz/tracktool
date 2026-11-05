@@ -1,3 +1,4 @@
+import { annotatedSettings } from "./gap-annotations.js";
 import type Database from "better-sqlite3";
 import { AppError } from "../../domain/errors.js";
 import { validatePresentation } from "../../domain/track-version.js";
@@ -11,7 +12,7 @@ import type { TrackReference } from "../../shared/track-reference.js";
 import type { Presentation, SegmentManifest } from "../../shared/track-edit.js";
 import { presentationDigest, hashJson } from "./identity.js";
 
-export const DISPLAY_VERSION = 1;
+export const DISPLAY_VERSION = 2;
 export function resolveTrack(
   db: Database.Database,
   track: { entry: string } | TrackReference,
@@ -76,7 +77,7 @@ export function readPresentation(db: Database.Database, ref: TrackReference) {
     locator: JSON.parse(locator_json) as number[],
   }));
   const settings = validatePresentation(
-    JSON.parse(row.settings_json),
+    annotatedSettings(db, ref.presentation_id, row.settings_json),
     segments.map((s) => s.segment_id),
   );
   const sha = row.settings_sha256;

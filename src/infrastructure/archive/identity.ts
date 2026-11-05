@@ -29,7 +29,7 @@ export function presentationDigest(value: Presentation): string {
   return hashJson({
     ...value,
     ignored: [...value.ignored].sort(),
-    connections: [...value.connections].sort((a, b) => {
+    gaps: [...value.gaps].sort((a, b) => {
       const x = JSON.stringify([a.from, a.to]),
         y = JSON.stringify([b.from, b.to]);
       return x < y ? -1 : x > y ? 1 : 0;

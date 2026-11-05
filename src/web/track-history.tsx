@@ -196,7 +196,11 @@ export function TrackHistory({
           )}
           {geometry.data && (
             <TrackEditorMap
-              geometry={geometry.data}
+              geometry={
+                workspace.hiddenTunnelEntries.includes(entryId)
+                  ? { ...geometry.data, connections: [] }
+                  : geometry.data
+              }
               active={active}
               autoFit
               readOnly

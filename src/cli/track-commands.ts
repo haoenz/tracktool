@@ -215,6 +215,7 @@ class TrackExport extends BusinessCommand {
     archive,
     version: Flags.string(),
     presentation: Flags.string(),
+    "hide-tunnels": Flags.boolean({ description: "隐藏隧道连接线" }),
     output: Flags.string({ char: "o", required: true }),
   };
   async run() {
@@ -243,14 +244,19 @@ class TrackExport extends BusinessCommand {
                   )
                   .get(version) as { id: string }
               ).id);
-        return exportDisplay(db, current.path, {
-          entry: current.path,
-          archive_id: archiveId(db),
-          entry_id: args.entry,
-          version_id: version,
-          presentation_id: presentation,
-          sha256: row.sha256,
-        });
+        return exportDisplay(
+          db,
+          current.path,
+          {
+            entry: current.path,
+            archive_id: archiveId(db),
+            entry_id: args.entry,
+            version_id: version,
+            presentation_id: presentation,
+            sha256: row.sha256,
+          },
+          !flags["hide-tunnels"],
+        );
       });
       if (!flags["dry-run"]) exclusive(path.resolve(flags.output), raw);
       this.log(

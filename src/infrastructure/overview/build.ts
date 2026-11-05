@@ -215,12 +215,16 @@ export async function buildOverview(
                 },
               ],
             };
-            const data = displayed(
+            const display = displayed(
               source,
               presentation.segments,
               presentation.settings,
-            ).data;
+            );
+            const data = display.data;
             value = {
+              tunnel_segments: display.view.connections.map(
+                (_, i) => display.view.segments.length + i,
+              ),
               name: value.name,
               tags: value.tags,
               date: value.date,
@@ -250,7 +254,13 @@ export async function buildOverview(
             await atomic(objectPath(root, presentation.key), bytes);
           }
         }
-        features = overviewFeatures(row.id, value.segments, crs, entry.kind);
+        features = overviewFeatures(
+          row.id,
+          value.segments,
+          crs,
+          entry.kind,
+          value.tunnel_segments,
+        );
         entry.name = value.name || entry.name;
         entry.points = value.points;
         entry.segments = value.segments.length;

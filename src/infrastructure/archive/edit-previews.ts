@@ -62,7 +62,7 @@ const noChanges = (): SegmentEditResult["changes"] => ({
   added_points: 0,
   removed_points: 0,
   removed_ranges: [],
-  removed_connections: [],
+  removed_gaps: [],
   before_edges: [],
   after_edges: [],
   warnings: [],
@@ -427,7 +427,6 @@ export class EditPreviews {
                   version_id: source.version_id,
                   segment_id,
                 })),
-                default_connect: source.settings.default_connect,
               },
             },
             signal,
@@ -438,23 +437,12 @@ export class EditPreviews {
             ignored: source.settings.ignored.filter((s) =>
               out.segment_ids.includes(s),
             ),
-            connections: source.settings.connections.filter(
+            gaps: source.settings.gaps.filter(
               (e) =>
                 out.segment_ids.includes(e.from) &&
                 out.segment_ids.includes(e.to),
             ),
           };
-          // Preserve only original logical neighbours; a removed intermediate must not invent a new default edge.
-          for (let j = 1; j < out.segment_ids.length; j++) {
-            const a = out.segment_ids[j - 1]!,
-              b = out.segment_ids[j]!;
-            if (
-              source.settings.order.indexOf(b) !==
-                source.settings.order.indexOf(a) + 1 &&
-              !settings.connections.some((e) => e.from === a && e.to === b)
-            )
-              settings.connections.push({ from: a, to: b, connect: false });
-          }
           const output = prepared.publish.outputs[0]!;
           if (output.kind !== "version") throw new Error("缺少内容输出");
           if (out.tag) {

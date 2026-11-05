@@ -1,3 +1,4 @@
+import { annotatedSettings } from "./gap-annotations.js";
 import { z } from "zod";
 import { AppError } from "../../domain/errors.js";
 import { MAX_KML_BYTES } from "../../domain/trackdata.js";
@@ -89,7 +90,7 @@ export async function prepareSegmentEdit(
         locator: JSON.parse(locator_json) as number[],
       }));
       const settings = validatePresentation(
-        JSON.parse(row.settings_json),
+        annotatedSettings(db, ref.presentation_id, row.settings_json),
         segments.map((s) => s.segment_id),
       );
       if (presentationDigest(settings) !== row.settings_sha256)

@@ -70,10 +70,10 @@ it("revalidates imported XML on save and inserts original coordinates in segment
     segments: manifest.segments,
     settings: {
       schema: 1 as const,
-      default_connect: false,
+
       order: ["original"],
       ignored: [],
-      connections: [],
+      gaps: [],
     },
   };
   const operation = {

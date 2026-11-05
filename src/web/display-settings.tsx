@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Eye, EyeOff, Link, Unlink, Plus } from "lucide-react";
-import { Button } from "./components/controls.js";
+import { Eye, EyeOff, Plus } from "lucide-react";
+import { Button, Select, Checkbox } from "./components/controls.js";
 import type {
   EditGeometry,
   Presentation,
@@ -8,6 +8,8 @@ import type {
 } from "../shared/track-edit.js";
 
 export function DisplaySettings({
+  showTunnels,
+  onShowTunnels,
   settings,
   segments,
   geometry,
@@ -21,6 +23,8 @@ export function DisplaySettings({
   onInsert,
   insertDisabled,
 }: {
+  showTunnels: boolean;
+  onShowTunnels: (value: boolean) => void;
   settings: Presentation;
   segments: SegmentManifest[];
   geometry?: EditGeometry;
@@ -56,44 +60,35 @@ export function DisplaySettings({
       ),
     [geometry],
   );
-  const visible = settings.order.filter((id) => !settings.ignored.includes(id));
   const name = (id: string) =>
     `片段 ${(segments.find((s) => s.segment_id === id)?.ordinal ?? 0) + 1}`;
-  const connected = (from: string, to: string) =>
-    settings.connections.find((e) => e.from === from && e.to === to)?.connect ??
-    (settings.order.indexOf(to) === settings.order.indexOf(from) + 1 &&
-      settings.default_connect);
-  const allConnected =
-    visible.length > 1 &&
-    visible.slice(1).every((to, i) => connected(visible[i]!, to));
-  function connect(from: string, to: string, value: boolean) {
+  function annotate(
+    from: string,
+    to: string,
+    reason: "tunnel" | "other" | "unknown",
+  ) {
     onChange({
       ...settings,
-      connections: [
-        ...settings.connections.filter((e) => e.from !== from || e.to !== to),
-        { from, to, connect: value },
+      gaps: [
+        ...settings.gaps.filter((gap) => gap.from !== from || gap.to !== to),
+        ...(reason === "unknown" ? [] : [{ from, to, reason }]),
       ],
-    });
-  }
-  function batch(value: boolean) {
-    onChange({
-      ...settings,
-      default_connect: false,
-      connections: value
-        ? visible
-            .slice(1)
-            .map((to, i) => ({ from: visible[i]!, to, connect: true }))
-        : [],
     });
   }
   return (
     <section aria-label="分段管理" className="space-y-3">
+      <Checkbox checked={showTunnels} onCheckedChange={onShowTunnels}>
+        显示本行程的隧道连接线
+      </Checkbox>
+      <p className="text-xs text-muted-foreground">
+        隧道按开关显示连接线；其他中断和未分类保持断开。显隐仅保存到应用设置。
+      </p>
       <fieldset disabled={busy} className="min-w-0 space-y-3">
         <ol className="space-y-1" aria-label="显示片段列表">
           {settings.order.slice(0, limit).map((id, i) => {
             const hidden = settings.ignored.includes(id),
               segment = segments.find((s) => s.segment_id === id)!;
-            const next = !hidden ? visible[visible.indexOf(id) + 1] : undefined;
+            const next = settings.order[i + 1];
             const points = geometry?.segments.find(
               (s) => s.segment_id === id,
             )?.coordinates;
@@ -146,32 +141,22 @@ export function DisplaySettings({
                 {(next || settings.order[i + 1]) && (
                   <div className="flex items-center gap-1">
                     {next && (
-                      <div className="ml-8 flex w-8 flex-col items-center">
-                        <span
-                          aria-hidden="true"
-                          className="h-1 w-px bg-border"
-                        />
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-6"
-                          aria-label={`${name(id)}与${name(next)}${connected(id, next) ? "已连接" : "未连接"}`}
-                          aria-pressed={connected(id, next)}
-                          onClick={() =>
-                            connect(id, next, !connected(id, next))
-                          }
-                        >
-                          {connected(id, next) ? (
-                            <Link size={14} />
-                          ) : (
-                            <Unlink size={14} />
-                          )}
-                        </Button>
-                        <span
-                          aria-hidden="true"
-                          className="h-1 w-px bg-border"
-                        />
-                      </div>
+                      <Select
+                        aria-label={`${name(id)}与${name(next)}的中断原因`}
+                        value={
+                          settings.gaps.find(
+                            (gap) => gap.from === id && gap.to === next,
+                          )?.reason ?? "unknown"
+                        }
+                        options={[
+                          { value: "unknown", label: "未分类" },
+                          { value: "tunnel", label: "隧道" },
+                          { value: "other", label: "其他中断" },
+                        ]}
+                        onChange={(reason: "unknown" | "tunnel" | "other") =>
+                          annotate(id, next, reason)
+                        }
+                      />
                     )}
                     {settings.order[i + 1] && (
                       <Button
@@ -203,13 +188,6 @@ export function DisplaySettings({
         role="group"
         aria-label="保存显示设置"
       >
-        <Button
-          className="mr-auto"
-          disabled={busy || visible.length < 2}
-          onClick={() => batch(!allConnected)}
-        >
-          {allConnected ? "全部断开" : "全部连接"}
-        </Button>
         <Button disabled={busy || !dirty} onClick={onDiscard}>
           取消
         </Button>

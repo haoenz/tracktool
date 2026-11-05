@@ -32,11 +32,15 @@ function locate(root: XmlElement, path: number[]) {
   return node;
 }
 /** Keep samples, timestamps, altitude, style definitions and extension data intact. */
-export function displayKml(input: SegmentInput): Uint8Array {
+export function displayKml(
+  input: SegmentInput,
+  showTunnels = true,
+): Uint8Array {
   return withDocument(input.raw, (doc) => {
     const view = evaluatePresentation(
       bindSegments(readTrackData(doc), input.segments),
       input.settings,
+      showTunnels,
     );
     const nodes = new Map(
       input.segments.map((s) => [s.segment_id, locate(doc.root, s.locator)]),
@@ -103,7 +107,7 @@ export function displayKml(input: SegmentInput): Uint8Array {
         n.addText("0");
       }
     const metadata: DisplayMetadata = {
-      schema: 1,
+      schema: 2,
       segments: view.segments.map((s) => ({
         xml_id: ids.get(s.segment_id)!,
         source_kind: s.source_kind,
@@ -114,10 +118,13 @@ export function displayKml(input: SegmentInput): Uint8Array {
     const connectionByEdge = new Map(
       view.connections.map((c) => [JSON.stringify([c.from, c.to]), c]),
     );
-    for (const [i, e] of view.edges.entries()) {
+    for (const [i, e] of input.settings.gaps
+      .filter((gap) => visible.has(gap.from) && visible.has(gap.to))
+      .entries()) {
       const c = connectionByEdge.get(JSON.stringify([e.from, e.to])),
         line_id = c ? `${prefix}-c${i}` : undefined;
       metadata.edges.push({
+        reason: e.reason,
         from: ids.get(e.from)!,
         to: ids.get(e.to)!,
         ...(line_id ? { line_id } : {}),
@@ -161,11 +168,11 @@ export function presentationFromDocument(
   const order = groups.flatMap((g) =>
     g.segments.map((s) => byXml.get(s.xml_id)!),
   );
-  const connections = groups.flatMap((g) =>
+  const gaps = groups.flatMap((g) =>
     g.edges.map((e) => ({
       from: byXml.get(e.from)!,
       to: byXml.get(e.to)!,
-      connect: true,
+      reason: e.reason,
     })),
   );
   const imported = new Set(order);
@@ -175,7 +182,7 @@ export function presentationFromDocument(
       .map((s) => s.segment_id),
   );
   return validatePresentation(
-    { schema: 1, default_connect: false, order, ignored: [], connections },
+    { schema: 1, order, ignored: [], gaps },
     segments.map((s) => s.segment_id),
   );
 }

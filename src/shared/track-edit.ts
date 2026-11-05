@@ -5,11 +5,14 @@ const id = z.string().min(1).max(200);
 export const PresentationSchema = z
   .object({
     schema: z.literal(1),
-    default_connect: z.boolean(),
     order: z.array(id).max(10000),
     ignored: z.array(id).max(10000),
-    connections: z
-      .array(z.object({ from: id, to: id, connect: z.boolean() }).strict())
+    gaps: z
+      .array(
+        z
+          .object({ from: id, to: id, reason: z.enum(["tunnel", "other"]) })
+          .strict(),
+      )
       .max(20000),
   })
   .strict()
@@ -22,7 +25,7 @@ export const PresentationSchema = z
     if (v.ignored.some((s) => !positions.has(s)))
       fail("unknown ignored segment");
     const edges = new Set<string>();
-    for (const edge of v.connections) {
+    for (const edge of v.gaps) {
       const from = positions.get(edge.from),
         to = positions.get(edge.to);
       if (from === undefined || to === undefined)
@@ -129,7 +132,6 @@ export const SegmentEditSchema = z.discriminatedUnion("kind", [
         )
         .min(1)
         .max(10000),
-      default_connect: z.boolean(),
     })
     .strict(),
   z
@@ -244,7 +246,7 @@ export type EditPreview = {
     added_points: number;
     removed_points: number;
     removed_ranges: { segment_id: string; start: number; end: number }[];
-    removed_connections: Presentation["connections"];
+    removed_gaps: Presentation["gaps"];
     before_edges: { from: string; to: string }[];
     after_edges: { from: string; to: string }[];
     warnings: string[];

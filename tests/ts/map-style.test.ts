@@ -522,3 +522,27 @@ describe("map content controls", () => {
     expect(featureReason(state, cfg, "paths")).toBe("");
   });
 });
+
+it("hides only the selected journey's tunnel features and keeps the preference in print documents", async () => {
+  const { printDocument, PrintDocumentSchema } =
+    await import("../../src/shared/print.js");
+  const state = defaultMapState();
+  state.style.tracks.hiddenTunnelEntries = ["journey-a"];
+  const style = mapStyle(state, config());
+  expect(styleSpec.validateStyleMin(style)).toEqual([]);
+  const layer = style.layers.find((layer) => layer.id === "track-lines")!;
+  const compiled = styleSpec.createExpression(
+    "filter" in layer ? layer.filter : undefined,
+  );
+  if (compiled.result !== "success")
+    throw new Error(JSON.stringify(compiled.value));
+  const visible = (properties: Record<string, unknown>) =>
+    compiled.value.evaluate({ zoom: 10 }, { type: 2, properties });
+  expect(visible({ trackId: "journey-a", gapReason: "tunnel" })).toBe(false);
+  expect(visible({ trackId: "journey-b", gapReason: "tunnel" })).toBe(true);
+  expect(visible({ trackId: "journey-a" })).toBe(true);
+  const document = PrintDocumentSchema.parse(
+    JSON.parse(JSON.stringify(printDocument(state, "archive", []))),
+  );
+  expect(document.style.tracks.hiddenTunnelEntries).toEqual(["journey-a"]);
+});

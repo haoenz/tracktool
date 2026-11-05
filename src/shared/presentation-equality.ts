@@ -1,19 +1,10 @@
 import type { Presentation } from "./track-edit.js";
 
-// Compare effective connections, including hidden segments so their edits survive.
+// Classification changes matter even when they do not change visible geometry.
 function connectionKeys(settings: Presentation): string[] {
-  const edges = new Set<string>();
-  if (settings.default_connect) {
-    for (let i = 1; i < settings.order.length; i++) {
-      edges.add(JSON.stringify([settings.order[i - 1], settings.order[i]]));
-    }
-  }
-  for (const { from, to, connect } of settings.connections) {
-    const key = JSON.stringify([from, to]);
-    if (connect) edges.add(key);
-    else edges.delete(key);
-  }
-  return [...edges].sort();
+  return settings.gaps
+    .map(({ from, to, reason }) => JSON.stringify([from, to, reason]))
+    .sort();
 }
 
 export function samePresentation(a: Presentation, b: Presentation): boolean {

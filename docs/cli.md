@@ -103,7 +103,7 @@ tracktool track operation OPERATION_ID
 }
 ```
 
-operation 还支持 prune（segment_id 和半开 ranges）、draw（after_segment_id、WGS84 coordinates，可明确吸附）、compose（按序 version_id/segment_id 和 default_connect）、presentation（完整 settings）、split_journey（每个输出 path/category/segment_ids）、restore_version（version_id/presentation_id）。完整契约见 [API](api.md) 和 `src/shared/track-edit.ts`。未知字段、重复/遗漏段、非法范围和倒向连接均拒绝。
+operation 还支持 prune（segment_id 和半开 ranges）、draw（after_segment_id、WGS84 coordinates，可明确吸附）、compose（按序 version_id/segment_id）、presentation（完整 settings）、split_journey（每个输出 path/category/segment_ids）、restore_version（version_id/presentation_id）。完整契约见 [API](api.md) 和 `src/shared/track-edit.ts`。未知字段、重复/遗漏段、非法范围和倒向连接均拒绝。
 
 整组撤销请求为 `{schema:1,archive_id,operation:{kind:"restore_group",operation_id,expected:[…]}}`，expected 从 `track operation` 各 effect.after 取出上述五个目标引用字段。全部成员仍与原操作结果一致才能撤销；生成的新行程保留为历史来源，原行程恢复活动状态。恢复历史版本同样先预览，不删除后续版本。
 

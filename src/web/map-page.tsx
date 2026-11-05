@@ -40,6 +40,7 @@ import { basemapLabel } from "./basemap-catalog.js";
 import { BasemapPicker } from "./basemap-picker.js";
 import {
   Alert,
+  Checkbox,
   Button,
   Input,
   Modal,
@@ -521,6 +522,12 @@ function Editor({ initial }: { initial: Bootstrap }) {
       return next;
     });
   };
+  const setTunnelVisible = (entry: string, visible: boolean) =>
+    change((next) => {
+      next.style.tracks.hiddenTunnelEntries =
+        next.style.tracks.hiddenTunnelEntries.filter((id) => id !== entry);
+      if (!visible) next.style.tracks.hiddenTunnelEntries.push(entry);
+    });
   const openArchive = async (path = initial.initialArchive) => {
     const sequence = ++operations.current;
     setBusy(true);
@@ -1221,6 +1228,8 @@ function Editor({ initial }: { initial: Bootstrap }) {
   return (
     <WorkspaceContext.Provider
       value={{
+        hiddenTunnelEntries: state.style.tracks.hiddenTunnelEntries,
+        setTunnelVisible,
         archive: catalog?.archive ?? initial.initialArchive,
         draft: reportDraft,
         editMap: setEditMap,
@@ -1830,6 +1839,18 @@ function Editor({ initial }: { initial: Bootstrap }) {
                     })
                   }
                 />
+                <Checkbox
+                  checked={
+                    !state.style.tracks.hiddenTunnelEntries.includes(
+                      overview.id,
+                    )
+                  }
+                  onCheckedChange={(visible) =>
+                    setTunnelVisible(overview.id, visible)
+                  }
+                >
+                  显示本行程的隧道连接线
+                </Checkbox>
                 <TrackDetailLinks
                   views={detailLinks}
                   titles={editorTitles}

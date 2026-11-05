@@ -132,6 +132,7 @@ export function deleteEntryInTransaction(
     const owned =
       "version_id IN (SELECT id FROM track_versions WHERE entry_id=?)";
     for (const table of [
+      "track_gap_annotations",
       "track_segment_sources",
       "track_source_locations",
       "track_presentations",
@@ -180,6 +181,7 @@ export function deleteEntryInTransaction(
     );
     try {
       for (const table of [
+        "track_gap_annotations",
         "track_segment_sources",
         "track_source_locations",
         "track_operation_inputs",

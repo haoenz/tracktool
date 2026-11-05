@@ -20,6 +20,7 @@ export interface DisplayProperties {
   part: number;
   role: "line" | "point";
   minLineZoom: number;
+  gapReason?: "tunnel";
 }
 export type DisplayFeature = Feature<LineString | Point, DisplayProperties>;
 export function project([x, y]: Position): Position {
@@ -66,8 +67,10 @@ export function overviewFeatures(
   segments: Position[][],
   crs: OverviewCrs,
   kind = "Unknown",
+  tunnelSegments: number[] = [],
 ): DisplayFeature[] {
   const result: DisplayFeature[] = [];
+  const tunnels = new Set(tunnelSegments);
   for (const [s, raw] of segments.entries()) {
     if (
       !raw.length ||
@@ -78,7 +81,13 @@ export function overviewFeatures(
         "轨迹包含空分段、无效坐标或超出 Web Mercator 纬度范围",
       );
     const coordinates = raw.map((p) => displayCoordinate(p, crs));
-    const base = { kind, trackId: id, segmentId: `${id}:${s}`, part: 0 };
+    const base = {
+      kind,
+      trackId: id,
+      segmentId: `${id}:${s}`,
+      part: 0,
+      ...(tunnels.has(s) ? { gapReason: "tunnel" as const } : {}),
+    };
     if (coordinates.length === 1) {
       const p = coordinates[0]!;
       result.push({

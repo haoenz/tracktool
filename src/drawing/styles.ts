@@ -596,7 +596,22 @@ export function mapStyle(
         id: "track-lines",
         type: "line",
         source: "tracks",
-        filter: ["==", ["geometry-type"], "LineString"],
+        filter: [
+          "all",
+          ["==", ["geometry-type"], "LineString"],
+          [
+            "!",
+            [
+              "all",
+              ["==", ["get", "gapReason"], "tunnel"],
+              [
+                "in",
+                ["get", "trackId"],
+                ["literal", state.style.tracks.hiddenTunnelEntries],
+              ],
+            ],
+          ],
+        ],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": state.style.tracks.current.color,
@@ -607,7 +622,22 @@ export function mapStyle(
         id: "track-points",
         type: "circle",
         source: "tracks",
-        filter: ["==", ["geometry-type"], "Point"],
+        filter: [
+          "all",
+          ["==", ["geometry-type"], "Point"],
+          [
+            "!",
+            [
+              "all",
+              ["==", ["get", "gapReason"], "tunnel"],
+              [
+                "in",
+                ["get", "trackId"],
+                ["literal", state.style.tracks.hiddenTunnelEntries],
+              ],
+            ],
+          ],
+        ],
         paint: {
           "circle-color": state.style.tracks.current.color,
           "circle-radius":

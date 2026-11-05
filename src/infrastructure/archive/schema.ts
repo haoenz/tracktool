@@ -1,5 +1,5 @@
 // Current archive structure. Creation never runs intermediate schemas.
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 export const SCHEMA = `
 CREATE TABLE archive_meta (
  singleton INTEGER PRIMARY KEY CHECK(singleton=1), archive_id TEXT NOT NULL,
@@ -98,6 +98,29 @@ CREATE TABLE track_presentations (
  settings_sha256 TEXT NOT NULL CHECK(length(settings_sha256)=64),
  UNIQUE(version_id,id)
 );
+
+CREATE TABLE track_gap_annotations (
+ presentation_id TEXT NOT NULL, version_id TEXT NOT NULL,
+ from_segment_id TEXT NOT NULL, to_segment_id TEXT NOT NULL,
+ reason TEXT NOT NULL CHECK(reason IN ('tunnel','other')),
+ PRIMARY KEY(presentation_id,from_segment_id,to_segment_id),
+ CHECK(from_segment_id<>to_segment_id),
+ FOREIGN KEY(version_id,presentation_id) REFERENCES track_presentations(version_id,id)
+   DEFERRABLE INITIALLY DEFERRED,
+ FOREIGN KEY(version_id,from_segment_id) REFERENCES track_segments(version_id,segment_id),
+ FOREIGN KEY(version_id,to_segment_id) REFERENCES track_segments(version_id,segment_id)
+);
+CREATE INDEX gap_annotations_version ON track_gap_annotations(version_id);
+CREATE TRIGGER gap_annotation_frozen BEFORE INSERT ON track_gap_annotations
+ WHEN EXISTS(SELECT 1 FROM track_presentations WHERE id=NEW.presentation_id) BEGIN
+ SELECT RAISE(ABORT,'immutable gap annotations'); END;
+CREATE TRIGGER gap_annotation_no_update BEFORE UPDATE ON track_gap_annotations
+ BEGIN SELECT RAISE(ABORT,'immutable gap annotation'); END;
+CREATE TRIGGER gap_annotation_no_delete BEFORE DELETE ON track_gap_annotations
+ WHEN tracktool_can_delete('track_gap_annotations',OLD.rowid)<>1 BEGIN
+ SELECT RAISE(ABORT,'protected gap annotation'); END;
+CREATE TRIGGER gap_annotation_insert AFTER INSERT ON track_gap_annotations BEGIN
+ UPDATE archive_meta SET storage_revision=storage_revision+1 WHERE singleton=1; END;
 
 CREATE TABLE track_source_locations (
  id TEXT PRIMARY KEY NOT NULL, operation_id TEXT NOT NULL REFERENCES track_operations(id),

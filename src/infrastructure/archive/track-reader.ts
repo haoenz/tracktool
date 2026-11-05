@@ -1,3 +1,4 @@
+import { annotatedSettings } from "./gap-annotations.js";
 import type Database from "better-sqlite3";
 import { AppError } from "../../domain/errors.js";
 import {
@@ -49,7 +50,7 @@ export function versionInputMeta(
     throw new AppError("USER_INPUT", "来源版本或段清单不可用");
   const segments = segmentRows(db, versionId);
   const settings = validatePresentation(
-    JSON.parse(row.settings_json),
+    annotatedSettings(db, presentationId, row.settings_json),
     segments.map((s) => s.segment_id),
   );
   if (presentationDigest(settings) !== row.settings_sha256)
@@ -143,7 +144,7 @@ export function trackDetail(
     if (!p) throw new AppError("USER_INPUT", "展示快照不属于该版本");
     const segments = segmentRows(db, version),
       settings = validatePresentation(
-        JSON.parse(p.settings_json),
+        annotatedSettings(db, selected, p.settings_json),
         segments.map((s) => s.segment_id),
       );
     if (presentationDigest(settings) !== p.settings_sha256)

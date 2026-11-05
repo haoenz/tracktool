@@ -314,7 +314,7 @@ export function editSegments(
     added_points: 0,
     removed_points: 0,
     removed_ranges: [],
-    removed_connections: [],
+    removed_gaps: [],
     before_edges: resolvedEdges(
       input.settings,
       input.segments.map((s) => s.segment_id),
@@ -326,11 +326,11 @@ export function editSegments(
     kinds = input.segments.map((s) => s.source_kind);
   const sources = input.segments.flatMap((s, i) => lineage(input, s, i));
   if (op.kind === "presentation") {
-    changes.removed_connections = input.settings.connections.filter(
+    changes.removed_gaps = input.settings.gaps.filter(
       (old) =>
-        !op.settings.connections.some(
+        !op.settings.gaps.some(
           (e) =>
-            e.from === old.from && e.to === old.to && e.connect === old.connect,
+            e.from === old.from && e.to === old.to && e.reason === old.reason,
         ),
     );
     return finish(input.raw, ids, kinds, op.settings, sources, changes);
@@ -394,7 +394,7 @@ export function editSegments(
           end: s.point_count,
         });
       }
-    changes.removed_connections = [...input.settings.connections];
+    changes.removed_gaps = [...input.settings.gaps];
     changes.warnings.push(
       "Composition uses the explicitly selected segment order and fresh presentation settings; source defaults are not inferred",
     );
@@ -408,10 +408,9 @@ export function editSegments(
       outKinds,
       {
         schema: 1,
-        default_connect: op.default_connect,
         order: outIds,
         ignored: [],
-        connections: [],
+        gaps: [],
       },
       outSources,
       changes,
@@ -453,7 +452,7 @@ export function editSegments(
       const id = stableId(`${seed}:draw`),
         inserted = insertSettings(settings, op.after_segment_id, id);
       settings = inserted.settings;
-      changes.removed_connections = inserted.removed;
+      changes.removed_gaps = inserted.removed;
       const kmlNs = ns(doc).kml,
         feature = `<Placemark xmlns="${xmlText(kmlNs)}"><name>补绘</name><LineString><coordinates>${coordinates.map((p) => p.join(",")).join(" ")}</coordinates></LineString></Placemark>`;
       appendFeature(doc, feature, patches);
@@ -520,6 +519,22 @@ export function editSegments(
         );
       } else {
         const ranges = keptRanges(op.ranges, s.point_count);
+        const removed = settings.gaps.filter(
+          (gap) =>
+            (gap.from === s.segment_id &&
+              ranges.at(-1)!.end !== s.point_count) ||
+            (gap.to === s.segment_id && ranges[0]!.start !== 0),
+        );
+        if (removed.length) {
+          settings = {
+            ...settings,
+            gaps: settings.gaps.filter((gap) => !removed.includes(gap)),
+          };
+          changes.removed_gaps.push(...removed);
+          changes.warnings.push(
+            "中断端点已改变，相关原因标注已清除，请重新确认。",
+          );
+        }
         patches.push(patch(node, select(ranges)));
         sources.splice(
           0,

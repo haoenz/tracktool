@@ -195,7 +195,7 @@ it("ignores unrelated revisions but rejects stale presentation generations even 
     addEntry(db, "Default/unrelated.kml", raw, "Default"),
   );
   const settings = structuredClone(f.detail.settings);
-  settings.default_connect = false;
+  settings.ignored = [settings.order[0]!];
   const presentation = await f.previews.create(
     f.file,
     randomUUID(),
@@ -357,7 +357,7 @@ it("group restore detects later edits to any member at apply time", async () => 
       {
         kind: "presentation",
         entry_id: f.id,
-        settings: { ...d.settings, default_connect: false },
+        settings: { ...d.settings, ignored: [...d.settings.order] },
       },
     ],
   });

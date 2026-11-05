@@ -1,3 +1,4 @@
+import { annotatedSettings } from "./gap-annotations.js";
 import Database from "better-sqlite3";
 import {
   linkSync,
@@ -69,9 +70,10 @@ export function verifyArchive(db: Database.Database): ArchiveStamp {
       );
     for (const row of db
       .prepare(
-        "SELECT version_id,settings_json,settings_sha256 FROM track_presentations",
+        "SELECT id,version_id,settings_json,settings_sha256 FROM track_presentations",
       )
       .iterate() as Iterable<{
+      id: string;
       version_id: string;
       settings_json: string;
       settings_sha256: string;
@@ -85,7 +87,10 @@ export function verifyArchive(db: Database.Database): ArchiveStamp {
       ).map((s) => s.segment_id);
       if (
         presentationDigest(
-          validatePresentation(JSON.parse(row.settings_json), ids),
+          validatePresentation(
+            annotatedSettings(db, row.id, row.settings_json),
+            ids,
+          ),
         ) !== row.settings_sha256
       )
         throw new AppError("USER_INPUT", "Presentation digest mismatch");

@@ -31,7 +31,7 @@ export type SegmentEditResult = {
     added_points: number;
     removed_points: number;
     removed_ranges: { segment_id: string; start: number; end: number }[];
-    removed_connections: Presentation["connections"];
+    removed_gaps: Presentation["gaps"];
     before_edges: { from: string; to: string }[];
     after_edges: { from: string; to: string }[];
     warnings: string[];
@@ -77,7 +77,7 @@ export function keptRanges(removed: PointRange[], count: number): PointRange[] {
     );
   return kept;
 }
-/** Remap incident overrides to the first/last child; explicitly break every new internal edge. */
+/** Preserve endpoint annotations on the first/last child; new internal gaps remain unclassified. */
 export function splitSettings(
   settings: Presentation,
   id: string,
@@ -87,39 +87,32 @@ export function splitSettings(
     ...settings,
     order: settings.order.flatMap((s) => (s === id ? children : [s])),
     ignored: settings.ignored.flatMap((s) => (s === id ? children : [s])),
-    connections: [
-      ...settings.connections.map((e) => ({
-        ...e,
-        from: e.from === id ? children.at(-1)! : e.from,
-        to: e.to === id ? children[0]! : e.to,
-      })),
-      ...children
-        .slice(1)
-        .map((to, i) => ({ from: children[i]!, to, connect: false })),
-    ],
+    gaps: settings.gaps.map((e) => ({
+      ...e,
+      from: e.from === id ? children.at(-1)! : e.from,
+      to: e.to === id ? children[0]! : e.to,
+    })),
   };
 }
 export function insertSettings(
   settings: Presentation,
   after: string | null,
   id: string,
-): { settings: Presentation; removed: Presentation["connections"] } {
+): { settings: Presentation; removed: Presentation["gaps"] } {
   const at = after === null ? 0 : settings.order.indexOf(after) + 1;
   if (after !== null && at === 0)
     throw new AppError("USER_INPUT", "未知的插入片段");
   const left = new Set(settings.order.slice(0, at)),
     right = new Set(settings.order.slice(at));
   // Any old cross-boundary override would bypass the newly inserted geometry.
-  const removed = settings.connections.filter(
+  const removed = settings.gaps.filter(
     (e) => left.has(e.from) && right.has(e.to),
   );
   return {
     settings: {
       ...settings,
       order: [...settings.order.slice(0, at), id, ...settings.order.slice(at)],
-      connections: settings.connections.filter(
-        (e) => !(left.has(e.from) && right.has(e.to)),
-      ),
+      gaps: settings.gaps.filter((e) => !(left.has(e.from) && right.has(e.to))),
     },
     removed,
   };

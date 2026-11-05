@@ -1,3 +1,4 @@
+import { trackDetail } from "../../dist/node/infrastructure/archive/track-reader.js";
 import Database from "better-sqlite3";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
@@ -115,14 +116,12 @@ function change(
   };
 }
 function settings(file: string, entry: EntrySnapshot): Presentation {
-  return JSON.parse(
-    (
-      rows(
-        file,
-        `SELECT settings_json FROM track_presentations WHERE id='${entry.presentation_id}'`,
-      )[0] as { settings_json: string }
-    ).settings_json,
-  ) as Presentation;
+  return trackDetail(
+    file,
+    entry.entry_id,
+    entry.version_id,
+    entry.presentation_id,
+  ).settings;
 }
 it("locates mixed geometries without treating untimed lines as hand drawing or changing bytes", () => {
   const bytes = Buffer.from(
@@ -209,14 +208,14 @@ it("stores presentation snapshots separately and rolls invalid settings back com
     {
       kind: "presentation",
       entry_id: entry.entry_id,
-      settings: { ...initial, default_connect: false },
+      settings: { ...initial, ignored: [...initial.order] },
     },
   ];
   const output = store.publish(request).entries[0]!;
   expect(output.version_id).toBe(entry.version_id);
   expect(output.generation).toBe(2);
   expect(settings(file, entry)).toEqual(initial);
-  expect(settings(file, output).default_connect).toBe(false);
+  expect(settings(file, output).ignored).toEqual(initial.order);
   expect(rows(file, "SELECT * FROM kml_objects")).toHaveLength(1);
 });
 it("publishes and restores a split group atomically and protects later edits", async () => {

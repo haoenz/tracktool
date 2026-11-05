@@ -839,32 +839,26 @@ function TrackEditor({
       geometry.data.segments.map((segment) => [segment.segment_id, segment]),
     );
     const ignored = new Set(settings.ignored);
-    const edges = new Map<
-      string,
-      { from: string; to: string; connect: boolean }
-    >();
-    const put = (edge: { from: string; to: string; connect: boolean }) =>
-      edges.set(JSON.stringify([edge.from, edge.to]), edge);
-    for (let i = 1; i < settings.order.length; i++)
-      put({
-        from: settings.order[i - 1]!,
-        to: settings.order[i]!,
-        connect: settings.default_connect,
-      });
-    settings.connections.forEach(put);
     mapData = {
       segments: settings.order
         .filter((id) => !ignored.has(id))
         .flatMap((id) => (byId.get(id) ? [byId.get(id)!] : [])),
-      connections: [...edges.values()].flatMap(({ from, to, connect }) => {
+      connections: settings.gaps.flatMap(({ from, to, reason }) => {
         const a = byId.get(from)?.coordinates.at(-1),
           b = byId.get(to)?.coordinates[0];
-        return connect && !ignored.has(from) && !ignored.has(to) && a && b
+        return reason === "tunnel" &&
+          !workspace.hiddenTunnelEntries.includes(entryId) &&
+          !ignored.has(from) &&
+          !ignored.has(to) &&
+          a &&
+          b
           ? [[a, b]]
           : [];
       }),
     };
   }
+  if (mapData && workspace.hiddenTunnelEntries.includes(entryId))
+    mapData = { ...mapData, connections: [] };
   const visualDrawing = [...drawing];
   const snapA = geometry.data?.segments
       .find((s) => s.segment_id === snapStart)
@@ -1022,6 +1016,10 @@ function TrackEditor({
           )}
           {view === "display" && !mode && (
             <DisplaySettings
+              showTunnels={!workspace.hiddenTunnelEntries.includes(entryId)}
+              onShowTunnels={(show) =>
+                workspace.setTunnelVisible(entryId, show)
+              }
               settings={settings}
               segments={d.segments}
               geometry={geometry.data}

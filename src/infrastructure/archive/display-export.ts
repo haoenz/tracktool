@@ -7,13 +7,17 @@ export function exportDisplay(
   db: Database.Database,
   entry: string,
   ref?: TrackReference,
+  showTunnels = true,
 ): Uint8Array {
   const reference = resolveTrack(db, ref ?? { entry });
   const { segments, settings } = readPresentation(db, reference);
-  return displayKml({
-    version_id: reference.version_id!,
-    raw: rawObject(db, reference.sha256),
-    segments,
-    settings,
-  });
+  return displayKml(
+    {
+      version_id: reference.version_id!,
+      raw: rawObject(db, reference.sha256),
+      segments,
+      settings,
+    },
+    showTunnels,
+  );
 }

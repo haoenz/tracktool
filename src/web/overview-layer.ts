@@ -221,7 +221,22 @@ export class OverviewLayer {
       this.selected,
     ];
     for (const role of ["line", "point"]) {
-      const filter: ExpressionSpecification = ["==", ["get", "role"], role];
+      const filter: ExpressionSpecification = [
+        "all",
+        ["==", ["get", "role"], role],
+        [
+          "!",
+          [
+            "all",
+            ["==", ["get", "gapReason"], "tunnel"],
+            [
+              "in",
+              ["get", "trackId"],
+              ["literal", this.style.hiddenTunnelEntries],
+            ],
+          ],
+        ],
+      ];
       const visibility = this.visibility;
       const ids = Object.keys(visibility?.exceptions ?? {});
       const member: ExpressionSpecification = [

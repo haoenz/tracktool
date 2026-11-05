@@ -200,10 +200,6 @@ it("rebuilds corrupt disposable indices without altering originals, rejects bad/
         [179, 30],
         [181, 31],
       ],
-      [
-        [-179, 31],
-        [-240, 40],
-      ],
     ],
     [[120, 40]],
   ]);

@@ -29,7 +29,7 @@ ExifTool 由 `exiftool-vendored` 提供，Unix 需要 Perl；`TRACKTOOL_EXIFTOOL
 
 Linux 配置位于 `$XDG_CONFIG_HOME/tracktool/config.json`（默认 `~/.config/tracktool/config.json`）。可用 `--config` 指定配置文件。密钥优先级为环境变量 > CLI 参数 > 配置文件，网页不回显密钥。
 
-使用 `archive init` 创建归档，再设置 `archive_path`。程序只接受 schema 9。完整备份与恢复也要求相同结构；不匹配的数据库会明确报错，不会改写输入文件。
+使用 `archive init` 创建归档，再设置 `archive_path`。程序只接受 schema 10。完整备份与恢复也要求相同结构；不匹配的数据库会明确报错，不会改写输入文件。
 
 网页任务、上传和 `display.json` 位于 `~/.local/state/tracktool`，可用 `--state-dir` 指定目录。状态目录不应作为永久文件备份。出图文档保存在浏览器草稿或导出的 JSON 中。
 
@@ -40,3 +40,16 @@ Linux 配置位于 `$XDG_CONFIG_HOME/tracktool/config.json`（默认 `~/.config/
 使用 `archive restore-backup` 将完整备份恢复到新目录或空目录，再切换 `archive_path`。备份保留轨迹原件、版本历史、展示设置及端点行政区结果。配置、媒体和瓦片不包含在数据库备份中。
 
 不要单独复制正在写入的 SQLite 主文件；使用在线完整备份以包含 WAL 中已提交的数据。应用更新或恢复数据库不会撤销已经写入外部媒体的元数据。
+
+## 从 schema 9 升级到 schema 10
+
+源码工作区提供一次性升级工具。先停止使用旧库的程序，执行 `pnpm build`，再运行：
+
+```sh
+node scripts/upgrade-archive-schema9.ts /旧目录/archive.sqlite3 /新目录/archive.sqlite3
+pnpm cli config set archive_path /新目录
+```
+
+工具通过 SQLite 一致快照生成新库，不覆盖原库，校验原件、外键和展示摘要后才发布。原始 KML、行程身份、轨迹版本及操作历史保留。旧连接设置不能证明中断原因，因此统一转为未分类，不自动标记为隧道；片段顺序与显隐保留，但历史地图中的跨段连接也会按新规则显示。需要原来的显示设置时，可用旧版程序打开保留的原库。
+
+程序正常运行及完整备份恢复仍只接受当前 schema；不要直接修改 `PRAGMA user_version` 来绕过检查。切换归档路径后重启服务，地图概览会重新生成。

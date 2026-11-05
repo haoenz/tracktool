@@ -1,11 +1,11 @@
 import { XmlElement, type XmlDocument } from "libxml2-wasm";
 import { z } from "zod";
 import { AppError } from "../../domain/errors.js";
-export const DISPLAY_NS = "urn:tracktool:display:1";
+export const DISPLAY_NS = "urn:tracktool:display:2";
 const id = z.string().min(1).max(200);
 export const DisplayMetadata = z
   .object({
-    schema: z.literal(1),
+    schema: z.literal(2),
     segments: z
       .array(
         z.object({
@@ -15,7 +15,14 @@ export const DisplayMetadata = z
       )
       .max(10000),
     edges: z
-      .array(z.object({ from: id, to: id, line_id: id.optional() }))
+      .array(
+        z.object({
+          from: id,
+          to: id,
+          reason: z.enum(["tunnel", "other"]),
+          line_id: id.optional(),
+        }),
+      )
       .max(20000),
   })
   .strict();

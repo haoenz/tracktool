@@ -82,6 +82,7 @@ export async function readManifest(root: string, version: string) {
   return manifest;
 }
 const Coordinates = z.object({
+  tunnel_segments: z.array(z.number().int().nonnegative()).optional(),
   name: z.string(),
   tags: z.string(),
   date: z.string(),

@@ -16,6 +16,7 @@ const category = z.object({
   opacity: z.number().finite().min(0.05).max(1),
 });
 export const TrackAppearanceSchema = z.object({
+  hiddenTunnelEntries: z.array(z.string().min(1)).max(50000).default([]),
   width,
   categories: z.object({
     Default: category,
@@ -28,6 +29,7 @@ export type TrackAppearance = z.infer<typeof TrackAppearanceSchema>;
 
 export function defaultTrackAppearance(): TrackAppearance {
   return {
+    hiddenTunnelEntries: [],
     width: 2.5,
     categories: {
       Default: {

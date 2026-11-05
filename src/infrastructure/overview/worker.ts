@@ -50,28 +50,22 @@ async function run(command: OverviewCommand) {
       entry,
       geometry: {
         type: "FeatureCollection",
-        features: [
-          {
-            type: "Feature",
-            properties: { trackId: entry.id },
-            geometry: {
-              type: "MultiLineString",
-              coordinates: object.segments
-                .filter((s) => s.length > 1)
-                .flatMap(splitOverviewLine),
-            },
+        features: object.segments.map((segment, i) => ({
+          type: "Feature",
+          properties: {
+            trackId: entry.id,
+            ...(object.tunnel_segments?.includes(i)
+              ? { gapReason: "tunnel" }
+              : {}),
           },
-          {
-            type: "Feature",
-            properties: { trackId: entry.id },
-            geometry: {
-              type: "MultiPoint",
-              coordinates: object.segments
-                .filter((s) => s.length === 1)
-                .map((s) => s[0]),
-            },
-          },
-        ],
+          geometry:
+            segment.length === 1
+              ? { type: "Point", coordinates: segment[0] }
+              : {
+                  type: "MultiLineString",
+                  coordinates: splitOverviewLine(segment),
+                },
+        })),
       },
     };
   }

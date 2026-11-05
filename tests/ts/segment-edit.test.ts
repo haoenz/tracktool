@@ -66,10 +66,14 @@ function source(raw: Uint8Array = mixed, version = "v1"): SegmentInput {
     segments: manifest.segments,
     settings: {
       schema: 1,
-      default_connect: true,
+
       order: manifest.segments.map((s) => s.segment_id),
       ignored: [],
-      connections: [],
+      gaps: manifest.segments.slice(1).map((segment, i) => ({
+        from: manifest.segments[i]!.segment_id,
+        to: segment.segment_id,
+        reason: "tunnel",
+      })),
     },
   };
 }
@@ -138,8 +142,8 @@ it("internally splits a nested Track into one KML, preserves aligned attributes,
   expect(values(result.raw, "//gx:interpolate")).toEqual(["0"]);
   expect(unchanged(result.raw)).toBe(other);
   expect(Buffer.from(input.raw)).toEqual(before);
-  expect(result.settings.connections).toHaveLength(2);
-  expect(result.settings.connections.every((e) => !e.connect)).toBe(true);
+  expect(result.settings.gaps).toHaveLength(2);
+  expect(result.settings.gaps.every((e) => e.reason === "tunnel")).toBe(true);
   expect(view(next(result)).edges).toHaveLength(2);
   expect(
     result.sources
@@ -310,7 +314,7 @@ it("inserts a hand-drawn LineString with explicit snapping, removes bypass overr
     ),
   );
   const [a, b] = input.settings.order as [string, string];
-  input.settings.connections = [{ from: a, to: b, connect: false }];
+  input.settings.gaps = [{ from: a, to: b, reason: "other" as const }];
   const result = editSegments(
     input,
     {
@@ -333,17 +337,14 @@ it("inserts a hand-drawn LineString with explicit snapping, removes bypass overr
     time_status: "absent",
   });
   expect(result.settings.order).toEqual([a, drawn.segment_id, b]);
-  expect(result.changes.removed_connections).toEqual([
-    { from: a, to: b, connect: false },
+  expect(result.changes.removed_gaps).toEqual([
+    { from: a, to: b, reason: "other" as const },
   ]);
   expect(values(result.raw, "//kml:coordinates").at(-1)).toBe(
     "120.01,30,10 120.015,30 120.02,30",
   );
   expect(values(result.raw, "/kml:kml/kml:Document")).toHaveLength(1);
-  expect(view(next(result)).edges).toEqual([
-    { from: a, to: drawn.segment_id },
-    { from: drawn.segment_id, to: b },
-  ]);
+  expect(view(next(result)).edges).toEqual([]);
   expect(view(next(result)).connections).toEqual([]); // snapped endpoints need no zero-length lines
   expect(values(result.raw, "//kml:when")).toEqual([]);
 });
@@ -369,7 +370,6 @@ it("composes mixed source segments in explicit order with styles and schemas, wi
         },
         { version_id: "v1", segment_id: input.segments[1]!.segment_id },
       ],
-      default_connect: false,
     },
     "compose",
     [other],
@@ -440,9 +440,8 @@ it("does not bridge an ignored middle segment, supports explicit cross-links and
   input.settings.ignored = [b];
   expect(view(input).edges).toEqual([]);
   expect(view(input).segments.map((s) => s.segment_id)).toEqual([a, c]);
-  input.settings.connections = [{ from: a, to: c, connect: true }];
+  input.settings.gaps = [{ from: a, to: c, reason: "tunnel" as const }];
   expect(view(input).connections).toHaveLength(1);
-  input.settings.default_connect = false;
   expect(view(input).connections).toHaveLength(1);
   expect(() =>
     resolvedEdges(
@@ -459,7 +458,7 @@ it("binds same-content geometry independently to presentation snapshots and excl
   );
   const other: Presentation = {
     ...input.settings,
-    default_connect: false,
+    gaps: [],
     ignored: [input.settings.order[0]!],
   };
   const first = evaluatePresentation(segments, input.settings),
@@ -606,7 +605,7 @@ it("prepares without writes, publishes identities/settings/lineage atomically, r
     generation: updated.generation,
     sha256: updated.sha256,
   };
-  const settings = { ...prepared.result.settings, default_connect: false };
+  const settings = { ...prepared.result.settings };
   const presentation = await prepareSegmentEdit(file, {
     archive_id: archive,
     request_key: "settings",
@@ -639,9 +638,9 @@ it("remaps incoming/outgoing overrides and ignored segments when splitting, with
   const input = source(),
     [a, b, c] = input.settings.order as [string, string, string];
   input.settings.ignored = [b];
-  input.settings.connections = [
-    { from: a, to: b, connect: false },
-    { from: b, to: c, connect: true },
+  input.settings.gaps = [
+    { from: a, to: b, reason: "other" as const },
+    { from: b, to: c, reason: "tunnel" as const },
   ];
   const result = editSegments(
     input,
@@ -651,20 +650,19 @@ it("remaps incoming/outgoing overrides and ignored segments when splitting, with
   const left = result.segments[1]!.segment_id,
     right = result.segments[2]!.segment_id;
   expect(result.settings.ignored).toEqual([left, right]);
-  expect(result.settings.connections).toEqual([
-    { from: a, to: left, connect: false },
-    { from: right, to: c, connect: true },
-    { from: left, to: right, connect: false },
+  expect(result.settings.gaps).toEqual([
+    { from: a, to: left, reason: "other" as const },
+    { from: right, to: c, reason: "tunnel" as const },
   ]);
   expect(result.changes.before_edges).toEqual([]);
   expect(result.changes.after_edges).toEqual([]);
   expect(
     evaluatePresentation(view(next(result)).segments, {
       schema: 1,
-      default_connect: false,
+
       order: [a, c],
       ignored: [],
-      connections: [],
+      gaps: [],
     }).connections,
   ).toEqual([]);
   const modelIds = values(result.raw, "//kml:Model/@id");
@@ -716,7 +714,6 @@ it("composes the same logical segment from two fixed versions with distinct outp
         segment_id: other.segments[0]!.segment_id,
       },
     ],
-    default_connect: true,
   };
   const result = editSegments(input, op, "two-versions", [other]);
   expect(new Set(result.segments.map((s) => s.segment_id)).size).toBe(2);
@@ -733,7 +730,7 @@ it("composes the same logical segment from two fixed versions with distinct outp
 it("drops explicit bypasses around an insertion and requires deliberate fixes for backward overrides after reordering", () => {
   const input = source(),
     [a, , c] = input.settings.order as [string, string, string];
-  input.settings.connections = [{ from: a, to: c, connect: true }];
+  input.settings.gaps = [{ from: a, to: c, reason: "tunnel" as const }];
   const drawn = editSegments(
     input,
     {
@@ -746,8 +743,8 @@ it("drops explicit bypasses around an insertion and requires deliberate fixes fo
     },
     "bypass",
   );
-  expect(drawn.changes.removed_connections).toEqual(input.settings.connections);
-  expect(drawn.settings.connections).toEqual([]);
+  expect(drawn.changes.removed_gaps).toEqual(input.settings.gaps);
+  expect(drawn.settings.gaps).toEqual([]);
   const order = [...input.settings.order].reverse();
   expect(() =>
     editSegments(
@@ -760,14 +757,12 @@ it("drops explicit bypasses around an insertion and requires deliberate fixes fo
     input,
     {
       kind: "presentation",
-      settings: { ...input.settings, order, connections: [] },
+      settings: { ...input.settings, order, gaps: [] },
     },
     "reorder-fixed",
   );
   expect(Buffer.from(changed.raw)).toEqual(Buffer.from(input.raw));
-  expect(changed.changes.removed_connections).toEqual(
-    input.settings.connections,
-  );
+  expect(changed.changes.removed_gaps).toEqual(input.settings.gaps);
 });
 it("omits zero-length dateline connections and never auto-connects independent evaluator calls", () => {
   const input = source(
@@ -786,10 +781,10 @@ it("omits zero-length dateline connections and never auto-connects independent e
     expect(
       evaluatePresentation([s], {
         schema: 1,
-        default_connect: true,
+
         order: [s.segment_id],
         ignored: [],
-        connections: [],
+        gaps: [],
       }).connections,
     ).toEqual([]);
 });
@@ -871,7 +866,6 @@ it("prepares a composition from fixed historical/source-only versions and publis
         { version_id: target.version_id, segment_id: targetId },
         { version_id: imported.version_id, segment_id: sourceId },
       ],
-      default_connect: false,
     },
   });
   expect(prepared.publish.historical_inputs).toEqual([
@@ -902,7 +896,51 @@ it("rejects unknown operations and composition flags", () => {
       SegmentEditSchema.safeParse({
         kind: "compose",
         segments: [{ version_id: "version", segment_id: "segment", unknown }],
-        default_connect: false,
       }).success,
     ).toBe(false);
+});
+
+it("only connects tunnel annotations and preserves classification when visibility changes", () => {
+  const input = source();
+  const [a, b, c] = input.settings.order as [string, string, string];
+  input.settings.gaps = [
+    { from: a, to: b, reason: "other" },
+    { from: b, to: c, reason: "tunnel" },
+  ];
+  const segments = withDocument(input.raw, (doc) =>
+    bindSegments(readTrackData(doc), input.segments),
+  );
+  const before = structuredClone(input.settings);
+  expect(evaluatePresentation(segments, input.settings).edges).toEqual([
+    { from: b, to: c },
+  ]);
+  expect(evaluatePresentation(segments, input.settings, false).edges).toEqual(
+    [],
+  );
+  expect(input.settings).toEqual(before);
+  expect(
+    evaluatePresentation(segments, { ...input.settings, gaps: [] }).edges,
+  ).toEqual([]);
+});
+it("clears only gap annotations whose endpoint was pruned", () => {
+  const input = source();
+  const [a, b, c] = input.settings.order as [string, string, string];
+  const result = editSegments(
+    input,
+    { kind: "prune", segment_id: b, ranges: [{ start: 0, end: 1 }] },
+    "pruned-start",
+  );
+  expect(result.settings.gaps).toEqual([{ from: b, to: c, reason: "tunnel" }]);
+  expect(result.changes.removed_gaps).toEqual([
+    { from: a, to: b, reason: "tunnel" },
+  ]);
+  expect(result.changes.warnings).toContain(
+    "中断端点已改变，相关原因标注已清除，请重新确认。",
+  );
+  const internal = editSegments(
+    input,
+    { kind: "prune", segment_id: b, ranges: [{ start: 1, end: 2 }] },
+    "pruned-middle",
+  );
+  expect(internal.settings.gaps).toEqual(input.settings.gaps);
 });
