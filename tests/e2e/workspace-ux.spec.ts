@@ -282,14 +282,8 @@ test("details preserve list scroll; hover and focus do not repaint map highlight
     steps: 12,
   });
   await page.mouse.up();
-  await expect(page.locator(".map-app")).toHaveAttribute(
-    "data-sheet",
-    "collapsed",
-  );
-  await expect
-    .poll(async () => (await controls.boundingBox())!.height)
-    .toBeLessThan(60);
-  await sheetHandle.click();
+  await expect(controls).toBeHidden();
+  await page.getByRole("button", { name: "打开轨迹列表", exact: true }).click();
   await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "half");
   await page.getByRole("button", { name: /调整面板高度/ }).press("End");
   await expect
@@ -333,7 +327,9 @@ test("details preserve list scroll; hover and focus do not repaint map highlight
     .locator("#map-panel")
     .evaluate((element) => element.style.removeProperty("display"));
   await sheetHandle.press("Home");
-  await page.getByRole("button", { name: /调整面板高度/ }).click();
+  await expect(controls).toBeHidden();
+  await page.getByRole("button", { name: "打开轨迹列表", exact: true }).click();
+  await expect(page.getByRole("region", { name: "轨迹详情" })).toBeVisible();
   await expect
     .poll(async () => Math.round((await controls.boundingBox())!.height))
     .toBe(405);
@@ -346,73 +342,89 @@ test("details preserve list scroll; hover and focus do not repaint map highlight
   ).toHaveCount(0);
 });
 
-test("map picks real points, marks a range and preserves draft when switching panels", async ({
-  page,
-}, info) => {
-  test.setTimeout(60000);
-  await page.goto("/map?panel=library");
-  await expect(
-    page.getByRole("complementary", { name: "地图控制面板" }),
-  ).toBeVisible();
-  if (
-    await page
-      .getByRole("button", { name: "轨迹列表", exact: true })
-      .isVisible()
-  )
-    await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
-  const fixture = await call<{ id: string; path: string }>(
+for (const mobile of [false, true]) {
+  test(`map picks real points and preserves draft when switching panels (${mobile ? "mobile" : "desktop"})`, async ({
     page,
-    "/api/test/edit-fixture",
-    {},
-  );
-  try {
-    await filterTracks(page, fixture.path);
-    await page
-      .getByRole("button", { name: `查看 ${fixture.path}`, exact: true })
-      .click();
-    await page.getByRole("button", { name: "编辑轨迹", exact: true }).click();
-    await page.getByRole("button", { name: "删除轨迹点", exact: true }).click();
-    await pickEditorPoint(page, 1);
-    await pickEditorPoint(page, 2, false);
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            window.renderer!.data?.features.find(
-              (f) => f.properties?.segment_id === "ux-delete",
-            )?.geometry,
-        ),
-      )
-      .toEqual({
-        type: "MultiLineString",
-        coordinates: [
-          [
-            [120.01, 30],
-            [120.02, 30],
-          ],
-        ],
-      });
-    await tool(page, "设置");
-    await tool(page, "轨迹库");
+  }, info) => {
+    test.setTimeout(90000);
+    if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/map?panel=library");
     await expect(
-      page.getByRole("button", { name: "删除", exact: true }),
-    ).toBeEnabled();
-    await page.getByRole("button", { name: "删除", exact: true }).click();
-    await expect(page.getByRole("region", { name: "轨迹详情" })).toContainText(
-      "编辑已保存",
-      { timeout: 20000 },
-    );
-    await expect(page.locator(".map-stage")).toHaveCount(1);
-    await page.screenshot({ path: info.outputPath("map-edit-range.png") });
-    const detail = await call<{ segments: { point_count: number }[] }>(
+      page.getByRole("complementary", { name: "地图控制面板" }),
+    ).toBeVisible();
+    if (
+      await page
+        .getByRole("button", { name: "轨迹列表", exact: true })
+        .isVisible()
+    )
+      await page.getByRole("button", { name: "轨迹列表", exact: true }).click();
+    const fixture = await call<{ id: string; path: string }>(
       page,
-      `/api/tracks/${fixture.id}`,
+      "/api/test/edit-fixture",
+      {},
     );
-    expect(detail.segments.reduce((n, s) => n + s.point_count, 0)).toBe(4);
-  } finally {
-    await call(page, "/api/test/edit-cleanup", { id: fixture.id });
-  }
-});
+    try {
+      await filterTracks(page, fixture.path);
+      await page
+        .getByRole("button", { name: `查看 ${fixture.path}`, exact: true })
+        .click();
+      await page.getByRole("button", { name: "编辑轨迹", exact: true }).click();
+      await page
+        .getByRole("button", { name: "删除轨迹点", exact: true })
+        .click();
+      await pickEditorPoint(page, 1);
+      await pickEditorPoint(page, 2, false);
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              window.renderer!.data?.features.find(
+                (f) => f.properties?.segment_id === "ux-delete",
+              )?.geometry,
+          ),
+        )
+        .toEqual({
+          type: "MultiLineString",
+          coordinates: [
+            [
+              [120.01, 30],
+              [120.02, 30],
+            ],
+          ],
+        });
+      if (mobile) {
+        await page.getByRole("button", { name: /调整面板高度/ }).press("Home");
+        await expect(page.locator("#map-panel")).toBeHidden();
+        await tool(page, "轨迹库");
+        await expect(page.locator(".map-app")).toHaveAttribute(
+          "data-sheet",
+          "half",
+        );
+        await expect(
+          page.getByRole("button", { name: "删除", exact: true }),
+        ).toBeEnabled();
+      }
+      await tool(page, "设置");
+      await tool(page, "轨迹库");
+      await expect(
+        page.getByRole("button", { name: "删除", exact: true }),
+      ).toBeEnabled();
+      await page.getByRole("button", { name: "删除", exact: true }).click();
+      await expect(
+        page.getByRole("region", { name: "轨迹详情" }),
+      ).toContainText("编辑已保存", { timeout: 20000 });
+      await expect(page.locator(".map-stage")).toHaveCount(1);
+      await page.screenshot({ path: info.outputPath("map-edit-range.png") });
+      const detail = await call<{ segments: { point_count: number }[] }>(
+        page,
+        `/api/tracks/${fixture.id}`,
+      );
+      expect(detail.segments.reduce((n, s) => n + s.point_count, 0)).toBe(4);
+    } finally {
+      await call(page, "/api/test/edit-cleanup", { id: fixture.id });
+    }
+  });
+}
 
 test("an open edit draft pins its geometry version and refuses a concurrent library change", async ({
   page,

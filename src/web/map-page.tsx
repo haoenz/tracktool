@@ -44,7 +44,7 @@ import {
   LoadingFeedback,
   LoadingPlaceholder,
 } from "./components/loading-feedback.js";
-import { SheetHandle } from "./components/sheet-handle.js";
+import { SheetPanel } from "./components/sheet-handle.js";
 import { StartupScreen } from "./components/startup-screen.js";
 import { DeleteTrackDialog } from "./delete-track-dialog.js";
 import { DetailPanel } from "./detail-panel.js";
@@ -312,6 +312,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
   // The composition mask belongs to the print panel, so a reload restores the
   // same view instead of a full screen map without a frame.
   const printMode = panel === "print";
+  useLayoutEffect(() => {
+    if (!panel) setSheet("half");
+  }, [panel]);
   const [archiveAction, setArchiveAction] = useState<ArchiveActionKind>();
   const [downloadingTrack, setDownloadingTrack] = useState(false);
   const [libraryList, setLibraryList] = useSessionState(
@@ -1361,9 +1364,22 @@ function Editor({ initial }: { initial: Bootstrap }) {
           </nav>
         </header>
         <div className="map-content">
-          <aside
+          <SheetPanel
             id="map-panel"
-            ref={controls}
+            panel={controls}
+            activePanel={panel ? `${panel}:${archiveAction ?? ""}` : undefined}
+            value={sheet}
+            onChange={setSheet}
+            onClose={() => {
+              const trigger = document.querySelector<HTMLElement>(
+                '#map-tools button[aria-expanded="true"]',
+              );
+              const menu = document.querySelector<HTMLElement>(".app-icon");
+              (trigger?.offsetParent ? trigger : menu)?.focus({
+                preventScroll: true,
+              });
+              setParams({ panel: "none" });
+            }}
             onScroll={(e) => {
               if (
                 e.currentTarget.offsetParent &&
@@ -1378,7 +1394,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
             hidden={!panel}
             aria-label="地图控制面板"
           >
-            <SheetHandle panel={controls} value={sheet} onChange={setSheet} />
             {!listVisible &&
               panel !== "export" &&
               panel !== "settings" &&
@@ -1522,6 +1537,12 @@ function Editor({ initial }: { initial: Bootstrap }) {
               }
             >
               <div className="track-list-content">
+                {!mapScope && (
+                  <PanelHeader
+                    title="轨迹列表"
+                    className="mobile-panel-header"
+                  />
+                )}
                 {mapScope && (
                   <PanelHeader
                     title="此处的轨迹"
@@ -1706,11 +1727,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                 editor={
                   <Suspense fallback={<PanelLoading />}>
                     <div hidden={!editing}>
-                      {(editorView === "edit" ||
-                        (editing &&
-                          detailOpen &&
-                          panel === "library" &&
-                          !archiveAction)) && (
+                      {(editorView === "edit" || editing) && (
                         <TrackEditor
                           key={overview.id + ":" + editorView}
                           view={editorView}
@@ -1879,7 +1896,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                 }}
               />
             )}
-          </aside>
+          </SheetPanel>
           <MapViewport
             ref={viewport}
             geolocation

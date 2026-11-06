@@ -162,15 +162,21 @@ export async function pickEditorPoint(
   const sheet = await page.locator(".map-app").getAttribute("data-sheet");
   const mobile = await handle.isVisible();
   if (mobile) {
-    await handle.press("Home");
+    if (sheet === "full") await handle.press("ArrowDown");
     await expect
       .poll(
-        async () =>
-          (await page
-            .getByRole("complementary", { name: "地图控制面板" })
-            .boundingBox())!.height,
+        async () => (await page.locator("#map-panel").boundingBox())!.height,
       )
-      .toBeLessThan(60);
+      .toBeLessThan(500);
+    if (locate) {
+      // Keep the editor active and pan the selected geometry above the sheet.
+      await page.evaluate(() => {
+        const height = document
+          .getElementById("map-panel")!
+          .getBoundingClientRect().height;
+        window.renderer!.map.panBy([0, height / 2], { duration: 0 });
+      });
+    }
   }
   await expect
     .poll(() =>
@@ -246,8 +252,8 @@ export async function pickEditorPoint(
     );
   }
   await page.mouse.click(point.x, point.y);
-  if (mobile && sheet !== "collapsed") {
-    await handle.press(sheet === "full" ? "End" : "ArrowUp");
+  if (mobile) {
+    if (sheet === "full") await handle.press("End");
     await expect(page.locator(".map-app")).toHaveAttribute(
       "data-sheet",
       sheet!,

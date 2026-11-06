@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page, type Locator } from "@playwright/test";
 import sharp from "sharp";
 import type {} from "../../src/drawing/globals.js";
 import { resetDisplay } from "./display-reset.js";
@@ -143,10 +143,14 @@ test("mobile handle drags, snaps, cycles and keeps icon closing", async ({
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2, box.y + 380, { steps: 12 });
   await page.mouse.up();
-  await expect(app).toHaveAttribute("data-sheet", "collapsed");
-  await expect
-    .poll(async () => (await panel.boundingBox())!.height)
-    .toBeLessThan(60);
+  await expect(panel).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "设置", exact: true }),
+  ).toBeFocused();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await expect(app).toHaveAttribute("data-sheet", "half");
+  await handle.tap();
+  await expect(app).toHaveAttribute("data-sheet", "full");
   await handle.tap();
   await expect(app).toHaveAttribute("data-sheet", "half");
   await handle.press("End");
@@ -166,4 +170,173 @@ test("mobile handle drags, snaps, cycles and keeps icon closing", async ({
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(handle).toBeHidden();
   await expect(panel).toBeVisible();
+});
+
+async function dragSheet(
+  page: Page,
+  target: Locator,
+  distance: number,
+  settle = true,
+) {
+  const box = (await target.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + distance, { steps: settle ? 8 : 1 });
+  // Holding at the destination distinguishes a deliberate drag from a fling.
+  if (settle) await page.waitForTimeout(130);
+  await page.mouse.up();
+}
+
+test("slow drags snap back or dismiss, and title space also drags", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=settings");
+  const panel = page.locator("#map-panel");
+  const handle = page.getByRole("button", { name: /调整面板高度/ });
+  const app = page.locator(".map-app");
+  await expect(handle).toBeVisible();
+  await dragSheet(page, handle, 80);
+  await expect(panel).toBeVisible();
+  await expect(app).toHaveAttribute("data-sheet", "half");
+  await expect
+    .poll(async () => (await panel.boundingBox())!.height)
+    .toBeGreaterThan(400);
+  await dragSheet(
+    page,
+    panel.getByRole("heading", { name: "设置", exact: true }),
+    260,
+  );
+  await expect(panel).toBeHidden();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await expect(app).toHaveAttribute("data-sheet", "half");
+  await handle.press("End");
+  await expect
+    .poll(async () => (await panel.boundingBox())!.height)
+    .toBeGreaterThan(750);
+  await dragSheet(page, handle, 680);
+  await expect(panel).toBeHidden();
+});
+
+test("downward flings advance one stop and reopening starts at half height", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=settings");
+  const panel = page.locator("#map-panel");
+  const handle = page.getByRole("button", { name: /调整面板高度/ });
+  await handle.press("End");
+  await expect
+    .poll(async () => (await panel.boundingBox())!.height)
+    .toBeGreaterThan(750);
+  await dragSheet(page, handle, 100, false);
+  await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "half");
+  await expect(panel).toBeVisible();
+  await expect
+    .poll(async () => (await panel.boundingBox())!.height)
+    .toBeLessThan(410);
+  await dragSheet(page, handle, 100, false);
+  await expect(panel).toBeHidden();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await handle.press("End");
+  await handle.press("Home");
+  await expect(panel).toBeHidden();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "half");
+});
+
+test("header navigation, native content scrolling and cancelled drags do not dismiss", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=settings");
+  const panel = page.locator("#map-panel");
+  const handle = page.getByRole("button", { name: /调整面板高度/ });
+  await page.getByRole("button", { name: "地图设置", exact: true }).click();
+  await page.getByRole("button", { name: "返回设置", exact: true }).click();
+  await expect(
+    panel.getByRole("heading", { name: "设置", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "地图设置", exact: true }).click();
+  const box = (await panel.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height - 40);
+  await page.mouse.wheel(0, 300);
+  await expect
+    .poll(() => panel.evaluate((el) => el.scrollTop))
+    .toBeGreaterThan(0);
+  await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "half");
+  const grip = (await handle.boundingBox())!;
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + 22);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + 300);
+  await handle.dispatchEvent("pointercancel", { pointerId: 1 });
+  await page.mouse.up();
+  await expect(panel).toBeVisible();
+  await expect
+    .poll(async () => (await panel.boundingBox())!.height)
+    .toBeGreaterThan(400);
+});
+
+test("keyboard closing works with reduced motion and restores toolbar focus", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/map?panel=settings");
+  const panel = page.locator("#map-panel");
+  const handle = page.getByRole("button", { name: /调整面板高度/ });
+  const settings = page.getByRole("button", { name: "设置", exact: true });
+  for (const key of ["Home", "ArrowDown"]) {
+    await handle.press(key);
+    await expect(panel).toBeHidden();
+    await expect(settings).toBeFocused();
+    await settings.click();
+    await expect(page.locator(".map-app")).toHaveAttribute(
+      "data-sheet",
+      "half",
+    );
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(handle).toBeHidden();
+});
+
+test("touch content scrolls while touch title dragging closes the sheet", async ({
+  page,
+}) => {
+  await page.goto("/map?panel=settings");
+  const panel = page.locator("#map-panel");
+  await page.getByRole("button", { name: "地图设置", exact: true }).tap();
+  const session = await page.context().newCDPSession(page);
+  async function swipe(x: number, y: number, distance: number) {
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y }],
+    });
+    for (let step = 1; step <= 12; step++) {
+      await session.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x, y: y + (distance * step) / 12 }],
+      });
+    }
+    await page.waitForTimeout(130);
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+  }
+  const bounds = (await panel.boundingBox())!;
+  await swipe(bounds.x + bounds.width - 5, bounds.y + bounds.height - 45, -180);
+  await expect
+    .poll(() => panel.evaluate((el) => el.scrollTop))
+    .toBeGreaterThan(0);
+  await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "half");
+  await panel.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  const title = (await panel
+    .getByRole("heading", { name: "地图设置", exact: true })
+    .boundingBox())!;
+  await swipe(title.x + title.width / 2, title.y + title.height / 2, 260);
+  await expect(panel).toBeHidden();
+  await page.getByRole("button", { name: "设置", exact: true }).tap();
+  await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "half");
+  await session.detach();
 });

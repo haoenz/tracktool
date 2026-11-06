@@ -72,6 +72,15 @@ for (const width of [1280, 390])
       await classify("未分类");
       await expect(insert).toBeEnabled();
       await classify("其他中断");
+      if (width <= 700) {
+        await page.getByRole("button", { name: /调整面板高度/ }).press("Home");
+        await expect(page.locator("#map-panel")).toBeHidden();
+        await tool(page, "轨迹库");
+        await expect(connection).toContainText("其他中断");
+        await expect(
+          page.getByRole("button", { name: "保存", exact: true }),
+        ).toBeEnabled();
+      }
       await page.getByRole("button", { name: "返回详情", exact: true }).click();
       await page.getByRole("button", { name: "分段管理", exact: true }).click();
       await expect(connection).toContainText("未分类");

@@ -1068,14 +1068,6 @@ button.settings-layer-toggle:focus-visible {
     padding: 0 12px 24px;
     border-radius: 16px 16px 8px 8px;
   }
-  .map-app[data-sheet="collapsed"] .map-controls {
-    height: 52px;
-    padding-bottom: 0;
-    overflow: hidden;
-  }
-  .map-app[data-sheet="collapsed"] .map-controls > .panel-header {
-    display: none;
-  }
   .map-app[data-sheet="full"] .map-controls {
     height: calc(100dvh - 90px);
   }
@@ -1108,6 +1100,16 @@ button.settings-layer-toggle:focus-visible {
   }
   .map-controls[data-dragging="true"] {
     transition: none;
+    overflow: hidden;
+    min-height: 0;
+    padding-bottom: 0;
+  }
+  .map-controls .panel-header {
+    touch-action: none;
+    user-select: none;
+  }
+  .map-controls .panel-header :is(button, a) {
+    touch-action: manipulation;
   }
   @media (prefers-reduced-motion: reduce) {
     .map-controls {
@@ -1258,6 +1260,9 @@ button.settings-layer-toggle:focus-visible {
 
 /* Keep the desktop list footer at the panel edge while rows scroll. */
 @media (min-width: 701px) {
+  .mobile-panel-header {
+    display: none;
+  }
   .map-controls:has(> section:not([hidden]) .import-panel) {
     bottom: auto;
     max-height: calc(100dvh - 146px);
