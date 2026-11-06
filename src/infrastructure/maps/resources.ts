@@ -65,6 +65,10 @@ export class MapResources {
   // Separate queues avoid holding download slots while waiting for source tiles.
   private readonly reprojections = new Downloads(2, { custom: 2 });
   private vector?: Vector;
+  private httpVersion = "";
+  get resourceVersion() {
+    return this.httpVersion;
+  }
   private preparing?: Promise<void>;
   private font?: opentype.Font;
   private env: Record<string, string | undefined>;
@@ -194,6 +198,17 @@ export class MapResources {
       );
     await this.atomic(metadata, Buffer.from(JSON.stringify(value)));
     this.vector = value;
+    // Browser URLs must change when source configuration or derived pixels change.
+    this.httpVersion = hash(
+      JSON.stringify([
+        "map-http-v1",
+        value,
+        this.presets,
+        rasterReprojectionVersion,
+        vectorLabelVersion,
+        MAP_LABEL_FONTS,
+      ]),
+    );
   }
   private async atomic(file: string, data: Buffer) {
     await mkdir(path.dirname(file), { recursive: true });
@@ -208,6 +223,7 @@ export class MapResources {
   versions(): Record<string, unknown> {
     const templates = this.vector?.tiles ?? [];
     return {
+      map_resources: this.resourceVersion,
       renderer: "tracktool-map-ts-v1",
       raster_reprojection: rasterReprojectionVersion,
       vector_labels: vectorLabelVersion,

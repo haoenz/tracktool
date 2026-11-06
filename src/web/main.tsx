@@ -6,6 +6,7 @@ import { StartupScreen } from "./components/startup-screen.js";
 import { Toaster } from "./components/ui/sonner.js";
 import "./style.css";
 import { initializeTheme, ThemeProvider } from "./theme.js";
+import { configureOverviewDetailCache } from "./overview-detail-cache.js";
 const MapPage = lazy(() => import("./map-page.js"));
 const client = new QueryClient({
   defaultOptions: {
@@ -17,6 +18,7 @@ const client = new QueryClient({
     },
   },
 });
+configureOverviewDetailCache(client);
 initializeTheme();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

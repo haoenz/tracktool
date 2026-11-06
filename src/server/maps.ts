@@ -21,6 +21,7 @@ import { PrintDocumentSchema, resolvePrintTracks } from "../shared/print.js";
 import type { MapConfig } from "../shared/map.js";
 import type { OverviewCrs, OverviewStatus } from "../shared/overview.js";
 import { canvasCrs, reconcileOverlays } from "../drawing/layers.js";
+import { sendCachedMapResource } from "./map-cache.js";
 export interface MapOptions {
   archiveDefault?: () => Promise<string>;
   cache?: string;
@@ -33,8 +34,18 @@ export interface MapOptions {
 const location = z.object({ path: z.string().min(1).max(4096) }),
   archive = z.object({ archive: z.string().min(1).max(4096) }),
   tileCrs = z
-    .object({ crs: z.enum(["wgs84", "gcj02"]).default("wgs84") })
+    .object({
+      crs: z.enum(["wgs84", "gcj02"]).default("wgs84"),
+      v: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .optional(),
+    })
     .strict();
+function checkResourceVersion(resources: MapResources, version?: string) {
+  if (version !== undefined && version !== resources.resourceVersion)
+    throw new AppError("USER_INPUT", "地图资源版本已更新，请刷新页面");
+}
 function restoreStyle(state: MapState, saved: MapStyle, config: MapConfig) {
   const basemap =
     saved.basemap === "vector" ||
@@ -218,37 +229,47 @@ export function mapRoutes(
     async (request, reply) => {
       if (!MAP_LABEL_FONTS.some((font) => font === request.params.font))
         throw new AppError("USER_INPUT", "无效地图字体");
-      return reply
-        .type("application/x-protobuf")
-        .send(
-          await (
-            await getResources()
-          ).glyph(
-            request.params.span.replace(/\.pbf$/, ""),
-            cancellation(request, reply),
-            request.headers["x-tracktool-render"] === token,
-            request.params.font,
-          ),
-        );
+      const { v } = z
+        .object({
+          v: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
+        })
+        .strict()
+        .parse(request.query);
+      const resources = await getResources();
+      checkResourceVersion(resources, v);
+      const data = await resources.glyph(
+        request.params.span.replace(/\.pbf$/, ""),
+        cancellation(request, reply),
+        request.headers["x-tracktool-render"] === token,
+        request.params.font,
+      );
+      reply.type("application/x-protobuf");
+      return v ? sendCachedMapResource(request, reply, data) : reply.send(data);
     },
   );
   app.get<{ Params: { source: string; z: string; x: string; y: string } }>(
     "/tiles/:source/:z/:x/:y",
     async (request, reply) => {
       const p = request.params,
-        { crs } = tileCrs.parse(request.query),
-        r = await (
-          await getResources()
-        ).displayTile(
-          p.source,
-          Number(p.z),
-          Number(p.x),
-          Number(p.y.replace(/\.(pbf|png)$/, "")),
-          cancellation(request, reply),
-          request.headers["x-tracktool-render"] === token,
-          crs,
-        );
-      return reply.type(r.mime).send(r.data);
+        { crs, v } = tileCrs.parse(request.query),
+        resources = await getResources();
+      checkResourceVersion(resources, v);
+      const r = await resources.displayTile(
+        p.source,
+        Number(p.z),
+        Number(p.x),
+        Number(p.y.replace(/\.(pbf|png)$/, "")),
+        cancellation(request, reply),
+        request.headers["x-tracktool-render"] === token,
+        crs,
+      );
+      reply.type(r.mime);
+      return v
+        ? sendCachedMapResource(request, reply, r.data)
+        : reply.send(r.data);
     },
   );
   app.addHook("onClose", async () => {

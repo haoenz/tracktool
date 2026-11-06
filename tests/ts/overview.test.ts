@@ -568,7 +568,32 @@ it("authenticates overview routes and binds data to backend configuration", asyn
   expect((await fetch(tileUrl)).status).toBe(403);
   const tile = await fetch(tileUrl, { headers });
   expect(tile.status).toBe(200);
-  expect(tile.headers.get("cache-control")).toBe("no-store");
+  expect(tile.headers.get("cache-control")).toBe(
+    "private, max-age=31536000, immutable",
+  );
+  expect(tile.headers.get("vary")).toContain("X-Tracktool-Token");
+  const etag = tile.headers.get("etag")!;
+  const unchanged = await fetch(tileUrl, {
+    headers: { ...headers, "If-None-Match": etag },
+  });
+  expect(unchanged.status).toBe(304);
+  expect(await unchanged.text()).toBe("");
+  const denied = await fetch(tileUrl, {
+    headers: { "X-Tracktool-Token": "expired", "If-None-Match": etag },
+  });
+  expect(denied.status).toBe(403);
+  expect(denied.headers.get("cache-control")).toBe("no-store");
+  const expired = await fetch(
+    tileUrl.replace(status.version!, "0".repeat(32)),
+    { headers: { ...headers, "If-None-Match": etag } },
+  );
+  expect(expired.status).toBe(400);
+  expect(expired.headers.get("cache-control")).toBe("no-store");
+  expect(
+    (await fetch(base + "/api/overview", { headers })).headers.get(
+      "cache-control",
+    ),
+  ).toBe("no-store");
   expect(tile.headers.get("content-type")).toContain("vector-tile");
   const raw = new VectorTile(new Pbf(new Uint8Array(await tile.arrayBuffer())));
   expect(raw.layers.tracks!.length).toBeGreaterThan(0);

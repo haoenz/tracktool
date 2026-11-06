@@ -76,6 +76,13 @@ export function mapStyle(
   const preset = presetFor(state, config),
     raster = !!preset,
     canvas = canvasCrs(state, config);
+  const resourceUrl = (path: string, crs?: string) => {
+    const query = new URLSearchParams();
+    if (crs) query.set("crs", crs);
+    if (typeof config.versions.map_resources === "string")
+      query.set("v", config.versions.map_resources);
+    return `${location.origin}${path}${query.size ? `?${query}` : ""}`;
+  };
   const dark = state.style.appearance === "dark" || !!preset?.imagery;
   const p = dark
     ? {
@@ -139,7 +146,7 @@ export function mapStyle(
   if (vector)
     sources.base = {
       type: "vector",
-      tiles: [`${location.origin}/tiles/vector/{z}/{x}/{y}.pbf`],
+      tiles: [resourceUrl("/tiles/vector/{z}/{x}/{y}.pbf")],
       maxzoom: config.vectorMaxZoom,
     };
   const rasterSource = (
@@ -147,9 +154,7 @@ export function mapStyle(
     id: string,
   ): RasterSourceSpecification => ({
     type: "raster",
-    tiles: [
-      `${location.origin}/tiles/${id}/{z}/{x}/{y}.png${canvas === "gcj02" ? "?crs=gcj02" : ""}`,
-    ],
+    tiles: [resourceUrl(`/tiles/${id}/{z}/{x}/{y}.png`, canvas)],
     tileSize: s?.tile_display_size || s?.tile_size || 256,
     minzoom: s?.minzoom || 0,
     maxzoom: s?.maxzoom || 18,
@@ -564,7 +569,7 @@ export function mapStyle(
     if (o.format === "vector") {
       sources[o.id] = {
         type: "vector",
-        tiles: [`${location.origin}/tiles/${o.id}/{z}/{x}/{y}.pbf`],
+        tiles: [resourceUrl(`/tiles/${o.id}/{z}/{x}/{y}.pbf`)],
         minzoom: o.minzoom,
         maxzoom: o.maxzoom,
       };
@@ -582,7 +587,7 @@ export function mapStyle(
   // Fixed order: foundation, optional geometry, ordinary annotation, themes, user tracks.
   return {
     version: 8,
-    glyphs: `${location.origin}/glyphs/{fontstack}/{range}.pbf`,
+    glyphs: resourceUrl("/glyphs/{fontstack}/{range}.pbf"),
     sources,
     layers: [
       ...base,

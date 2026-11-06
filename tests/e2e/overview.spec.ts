@@ -27,7 +27,7 @@ async function loaded(page: Page) {
             l.id.startsWith("overview-") &&
             l.id.endsWith("-line") &&
             m.getPaintProperty(l.id, "line-opacity") !== 0 &&
-            JSON.stringify(m.getFilter(l.id)).startsWith('["=="'),
+            Array.isArray(m.getPaintProperty(l.id, "line-color")),
         )
     );
   });
@@ -44,8 +44,8 @@ async function overviewSource(page: Page) {
               l.id.endsWith("-line") &&
               window.renderer!.map.getPaintProperty(l.id, "line-opacity") !==
                 0 &&
-              JSON.stringify(window.renderer!.map.getFilter(l.id)).startsWith(
-                '["=="',
+              Array.isArray(
+                window.renderer!.map.getPaintProperty(l.id, "line-color"),
               ),
           ) as { source: string } | undefined
       )?.source,
@@ -290,6 +290,10 @@ test("default overview requests viewport tiles, checks visible tracks, and resto
   );
   expect(JSON.stringify(width)).toContain("trackId");
   await page.getByRole("button", { name: "返回列表", exact: true }).click();
+  await view.click();
+  await expect(page.getByRole("button", { name: "定位轨迹" })).toBeEnabled();
+  expect(requests.filter((url) => url.includes("/geometry?"))).toHaveLength(1);
+  await page.getByRole("button", { name: "返回列表", exact: true }).click();
   await filterTracks(page, "no-such-track");
   await expect(page.getByText("无匹配", { exact: true })).toBeVisible();
   expect(await overviewSource(page)).toBe(source);
@@ -369,8 +373,8 @@ test("style reload restores the overview; export preview excludes it; mobile pan
           l.id.startsWith("overview-") &&
           l.id.endsWith("-line") &&
           window.renderer!.map.getPaintProperty(l.id, "line-opacity") !== 0 &&
-          JSON.stringify(window.renderer!.map.getFilter(l.id)).startsWith(
-            '["=="',
+          Array.isArray(
+            window.renderer!.map.getPaintProperty(l.id, "line-color"),
           ),
       ),
   );
@@ -718,6 +722,10 @@ test("browse eye buttons filter map lines and points, survive searches and style
 }) => {
   await loaded(page);
   const source = await overviewSource(page);
+  const baseFilter = await page.evaluate(
+    (s) => window.renderer!.map.getFilter(s + "-line"),
+    source,
+  );
   await page
     .getByRole("button", { name: "切换当前列表可见性", exact: true })
     .click();
@@ -733,11 +741,7 @@ test("browse eye buttons filter map lines and points, survive searches and style
     .poll(() =>
       page.evaluate((s) => window.renderer!.map.getFilter(s + "-line"), source),
     )
-    .toEqual([
-      "all",
-      ["==", ["get", "role"], "line"],
-      ["in", ["get", "trackId"], ["literal", []]],
-    ]);
+    .toEqual(["all", baseFilter, ["in", ["get", "trackId"], ["literal", []]]]);
   await expect(checkbox).toBeEnabled();
   await checkbox.click();
   await expect(
@@ -831,7 +835,7 @@ test("list toolbar and page jump keep pagination at the desktop panel bottom", a
   });
   await loaded(page);
   const panel = page.getByRole("complementary", { name: "地图控制面板" });
-  await expect(panel.locator(".panel-header")).toHaveCount(0);
+  await expect(panel.locator(".panel-header")).toBeHidden();
   const batch = panel
     .locator(".list-visibility-toolbar")
     .getByRole("button", { name: "批量操作" });

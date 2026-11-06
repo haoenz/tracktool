@@ -226,7 +226,6 @@ export function useOverview(
       ),
     retry: (count, error) => count < 2 && !error.message.includes("版本已过期"),
     retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 2000),
-    gcTime: 0,
   });
   const loggedErrors = useRef(new Map<string, string>());
   useEffect(() => {

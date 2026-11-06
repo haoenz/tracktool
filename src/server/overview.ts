@@ -8,6 +8,7 @@ import { OVERVIEW_TILING } from "../domain/overview.js";
 import { databasePath } from "../infrastructure/archive/database.js";
 import { OverviewService } from "../infrastructure/overview/service.js";
 import { digest } from "../infrastructure/overview/files.js";
+import { sendCachedMapResource } from "./map-cache.js";
 import {
   compareOverviewSortKeys,
   overviewSortKey,
@@ -193,10 +194,10 @@ export function overviewRoutes(
       const bytes = await (
         await required()
       ).tile(p.version, p.z, p.x, p.y, signal(request, reply));
-      return reply
+      reply
         .type("application/vnd.mapbox-vector-tile")
-        .header("Content-Encoding", "gzip")
-        .send(bytes);
+        .header("Content-Encoding", "gzip");
+      return sendCachedMapResource(request, reply, bytes, true);
     },
   );
   app.addHook("onClose", async () => {

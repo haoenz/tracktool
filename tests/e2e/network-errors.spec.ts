@@ -119,8 +119,8 @@ test("overview failures recover without leaving a sticky overview error", async 
             (l) =>
               l.id.startsWith("overview-") &&
               l.type === "line" &&
-              JSON.stringify(window.renderer!.map.getFilter(l.id)).startsWith(
-                '["=="',
+              Array.isArray(
+                window.renderer!.map.getPaintProperty(l.id, "line-color"),
               ),
           ),
       ),

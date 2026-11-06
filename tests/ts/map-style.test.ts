@@ -103,6 +103,31 @@ beforeAll(() => vi.stubGlobal("location", { origin: "http://localhost" }));
 afterAll(() => vi.unstubAllGlobals());
 
 describe("map content controls", () => {
+  it("versions every map resource and separates raster coordinate systems", () => {
+    const state = defaultMapState();
+    const cfg = config([preset("raster")]);
+    cfg.versions.map_resources = "a".repeat(64);
+    cfg.overlays = [
+      { ...preset("overlay"), kind: "overlay", format: "vector" },
+    ];
+    state.style.overlays = [{ id: "overlay", enabled: true, opacity: 1 }];
+    const first = mapStyle(state, cfg);
+    const urls = Object.values(first.sources).flatMap((source) =>
+      "tiles" in source ? (source.tiles ?? []) : [],
+    );
+    expect(urls).toHaveLength(2);
+    for (const url of [...urls, first.glyphs!])
+      expect(new URL(url).searchParams.get("v")).toBe("a".repeat(64));
+    cfg.versions.map_resources = "b".repeat(64);
+    expect(mapStyle(state, cfg).sources).not.toEqual(first.sources);
+    state.style.basemap = "raster";
+    const wgs = mapStyle(state, cfg).sources.satellite!;
+    cfg.basemaps[0]!.crs = "gcj02";
+    const gcj = mapStyle(state, cfg).sources.satellite!;
+    expect(wgs).not.toEqual(gcj);
+    expect("tiles" in wgs && wgs.tiles?.[0]).toContain("crs=wgs84");
+    expect("tiles" in gcj && gcj.tiles?.[0]).toContain("crs=gcj02");
+  });
   it("renders custom detail styles at browser and document scales without outlines", () => {
     const state = defaultMapState();
     state.style.tracks.current = { color: "#123abc", width: 7 };
