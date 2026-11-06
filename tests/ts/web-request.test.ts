@@ -56,3 +56,25 @@ it("preserves server errors and HTTP status failures", async () => {
   );
   await expect(request("/api/archive")).rejects.toThrow("请求失败（503）");
 });
+
+it.each([
+  new Response("session expired", { status: 401 }),
+  new Response("<html>login</html>", {
+    headers: { "Content-Type": "text/html" },
+  }),
+  new Response("<html>denied</html>", {
+    status: 403,
+    headers: { "Content-Type": "text/html" },
+  }),
+])("explains Access responses without replaying a write", async (response) => {
+  const fetch = vi.fn().mockResolvedValue(response);
+  vi.stubGlobal("fetch", fetch);
+  await expect(
+    request("/api/work/tasks/example/apply", { confirm: true }),
+  ).rejects.toThrow("登录已过期或访问被拒绝");
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+    redirect: "error",
+    headers: { "X-Requested-With": "XMLHttpRequest" },
+  });
+});

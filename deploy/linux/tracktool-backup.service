@@ -1,0 +1,18 @@
+[Unit]
+Description=Tracktool consistent archive backup
+
+[Service]
+Type=oneshot
+User=tracktool
+Group=tracktool
+WorkingDirectory=/var/lib/tracktool/data
+Environment=PATH=/var/lib/tracktool/.nvm/versions/node/v26.11.1/bin:/usr/local/bin:/usr/bin:/bin
+Environment=XDG_STATE_HOME=/var/lib/tracktool/state
+EnvironmentFile=/etc/tracktool/service.env
+ExecStart=/opt/tracktool/backup.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tracktool/data /var/lib/tracktool/backups

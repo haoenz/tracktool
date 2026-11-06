@@ -18,13 +18,15 @@ try {
       "state-dir": { type: "string" },
       "files-root": { type: "string", multiple: true },
       "no-browser": { type: "boolean" },
+      "public-origin": { type: "string" },
+      "cloudflare-access": { type: "boolean" },
       "refresh-basemap": { type: "boolean" },
       help: { type: "boolean" },
     },
   });
   if (values.help)
     process.stdout.write(
-      "tracktool-map [--host 127.0.0.1] [--port 8765] [--config PATH]\n地图、轨迹归档与持久化任务。支持 --archive PATH --cache PATH --state-dir PATH --files-root PATH（可重复）--refresh-basemap --no-browser。\n",
+      "tracktool-map [--host 127.0.0.1] [--port 8765] [--config PATH]\n地图、轨迹归档与持久化任务。支持 --archive PATH --cache PATH --state-dir PATH --files-root PATH（可重复）--refresh-basemap --no-browser。\n隧道部署：--public-origin https://域名 --cloudflare-access（需在隧道配置认证，仅允许监听 127.0.0.1）。\n",
     );
   else {
     setGlobalProxyFromEnv({
@@ -47,7 +49,16 @@ try {
         "USER_INPUT",
         "host 必须是 IPv4，port 必须在 0–65535 之间",
       );
+    if (values["public-origin"] && values.host !== "127.0.0.1")
+      throw new AppError(
+        "USER_INPUT",
+        "公开地址模式必须监听 127.0.0.1，由本机认证代理转发",
+      );
     const app = await createApp({
+      access: {
+        publicOrigin: values["public-origin"],
+        cloudflareAccess: values["cloudflare-access"],
+      },
       // A development session keeps its token across backend replacements.
       token:
         process.env.NODE_ENV === "development"

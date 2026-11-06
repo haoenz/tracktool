@@ -17,7 +17,8 @@
     "THIRD_PARTY_NOTICES.md",
     "docs/*.md",
     "docs/validation",
-    "docs/*.json"
+    "docs/*.json",
+    "deploy/linux"
   ],
   "scripts": {
     "build": "node scripts/build.ts",

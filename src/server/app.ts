@@ -17,6 +17,7 @@ import type { ConfigStore } from "../services/ports.js";
 import { mapRoutes, type MapOptions } from "./maps.js";
 import { overviewRoutes } from "./overview.js";
 import { workRoutes, type WorkOptions } from "./work.js";
+import { publicOrigin, type AccessOptions } from "./access.js";
 
 export async function createApp(options: {
   configStore: ConfigStore;
@@ -25,7 +26,9 @@ export async function createApp(options: {
   webRoot?: string;
   maps?: MapOptions;
   work?: WorkOptions;
+  access?: AccessOptions;
 }): Promise<FastifyInstance> {
+  const external = publicOrigin(options.access ?? {});
   const app = Fastify({
     logger: false,
     bodyLimit: 2 * 1024 * 1024,
@@ -47,12 +50,15 @@ export async function createApp(options: {
     const allowed = new Set([`${address}:${port}`]);
     if (address?.startsWith("127.")) allowed.add(`localhost:${port}`);
     const host = request.headers.host;
-    if (!host || !allowed.has(host))
+    // The tunnel preserves Host. Forwarded headers never expand this allowlist.
+    const isPublic = external !== undefined && host === external.host;
+    if (!host || (!allowed.has(host) && !isPublic))
       throw new AppError(
         "FORBIDDEN",
-        "请使用服务器 IP 地址访问（拒绝未知 Host）",
+        "请使用服务器 IP 或已配置的公开地址访问（拒绝未知 Host）",
       );
-    if (request.headers.origin && request.headers.origin !== `http://${host}`)
+    const origin = isPublic ? external.origin : `http://${host}`;
+    if (request.headers.origin && request.headers.origin !== origin)
       throw new AppError("FORBIDDEN", "拒绝跨站请求");
     if (request.routeOptions.url?.startsWith("/api/")) {
       const supplied = request.headers["x-tracktool-token"];
@@ -131,14 +137,25 @@ export async function createApp(options: {
       else reply.header("Cache-Control", "public, max-age=0");
     },
   });
-  const page = async () =>
-    (await readFile(`${webRoot}/index.html`, "utf8")).replace(
-      "__TRACKTOOL_TOKEN__",
-      token,
-    );
+  const page = async (showLogout: boolean) =>
+    (await readFile(`${webRoot}/index.html`, "utf8"))
+      .replace("__TRACKTOOL_TOKEN__", token)
+      .replace(
+        "</head>",
+        `${showLogout ? '<meta name="tracktool-logout" content="/cdn-cgi/access/logout" />' : ""}</head>`,
+      );
   for (const route of ["/", "/map"])
-    app.get(route, async (_request, reply) =>
-      reply.type("text/html; charset=utf-8").send(await page()),
+    app.get(route, async (request, reply) =>
+      reply
+        .type("text/html; charset=utf-8")
+        .send(
+          await page(
+            Boolean(
+              options.access?.cloudflareAccess &&
+              request.headers.host === external?.host,
+            ),
+          ),
+        ),
     );
   app.get("/render", async (_request, reply) =>
     reply

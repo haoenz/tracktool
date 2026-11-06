@@ -13,12 +13,16 @@ const execute = promisify(execFile),
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
-async function setup(text: string) {
+async function setup(
+  text: string,
+  access?: { publicOrigin?: string; cloudflareAccess?: boolean },
+) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "tracktool-entry-"));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   const file = path.join(dir, "config.json");
   await writeFile(file, text);
   const app = await createApp({
+    access,
     configStore: new FileConfigStore({ path: file }),
     token: "test-token",
     envKey: "",
@@ -94,6 +98,67 @@ it("guards token, Host and Origin using the actual listening interface", async (
       })
     ).status,
   ).toBe(200);
+});
+it("accepts only the configured HTTPS origin behind a tunnel and preserves local rendering", async () => {
+  const { address } = await setup("{}", {
+    publicOrigin: "https://tracks.example.test",
+    cloudflareAccess: true,
+  });
+  const wire = (route: string, headers: Record<string, string>) =>
+    new Promise<{ status: number | undefined; text: string }>(
+      (resolve, reject) => {
+        get(`${address}${route}`, { headers }, (response) => {
+          let text = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk: string) => {
+            text += chunk;
+          });
+          response.on("end", () =>
+            resolve({ status: response.statusCode, text }),
+          );
+        }).on("error", reject);
+      },
+    );
+  const headers = {
+    Host: "tracks.example.test",
+    "X-Tracktool-Token": "test-token",
+  };
+  expect(
+    (
+      await wire("/api/config", {
+        ...headers,
+        Origin: "https://tracks.example.test",
+      })
+    ).status,
+  ).toBe(200);
+  expect((await wire("/map", headers)).text).toContain(
+    'name="tracktool-logout"',
+  );
+  expect((await wire("/map", {})).text).not.toContain(
+    'name="tracktool-logout"',
+  );
+  expect((await wire("/render", {})).text).toContain("test-token");
+  const rejected: Record<string, string>[] = [
+    { Origin: "http://tracks.example.test" },
+    { Origin: "https://attacker.example" },
+    { Origin: address },
+    { Host: "attacker.example", "X-Forwarded-Host": "tracks.example.test" },
+    { "X-Tracktool-Token": "wrong" },
+  ];
+  for (const extra of rejected)
+    expect((await wire("/api/config", { ...headers, ...extra })).status).toBe(
+      403,
+    );
+  expect(
+    (
+      await wire("/api/config", {
+        "X-Tracktool-Token": "test-token",
+        Origin: "https://tracks.example.test",
+        "X-Forwarded-Host": "tracks.example.test",
+        "X-Forwarded-Proto": "https",
+      })
+    ).status,
+  ).toBe(403);
 });
 it("returns the same sanitized configuration error and exit code through both entrypoints", async () => {
   const { address, file } = await setup('{"secret": broken}');

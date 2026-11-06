@@ -23,6 +23,7 @@ import {
   DialogTrigger,
 } from "./components/ui/dialog.js";
 import { requestWorkTask, api, readConfig } from "./api.js";
+import { checkAccessResponse } from "./access-session.js";
 import { importError } from "./import-error.js";
 import { useWorkspace } from "./workspace.js";
 import type { ImportItem, UploadResult, WorkTask } from "../shared/work.js";
@@ -251,6 +252,7 @@ export function ImportPanel() {
           ?.content ?? "",
       );
       request.setRequestHeader("Content-Type", "application/octet-stream");
+      request.setRequestHeader("X-Requested-With", "XMLHttpRequest");
       request.upload.onprogress = (event) => {
         if (event.lengthComputable) {
           row.progress = Math.round((event.loaded / event.total) * 100);
@@ -261,6 +263,10 @@ export function ImportPanel() {
       request.onabort = () => reject(new Error("已取消"));
       request.onload = () => {
         try {
+          checkAccessResponse(
+            request.status,
+            request.getResponseHeader("content-type"),
+          );
           const result = JSON.parse(request.responseText) as UploadResult & {
             error?: { message: string };
           };

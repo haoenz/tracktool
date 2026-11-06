@@ -4,6 +4,7 @@ import {
 } from "../shared/contracts.js";
 import { WorkTaskSchema } from "../shared/work.js";
 import { downloadBlob } from "./lib/download.js";
+import { checkAccessResponse } from "./access-session.js";
 export async function request(
   path: string,
   body?: unknown,
@@ -14,8 +15,10 @@ export async function request(
       ?.content ?? "";
   const response = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
+    redirect: "error",
     headers: {
       "X-Tracktool-Token": token,
+      "X-Requested-With": "XMLHttpRequest",
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -27,6 +30,7 @@ export async function request(
       cause: error,
     });
   });
+  checkAccessResponse(response.status, response.headers.get("content-type"));
   if (!response.ok) {
     let message = `请求失败（${response.status}）`;
     try {

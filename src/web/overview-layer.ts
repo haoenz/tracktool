@@ -58,6 +58,7 @@ export class OverviewLayer {
         ? {
             url,
             headers: {
+              "X-Requested-With": "XMLHttpRequest",
               "X-Tracktool-Token":
                 document.querySelector<HTMLMetaElement>(
                   'meta[name="tracktool-token"]',

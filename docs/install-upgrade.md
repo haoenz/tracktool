@@ -2,6 +2,8 @@
 
 当前候选版本 `2.0.0-rc.2`，验收范围为 Linux。采用 Node 26（至少 26.11.1，本轮验证版本 26.11.1）和 pnpm 12.10.1。尚未发布公共 registry 包。
 
+VPS 私有网页部署见 [Cloudflare Tunnel 部署说明](vps-deployment.md)。
+
 ## 安装
 
 源码方式：`pnpm install --frozen-lockfile` → `pnpm build` → `pnpm cli setup chromium` → `pnpm start`。仓库的 `pnpm-workspace.yaml` 仅允许 better-sqlite3 和 sharp 的安装构建脚本。

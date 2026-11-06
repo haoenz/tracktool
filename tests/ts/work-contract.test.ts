@@ -181,7 +181,12 @@ describe("task polling deadline", () => {
           });
         return phase === "headers"
           ? hung()
-          : Promise.resolve({ ok: true, json: hung });
+          : Promise.resolve({
+              ok: true,
+              status: 200,
+              headers: new Headers(),
+              json: hung,
+            });
       });
       vi.stubGlobal("fetch", fetch);
       const controller = new AbortController();

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, Map, Route } from "lucide-react";
+import { ChevronRight, LogOut, Map, Route } from "lucide-react";
 import { Button, Select } from "./components/controls.js";
 import { PanelHeader } from "./components/panel-header.js";
 import { useTheme } from "./theme.js";
@@ -14,6 +14,9 @@ export default function Settings({
   status?: ReactNode;
 }) {
   const { theme, setTheme } = useTheme();
+  const canLogout =
+    document.querySelector<HTMLMetaElement>('meta[name="tracktool-logout"]')
+      ?.content === "/cdn-cgi/access/logout";
   const [section, setSection] = useState<"map" | "tracks">();
   const panel = useRef<HTMLDivElement>(null);
   const previousSection = useRef(section);
@@ -88,6 +91,17 @@ export default function Settings({
             轨迹样式
             <ChevronRight className="ml-auto" aria-hidden="true" />
           </Button>
+          {canLogout && (
+            <Button
+              block
+              variant="ghost"
+              className="h-12 justify-start"
+              onClick={() => window.location.assign("/cdn-cgi/access/logout")}
+            >
+              <LogOut aria-hidden="true" />
+              退出登录
+            </Button>
+          )}
         </>
       )}
     </div>
