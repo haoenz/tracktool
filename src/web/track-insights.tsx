@@ -1,7 +1,11 @@
 import { speedChartMaximum } from "../shared/speed-chart.js";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Spin } from "./components/controls.js";
+import { Button } from "./components/controls.js";
+import {
+  LoadingFeedback,
+  LoadingPlaceholder,
+} from "./components/loading-feedback.js";
 import { api } from "./api.js";
 import type { TrackDetail } from "../shared/track-edit.js";
 import type { AdministrativeLocation } from "../shared/endpoint-location.js";
@@ -124,7 +128,7 @@ export function TrackInsights({
   const start = endpoints?.find((e) => e.endpoint === "start")?.location;
   const end = endpoints?.find((e) => e.endpoint === "end")?.location;
   const locationLabel = (value?: AdministrativeLocation) =>
-    locations.isError
+    !locations.data && locations.isError
       ? "读取失败"
       : locations.isPending
         ? "读取中…"
@@ -144,9 +148,7 @@ export function TrackInsights({
   const pendingText = query.isError ? (
     "计算失败"
   ) : (
-    <span className="track-value-skeleton" role="status" aria-label="正在计算">
-      <span className="sr-only">正在计算</span>
-    </span>
+    <span className="track-value-skeleton" aria-hidden="true" />
   );
   const distance = data?.distance_m ?? entry.distance_m;
   useEffect(() => {
@@ -192,10 +194,11 @@ export function TrackInsights({
   return (
     <>
       {locations.isPending ? (
-        <div className="track-route-loading" role="status">
-          <Spin decorative />
-          <span>正在读取起终点…</span>
-        </div>
+        <LoadingPlaceholder
+          active={active}
+          variant="route"
+          label="正在读取起终点…"
+        />
       ) : (
         <div
           className={`track-route${sameEndpoint ? " track-route-same" : ""}`}
@@ -215,10 +218,22 @@ export function TrackInsights({
           )}
         </div>
       )}
+      <LoadingFeedback
+        active={
+          !!(
+            (locations.data && locations.isFetching) ||
+            (data && query.isFetching)
+          )
+        }
+        label="正在更新轨迹详情…"
+      />
       {locations.isError && (
-        <Button size="sm" onClick={() => void locations.refetch()}>
-          重试行政区
-        </Button>
+        <p role="alert">
+          起终点读取失败：{locations.error.message}
+          <Button size="sm" onClick={() => void locations.refetch()}>
+            重试行政区
+          </Button>
+        </p>
       )}
       <dl className="track-stats">
         <div>
@@ -250,10 +265,12 @@ export function TrackInsights({
           aria-busy="true"
         >
           <h3>轨迹分析</h3>
-          <div className="analysis-empty track-analysis-loading" role="status">
-            <Spin decorative />
-            <span>正在计算轨迹统计…</span>
-          </div>
+          <LoadingPlaceholder
+            active={active}
+            variant="chart"
+            label="正在计算轨迹统计…"
+            hint="轨迹统计仍在计算，耗时取决于轨迹点数。"
+          />
         </section>
       )}
       {query.error && (

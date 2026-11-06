@@ -169,7 +169,7 @@ export function useOverview(
       entries: entries.slice(offset, offset + Number(params.limit ?? 50)),
     };
   }
-  const list = useQuery({
+  const list = useQuery<OverviewEntries>({
     queryKey: [
       "overview-entries",
       listVersion,
@@ -180,6 +180,14 @@ export function useOverview(
       candidates,
     ],
     enabled: active && !!listVersion,
+    // Retain the last page when only the overview version changes. Filters,
+    // candidates and pagination must never show another scope's old rows.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery &&
+      JSON.stringify(previousQuery.queryKey.slice(2)) ===
+        JSON.stringify([listSearch, listKind, offset, listDates, candidates])
+        ? previous
+        : undefined,
     queryFn: ({ signal }) =>
       fetchEntries(
         {

@@ -23,8 +23,13 @@ import type {
 } from "../shared/track-edit.js";
 import { AltitudePreviewTable } from "./altitude-preview-table.js";
 import { api, requestWorkTask, waitForWorkTask } from "./api.js";
-import { Alert, Button, Modal, Select, Spin } from "./components/controls.js";
+import { Alert, Button, Modal, Select } from "./components/controls.js";
 import { isRegisteredTag, TagPicker } from "./components/tag-picker.js";
+import {
+  LoadingFeedback,
+  LoadingPlaceholder,
+} from "./components/loading-feedback.js";
+import { PanelLoading } from "./components/panel-loading.js";
 import { DisplaySettings } from "./display-settings.js";
 import { useEditSnapshot } from "./edit-snapshot.js";
 import { importError } from "./import-error.js";
@@ -998,7 +1003,34 @@ function TrackEditor({
             重新载入轨迹
           </Button>
         )}
-      {target.isFetching && <Spin />}
+      {!target.data && target.isPending && (
+        <LoadingPlaceholder
+          active={visible}
+          variant="detail"
+          label="正在读取编辑数据…"
+        />
+      )}
+      <LoadingFeedback
+        active={!!target.data && target.isFetching}
+        label="正在更新编辑数据…"
+      />
+      {(target.error ||
+        geometry.error ||
+        resultGeometry.error ||
+        config.error ||
+        tagData.error) && (
+        <Button
+          onClick={() => {
+            if (target.error) void target.refetch();
+            if (geometry.error) void geometry.refetch();
+            if (resultGeometry.error) void resultGeometry.refetch();
+            if (config.error) void config.refetch();
+            if (tagData.error) void tagData.refetch();
+          }}
+        >
+          重试读取编辑数据
+        </Button>
+      )}
       {d && settings && (
         <>
           {d.entry.state !== "active" && (
@@ -1088,7 +1120,7 @@ function TrackEditor({
                         }。`
                       : "高程查询完成。"}
                   </p>
-                  {altitudeResult.isPending && <Spin />}
+                  {altitudeResult.isPending && <PanelLoading />}
                   {altitudeResult.error && (
                     <Alert type="error" title={altitudeResult.error.message} />
                   )}
@@ -1465,7 +1497,7 @@ function TrackEditor({
                     )}
                     {mode === "fill_altitude" &&
                       (missingAltitude === undefined ? (
-                        <Spin />
+                        <PanelLoading />
                       ) : missingAltitude === 0 ? (
                         <Alert
                           type="info"
@@ -1541,7 +1573,7 @@ function TrackEditor({
                           }
                         />
                       ) : (
-                        !tagData.error && !config.error && <Spin />
+                        !tagData.error && !config.error && <PanelLoading />
                       ))}
                     {mode === "split_journey" && (
                       <SplitJourneyEditor

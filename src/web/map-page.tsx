@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   FileOutput,
   List,
-  Map as MapIcon,
   Settings as SettingsIcon,
   Upload,
 } from "lucide-react";
@@ -38,17 +37,13 @@ import { api, request } from "./api.js";
 import appIcon from "./app-icon.svg";
 import { basemapLabel } from "./basemap-catalog.js";
 import { BasemapPicker } from "./basemap-picker.js";
-import {
-  Alert,
-  Checkbox,
-  Button,
-  Input,
-  Modal,
-  Select,
-  Spin,
-} from "./components/controls.js";
+import { Alert, Button, Input, Modal, Select } from "./components/controls.js";
 import { PanelHeader } from "./components/panel-header.js";
 import { PanelLoading } from "./components/panel-loading.js";
+import {
+  LoadingFeedback,
+  LoadingPlaceholder,
+} from "./components/loading-feedback.js";
 import { SheetHandle } from "./components/sheet-handle.js";
 import { StartupScreen } from "./components/startup-screen.js";
 import { DeleteTrackDialog } from "./delete-track-dialog.js";
@@ -132,7 +127,7 @@ export default function MapPage() {
         </Button>
         <Link to="/map?panel=settings">设置</Link>
         {params.get("panel") === "settings" && (
-          <Suspense fallback={<PanelLoading>正在加载设置…</PanelLoading>}>
+          <Suspense fallback={<PanelLoading />}>
             <Settings />
           </Suspense>
         )}
@@ -198,6 +193,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [printPhase, setPrintPhase] = useState<
+    MapExport["phase"] | "downloading"
+  >("preparing");
   const [switching, setSwitching] = useState("");
   const [basemapError, setBasemapError] = useState("");
   const [displaySaveState, setDisplaySaveState] = useState<
@@ -218,7 +216,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
       sort: "date-desc",
     },
   );
-  const activity = "正在读取轨迹…";
   const [drafts, setDrafts] = useState<Record<string, boolean>>({});
   const reportDraft = useCallback(
     (key: string, dirty: boolean) =>
@@ -336,9 +333,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
   };
   const controls = useRef<HTMLElement>(null);
   const scrollPositions = useRef(new Map<string, number>());
-  const [menuExpanded, setMenuExpanded] = useState(
-    !!panel && panel !== "settings",
-  );
+  const [menuExpanded, setMenuExpanded] = useState(!!panel);
   useEffect(() => {
     document.title = panel
       ? `Tracktool · ${panels[panel]}`
@@ -661,36 +656,44 @@ function Editor({ initial }: { initial: Bootstrap }) {
   }, [notice]);
   const overviewError =
     overview.tileError ||
-    (!overview.query.data?.version
-      ? (overview.query.error?.message ?? overview.query.data?.error ?? "")
-      : "");
-  const listLoading =
-    overview.list.isFetching || (overview.list.isPending && !overviewError);
+    overview.query.error?.message ||
+    overview.query.data?.error ||
+    "";
+  const listLoading = overview.list.isPending && !overviewError;
+  const buildingOverview =
+    overview.query.data?.state === "building" || overview.query.data?.updating;
+  const overviewProgress = overview.query.data?.progress;
+  const printLabels = {
+    preparing: "正在准备地图导出…",
+    resources: "正在加载出图资源…",
+    rendering: "正在生成 PNG 图片…",
+    downloading: "正在下载 PNG 图片…",
+    done: "正在下载 PNG 图片…",
+    failed: "",
+  };
   const loadingText = exporting
-    ? "正在导出地图…"
+    ? printLabels[printPhase]
     : switching
-      ? "正在准备新底图…"
-      : busy
-        ? activity
-        : !overviewError &&
-            (overview.query.isPending ||
-              overview.query.data?.state === "building" ||
-              overview.query.data?.updating ||
-              overview.loading)
-          ? overview.query.data?.progress
-            ? `正在准备轨迹 · ${overview.query.data.progress.completed}/${overview.query.data.progress.total}`
-            : "正在加载轨迹…"
+      ? `正在切换到底图「${basemapLabel(config, switching)}」…`
+      : !overviewError && buildingOverview
+        ? overviewProgress?.phase === "indexing"
+          ? "正在完成轨迹概览…"
+          : `正在生成轨迹概览${overviewProgress && overviewProgress.total > 0 ? ` · ${overviewProgress.completed}/${overviewProgress.total}` : "…"}`
+        : !overviewError && (overview.query.isPending || overview.loading)
+          ? "正在加载地图轨迹…"
           : "";
-  const [showLoading, setShowLoading] = useState(false);
-  const loading = !!loadingText;
-  useEffect(() => {
-    if (!loading) {
-      setShowLoading(false);
-      return;
-    }
-    const timer = setTimeout(() => setShowLoading(true), 180);
-    return () => clearTimeout(timer);
-  }, [loading]);
+  const loadingTask = exporting
+    ? "print"
+    : switching
+      ? `basemap:${switching}`
+      : "overview";
+  const loadingHint = exporting
+    ? "图片导出仍在进行中，底图资源和图片尺寸会影响耗时。完成后自动下载。"
+    : switching
+      ? "底图仍在加载，耗时取决于图源连接；可以在设置中选择其他底图。"
+      : buildingOverview
+        ? "轨迹概览仍在生成，耗时取决于轨迹数量和点数。"
+        : "地图轨迹仍在加载，请检查网络连接；已有轨迹会继续显示。";
   async function allMatching(signal?: AbortSignal): Promise<OverviewEntry[]> {
     if (!overview.version) throw new Error("请等待列表加载完成");
     const rows: OverviewEntry[] = [];
@@ -1115,6 +1118,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
   const exportPrint = async () => {
     if (!printValue || !catalog || titleError || exporting) return;
     setExporting(true);
+    setPrintPhase("preparing");
     setPrintError("");
     const session = printSession.current;
     try {
@@ -1132,7 +1136,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
         if (Date.now() > deadline)
           throw new Error("图片生成超时，请重试或稍后检查结果");
         const status = await api<MapExport>(`/api/jobs/${job}`);
+        setPrintPhase(status.phase);
         if (status.status === "done") {
+          setPrintPhase("downloading");
           downloadBlob(
             await (await request(`/api/jobs/${job}/png`)).blob(),
             status.fileName,
@@ -1339,35 +1345,21 @@ function Editor({ initial }: { initial: Bootstrap }) {
               <FileOutput size={22} aria-hidden="true" />
             </Button>
             <Button
-              variant={panel === "print" ? "default" : "ghost"}
-              aria-label={panel === "print" ? "退出出图" : "出图"}
-              aria-expanded={panel === "print"}
-              title={panel === "print" ? "退出出图" : "出图"}
-              onClick={() => {
-                setMenuExpanded(false);
-                if (panel === "print") setParams({ panel: "none" });
-                else openPanel("print");
-              }}
+              variant={panel === "settings" ? "default" : "ghost"}
+              aria-label="设置"
+              title="设置"
+              aria-expanded={panel === "settings"}
+              aria-controls="map-panel"
+              onClick={() =>
+                panel === "settings"
+                  ? setParams({ panel: "none" })
+                  : openPanel("settings")
+              }
             >
-              <MapIcon size={22} aria-hidden="true" />
+              <SettingsIcon size={22} aria-hidden="true" />
             </Button>
           </nav>
         </header>
-        <Button
-          className="map-settings-button"
-          variant={panel === "settings" ? "default" : "outline"}
-          aria-label="设置"
-          title="设置"
-          aria-expanded={panel === "settings"}
-          aria-controls="map-panel"
-          onClick={() =>
-            panel === "settings"
-              ? setParams({ panel: "none" })
-              : openPanel("settings")
-          }
-        >
-          <SettingsIcon size={22} aria-hidden="true" />
-        </Button>
         <div className="map-content">
           <aside
             id="map-panel"
@@ -1398,7 +1390,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                       : panel === "library" && overview.id && detailOpen
                         ? editing
                           ? (editorHeader?.title ?? editorTitles[editorView])
-                          : (overview.selected?.name ?? "正在读取轨迹…")
+                          : (overview.selected?.name ?? "轨迹详情")
                         : panel === "library" && libraryList
                           ? "轨迹列表"
                           : panel
@@ -1507,9 +1499,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                   </p>
                 )}
                 {(exportKind === "zip" || exportKind === "kml") && (
-                  <Suspense
-                    fallback={<PanelLoading>正在加载导出面板…</PanelLoading>}
-                  >
+                  <Suspense fallback={<PanelLoading />}>
                     <ArchiveAction
                       key={`${exportKind}:${JSON.stringify(exportEntries)}`}
                       entries={exportEntries}
@@ -1566,7 +1556,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                       </Button>
                     </div>
                   ) : (
-                    <PanelLoading>正在读取轨迹库…</PanelLoading>
+                    <LoadingPlaceholder label="正在读取轨迹库…" />
                   ))}
                 {catalog && (
                   <LibraryList
@@ -1613,11 +1603,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                     batchSelecting={batchSelecting}
                     loading={listLoading}
                     fetching={overview.list.isFetching}
-                    error={
-                      !overview.list.data
-                        ? overview.list.error?.message
-                        : undefined
-                    }
+                    error={overview.list.error?.message}
                     onRetry={() => void overview.list.refetch()}
                     total={overview.list.data?.total}
                     offset={overview.offset}
@@ -1685,13 +1671,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                     config={config}
                     crs={crs}
                     value={state.style.basemap}
-                    error={basemapError}
                     onPick={(id) => void switchBase(id)}
-                    onRetry={
-                      baseRetry
-                        ? () => void switchBase(baseRetry.id, baseRetry.style)
-                        : undefined
-                    }
                   />
                   <MapContentSettings
                     state={state}
@@ -1724,7 +1704,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
                   void overview.matching.refetch();
                 }}
                 editor={
-                  <Suspense fallback={<Spin />}>
+                  <Suspense fallback={<PanelLoading />}>
                     <div hidden={!editing}>
                       {(editorView === "edit" ||
                         (editing &&
@@ -1838,18 +1818,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
                     })
                   }
                 />
-                <Checkbox
-                  checked={
-                    !state.style.tracks.hiddenTunnelEntries.includes(
-                      overview.id,
-                    )
-                  }
-                  onCheckedChange={(visible) =>
-                    setTunnelVisible(overview.id, visible)
-                  }
-                >
-                  显示本行程的隧道连接线
-                </Checkbox>
                 <TrackDetailLinks
                   views={detailLinks}
                   titles={editorTitles}
@@ -1872,15 +1840,7 @@ function Editor({ initial }: { initial: Bootstrap }) {
               aria-label="轨迹库操作"
             >
               {archiveAction && (
-                <Suspense
-                  fallback={
-                    <PanelLoading>
-                      {archiveAction === "archive:push"
-                        ? "正在加载上传面板…"
-                        : "正在加载轨迹库操作…"}
-                    </PanelLoading>
-                  }
-                >
+                <Suspense fallback={<PanelLoading />}>
                   <ArchiveAction
                     key={archiveAction}
                     fixedOperation={archiveAction}
@@ -2077,19 +2037,41 @@ function Editor({ initial }: { initial: Bootstrap }) {
             </div>
           )}
         </Modal>
-        {showLoading && loadingText && (
-          <div className="map-status" role="status">
-            <Spin decorative /> {loadingText}
-          </div>
-        )}
-        {overviewError && (
-          <div className="overview-resource-error" role="alert">
-            轨迹概览暂时不可用
-            <Button size="sm" onClick={() => void retryOverview()}>
-              重试概览
-            </Button>
-          </div>
-        )}
+        <div className="map-feedback">
+          {(!!loadingText || (!overviewError && !basemapError)) && (
+            <LoadingFeedback
+              active={!starting && !!loadingText}
+              label={loadingText}
+              task={loadingTask}
+              hint={loadingHint}
+              className="map-status"
+            />
+          )}
+          {overviewError && (
+            <div
+              className="map-feedback-error overview-resource-error"
+              role="alert"
+            >
+              <div>轨迹概览暂时不可用：{overviewError}</div>
+              <Button size="sm" onClick={() => void retryOverview()}>
+                重试概览
+              </Button>
+            </div>
+          )}
+          {basemapError && (
+            <div className="map-feedback-error" role="alert">
+              <div>{basemapError}</div>
+              {baseRetry && (
+                <Button
+                  size="sm"
+                  onClick={() => void switchBase(baseRetry.id, baseRetry.style)}
+                >
+                  重试底图
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="map-errors" hidden={!error}>
           {error && (

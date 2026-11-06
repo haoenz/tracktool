@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import type { OverviewEntry } from "../shared/overview.js";
 import type { AnalysisSample } from "../shared/track-analysis.js";
-import { Button, Spin } from "./components/controls.js";
+import { Button } from "./components/controls.js";
+import { LoadingPlaceholder } from "./components/loading-feedback.js";
 import { TrackInsights, type AnalysisOverlay } from "./track-insights.js";
 
 /** Detail shell: loading/error states, the insights frame and its editor slot. */
@@ -37,10 +38,11 @@ export function DetailPanel({
       <div role="region" aria-label="轨迹详情">
         <div className="track-summary" hidden={editing}>
           {!entry && !error && (
-            <div className="track-detail-loading" role="status">
-              <Spin decorative />
-              <span>正在读取轨迹详情…</span>
-            </div>
+            <LoadingPlaceholder
+              active={!hidden && !editing}
+              variant="detail"
+              label="正在读取轨迹详情…"
+            />
           )}
           {error && (
             <p role="alert">

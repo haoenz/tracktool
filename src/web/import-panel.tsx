@@ -26,6 +26,7 @@ import { requestWorkTask, api, readConfig } from "./api.js";
 import { checkAccessResponse } from "./access-session.js";
 import { importError } from "./import-error.js";
 import { useWorkspace } from "./workspace.js";
+import { SlowLoadingHint } from "./components/loading-feedback.js";
 import type { ImportItem, UploadResult, WorkTask } from "../shared/work.js";
 import type { PublicConfig } from "../shared/contracts.js";
 
@@ -159,6 +160,7 @@ export function ImportPanel() {
   const [editSession, setEditSession] = useState(0);
   const current = useRef<Row[]>([]);
   const [running, setRunning] = useState(false);
+  const [taskProgress, setTaskProgress] = useState<WorkTask["progress"]>();
   const [showCancel, setShowCancel] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -217,6 +219,7 @@ export function ImportPanel() {
 
   async function settle(task: WorkTask, cancellable: boolean) {
     let next = task;
+    if (mounted.current) setTaskProgress(next.progress);
     while (active(next)) {
       if (cancellable && stop.current && !next.cancelRequested) {
         try {
@@ -229,6 +232,7 @@ export function ImportPanel() {
       }
       await new Promise((resolve) => setTimeout(resolve, 300));
       next = await requestWorkTask(`/api/work/tasks/${next.id}`);
+      if (mounted.current) setTaskProgress(next.progress);
     }
     return next;
   }
@@ -307,6 +311,7 @@ export function ImportPanel() {
   }
   async function check(changed: string[] = []) {
     if (busy.current || batch.current?.applying) return;
+    setTaskProgress(undefined);
     batch.current = undefined;
     const pending = current.current.filter((row) => !completed(row));
     if (!pending.length) {
@@ -439,6 +444,7 @@ export function ImportPanel() {
     setRunning(true);
     setError("");
     for (const row of confirmed.rows) row.stage = "saving";
+    setTaskProgress(undefined);
     publish();
     confirmed.applying = true;
     try {
@@ -538,8 +544,17 @@ export function ImportPanel() {
   const uncertain = rows.filter((row) => row.stage === "uncertain").length;
   const locked = running || uncertain > 0;
   const ready = rows.filter((row) => row.stage === "ready").length;
+  const phase = batch.current?.applying
+    ? "正在导入"
+    : rows.some((row) => row.stage === "queued" || row.stage === "uploading")
+      ? "正在上传"
+      : "正在检查轨迹";
+  const progressText =
+    taskProgress && taskProgress.total > 0
+      ? ` · ${taskProgress.completed}/${taskProgress.total}`
+      : "…";
   const summary = running
-    ? `共${rows.length}个文件，${batch.current?.applying ? "正在导入" : "正在检查"}…`
+    ? `共${rows.length}个文件，${phase}${progressText}`
     : [
         `共${rows.length}个文件`,
         imported.length > 0 && `已导入${imported.length}个`,
@@ -741,6 +756,12 @@ export function ImportPanel() {
           <div className="import-actions">
             <div className="import-summary">
               <p role="status">{summary}</p>
+              <SlowLoadingHint
+                active={running}
+                task={checking ? "check" : "import"}
+              >
+                文件处理仍在进行中，耗时取决于文件大小和轨迹点数。检查阶段可取消；导入结果未确认时请勿重复提交。
+              </SlowLoadingHint>
             </div>
             {stopping && (
               <p className="overview-hint">

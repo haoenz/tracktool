@@ -668,30 +668,87 @@ button.settings-layer-toggle:focus-visible {
   font-size: 12px;
   color: var(--muted-foreground);
 }
-.map-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 50px;
-  padding: 8px 12px;
-  background: color-mix(in oklch, var(--background) 85%, transparent);
-  border-top: 1px solid var(--border);
-  min-height: 0;
+.map-feedback {
   position: absolute;
-  /* Keep loading feedback below workspace panels (z-index: 5). */
+  /* Feedback stays below workspace panels and never captures map gestures. */
   z-index: 4;
-  /* Leave a 12px gap to the left of the 50px settings button. */
   top: 16px;
-  right: max(78px, calc(env(safe-area-inset-right) + 62px));
-  max-width: min(620px, calc(100% - 94px));
+  right: max(16px, env(safe-area-inset-right));
+  max-width: min(620px, calc(100% - 32px));
+  display: grid;
+  gap: 8px;
+  pointer-events: none;
+}
+.map-status,
+.map-feedback-error {
+  padding: 8px 12px;
+  min-height: 50px;
+  background: color-mix(in oklch, var(--background) 85%, transparent);
   box-sizing: border-box;
   font-size: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 3px 14px #19332a12;
-  overflow: auto;
+  overflow-wrap: anywhere;
   backdrop-filter: blur(5px);
-  pointer-events: none;
+}
+.map-feedback-error {
+  display: grid;
+  gap: 8px;
+  pointer-events: auto;
+}
+.loading-feedback {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  padding-block: 6px;
+}
+.loading-feedback-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+.loading-feedback-hint {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.loading-placeholder {
+  padding: 16px 0;
+  min-height: 180px;
+}
+.loading-placeholder-shapes {
+  display: grid;
+  gap: 16px;
+}
+.loading-placeholder .track-value-skeleton {
+  width: 100%;
+  height: 24px;
+}
+.loading-placeholder .track-value-skeleton:nth-child(even) {
+  width: 65%;
+}
+.loading-placeholder-detail {
+  min-height: 240px;
+}
+.loading-placeholder-route {
+  min-height: 60px;
+}
+.loading-placeholder-route .loading-placeholder-shapes {
+  grid-template-columns: 1fr 1fr;
+}
+.loading-placeholder-chart .loading-placeholder-shapes {
+  height: 148px;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: end;
+}
+.loading-placeholder-chart .track-value-skeleton {
+  width: 100%;
+  height: 60%;
+}
+.loading-placeholder-chart .track-value-skeleton:nth-child(even) {
+  height: 90%;
 }
 .map-status [role="status"] {
   flex-shrink: 0;
@@ -773,17 +830,6 @@ button.settings-layer-toggle:focus-visible {
   height: 40px;
   padding: 0;
 }
-.map-settings-button {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 6;
-  width: 50px;
-  height: 50px;
-  padding: 0;
-  border-radius: 14px;
-  box-shadow: 0 5px 24px #19332a15;
-}
 .track-properties {
   margin-top: 20px;
   padding-top: 16px;
@@ -792,8 +838,7 @@ button.settings-layer-toggle:focus-visible {
 .track-properties .ui-alert {
   margin-block: 10px;
 }
-.map-resource-error,
-.overview-resource-error {
+.map-resource-error {
   position: absolute;
   z-index: 6;
   bottom: 16px;
@@ -806,9 +851,6 @@ button.settings-layer-toggle:focus-visible {
   background: var(--warning-background);
   color: var(--warning-foreground);
   box-shadow: 0 3px 14px #19332a12;
-}
-.overview-resource-error {
-  bottom: 68px;
 }
 .map-resource-error button {
   margin-left: 10px;
@@ -1001,10 +1043,6 @@ button.settings-layer-toggle:focus-visible {
   width: 100%;
 }
 @media (max-width: 700px) {
-  .map-settings-button {
-    top: 8px;
-    right: 8px;
-  }
   .map-header {
     top: 8px;
     left: 8px;
@@ -1076,10 +1114,10 @@ button.settings-layer-toggle:focus-visible {
       transition: none;
     }
   }
-  .map-status {
+  .map-feedback {
     top: 8px;
-    right: max(70px, calc(env(safe-area-inset-right) + 62px));
-    max-width: min(42%, calc(100% - 78px));
+    right: max(8px, env(safe-area-inset-right));
+    max-width: 42%;
   }
   .map-errors {
     bottom: 28px;
@@ -1617,29 +1655,6 @@ button.settings-layer-toggle:focus-visible {
   color: var(--foreground);
 }
 
-.track-detail-loading,
-.track-route-loading,
-.track-analysis-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--muted-foreground);
-  font-size: 13px;
-}
-.track-detail-loading {
-  min-height: 240px;
-  flex-direction: column;
-  gap: 12px;
-}
-.track-route-loading {
-  min-height: 60px;
-}
-.track-analysis-loading {
-  min-height: 180px;
-  flex-direction: column;
-  gap: 12px;
-}
 .track-value-skeleton {
   display: inline-block;
   width: 88px;
@@ -1658,9 +1673,7 @@ button.settings-layer-toggle:focus-visible {
   .track-value-skeleton {
     animation: none;
   }
-  .track-detail-loading .animate-spin,
-  .track-route-loading .animate-spin,
-  .track-analysis-loading .animate-spin {
+  .loading-feedback-title .animate-spin {
     animation: none;
   }
 }

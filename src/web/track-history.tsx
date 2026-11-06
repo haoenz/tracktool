@@ -5,7 +5,11 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Alert, Button, Modal, Space, Spin } from "./components/controls.js";
+import { Alert, Button, Modal, Space } from "./components/controls.js";
+import {
+  LoadingFeedback,
+  LoadingPlaceholder,
+} from "./components/loading-feedback.js";
 import { api, request, waitForWorkTask } from "./api.js";
 import { downloadBlob } from "./lib/download.js";
 import { TrackEditorMap } from "./track-editor-map.js";
@@ -192,7 +196,12 @@ export function TrackHistory({
             </Button>
           )}
           {geometry.error && (
-            <Alert type="error" title={geometry.error.message} />
+            <>
+              <Alert type="error" title={geometry.error.message} />
+              <Button onClick={() => void geometry.refetch()}>
+                重试历史轨迹
+              </Button>
+            </>
           )}
           {geometry.data && (
             <TrackEditorMap
@@ -208,7 +217,14 @@ export function TrackHistory({
           )}
         </section>
       )}
-      {history.isFetching && <Spin />}
+      {history.isPending && <LoadingPlaceholder label="正在读取轨迹历史…" />}
+      <LoadingFeedback
+        active={!!history.data && history.isFetching}
+        label="正在更新轨迹历史…"
+      />
+      {history.error && (
+        <Button onClick={() => void history.refetch()}>重试历史记录</Button>
+      )}
       {history.data && !history.data.events.length && <p>暂无历史操作。</p>}
       <ol className="space-y-2" aria-label="操作时间线">
         {history.data?.events.map((event) => (

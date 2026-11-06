@@ -7,9 +7,32 @@ test("map menu and print bar support keyboard use", async ({ page }) => {
   await page.goto("/map");
   await page.locator(".app-icon").focus();
   await page.keyboard.press("Enter");
-  const print = page.getByRole("button", { name: "出图", exact: true });
-  await expect(print).toBeVisible();
-  await print.focus();
+  const exportButton = page.getByRole("button", {
+    name: "导出轨迹",
+    exact: true,
+  });
+  await expect(exportButton).toBeVisible();
+  await exportButton.focus();
+  await page.keyboard.press("Tab");
+  const settings = page.getByRole("button", { name: "设置", exact: true });
+  await expect(settings).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(settings).toHaveAttribute("aria-expanded", "true");
+  await exportButton.focus();
+  await page.keyboard.press("Enter");
+  const exportKind = page.getByRole("combobox", {
+    name: "导出类型",
+    exact: true,
+  });
+  await exportKind.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("option", { name: "压缩包", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(
+    page.getByRole("option", { name: "PNG图像", exact: true }),
+  ).toBeFocused();
   await page.keyboard.press("Enter");
   const bar = page.getByRole("region", { name: "出图设置" });
   await expect(bar).toBeVisible();

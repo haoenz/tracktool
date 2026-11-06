@@ -31,6 +31,7 @@ async function openMenu(page: Page) {
 export async function tool(page: Page, name: string) {
   await expect(page.locator(".app-icon")).toBeVisible();
   if (["地图样式", "设置"].includes(name)) {
+    await openMenu(page);
     const settings = page.getByRole("button", { name: "设置", exact: true });
     if ((await settings.getAttribute("aria-expanded")) !== "true")
       await settings.click();
@@ -69,8 +70,18 @@ export async function tool(page: Page, name: string) {
   }
   if (name === "出图") {
     const bar = page.getByRole("region", { name: "出图设置" });
-    if (!(await bar.isVisible()))
-      await page.getByRole("button", { name: "出图", exact: true }).click();
+    if (!(await bar.isVisible())) {
+      const exportButton = page.getByRole("button", {
+        name: "导出轨迹",
+        exact: true,
+      });
+      if ((await exportButton.getAttribute("aria-expanded")) !== "true")
+        await exportButton.click();
+      await page
+        .getByRole("combobox", { name: "导出类型", exact: true })
+        .click();
+      await page.getByRole("option", { name: "PNG图像", exact: true }).click();
+    }
     await expect(bar).toBeVisible();
     return;
   }

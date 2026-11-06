@@ -1,12 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import type { WorkTask } from "../shared/work.js";
 import {
   downloadWorkFile,
   downloadWorkFiles,
   requestWorkTask,
   waitForWorkTask,
 } from "./api.js";
-import { Alert, Spin } from "./components/controls.js";
+import { Alert, Button } from "./components/controls.js";
+import { LoadingFeedback } from "./components/loading-feedback.js";
 import { ExportOptions, ExportResult } from "./export-panel.js";
 import { ImportPanel } from "./import-panel.js";
 import { useWorkspace } from "./workspace.js";
@@ -16,18 +18,20 @@ export type ArchiveAction =
   "archive:push" | "archive:backup" | "archive:rebuild";
 
 function ExportTask({
-  id,
+  initial,
   processing,
   onDownloaded,
 }: {
-  id: string;
+  initial: WorkTask;
   processing: boolean;
   onDownloaded: () => void;
 }) {
+  const id = initial.id;
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
-  const query = useQuery({
+  const query = useQuery<WorkTask>({
     queryKey: ["task", id],
+    initialData: initial,
     queryFn: ({ signal }) =>
       requestWorkTask(`/api/work/tasks/${id}`, undefined, signal),
     refetchInterval: (q) =>
@@ -52,8 +56,14 @@ function ExportTask({
   if (!task)
     return (
       <>
-        {message && <Alert type="error" title={message} />}
-        <Spin />
+        {message ? (
+          <Alert type="error" title={message} />
+        ) : (
+          <LoadingFeedback active label="正在读取导出进度…" />
+        )}
+        {message && (
+          <Button onClick={() => void query.refetch()}>重试读取进度</Button>
+        )}
       </>
     );
   return (
@@ -76,7 +86,12 @@ function ExportTask({
       }
       onRefresh={() => void query.refetch()}
     >
-      {message && <Alert type="error" title={message} />}
+      {message && (
+        <>
+          <Alert type="error" title={message} />
+          <Button onClick={() => void query.refetch()}>重试读取进度</Button>
+        </>
+      )}
     </ExportResult>
   );
 }
@@ -107,10 +122,11 @@ function ArchiveExport({
   );
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
-    [id, setId] = useState<string>();
+    [task, setTask] = useState<WorkTask>();
   async function exportTracks() {
     setBusy(true);
     setError("");
+    setTask(undefined);
     try {
       const task = await requestWorkTask("/api/work/preview", {
         operation,
@@ -118,13 +134,13 @@ function ArchiveExport({
         inputs: [],
         options: { ...options, ...(entries ? { entries } : {}) },
       });
-      setId(task.id);
+      setTask(task);
       await waitForWorkTask(task.id);
       const applied = await requestWorkTask(
         `/api/work/tasks/${task.id}/apply`,
         {},
       );
-      setId(applied.id);
+      setTask(applied);
       await downloadWorkFiles(await waitForWorkTask(applied.id));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -143,11 +159,26 @@ function ArchiveExport({
         onExport={() => void exportTracks()}
       >
         {error && <Alert type="error" title={error} />}
+        {error && (
+          <Button
+            disabled={busy || !archive}
+            onClick={() => void exportTracks()}
+          >
+            重试导出
+          </Button>
+        )}
       </ExportOptions>
-      {id && (
+      {!task && (
+        <LoadingFeedback
+          active={busy}
+          label="正在准备导出…"
+          hint="正在确认导出范围，请检查网络连接；请求仍在进行中。"
+        />
+      )}
+      {task && (
         <ExportTask
-          key={id}
-          id={id}
+          key={task.id}
+          initial={task}
           processing={busy}
           onDownloaded={() => setError("")}
         />

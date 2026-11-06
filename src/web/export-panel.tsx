@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Button, Progress, Select, RadioGroup } from "./components/controls.js";
 import type { WorkTask } from "../shared/work.js";
+import { SlowLoadingHint } from "./components/loading-feedback.js";
 
 export function ExportOptions({
   zip,
@@ -99,12 +100,11 @@ export function ExportOptions({
         <Button
           block
           variant="default"
-          loading={busy}
-          disabled={disabled}
+          disabled={disabled || busy}
           onClick={onExport}
         >
-          {!busy && <Download size={16} aria-hidden="true" />}
-          {busy ? "正在导出…" : "导出"}
+          <Download size={16} aria-hidden="true" />
+          导出
         </Button>
         <p className="export-hint">完成后自动下载，下载后清理临时文件。</p>
       </div>
@@ -166,6 +166,9 @@ export function ExportResult({
         />
         <h3>{title}</h3>
       </div>
+      <SlowLoadingHint active={pending} task={task.id}>
+        导出仍在进行中，文件数量、大小和压缩程度会影响耗时；可取消导出。
+      </SlowLoadingHint>
       {active && task.progress.total > 0 && (
         <Progress
           percent={Math.round(

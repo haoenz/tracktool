@@ -134,8 +134,7 @@ export function PrintPanel({
       <Button
         variant="default"
         block
-        loading={exporting}
-        disabled={busy || !!titleError}
+        disabled={busy || exporting || !!titleError}
         onClick={onExport}
       >
         <ImageDown aria-hidden="true" />

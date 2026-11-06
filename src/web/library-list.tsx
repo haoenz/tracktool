@@ -8,7 +8,10 @@ import {
 import type { OverviewEntry } from "../shared/overview.js";
 import type { OverviewVisibility } from "./overview-layer.js";
 import { Button, Checkbox, Pagination } from "./components/controls.js";
-import { PanelLoading } from "./components/panel-loading.js";
+import {
+  LoadingFeedback,
+  LoadingPlaceholder,
+} from "./components/loading-feedback.js";
 import { LibraryToolbar, type ListVisibility } from "./library-toolbar.js";
 import { TrackListRow } from "./track-list-row.js";
 
@@ -166,7 +169,7 @@ export function LibraryList({
       <div
         ref={listElement}
         className="map-track-list"
-        aria-busy={loading}
+        aria-busy={loading || fetching}
         onScroll={(event) => {
           if (!loading && event.currentTarget.offsetParent)
             scrollPositions.current.set(
@@ -176,12 +179,16 @@ export function LibraryList({
         }}
       >
         {loading ? (
-          <PanelLoading>正在读取轨迹列表…</PanelLoading>
+          <LoadingPlaceholder label="正在读取轨迹列表…" />
         ) : total === 0 ? (
           <div className="track-list-status" role="status">
             无匹配
           </div>
         ) : null}
+        <LoadingFeedback
+          active={fetching && !loading && !error}
+          label="正在更新列表…"
+        />
         {!loading &&
           rows.map(({ entry, month, visible, checked }) => (
             <Fragment key={entry.id}>

@@ -320,7 +320,7 @@ test("failed source retains the current map; a later source wins and camera/styl
   const google = config.basemaps.find((b) => b.id.startsWith("google-"))!;
   const esri = config.basemaps.find((b) => b.id === "esri-satellite")!;
   await pickBasemap(page, google.id);
-  await expect(page.locator(".settings-panel [role=alert]")).toContainText(
+  await expect(page.locator(".map-feedback [role=alert]")).toContainText(
     "失败：",
   );
   expect(await page.evaluate(() => window.renderer?.state.style.basemap)).toBe(
@@ -350,6 +350,9 @@ test("map icons directly toggle panels on desktop and mobile", async ({
     await tracks.click();
     await expect(panel).toBeHidden();
     await expect(nav.getByRole("button")).toHaveCount(4);
+    await expect(
+      nav.getByRole("button", { name: "出图", exact: true }),
+    ).toHaveCount(0);
     await expect(page.locator(".map-header")).not.toContainText(
       /轨迹|设置|浏览地图/,
     );
@@ -368,11 +371,17 @@ test("map icons directly toggle panels on desktop and mobile", async ({
     await settings.click();
     await expect(settings).toHaveAttribute("aria-expanded", "true");
     const bounds = await settings.boundingBox();
-    expect(bounds!.x + bounds!.width).toBeGreaterThan(width - 24);
+    const exportBounds = await nav
+      .getByRole("button", { name: "导出轨迹", exact: true })
+      .boundingBox();
+    expect(bounds!.x).toBeGreaterThan(exportBounds!.x + exportBounds!.width);
+    expect(bounds!.y).toBeCloseTo(exportBounds!.y, 1);
+    expect(bounds!.x + bounds!.width).toBeLessThan(width);
     await settings.click();
     await expect(panel).toBeHidden();
     await tracks.click();
     await expect(nav).toBeHidden();
+    await expect(settings).toBeHidden();
   }
 });
 

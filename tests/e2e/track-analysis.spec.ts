@@ -241,23 +241,19 @@ for (const complete of [true, false])
       const elapsed = panel
         .locator(".track-stats > div")
         .filter({ hasText: "耗时" });
-      await expect(
-        elapsed.getByRole("status", { name: "正在计算" }),
-      ).toBeVisible();
+      await expect(elapsed.locator(".track-value-skeleton")).toBeVisible();
       await expect(
         panel
           .locator(".analysis-stat-list")
           .first()
-          .getByRole("status", { name: "正在计算" }),
+          .locator(".track-value-skeleton"),
       ).toHaveCount(2);
       await expect(panel).not.toContainText("无数据");
       await expect(
         panel.getByRole("region", { name: "轨迹分析" }).getByRole("status"),
       ).toContainText("正在计算轨迹统计…");
       release();
-      await expect(
-        elapsed.getByRole("status", { name: "正在计算" }),
-      ).toHaveCount(0);
+      await expect(elapsed.locator(".track-value-skeleton")).toHaveCount(0);
       if (complete) await expect(elapsed).not.toContainText("无数据");
       else await expect(elapsed).toContainText("无数据");
     } finally {
@@ -298,9 +294,7 @@ test("analysis failure is distinct from missing data and retry computes successf
     await page.unrouteAll();
     await panel.getByRole("button", { name: "重试统计" }).click();
     await expect(elapsed).not.toContainText("计算失败");
-    await expect(elapsed.getByRole("status", { name: "正在计算" })).toHaveCount(
-      0,
-    );
+    await expect(elapsed.locator(".track-value-skeleton")).toHaveCount(0);
     await expect(elapsed).not.toContainText("无数据");
   } finally {
     await page.unrouteAll();

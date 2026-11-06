@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { resetDisplay } from "./display-reset.js";
+import { tool } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
 
 declare global {
@@ -103,7 +104,7 @@ for (const [width, colorScheme] of [
         await page.evaluate(() => window.renderer!.map.areTilesLoaded()),
       ).toBe(false);
       // Slow resources must not prevent opening settings or changing a source.
-      await page.getByRole("button", { name: "设置", exact: true }).click();
+      await tool(page, "设置");
       await expect(page.locator("#map-panel")).toBeVisible();
       releaseTiles();
       await expect(page.locator(".map-stage")).toHaveAttribute(

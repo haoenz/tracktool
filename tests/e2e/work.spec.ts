@@ -438,7 +438,7 @@ for (const width of [1280, 390]) {
     await page.screenshot({ path: info.outputPath(`upload-${width}.png`) });
     await upload(page, name, buffer);
     await expect(
-      page.getByText("共2个文件，已导入1个，跳过重复1个。", {
+      page.getByText("共1个文件，跳过重复1个。", {
         exact: true,
       }),
     ).toBeVisible();
@@ -568,7 +568,7 @@ for (const width of [1280, 390]) {
     );
     await confirmImport(page);
     await expect(
-      page.getByText("共3个文件，已导入2个，跳过重复1个。", {
+      page.getByText("共1个文件，已导入1个。", {
         exact: true,
       }),
     ).toBeVisible({ timeout: 20000 });
@@ -578,11 +578,11 @@ for (const width of [1280, 390]) {
     await expect(
       page.getByRole("button", { name: /^查看 .*上传交互.*-修正.kml$/ }),
     ).toHaveCount(1);
-    await expect(page.locator(".track-row-name")).toHaveCount(2);
+    await expect(page.locator(".track-row-name")).toHaveCount(1);
     await page.getByRole("button", { name: "筛选", exact: true }).click();
     await expect(
       page.getByRole("group", { name: "导入范围", exact: true }),
-    ).toContainText("本次导入：2条");
+    ).toContainText("本次导入：1条");
     await page
       .getByRole("button", { name: "清除导入筛选", exact: true })
       .click();
@@ -753,7 +753,7 @@ test("failed upload blocks the batch and retry rechecks before confirmation", as
   await upload(page, `2026-10-01 新增-${Date.now()}.kml`, buffer);
   await confirmImport(page);
   await expect(
-    page.getByText("共3个文件，已导入3个。", { exact: true }),
+    page.getByText("共1个文件，已导入1个。", { exact: true }),
   ).toBeVisible({ timeout: 20000 });
   expect(uploads).toHaveLength(4);
 });
