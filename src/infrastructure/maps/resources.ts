@@ -76,6 +76,7 @@ export class MapResources {
   constructor(
     readonly cache: string,
     options: {
+      cacheMiB?: number;
       root?: string;
       env?: Record<string, string | undefined>;
       fetch?: (url: string) => Promise<Buffer>;
@@ -115,7 +116,10 @@ export class MapResources {
     };
     const workers = setting("TRACKTOOL_MAP_DOWNLOADS", 8, 1, 32),
       capacity =
-        setting("TRACKTOOL_MAP_CACHE_MIB", 1024, 1, 16384) * 1024 * 1024;
+        (options.cacheMiB ??
+          setting("TRACKTOOL_MAP_CACHE_MIB", 1024, 1, 16384)) *
+        1024 *
+        1024;
     const limits: Record<string, number> = {
       google: 8,
       bing: 4,

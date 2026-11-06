@@ -122,6 +122,7 @@ export async function createApp(options: {
     ...options.maps,
     display,
     archiveDefault,
+    configStore: options.configStore,
     overview: overviewStatus,
   });
   await app.register(staticFiles, {

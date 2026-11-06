@@ -169,7 +169,7 @@ tracktool --dry-run kml push ./2024-05-01\ 徒步.kml
 
 配置文件放在各平台自己的用户配置目录里，文件名统一是 `config.json`：Windows 用 `%APPDATA%\tracktool\`（Roaming，变量缺席时退回 `~\AppData\Roaming\tracktool\`），macOS 用 `~/Library/Application Support/tracktool/`，其余系统用 `$XDG_CONFIG_HOME/tracktool/`（取值未设或**不是绝对路径**时退回 `~/.config/tracktool/`——XDG 规范要求忽略相对值）。放在用户目录而不是项目里，是因为设置对工具是全局的：从轨迹文件夹里跑和从项目根跑必须读到同一份。
 
-字段：`log_level`、`archive_path`、`auto_fill_locations`、`kml_backup_dir_name`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向包含 `archive.sqlite3` 的**归档目录**；新库通过 `archive init` 创建，ZIP 通过 `archive import-zip` 导入。路径打错不会静默建立新库。显式指定 `--config` 时只使用该文件。版本历史自动保存。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
+字段：`log_level`、`archive_path`、`auto_fill_locations`、`map_cache_mib`、`kml_backup_dir_name`、`google_api_key`，以及三个活动词表 `track_tag.Default`、`track_tag.Train`、`track_tag.Flight`。`archive_path` 指向包含 `archive.sqlite3` 的**归档目录**；新库通过 `archive init` 创建，ZIP 通过 `archive import-zip` 导入。路径打错不会静默建立新库。显式指定 `--config` 时只使用该文件。`map_cache_mib` 控制服务端瓦片数据缓存上限（1–16384 MiB，默认 1024）；CLI 修改后重启网页服务生效，也可在网页设置中保存并立即生效。环境变量 `TRACKTOOL_MAP_CACHE_MIB` 优先于该配置。版本历史自动保存。Google Maps API key 的解析顺序：环境变量 `TRACKTOOL_GOOGLE_API_KEY` > `--api-key` 参数 > 配置文件。
 
 `track_tag.<类别>` 是活动词表：KML 里的 `TrackTags` 存的是 2bulu 的活动名（徒步、地铁），归档类别（集合文件名 `Train.kml`、ZIP 条目前缀 `Train/`、`kml push --type` 的取值域）由这张表查出来。用 `tracktool config set` 增删：
 

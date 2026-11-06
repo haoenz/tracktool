@@ -359,3 +359,24 @@ it("discards malformed raster cache entries and fetches valid replacements", asy
     await r.close();
   }
 });
+
+it("resizes the tile cache immediately using pending read recency", async () => {
+  const cache = new TileCache(await temporary(), 12);
+  try {
+    cache.put("old", Buffer.from("1234"), 1);
+    cache.put("recent", Buffer.from("5678"), 2);
+    cache.get("old");
+    cache.setCapacity(4);
+    expect(cache.get("old")?.toString()).toBe("1234");
+    expect(cache.get("recent")).toBeUndefined();
+    cache.put("oversized", Buffer.alloc(5));
+    expect(cache.get("oversized")).toBeUndefined();
+    expect(() => cache.setCapacity(0)).toThrow();
+    cache.setCapacity(12);
+    cache.put("new", Buffer.alloc(8));
+    expect(cache.get("old")).toBeDefined();
+    expect(cache.get("new")).toHaveLength(8);
+  } finally {
+    cache.close();
+  }
+});

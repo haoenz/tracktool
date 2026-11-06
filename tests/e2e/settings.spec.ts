@@ -427,7 +427,7 @@ test("entry visibility preference applies on refresh and to new tabs", async ({
   await second.close();
 });
 
-test("settings group map controls and server configuration writes require CLI", async ({
+test("settings group map controls and protect unrelated server configuration", async ({
   page,
 }, info) => {
   const errors: string[] = [],
@@ -444,7 +444,7 @@ test("settings group map controls and server configuration writes require CLI", 
   });
   await expect(mapSettings).toBeFocused();
   await expect(page.locator(".settings-panel").getByRole("button")).toHaveCount(
-    2,
+    3,
   );
   await expect(page.getByLabel("图源", { exact: true })).toHaveCount(0);
   await mapSettings.press("Enter");
@@ -724,3 +724,35 @@ test("map content hides inherited controls and lists every feature category", as
     buildings.getByRole("radio", { name: "关闭", exact: true }),
   ).toBeChecked();
 });
+
+for (const width of [1280, 390]) {
+  test(`tile cache capacity persists at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const headers = { "X-Tracktool-Token": "e2e" };
+    try {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto("/map?panel=settings");
+      const capacity = page.getByRole("spinbutton", {
+        name: "服务端瓦片缓存上限（MiB）",
+      });
+      await expect(capacity).toBeEnabled();
+      await capacity.fill("256");
+      await page.getByRole("button", { name: "保存", exact: true }).click();
+      await expect(page.getByText("缓存容量已保存并生效")).toBeVisible();
+      await page.reload();
+      await expect(capacity).toHaveValue("256");
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+    } finally {
+      await request.post("/api/settings/tile-cache", {
+        headers,
+        data: { capacityMiB: 1024 },
+      });
+    }
+  });
+}

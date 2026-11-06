@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { AppError } from "../../domain/errors.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 export class TileCache {
@@ -35,6 +36,21 @@ export class TileCache {
     // memory and fold it into the LRU index in batches.
     this.flushTimer = setInterval(() => this.tryFlush(), 15_000);
     this.flushTimer.unref();
+  }
+  setCapacity(capacity: number) {
+    if (!Number.isSafeInteger(capacity) || capacity < 1)
+      throw new AppError("USER_INPUT", "瓦片缓存容量必须为正整数");
+    if (capacity === this.capacity) return;
+    this.flush();
+    const previous = this.capacity;
+    this.capacity = capacity;
+    try {
+      this.db.transaction(() => this.evict()).immediate();
+    } catch (error) {
+      this.capacity = previous;
+      throw error;
+    }
+    this.db.pragma("incremental_vacuum");
   }
   get(key: string): Buffer | undefined {
     const row = this.select.get(key) as { data: Buffer } | undefined;

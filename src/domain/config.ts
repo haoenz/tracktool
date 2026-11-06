@@ -1,3 +1,4 @@
+import { TileCacheCapacitySchema } from "../shared/tile-cache.js";
 import type { PublicConfig } from "../shared/contracts.js";
 import {
   CategorySchema,
@@ -9,6 +10,7 @@ import { AppError } from "./errors.js";
 export type ConfigData = Record<string, unknown>;
 export const DEFAULTS: ConfigData = {
   log_level: "INFO",
+  map_cache_mib: 1024,
   archive_path: "",
   auto_fill_locations: true,
   kml_backup_dir_name: "Backup",
@@ -98,6 +100,12 @@ export function changeTagList(
 export function normalizeScalar(key: string, value: string): unknown {
   if (!Object.hasOwn(DEFAULTS, key))
     throw new AppError("USER_INPUT", `未知的配置项：${key}`);
+  if (key === "map_cache_mib") {
+    const parsed = TileCacheCapacitySchema.safeParse(Number(value));
+    if (!parsed.success)
+      throw new AppError("USER_INPUT", "瓦片缓存容量需为 1–16384 MiB 的整数");
+    return parsed.data;
+  }
   if (key === "log_level") {
     const parsed = LogLevelSchema.safeParse(value.toUpperCase());
     if (!parsed.success)

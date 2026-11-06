@@ -11,6 +11,7 @@ import type {
 import type { ConfigData } from "../domain/config.js";
 import type { Task, TaskEvent } from "../shared/contracts.js";
 export interface ConfigStore {
+  set?(key: string, value: string): Promise<ConfigData>;
   load(): Promise<ConfigData>;
 }
 export type XmlOperation =

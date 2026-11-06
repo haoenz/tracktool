@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, LogOut, Map, Route } from "lucide-react";
 import { Button, Select } from "./components/controls.js";
 import { PanelHeader } from "./components/panel-header.js";
+import { TileCacheControl } from "./tile-cache-settings.js";
 import { useTheme } from "./theme.js";
 
 export default function Settings({
@@ -69,6 +70,7 @@ export default function Settings({
               ]}
             />
           </div>
+          <TileCacheControl />
           <Button
             data-settings-map
             block

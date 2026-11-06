@@ -2,6 +2,8 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import path from "node:path";
 import os from "node:os";
 import { z } from "zod";
+import type { ConfigStore } from "../services/ports.js";
+import { TileCacheCapacitySchema } from "../shared/tile-cache.js";
 import { AppError } from "../domain/errors.js";
 import { MAP_LABEL_FONTS } from "../shared/map-label.js";
 import { OVERVIEW_TILING } from "../domain/overview.js";
@@ -23,6 +25,7 @@ import type { OverviewCrs, OverviewStatus } from "../shared/overview.js";
 import { canvasCrs, reconcileOverlays } from "../drawing/layers.js";
 import { sendCachedMapResource } from "./map-cache.js";
 export interface MapOptions {
+  configStore?: ConfigStore;
   archiveDefault?: () => Promise<string>;
   cache?: string;
   display?: DisplayStore;
@@ -84,16 +87,74 @@ export function mapRoutes(
   const client = new ArchiveClient(),
     service = new MapService(client);
   let resources: MapResources | undefined;
-  const getResources = async () => {
-    resources ??=
-      options.resources?.() ??
-      new MapResources(
-        options.cache ?? path.join(os.homedir(), ".cache/tracktool/maps"),
-      );
-    await resources.prepare(options.refresh);
-    options.refresh = false;
-    return resources;
+  const cacheSettings = async () => ({
+    capacityMiB: TileCacheCapacitySchema.parse(
+      process.env.TRACKTOOL_MAP_CACHE_MIB !== undefined
+        ? Number(process.env.TRACKTOOL_MAP_CACHE_MIB)
+        : ((await options.configStore?.load())?.map_cache_mib ?? 1024),
+    ),
+    readOnly:
+      process.env.TRACKTOOL_MAP_CACHE_MIB !== undefined ||
+      !options.configStore?.set,
+  });
+  let initialization: Promise<MapResources> | undefined;
+  const cacheResources = () => {
+    initialization ??= (async () => {
+      const settings = await cacheSettings();
+      resources =
+        options.resources?.() ??
+        new MapResources(
+          options.cache ?? path.join(os.homedir(), ".cache/tracktool/maps"),
+          { cacheMiB: settings.capacityMiB },
+        );
+      resources.tiles.setCapacity(settings.capacityMiB * 1024 * 1024);
+      return resources;
+    })().catch((error: unknown) => {
+      initialization = undefined;
+      throw error;
+    });
+    return initialization;
   };
+  const getResources = async () => {
+    const r = await cacheResources();
+    await r.prepare(options.refresh);
+    options.refresh = false;
+    return r;
+  };
+  app.get("/api/settings/tile-cache", cacheSettings);
+  let settingWrite = Promise.resolve();
+  app.post("/api/settings/tile-cache", async (request) => {
+    const { capacityMiB } = z
+      .object({ capacityMiB: TileCacheCapacitySchema })
+      .strict()
+      .parse(request.body);
+    const update = settingWrite.then(async () => {
+      const previous = await cacheSettings();
+      if (previous.readOnly)
+        throw new AppError(
+          "FORBIDDEN",
+          "瓦片缓存容量由服务端配置控制，无法在网页修改",
+        );
+      const r = await cacheResources();
+      await options.configStore!.set!("map_cache_mib", String(capacityMiB));
+      try {
+        r.tiles.setCapacity(capacityMiB * 1024 * 1024);
+      } catch (error) {
+        await options.configStore!.set!(
+          "map_cache_mib",
+          String(previous.capacityMiB),
+        );
+        r.tiles.setCapacity(previous.capacityMiB * 1024 * 1024);
+        throw error;
+      }
+      return cacheSettings();
+    });
+    settingWrite = update.then(
+      () => {},
+      () => {},
+    );
+    return update;
+  });
   const jobs = new Exports(() => {
     const address = app.server.address();
     if (!address || typeof address === "string")
