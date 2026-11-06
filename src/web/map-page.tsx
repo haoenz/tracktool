@@ -753,9 +753,9 @@ function Editor({ initial }: { initial: Bootstrap }) {
       setVisibilityBusy(false);
     }
   }
-  const fitTracks = (selected: SelectedTrack[], avoidPanel = true) => {
+  const fitTracks = (selected: SelectedTrack[]) => {
     try {
-      viewport.current?.fit(selected, avoidPanel);
+      viewport.current?.fit(selected);
     } catch (error) {
       setError(message(error));
     }
@@ -1772,7 +1772,6 @@ function Editor({ initial }: { initial: Bootstrap }) {
                   onLocate={() =>
                     fitTracks(
                       editMap ? editMap.tracks : [overview.selectedTrack!],
-                      false,
                     )
                   }
                   locateDisabled={

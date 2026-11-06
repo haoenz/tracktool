@@ -23,7 +23,7 @@ import type { MapConfig, SelectedTrack } from "../shared/map.js";
 import { displayCoordinate } from "../shared/coordinates.js";
 import { MapLocationButton } from "./map-location-button.js";
 export interface Viewport {
-  fit(tracks?: SelectedTrack[], avoidPanel?: boolean): void;
+  fit(tracks?: SelectedTrack[]): void;
   stage(state: MapState, overview?: OverviewStatus): Promise<boolean>;
   fitOverview(bounds: [number, number, number, number]): void;
   retryOverview(): void;
@@ -423,7 +423,6 @@ export const MapViewport = memo(
     }, [props.analysisOverlay]);
     const fitPadding = (
       map: MapCanvas,
-      avoidPanel = true,
     ): Required<PaddingOptions> | undefined => {
       if (latest.current.print)
         return compositionPadding(
@@ -441,11 +440,15 @@ export const MapViewport = memo(
       const top = bounds.top + margin;
       let bottom = bounds.bottom - margin;
       const panel = document.getElementById("map-panel");
-      if (avoidPanel && panel && panel.offsetParent !== null) {
+      if (panel && panel.offsetParent !== null) {
         const rect = panel.getBoundingClientRect();
+        // A thin strip (especially above a full mobile sheet) is not useful
+        // for locating tracks. Fall back to the viewport instead of squeezing.
+        const minimumSpace = 120;
         if (bounds.width <= 700) {
-          if (rect.top - margin > top + 32) bottom = rect.top - margin;
-        } else if (rect.right + margin < right - 32) {
+          if (rect.top - margin - top >= minimumSpace)
+            bottom = Math.min(bottom, rect.top - margin);
+        } else if (right - rect.right - margin >= minimumSpace) {
           left = rect.right + margin;
         }
       }
@@ -483,10 +486,10 @@ export const MapViewport = memo(
           { padding, maxZoom: 15, duration: 0 },
         );
       },
-      fit: (tracks, avoidPanel = true) => {
+      fit: (tracks) => {
         const map = current.current;
         if (!map) return;
-        const padding = fitPadding(map, avoidPanel);
+        const padding = fitPadding(map);
         if (padding) map.fit(tracks, padding);
       },
       cancel,

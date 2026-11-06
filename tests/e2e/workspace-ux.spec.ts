@@ -3,6 +3,8 @@ import { filterTracks, expectTrackFilter } from "./map-tools.js";
 import { test, expect, type Page } from "@playwright/test";
 import { tool } from "./map-tools.js";
 import type {} from "../../src/drawing/globals.js";
+import type { TrackGeoJSON } from "../../src/shared/map.js";
+import { displayCoordinate } from "../../src/shared/coordinates.js";
 async function call<T>(page: Page, url: string, body?: unknown): Promise<T> {
   return page.evaluate(
     async ({ url, body }) => {
@@ -210,11 +212,65 @@ test("details preserve list scroll; hover and focus do not repaint map highlight
   const controls = page.getByRole("complementary", { name: "地图控制面板" });
   await controls.evaluate((e) => (e.scrollTop = 180));
   const scroll = await controls.evaluate((e) => e.scrollTop);
+  const detailResponse = page.waitForResponse((response) =>
+    /\/api\/overview\/entries\/[^/]+\/geometry\?/.test(response.url()),
+  );
   await page
     .getByRole("button", { name: "查看 Train/same.kml", exact: true })
     .click();
   await expect(page.getByRole("region", { name: "轨迹详情" })).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  const { geometry } = (await (await detailResponse).json()) as {
+    geometry: TrackGeoJSON;
+  };
+  const crs = await page.evaluate(() => window.renderer!.crs);
+  const coordinates = geometry.features.flatMap((feature) =>
+    (feature.geometry.type === "MultiLineString"
+      ? feature.geometry.coordinates.flat()
+      : feature.geometry.coordinates
+    ).map((point) => displayCoordinate(point, crs)),
+  );
+  expect(coordinates.length).toBeGreaterThan(0);
+  const expectLocated = async (avoidPanel: boolean) => {
+    await expect
+      .poll(() =>
+        page.evaluate(
+          ({ coordinates, avoidPanel }) => {
+            const renderer = window.renderer!;
+            const canvas = renderer.mapElement.getBoundingClientRect();
+            const scale = canvas.width / renderer.mapElement.clientWidth;
+            const stage = document
+              .querySelector(".map-stage")!
+              .getBoundingClientRect();
+            const panel = document
+              .getElementById("map-panel")!
+              .getBoundingClientRect();
+            const left =
+              avoidPanel && stage.width > 700 ? panel.right : stage.left;
+            const bottom =
+              avoidPanel && stage.width <= 700 ? panel.top : stage.bottom;
+            return coordinates.every(([lon, lat]) => {
+              const longitude =
+                lon +
+                360 * Math.round((renderer.map.getCenter().lng - lon) / 360);
+              const point = renderer.map.project([longitude, lat]);
+              const x = canvas.left + point.x * scale;
+              const y = canvas.top + point.y * scale;
+              return (
+                x >= left + 14 &&
+                x <= stage.right - 14 &&
+                y >= stage.top + 14 &&
+                y <= bottom - 14
+              );
+            });
+          },
+          { coordinates, avoidPanel },
+        ),
+      )
+      .toBe(true);
+  };
+  await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
+  await expectLocated(true);
   await page.getByRole("button", { name: "返回列表", exact: true }).click();
   expect(await controls.evaluate((e) => e.scrollTop)).toBe(scroll);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -248,19 +304,43 @@ test("details preserve list scroll; hover and focus do not repaint map highlight
   );
   await page.screenshot({ path: info.outputPath("library-mobile.png") });
   await page.getByRole("button", { name: /调整面板高度/ }).press("End");
+  await expect
+    .poll(async () => (await controls.boundingBox())!.height)
+    .toBeGreaterThan(750);
   await page
     .getByRole("button", { name: "查看 Train/same.kml", exact: true })
     .click();
   await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
   await expect(page.locator(".map-app")).toHaveAttribute("data-sheet", "full");
   const fullCamera = await page.evaluate(() => window.renderer!.state.camera);
+  await expectLocated(false);
+  // Compare with a hidden panel to prove the full sheet uses the viewport.
+  await controls.evaluate((element) => (element.style.display = "none"));
+  await page
+    .getByRole("button", {
+      name: "定位轨迹",
+      exact: true,
+      includeHidden: true,
+    })
+    .evaluate((element) => (element as HTMLButtonElement).click());
+  const viewportCamera = await page.evaluate(
+    () => window.renderer!.state.camera,
+  );
+  expect(fullCamera.zoom).toBeCloseTo(viewportCamera.zoom, 8);
+  expect(fullCamera.center[0]).toBeCloseTo(viewportCamera.center[0], 8);
+  expect(fullCamera.center[1]).toBeCloseTo(viewportCamera.center[1], 8);
+  await page
+    .locator("#map-panel")
+    .evaluate((element) => element.style.removeProperty("display"));
   await sheetHandle.press("Home");
   await page.getByRole("button", { name: /调整面板高度/ }).click();
+  await expect
+    .poll(async () => Math.round((await controls.boundingBox())!.height))
+    .toBe(405);
   await page.getByRole("button", { name: "定位轨迹", exact: true }).click();
   const halfCamera = await page.evaluate(() => window.renderer!.state.camera);
-  expect(halfCamera.zoom).toBeCloseTo(fullCamera.zoom, 8);
-  expect(halfCamera.center[0]).toBeCloseTo(fullCamera.center[0], 8);
-  expect(halfCamera.center[1]).toBeCloseTo(fullCamera.center[1], 8);
+  expect(halfCamera).not.toEqual(fullCamera);
+  await expectLocated(true);
   await expect(
     page.getByText("地图可见区域太小，请收起面板后再定位。"),
   ).toHaveCount(0);

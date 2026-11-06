@@ -274,6 +274,15 @@ it("builds a complete decodable overview, reports bad entries, and never writes 
     geometry: { features: { geometry: { coordinates: number[][][] } }[] };
   };
   expect(detail.geometry.features[0]!.geometry.coordinates).toHaveLength(2);
+  const single = (await s.detail(status.version!, "single")) as {
+    geometry: {
+      features: { geometry: { type: string; coordinates: number[][] } }[];
+    };
+  };
+  expect(single.geometry.features[0]!.geometry).toEqual({
+    type: "MultiPoint",
+    coordinates: [[expect.closeTo(116.03, 8), expect.closeTo(39.03, 8)]],
+  });
   expect(await readFile(source)).toEqual(before);
   const db = new Database(source, { readonly: true });
   expect(db.prepare("SELECT count(*) AS n FROM kml_index").get()).toEqual({

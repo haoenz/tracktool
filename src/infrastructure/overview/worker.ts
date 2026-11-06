@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import geojsonvt from "geojson-vt";
 import { AppError, errorInfo } from "../../domain/errors.js";
+import type { TrackGeoJSON } from "../../shared/map.js";
 import {
   OVERVIEW_TILING,
   splitOverviewLine,
@@ -60,13 +61,13 @@ async function run(command: OverviewCommand) {
           },
           geometry:
             segment.length === 1
-              ? { type: "Point", coordinates: segment[0] }
+              ? { type: "MultiPoint", coordinates: segment }
               : {
                   type: "MultiLineString",
                   coordinates: splitOverviewLine(segment),
                 },
         })),
-      },
+      } satisfies TrackGeoJSON,
     };
   }
   if (active?.key !== key) {
